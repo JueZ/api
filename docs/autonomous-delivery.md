@@ -13,6 +13,8 @@ This repository is configured for routine changes to move from Codex-created pul
 7. When explicitly enabled, deployment authenticates to Azure with GitHub Actions OIDC, deploys infrastructure/application artifacts when present, and runs production smoke tests.
 8. If deployment or smoke tests fail, the workflow fails closed and creates a GitHub issue with the failed run and commit.
 
+Codex can use the repo-scoped `github-cli-devops` and `azure-cli-devops` skills for safe GitHub CLI and Azure CLI diagnostics during this flow. Direct CLI diagnostics do not override CI, Policy Check, branch protection, deployment gating, secret-handling rules, or the `DEPLOY_PRODUCTION_ENABLED` production deployment gate.
+
 ## Required branch protection and repository settings
 
 Configure these settings in GitHub before relying on autonomous delivery:

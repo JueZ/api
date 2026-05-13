@@ -6,6 +6,29 @@ Codex may create or update pull requests. If all required checks pass and reposi
 
 However, autonomous delivery must be guarded by strict automated policy checks.
 
+## Direct DevOps CLI skills
+
+Codex may use repo-scoped skills for direct operational work:
+
+- `github-cli-devops` for GitHub CLI, pull requests, workflow runs, CI logs, branch protection, variables, labels, auto-merge, and GitHub Actions debugging.
+- `azure-cli-devops` for Azure CLI, Azure diagnostics, Azure Functions, Storage, Bicep, Entra/OIDC, RBAC, resource groups, deployment debugging, and Azure architecture decisions.
+
+Direct CLI access is allowed for development, testing, debugging, diagnostics, architecture investigation, and safe operational work.
+
+CLI use does not override repository guardrails:
+
+- Do not print secrets or tokens.
+- Do not commit secrets.
+- Do not disable checks to make CI pass.
+- Do not weaken authentication or authorization.
+- Do not disable branch protection.
+- Do not delete Azure or GitHub resources unless explicitly requested.
+- Do not grant broad permissions unless explicitly requested and documented.
+- Do not deploy production unless `DEPLOY_PRODUCTION_ENABLED=true` and the task explicitly requires deployment.
+
+`scripts/setup-codex-env.sh` prepares Codex hosts by installing and authenticating Azure CLI and GitHub CLI.
+`scripts/maintain-codex-env.sh` refreshes tools and verifies cached authentication without using or printing secrets.
+
 ## Required autonomous pipeline
 
 The normal loop should be:
