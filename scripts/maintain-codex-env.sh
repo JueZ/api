@@ -1,83 +1,49 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Reinstall/verify Codex CLI tooling and cached CLI authentication.
-# This script is deployment-free and must never print tokens, client secrets, or other secrets.
+# Maintenance script for cached Codex containers.
+# It verifies tools and cached authentication only.
+# It does not deploy and does not require or print secrets.
 
-install_tools() {
-  if [[ "${EUID}" -ne 0 ]]; then
-    echo "This maintenance script must run as root so it can refresh apt packages." >&2
-    exit 1
-  fi
+if [[ "${TRACE:-}" == "1" ]]; then
+  echo "Refusing to run with TRACE=1." >&2
+  exit 1
+fi
 
-  if [[ -r /etc/os-release ]]; then
-    # shellcheck source=/dev/null
-    source /etc/os-release
-  else
-    echo "Unsupported OS: /etc/os-release not found." >&2
-    exit 1
-  fi
+if [[ ! -x scripts/setup-codex-env.sh ]]; then
+  chmod +x scripts/setup-codex-env.sh
+fi
 
-  if [[ "${ID:-}" != "ubuntu" && "${ID_LIKE:-}" != *"debian"* ]]; then
-    echo "Unsupported OS: this maintenance script expects Ubuntu/Debian with apt." >&2
-    exit 1
-  fi
+if ! command -v az >/dev/null 2>&1 || ! command -v gh >/dev/null 2>&1; then
+  echo "az or gh missing; running setup script to install tools."
+  scripts/setup-codex-env.sh
+fi
 
-  export DEBIAN_FRONTEND=noninteractive
+export AZURE_CORE_OUTPUT=none
 
-  apt-get update
-  apt-get install -y ca-certificates curl apt-transport-https lsb-release gnupg
-
-  install -m 0755 -d /etc/apt/keyrings
-
-  curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
-    | gpg --dearmor > /etc/apt/keyrings/microsoft.gpg
-  chmod go+r /etc/apt/keyrings/microsoft.gpg
-
-  local architecture
-  architecture="$(dpkg --print-architecture)"
-  local azure_suite
-  azure_suite="$(lsb_release -cs)"
-  cat > /etc/apt/sources.list.d/azure-cli.sources <<AZURE_SOURCES
-Types: deb
-URIs: https://packages.microsoft.com/repos/azure-cli/
-Suites: ${azure_suite}
-Components: main
-Architectures: ${architecture}
-Signed-By: /etc/apt/keyrings/microsoft.gpg
-AZURE_SOURCES
-
-  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    > /etc/apt/keyrings/githubcli-archive-keyring.gpg
-  chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-
-  cat > /etc/apt/sources.list.d/github-cli.sources <<GITHUB_CLI_SOURCES
-Types: deb
-URIs: https://cli.github.com/packages
-Suites: stable
-Components: main
-Architectures: ${architecture}
-Signed-By: /etc/apt/keyrings/githubcli-archive-keyring.gpg
-GITHUB_CLI_SOURCES
-
-  apt-get update
-  apt-get install -y --reinstall azure-cli gh
-}
-
-verify_cached_auth() {
-  echo "Verifying cached Azure CLI authentication."
-  az account show --query '{name:name, id:id, tenantId:tenantId}' --output table
-
-  echo "Verifying cached GitHub CLI authentication."
-  # Ensure this check uses the persisted gh credential cache, not environment tokens.
-  unset GH_TOKEN
-  unset GITHUB_TOKEN
-  gh auth status
-}
-
-install_tools
+echo "Azure CLI version:"
 az version --output table
+
+echo "GitHub CLI version:"
 gh --version
-verify_cached_auth
+
+echo "Checking cached Azure CLI login."
+if az account show --query '{name:name, id:id, tenantId:tenantId}' --output table; then
+  if [[ -n "${AZURE_RESOURCE_GROUP:-}" ]]; then
+    az group show \
+      --name "${AZURE_RESOURCE_GROUP}" \
+      --query '{name:name, location:location}' \
+      --output table || true
+  fi
+else
+  echo "Azure CLI is not logged in. Reset Codex cache or rerun setup with Azure secrets available."
+fi
+
+echo "Checking cached GitHub CLI login."
+if gh auth status; then
+  gh repo view JueZ/api >/dev/null || true
+else
+  echo "GitHub CLI is not logged in. Reset Codex cache or rerun setup with CODEX_GH_TOKEN/GH_TOKEN available."
+fi
 
 echo "Codex environment maintenance complete."
