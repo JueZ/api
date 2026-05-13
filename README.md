@@ -361,13 +361,13 @@ CODEX_SP_OBJECT_ID="$(az ad sp create \
 echo "CODEX_APP_ID=$CODEX_APP_ID"
 echo "CODEX_SP_OBJECT_ID=$CODEX_SP_OBJECT_ID"
 
-CODEX_AZURE_CLIENT_SECRET="$(az ad app credential reset \
+CODEX_AZURE_CLIENT_SECRET=$(az ad app credential reset \
   --id "$CODEX_APP_ID" \
   --append \
   --display-name "codex-direct-secret" \
   --years 1 \
   --query password \
-  -o tsv)"
+  -o tsv)
 
 echo "Store CODEX_AZURE_CLIENT_SECRET in Codex secrets now. Do not paste it into chat, README, issues, or PRs."
 ```
