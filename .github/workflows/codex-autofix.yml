@@ -4,18 +4,6 @@ on:
   workflow_run:
     workflows: [CI, Policy Check]
     types: [completed]
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: Pull request number to repair
-        required: true
-        type: number
-      attempt:
-        description: Repair attempt number, maximum 2
-        required: true
-        default: '1'
-        type: choice
-        options: ['1', '2']
 
 permissions:
   contents: write
@@ -24,7 +12,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: codex-autofix-${{ github.event.workflow_run.pull_requests[0].number || inputs.pr_number || github.run_id }}
+  group: codex-autofix-${{ github.event.workflow_run.id || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -32,8 +20,10 @@ jobs:
     name: bounded Codex repair task
     if: >-
       ${{
-        github.event_name == 'workflow_dispatch' ||
-        (github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.pull_requests[0].number != '')
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'failure' &&
+        contains(fromJSON('["CI","Policy Check"]'), github.event.workflow_run.name) &&
+        github.event.workflow_run.pull_requests[0].number > 0
       }}
     runs-on: ubuntu-latest
     steps:
@@ -42,12 +32,26 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const prNumber = context.eventName === 'workflow_dispatch'
-              ? Number(core.getInput('pr_number'))
-              : context.payload.workflow_run.pull_requests[0].number;
-            const requestedAttempt = context.eventName === 'workflow_dispatch'
-              ? Number(core.getInput('attempt'))
-              : 1;
+            const run = context.payload.workflow_run;
+            const allowedWorkflowNames = new Set(['CI', 'Policy Check']);
+            if (context.eventName !== 'workflow_run') {
+              core.setFailed('Codex Autofix only handles workflow_run events.');
+              return;
+            }
+            if (run.conclusion !== 'failure') {
+              core.setFailed(`Codex Autofix only repairs failed workflow runs; received ${run.conclusion}.`);
+              return;
+            }
+            if (!allowedWorkflowNames.has(run.name)) {
+              core.setFailed(`Codex Autofix ignores workflow ${run.name}.`);
+              return;
+            }
+            const prNumber = run.pull_requests?.[0]?.number;
+            if (!prNumber) {
+              core.setFailed('Codex Autofix only repairs failed CI or Policy Check runs associated with a pull request.');
+              return;
+            }
+            const requestedAttempt = 1;
             const {data: comments} = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -79,11 +83,11 @@ jobs:
         with:
           script: |
             const body = [
-              `Codex autofix attempt ${core.getInput('attempt') || '${{ steps.resolve.outputs.attempt }}'} started.`,
+              `Codex autofix attempt ${{ steps.resolve.outputs.attempt }} started.`,
               '',
               'This workflow is intentionally bounded to two attempts and must not disable checks, weaken auth, remove policy checks, or commit secrets.',
               '',
-              `Failed workflow run: ${context.payload.workflow_run?.html_url || 'manual dispatch'}`
+              `Failed workflow run: ${context.payload.workflow_run.html_url}`
             ].join('\n');
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -101,7 +105,7 @@ jobs:
               `PR #${{ steps.resolve.outputs.pr_number }} has failing CI or policy checks.`,
               '',
               `Attempt: ${{ steps.resolve.outputs.attempt }} of 2`,
-              `Workflow run: ${context.payload.workflow_run?.html_url || 'manual dispatch'}`,
+              `Workflow run: ${context.payload.workflow_run.html_url}`,
               '',
               'A Codex agent may inspect logs and push the smallest safe fix to the PR branch.',
               'Do not disable tests, weaken authentication, remove policy checks, or commit secrets.'
