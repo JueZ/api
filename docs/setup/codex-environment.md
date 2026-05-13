@@ -4,6 +4,14 @@ Use `scripts/setup-codex-env.sh` once per fresh Codex host to install required C
 
 Both scripts are deployment-free. They install or verify tooling only and must not deploy infrastructure or application code.
 
+## Related Codex skills
+
+Use the repo-scoped `github-cli-devops` skill for GitHub CLI work, pull requests, workflow runs, CI logs, and repository automation. Use the repo-scoped `azure-cli-devops` skill for Azure CLI work, resource diagnostics, Bicep validation, RBAC checks, Azure Functions, Storage, and deployment debugging.
+
+`CODEX_AZURE_TENANT_ID` is the canonical tenant variable for Codex direct setup. Do not introduce `AZURE_TENANT_ID` for Codex direct setup unless the setup script is intentionally changed later.
+
+`CODEX_GH_TOKEN` is for setup only and must not be printed, logged, echoed, or committed. Setup clears `GH_TOKEN` and `GITHUB_TOKEN` before `gh auth login --with-token` so GitHub CLI can persist credentials instead of relying on environment-only token authentication. Maintenance verifies cached Azure CLI and GitHub CLI authentication and must not require or print secrets.
+
 ## Required setup secrets
 
 Provide these environment variables only to the setup process:
