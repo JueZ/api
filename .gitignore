@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.angular/
+coverage/
+local.settings.json
+.env
+.env.*
+!.env.example
+
+infra/*.json
