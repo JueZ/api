@@ -1,0 +1,44 @@
+name: Verify Azure OIDC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+
+jobs:
+  verify:
+    name: verify azure oidc
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Azure OIDC configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${AZURE_CLIENT_ID:?AZURE_CLIENT_ID repository variable is required}"
+          : "${AZURE_TENANT_ID:?AZURE_TENANT_ID repository variable is required}"
+          : "${AZURE_SUBSCRIPTION_ID:?AZURE_SUBSCRIPTION_ID repository variable is required}"
+          : "${AZURE_RESOURCE_GROUP:?AZURE_RESOURCE_GROUP repository variable is required}"
+      - name: Azure OIDC login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Show Azure account
+        shell: bash
+        run: |
+          set -euo pipefail
+          az account show
+      - name: Show Azure resource group
+        shell: bash
+        run: |
+          set -euo pipefail
+          az group show --name "$AZURE_RESOURCE_GROUP"
