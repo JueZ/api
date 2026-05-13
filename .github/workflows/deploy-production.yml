@@ -114,15 +114,32 @@ jobs:
             echo "EFFECTIVE_PRODUCTION_BASE_URL=$effective_production_base_url"
           } >> "$GITHUB_ENV"
 
+          {
+            echo "### Effective production deployment settings"
+            echo "- Production base URL: $effective_production_base_url"
+            echo "- Function App name: $effective_functionapp_name"
+            echo "- Static web storage account: ${effective_storage_account:-not set}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
           echo "Resolved effective deployment settings."
-      - name: Deploy Azure Functions
+      - name: Package and deploy Azure Functions
         shell: bash
         run: |
           set -euo pipefail
-          if find . -path './node_modules' -prune -o -name host.json -print -quit | grep -q .; then
+          if [ -f apps/api/host.json ]; then
             : "${EFFECTIVE_FUNCTIONAPP_NAME:?EFFECTIVE_FUNCTIONAPP_NAME is required when Azure Functions are present}"
-            function_dir=$(dirname "$(find . -path './node_modules' -prune -o -name host.json -print -quit)")
-            (cd "$function_dir" && zip -r "$RUNNER_TEMP/functionapp.zip" .)
+            : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
+
+            package_dir="$RUNNER_TEMP/function-package"
+            rm -rf "$package_dir" "$RUNNER_TEMP/functionapp.zip"
+            mkdir -p "$package_dir"
+
+            cp apps/api/host.json apps/api/package.json "$package_dir/"
+            cp -R apps/api/dist "$package_dir/dist"
+
+            npm install --omit=dev --package-lock=false --prefix "$package_dir"
+
+            (cd "$package_dir" && zip -r "$RUNNER_TEMP/functionapp.zip" .)
             az functionapp deployment source config-zip \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --name "$EFFECTIVE_FUNCTIONAPP_NAME" \
@@ -155,8 +172,8 @@ jobs:
         run: |
           set -euo pipefail
           : "${EFFECTIVE_PRODUCTION_BASE_URL:?EFFECTIVE_PRODUCTION_BASE_URL is required for smoke tests}"
-          curl --fail --show-error --silent --max-time 20 "$EFFECTIVE_PRODUCTION_BASE_URL/health" || \
-          curl --fail --show-error --silent --max-time 20 "$EFFECTIVE_PRODUCTION_BASE_URL/"
+          curl --fail --show-error --silent --max-time 20 "$EFFECTIVE_PRODUCTION_BASE_URL/health"
+          curl --fail --show-error --silent --max-time 20 "$EFFECTIVE_PRODUCTION_BASE_URL/api/hello"
       - name: Create issue on failed smoke or deploy
         if: failure()
         uses: actions/github-script@v7
