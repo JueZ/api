@@ -1,0 +1,131 @@
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+env:
+  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
+  AZURE_STATIC_WEB_STORAGE_ACCOUNT: ${{ vars.AZURE_STATIC_WEB_STORAGE_ACCOUNT }}
+  PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy production
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ env.PRODUCTION_BASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Azure OIDC login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+      - name: Build production artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build --if-present
+          npm run build:api --if-present
+          npm run build:functions --if-present
+      - name: Deploy Bicep infrastructure
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f infra/main.bicep ]; then
+            : "${AZURE_RESOURCE_GROUP:?AZURE_RESOURCE_GROUP repository variable is required}"
+            az deployment group create \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --template-file infra/main.bicep \
+              --parameters environmentName=prod
+          else
+            echo "No infra/main.bicep found; skipping infrastructure deployment."
+          fi
+      - name: Deploy Azure Functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find . -path './node_modules' -prune -o -name host.json -print -quit | grep -q .; then
+            : "${AZURE_RESOURCE_GROUP:?AZURE_RESOURCE_GROUP repository variable is required}"
+            : "${AZURE_FUNCTIONAPP_NAME:?AZURE_FUNCTIONAPP_NAME repository variable is required}"
+            function_dir=$(dirname "$(find . -path './node_modules' -prune -o -name host.json -print -quit)")
+            (cd "$function_dir" && zip -r "$RUNNER_TEMP/functionapp.zip" .)
+            az functionapp deployment source config-zip \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$AZURE_FUNCTIONAPP_NAME" \
+              --src "$RUNNER_TEMP/functionapp.zip"
+          else
+            echo "No Azure Functions host.json found; skipping Functions deployment."
+          fi
+      - name: Deploy Angular static site with Azure OIDC
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f angular.json ]; then
+            : "${AZURE_STATIC_WEB_STORAGE_ACCOUNT:?AZURE_STATIC_WEB_STORAGE_ACCOUNT repository variable is required for Angular deployment}"
+            output_dir=$(find dist -maxdepth 2 -type f -name index.html -print -quit | xargs -r dirname)
+            if [ -z "${output_dir:-}" ]; then
+              echo "No Angular dist index.html found after build."
+              exit 1
+            fi
+            az storage blob upload-batch \
+              --auth-mode login \
+              --account-name "$AZURE_STATIC_WEB_STORAGE_ACCOUNT" \
+              --destination '$web' \
+              --source "$output_dir" \
+              --overwrite
+          else
+            echo "No root angular.json found; skipping Angular static site deployment."
+          fi
+      - name: Run production smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${PRODUCTION_BASE_URL:?PRODUCTION_BASE_URL repository variable is required for smoke tests}"
+          curl --fail --show-error --silent --max-time 20 "$PRODUCTION_BASE_URL/health" || \
+          curl --fail --show-error --silent --max-time 20 "$PRODUCTION_BASE_URL/"
+      - name: Create issue on failed smoke or deploy
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `Production deployment failed for ${context.sha.substring(0, 7)}`;
+            const body = [
+              'Production deployment or smoke tests failed.',
+              '',
+              `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              `Commit: ${context.sha}`,
+              '',
+              'Automation must fail closed. Investigate logs and create a bounded repair PR if safe.'
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['production-failure', 'codex-repair']
+            });

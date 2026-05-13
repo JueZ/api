@@ -1,0 +1,306 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    name: install
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install
+          else
+            echo "No root package.json found; install check is not applicable yet."
+          fi
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    needs: install
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+      - name: Run lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npm run | grep -qE '^  lint$|^    lint$| lint$'; then
+            npm run lint
+          else
+            echo "No npm lint script found; lint check is not applicable yet."
+          fi
+
+  type-check:
+    name: type-check
+    runs-on: ubuntu-latest
+    needs: install
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+      - name: Run type check
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npm run | grep -qE '^  type-check$|^    type-check$| type-check$'; then
+            npm run type-check
+          elif [ -f tsconfig.json ]; then
+            npx tsc --noEmit
+          else
+            echo "No TypeScript project found; type-check is not applicable yet."
+          fi
+
+  unit-tests:
+    name: unit tests
+    runs-on: ubuntu-latest
+    needs: install
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npm run | grep -qE '^  test$|^    test$| test$'; then
+            npm test -- --watch=false
+          else
+            echo "No npm test script found; unit test check is not applicable yet."
+          fi
+
+  api-tests:
+    name: API tests
+    runs-on: ubuntu-latest
+    needs: install
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+      - name: Run API tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npm run | grep -qE '^  test:api$|^    test:api$| test:api$'; then
+            npm run test:api
+          elif find . -path './node_modules' -prune -o -type f \( -name '*api*.test.*' -o -name '*api*.spec.*' \) -print -quit | grep -q .; then
+            npm test -- --watch=false --runInBand
+          else
+            echo "No API test target found; API tests are not applicable yet."
+          fi
+
+  angular-build:
+    name: Angular build
+    runs-on: ubuntu-latest
+    needs: install
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+      - name: Build Angular app
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f angular.json ]; then
+            npx ng build --configuration production
+          elif find . -path './node_modules' -prune -o -name angular.json -print -quit | grep -q .; then
+            app_dir=$(dirname "$(find . -path './node_modules' -prune -o -name angular.json -print -quit)")
+            (cd "$app_dir" && npx ng build --configuration production)
+          else
+            echo "No angular.json found; Angular build is not applicable yet."
+          fi
+
+  azure-functions-build:
+    name: Azure Functions build
+    runs-on: ubuntu-latest
+    needs: install
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+      - name: Build Azure Functions app
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npm run | grep -qE '^  build:api$|^    build:api$| build:api$'; then
+            npm run build:api
+          elif npm run | grep -qE '^  build:functions$|^    build:functions$| build:functions$'; then
+            npm run build:functions
+          elif find . -path './node_modules' -prune -o -name host.json -print -quit | grep -q .; then
+            npm run build --if-present
+          else
+            echo "No Azure Functions app found; Azure Functions build is not applicable yet."
+          fi
+
+  openapi-validation:
+    name: OpenAPI validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Validate OpenAPI documents
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t specs < <(find . -path './node_modules' -prune -o -type f \( -iname '*openapi*.yml' -o -iname '*openapi*.yaml' -o -iname '*openapi*.json' \) -print)
+          if [ "${#specs[@]}" -eq 0 ]; then
+            echo "No OpenAPI document found; OpenAPI validation is not applicable yet."
+            exit 0
+          fi
+          for spec in "${specs[@]}"; do
+            echo "Validating $spec"
+            npx --yes @redocly/cli@latest lint "$spec"
+          done
+
+  bicep-validation:
+    name: Bicep validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Azure CLI
+        uses: azure/CLI@v2
+        with:
+          inlineScript: az version
+      - name: Validate Bicep files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t bicep_files < <(find . -type f -name '*.bicep' -print)
+          if [ "${#bicep_files[@]}" -eq 0 ]; then
+            echo "No Bicep files found; Bicep validation is not applicable yet."
+            exit 0
+          fi
+          az bicep install
+          for file in "${bicep_files[@]}"; do
+            echo "Building $file"
+            az bicep build --file "$file" --stdout >/dev/null
+          done
+
+  security-scan:
+    name: security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan workspace with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for secrets with Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Audit npm dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm audit --audit-level=high
+          elif [ -f package.json ]; then
+            npm install --package-lock-only
+            npm audit --audit-level=high
+          else
+            echo "No npm package files found; dependency audit is not applicable yet."
+          fi
+
+  ci-complete:
+    name: CI complete
+    runs-on: ubuntu-latest
+    needs:
+      - install
+      - lint
+      - type-check
+      - unit-tests
+      - api-tests
+      - angular-build
+      - azure-functions-build
+      - openapi-validation
+      - bicep-validation
+      - security-scan
+      - secret-scan
+      - dependency-audit
+    if: always()
+    steps:
+      - name: Verify all required CI jobs passed
+        shell: bash
+        run: |
+          set -euo pipefail
+          results='${{ toJson(needs) }}'
+          echo "$results"
+          if echo "$results" | jq -e 'to_entries | all(.value.result == "success")' >/dev/null; then
+            echo "All CI checks passed."
+          else
+            echo "One or more CI checks failed."
+            exit 1
+          fi
