@@ -60,7 +60,6 @@ Use placeholders for repository-specific values:
 - `CODEX_SP_OBJECT_ID`
 - `CODEX_AZURE_CLIENT_SECRET`
 - `CODEX_GH_TOKEN`
-- `PRODUCTION_BASE_URL`
 
 For the current repository, the non-secret values used were:
 
@@ -326,7 +325,7 @@ gh variable set DEPLOY_PRODUCTION_ENABLED \
   --repo "$GH_OWNER/$GH_REPO_NAME"
 ```
 
-Add these later, after real deployment targets exist.
+`PRODUCTION_BASE_URL`, `AZURE_FUNCTIONAPP_NAME`, and `AZURE_STATIC_WEB_STORAGE_ACCOUNT` are optional for the first deployment. The production deployment workflow resolves the Function App and Storage account from `infra/main.bicep` outputs and discovers the Function App URL when `PRODUCTION_BASE_URL` is not set. Set these variables later only if you need to override discovered values.
 
 ```bash
 gh variable set PRODUCTION_BASE_URL \
@@ -467,16 +466,51 @@ Only set `DEPLOY_PRODUCTION_ENABLED=true` after:
 - CI passes
 - Policy Check passes
 - Azure OIDC verification passes
-- branch protection is active
-- production app exists
-- `PRODUCTION_BASE_URL` is set
-- `/health` smoke test works
+- branch protection and required checks are active
+- Azure OIDC is configured for `main` and the `production` environment if used
 - app deployment has been intentionally approved
+
+The first production deployment can create the app and storage resources from `infra/main.bicep`; `PRODUCTION_BASE_URL`, `AZURE_FUNCTIONAPP_NAME`, and `AZURE_STATIC_WEB_STORAGE_ACCOUNT` can remain unset unless you need explicit overrides. After these workflow updates have merged and you are ready to deploy, run:
 
 ```bash
 gh variable set DEPLOY_PRODUCTION_ENABLED \
   --body "true" \
   --repo OWNER/REPO
+
+gh workflow run deploy-production.yml \
+  --ref main \
+  --repo OWNER/REPO
+
+RUN_ID="$(gh run list \
+  --repo OWNER/REPO \
+  --workflow deploy-production.yml \
+  --branch main \
+  --limit 1 \
+  --json databaseId \
+  --jq '.[0].databaseId')"
+
+gh run watch "$RUN_ID" \
+  --repo OWNER/REPO \
+  --exit-status
+```
+
+When the deployment run succeeds, call the deployed health and hello endpoints. If `PRODUCTION_BASE_URL` is not set as a repository variable, use the Function App hostname reported by Azure for the Bicep output `functionAppResourceName`.
+
+```bash
+FUNCTION_APP_NAME="$(az deployment group show \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --name main \
+  --query properties.outputs.functionAppResourceName.value \
+  -o tsv)"
+
+PRODUCTION_BASE_URL="https://$(az functionapp show \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --name "$FUNCTION_APP_NAME" \
+  --query defaultHostName \
+  -o tsv)"
+
+curl --fail --show-error --silent "$PRODUCTION_BASE_URL/health"
+curl --fail --show-error --silent "$PRODUCTION_BASE_URL/api/hello"
 ```
 
 Do not enable this during bootstrap.
