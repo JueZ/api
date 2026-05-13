@@ -140,10 +140,49 @@ jobs:
             npm install --omit=dev --package-lock=false --prefix "$package_dir"
 
             (cd "$package_dir" && zip -r "$RUNNER_TEMP/functionapp.zip" .)
-            az functionapp deployment source config-zip \
+
+            : "${EFFECTIVE_STORAGE_ACCOUNT:?EFFECTIVE_STORAGE_ACCOUNT is required for run-from-package deployment}"
+            release_container="function-releases"
+            release_blob="functionapp-${GITHUB_SHA}-${GITHUB_RUN_ID}.zip"
+            sas_expiry=$(date -u -d "30 days" '+%Y-%m-%dT%H:%MZ')
+
+            az storage container create \
+              --auth-mode login \
+              --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
+              --name "$release_container" \
+              --public-access off \
+              -o none
+            az storage blob upload \
+              --auth-mode login \
+              --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
+              --container-name "$release_container" \
+              --name "$release_blob" \
+              --file "$RUNNER_TEMP/functionapp.zip" \
+              --overwrite true \
+              -o none
+
+            package_sas=$(az storage blob generate-sas \
+              --auth-mode login \
+              --as-user \
+              --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
+              --container-name "$release_container" \
+              --name "$release_blob" \
+              --permissions r \
+              --expiry "$sas_expiry" \
+              -o tsv)
+            package_url="https://$EFFECTIVE_STORAGE_ACCOUNT.blob.core.windows.net/$release_container/$release_blob?$package_sas"
+            echo "::add-mask::$package_sas"
+            echo "::add-mask::$package_url"
+
+            az functionapp config appsettings set \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --name "$EFFECTIVE_FUNCTIONAPP_NAME" \
-              --src "$RUNNER_TEMP/functionapp.zip"
+              --settings WEBSITE_RUN_FROM_PACKAGE="$package_url" \
+              -o none
+            az functionapp restart \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$EFFECTIVE_FUNCTIONAPP_NAME" \
+              -o none
           else
             echo "No Azure Functions host.json found; skipping Functions deployment."
           fi
