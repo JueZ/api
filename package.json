@@ -7,8 +7,8 @@
   "scripts": {
     "lint": "npm run type-check",
     "type-check": "tsc -p apps/api/tsconfig.json --noEmit && ng build --configuration development --no-progress",
-    "test": "npm run build:api && node --test apps/api/test/*.test.mjs",
-    "test:api": "npm run build:api && node --test apps/api/test/*.test.mjs",
+    "test": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs'",
+    "test:api": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs'",
     "build": "npm run build:web && npm run build:api",
     "build:web": "ng build --configuration production --no-progress",
     "build:api": "tsc -p apps/api/tsconfig.json",
