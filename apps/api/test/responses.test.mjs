@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import test from 'node:test';
 import { createHealthResponse, createHelloResponse } from '../dist/shared/responses.js';
 
@@ -20,4 +21,11 @@ test('createHelloResponse returns the v0 auth placeholder payload', () => {
     authenticated: false,
     note: 'Authentication placeholder; JWT enforcement comes in the next milestone.',
   });
+});
+
+test('host config removes the default Functions HTTP route prefix', async () => {
+  const hostConfigUrl = new URL('../host.json', import.meta.url);
+  const hostConfig = JSON.parse(await fs.readFile(hostConfigUrl, 'utf8'));
+
+  assert.equal(hostConfig.extensions?.http?.routePrefix, '');
 });
