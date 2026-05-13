@@ -11,6 +11,10 @@ permissions:
   issues: write
 
 env:
+  DEPLOY_PRODUCTION_ENABLED: ${{ vars.DEPLOY_PRODUCTION_ENABLED }}
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
   AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
   AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
   AZURE_STATIC_WEB_STORAGE_ACCOUNT: ${{ vars.AZURE_STATIC_WEB_STORAGE_ACCOUNT }}
@@ -24,18 +28,29 @@ jobs:
   deploy:
     name: deploy production
     runs-on: ubuntu-latest
+    if: ${{ vars.DEPLOY_PRODUCTION_ENABLED == 'true' }}
     environment:
       name: production
       url: ${{ env.PRODUCTION_BASE_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${AZURE_CLIENT_ID:?AZURE_CLIENT_ID repository variable is required}"
+          : "${AZURE_TENANT_ID:?AZURE_TENANT_ID repository variable is required}"
+          : "${AZURE_SUBSCRIPTION_ID:?AZURE_SUBSCRIPTION_ID repository variable is required}"
+          : "${AZURE_RESOURCE_GROUP:?AZURE_RESOURCE_GROUP repository variable is required}"
+          : "${PRODUCTION_BASE_URL:?PRODUCTION_BASE_URL repository variable is required for smoke tests}"
+          echo "Production deployment is explicitly enabled. Continuing with OIDC login."
       - name: Azure OIDC login
         uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -49,15 +64,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm run build --if-present
-          npm run build:api --if-present
-          npm run build:functions --if-present
+          if [ -f package.json ]; then
+            npm run build --if-present
+            npm run build:api --if-present
+            npm run build:functions --if-present
+          else
+            echo "No root package.json found; skipping application artifact build."
+          fi
       - name: Deploy Bicep infrastructure
         shell: bash
         run: |
           set -euo pipefail
           if [ -f infra/main.bicep ]; then
-            : "${AZURE_RESOURCE_GROUP:?AZURE_RESOURCE_GROUP repository variable is required}"
             az deployment group create \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --template-file infra/main.bicep \
@@ -70,8 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           if find . -path './node_modules' -prune -o -name host.json -print -quit | grep -q .; then
-            : "${AZURE_RESOURCE_GROUP:?AZURE_RESOURCE_GROUP repository variable is required}"
-            : "${AZURE_FUNCTIONAPP_NAME:?AZURE_FUNCTIONAPP_NAME repository variable is required}"
+            : "${AZURE_FUNCTIONAPP_NAME:?AZURE_FUNCTIONAPP_NAME repository variable is required when Azure Functions are present}"
             function_dir=$(dirname "$(find . -path './node_modules' -prune -o -name host.json -print -quit)")
             (cd "$function_dir" && zip -r "$RUNNER_TEMP/functionapp.zip" .)
             az functionapp deployment source config-zip \
@@ -85,9 +102,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f angular.json ]; then
-            : "${AZURE_STATIC_WEB_STORAGE_ACCOUNT:?AZURE_STATIC_WEB_STORAGE_ACCOUNT repository variable is required for Angular deployment}"
-            output_dir=$(find dist -maxdepth 2 -type f -name index.html -print -quit | xargs -r dirname)
+          if find . -path './node_modules' -prune -o -name angular.json -print -quit | grep -q .; then
+            : "${AZURE_STATIC_WEB_STORAGE_ACCOUNT:?AZURE_STATIC_WEB_STORAGE_ACCOUNT repository variable is required when Angular is present}"
+            output_dir=$(find . -path './node_modules' -prune -o -path '*/dist/*' -type f -name index.html -print -quit | xargs -r dirname)
             if [ -z "${output_dir:-}" ]; then
               echo "No Angular dist index.html found after build."
               exit 1
@@ -99,7 +116,7 @@ jobs:
               --source "$output_dir" \
               --overwrite
           else
-            echo "No root angular.json found; skipping Angular static site deployment."
+            echo "No angular.json found; skipping Angular static site deployment."
           fi
       - name: Run production smoke tests
         shell: bash

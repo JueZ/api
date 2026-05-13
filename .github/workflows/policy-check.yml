@@ -37,7 +37,8 @@ jobs:
             exit 0
           fi
           paid_patterns='Microsoft.Sql|Microsoft.DocumentDB|Microsoft.ApiManagement|Microsoft.Cdn/profiles|Microsoft.Network/frontDoors|Microsoft.Search|Microsoft.CognitiveServices|Microsoft.MachineLearningServices|Microsoft.ContainerService|Microsoft.App/managedEnvironments'
-          if git diff "$base_ref" HEAD -- . ':!docs/cost/**' | grep -E "^\+.*($paid_patterns)"; then
+          # Match actual added resource declarations instead of the guardrail's own pattern list.
+          if git diff "$base_ref" HEAD -- . ':!docs/cost/**' | grep -E "^\+.*(resource[[:space:]].*'($paid_patterns)|['\"]type['\"]?[[:space:]]*[:=][[:space:]]*['\"]?($paid_patterns))"; then
             if git diff --name-only "$base_ref" HEAD | grep -q '^docs/cost/'; then
               echo "Paid Azure service addition has a docs/cost note."
             else
