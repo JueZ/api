@@ -5,10 +5,17 @@ set -euo pipefail
 # This script is deployment-free: it installs tooling and caches az/gh auth only.
 # Never run with shell tracing enabled because the environment includes secrets.
 
-if [[ "${TRACE:-}" == "1" ]]; then
-  echo "Refusing to run with TRACE=1 because setup uses secret environment variables." >&2
-  exit 1
-fi
+reject_shell_tracing() {
+  if [[ $- == *x* || "${TRACE:-}" == "1" ]]; then
+    # Turn off xtrace before printing the refusal so no later command can leak
+    # secret-bearing environment variables into logs.
+    set +x
+    echo "Refusing to run with shell tracing enabled because setup uses secret environment variables." >&2
+    exit 1
+  fi
+}
+
+reject_shell_tracing
 
 require_env() {
   local name="$1"
@@ -79,6 +86,7 @@ GITHUB_CLI_SOURCES
 }
 
 login_azure() {
+  reject_shell_tracing
   require_env CODEX_AZURE_CLIENT_ID
   require_env CODEX_AZURE_CLIENT_SECRET
   require_env CODEX_AZURE_TENANT_ID
@@ -96,6 +104,7 @@ login_azure() {
 }
 
 login_github() {
+  reject_shell_tracing
   require_env CODEX_GH_TOKEN
 
   echo "Logging into GitHub CLI with CODEX_GH_TOKEN."
