@@ -76,7 +76,7 @@ jobs:
           set -euo pipefail
 
           function_app_output=""
-          storage_account_output=""
+          static_web_storage_account_output=""
 
           if [ -f infra/main.bicep ]; then
             deployment_outputs=$(az deployment group create \
@@ -88,13 +88,13 @@ jobs:
               -o json)
 
             function_app_output=$(jq -r '.functionAppResourceName.value // empty' <<< "$deployment_outputs")
-            storage_account_output=$(jq -r '.storageAccountResourceName.value // empty' <<< "$deployment_outputs")
+            static_web_storage_account_output=$(jq -r '.staticWebStorageAccountResourceName.value // empty' <<< "$deployment_outputs")
           else
             echo "No infra/main.bicep found; skipping infrastructure deployment."
           fi
 
           effective_functionapp_name="${AZURE_FUNCTIONAPP_NAME:-$function_app_output}"
-          effective_storage_account="${AZURE_STATIC_WEB_STORAGE_ACCOUNT:-$storage_account_output}"
+          effective_storage_account="${AZURE_STATIC_WEB_STORAGE_ACCOUNT:-$static_web_storage_account_output}"
           effective_production_base_url="${PRODUCTION_BASE_URL:-}"
 
           if [ -z "$effective_production_base_url" ]; then
@@ -135,12 +135,17 @@ jobs:
         run: |
           set -euo pipefail
           if find . -path './node_modules' -prune -o -name angular.json -print -quit | grep -q .; then
-            : "${EFFECTIVE_STORAGE_ACCOUNT:?EFFECTIVE_STORAGE_ACCOUNT is required when Angular is present}"
+            : "${EFFECTIVE_STORAGE_ACCOUNT:?AZURE_STATIC_WEB_STORAGE_ACCOUNT repository variable or staticWebStorageAccountResourceName Bicep output is required when Angular is present}"
             output_dir=$(find . -path './node_modules' -prune -o -path '*/dist/*' -type f -name index.html -print -quit | xargs -r dirname)
             if [ -z "${output_dir:-}" ]; then
               echo "No Angular dist index.html found after build."
               exit 1
             fi
+            az storage blob service-properties update \
+              --auth-mode login \
+              --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
+              --static-website \
+              --index-document index.html
             az storage blob upload-batch \
               --auth-mode login \
               --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \

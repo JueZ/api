@@ -325,7 +325,7 @@ gh variable set DEPLOY_PRODUCTION_ENABLED \
   --repo "$GH_OWNER/$GH_REPO_NAME"
 ```
 
-`PRODUCTION_BASE_URL`, `AZURE_FUNCTIONAPP_NAME`, and `AZURE_STATIC_WEB_STORAGE_ACCOUNT` are optional for the first deployment. The production deployment workflow resolves the Function App and Storage account from `infra/main.bicep` outputs and discovers the Function App URL when `PRODUCTION_BASE_URL` is not set. Set these variables later only if you need to override discovered values.
+`PRODUCTION_BASE_URL` and `AZURE_FUNCTIONAPP_NAME` are optional for the first deployment. The production deployment workflow resolves the Function App from the `infra/main.bicep` `functionAppResourceName` output and discovers the Function App URL when `PRODUCTION_BASE_URL` is not set. `AZURE_STATIC_WEB_STORAGE_ACCOUNT` is required when an Angular app is present unless your Bicep template creates a separate static website storage account and outputs it as `staticWebStorageAccountResourceName`; do not point it at the Functions backing storage account.
 
 ```bash
 gh variable set PRODUCTION_BASE_URL \
@@ -470,7 +470,7 @@ Only set `DEPLOY_PRODUCTION_ENABLED=true` after:
 - Azure OIDC is configured for `main` and the `production` environment if used
 - app deployment has been intentionally approved
 
-The first production deployment can create the app and storage resources from `infra/main.bicep`; `PRODUCTION_BASE_URL`, `AZURE_FUNCTIONAPP_NAME`, and `AZURE_STATIC_WEB_STORAGE_ACCOUNT` can remain unset unless you need explicit overrides. After these workflow updates have merged and you are ready to deploy, run:
+The first production deployment can create the Function App and its backing storage resources from `infra/main.bicep`; `PRODUCTION_BASE_URL` and `AZURE_FUNCTIONAPP_NAME` can remain unset unless you need explicit overrides. Because the repository contains an Angular app, set `AZURE_STATIC_WEB_STORAGE_ACCOUNT` to a separate StorageV2 account intended for static website hosting unless your Bicep template outputs `staticWebStorageAccountResourceName`. After these workflow updates have merged and you are ready to deploy, run:
 
 ```bash
 gh variable set DEPLOY_PRODUCTION_ENABLED \
