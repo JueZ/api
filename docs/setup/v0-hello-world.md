@@ -89,7 +89,7 @@ serverless foundation:
 
 - Standard LRS storage account required by Azure Functions.
 - Linux consumption Azure Functions hosting plan (`Y1` dynamic SKU).
-- Function App on Node.js 20.
+- Function App on the Linux Consumption-supported Node.js 22 stack.
 - Application Insights for basic observability.
 
 This change does not deploy infrastructure. Validate Bicep locally with:
