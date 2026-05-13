@@ -144,7 +144,8 @@ jobs:
             : "${EFFECTIVE_STORAGE_ACCOUNT:?EFFECTIVE_STORAGE_ACCOUNT is required for run-from-package deployment}"
             release_container="function-releases"
             release_blob="functionapp-${GITHUB_SHA}-${GITHUB_RUN_ID}.zip"
-            sas_expiry=$(date -u -d "30 days" '+%Y-%m-%dT%H:%MZ')
+            # User delegation SAS tokens must expire within 7 days; keep this below the service limit.
+            sas_expiry=$(date -u -d "6 days" '+%Y-%m-%dT%H:%MZ')
 
             az storage container create \
               --auth-mode login \
