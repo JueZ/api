@@ -1,26 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install and authenticate the CLIs needed for Codex DevOps verification.
-# This script is deployment-free: it installs tooling and caches az/gh auth only.
-# Never run with shell tracing enabled because the environment includes secrets.
-
-if [[ "${TRACE:-}" == "1" ]]; then
-  echo "Refusing to run with TRACE=1 because setup uses secret environment variables." >&2
-  exit 1
-fi
-
-require_env() {
-  local name="$1"
-  if [[ -z "${!name:-}" ]]; then
-    echo "Missing required environment variable: ${name}" >&2
-    exit 1
-  fi
-}
+# Reinstall/verify Codex CLI tooling and cached CLI authentication.
+# This script is deployment-free and must never print tokens, client secrets, or other secrets.
 
 install_tools() {
   if [[ "${EUID}" -ne 0 ]]; then
-    echo "This setup script must run as root so it can configure apt repositories." >&2
+    echo "This maintenance script must run as root so it can refresh apt packages." >&2
     exit 1
   fi
 
@@ -33,7 +19,7 @@ install_tools() {
   fi
 
   if [[ "${ID:-}" != "ubuntu" && "${ID_LIKE:-}" != *"debian"* ]]; then
-    echo "Unsupported OS: this setup script expects Ubuntu/Debian with apt." >&2
+    echo "Unsupported OS: this maintenance script expects Ubuntu/Debian with apt." >&2
     exit 1
   fi
 
@@ -75,42 +61,23 @@ Signed-By: /etc/apt/keyrings/githubcli-archive-keyring.gpg
 GITHUB_CLI_SOURCES
 
   apt-get update
-  apt-get install -y azure-cli gh
+  apt-get install -y --reinstall azure-cli gh
 }
 
-login_azure() {
-  require_env CODEX_AZURE_CLIENT_ID
-  require_env CODEX_AZURE_CLIENT_SECRET
-  require_env CODEX_AZURE_TENANT_ID
-  require_env AZURE_SUBSCRIPTION_ID
-
-  echo "Logging into Azure CLI with Codex service principal credentials."
-  az login \
-    --service-principal \
-    --username "${CODEX_AZURE_CLIENT_ID}" \
-    --password "${CODEX_AZURE_CLIENT_SECRET}" \
-    --tenant "${CODEX_AZURE_TENANT_ID}" \
-    --output none
-  az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
+verify_cached_auth() {
+  echo "Verifying cached Azure CLI authentication."
   az account show --query '{name:name, id:id, tenantId:tenantId}' --output table
-}
 
-login_github() {
-  require_env CODEX_GH_TOKEN
-
-  echo "Logging into GitHub CLI with CODEX_GH_TOKEN."
-  # gh gives precedence to GH_TOKEN/GITHUB_TOKEN environment variables and will not
-  # persist authentication while they are set. Clear them before --with-token.
+  echo "Verifying cached GitHub CLI authentication."
+  # Ensure this check uses the persisted gh credential cache, not environment tokens.
   unset GH_TOKEN
   unset GITHUB_TOKEN
-  printf '%s' "${CODEX_GH_TOKEN}" | gh auth login --with-token
   gh auth status
 }
 
 install_tools
 az version --output table
 gh --version
-login_azure
-login_github
+verify_cached_auth
 
-echo "Codex environment setup complete."
+echo "Codex environment maintenance complete."
