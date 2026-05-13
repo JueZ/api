@@ -1,0 +1,138 @@
+openapi: 3.1.0
+info:
+  title: JueZ API Catalogue
+  version: 0.1.0
+  description: |
+    v0 Hello World API contract for the personal API catalogue platform.
+    Authentication is planned for a later milestone and is not represented as complete here.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: /
+    description: Current host
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Get service health
+      description: Public liveness endpoint for the API catalogue service.
+      tags:
+        - System
+      security: []
+      responses:
+        '200':
+          description: Service is reachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                ok:
+                  summary: Healthy response
+                  value:
+                    status: ok
+                    service: api-catalogue
+                    timestamp: '2026-05-13T00:00:00.000Z'
+        '404':
+          description: Endpoint was not found on the current host.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/hello:
+    get:
+      operationId: getHello
+      summary: Get the v0 Hello World response
+      description: |
+        Protected-placeholder endpoint for the v0 milestone. It is intentionally public in
+        this skeleton so the end-to-end path can be tested, but OAuth/OIDC/JWT enforcement
+        is planned for the next milestone and must be added before protected production APIs.
+      tags:
+        - Hello
+      security: []
+      responses:
+        '200':
+          description: Hello World placeholder response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelloResponse'
+              examples:
+                martin:
+                  summary: Hello Martin response
+                  value:
+                    message: Hello, Martin
+                    authenticated: false
+                    note: Authentication placeholder; JWT enforcement comes in the next milestone.
+        '404':
+          description: Endpoint was not found on the current host.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      additionalProperties: true
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error summary.
+          examples:
+            - Not found
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - service
+        - timestamp
+      properties:
+        status:
+          type: string
+          const: ok
+          description: Health status marker.
+          examples:
+            - ok
+        service:
+          type: string
+          const: api-catalogue
+          description: Stable service identifier.
+          examples:
+            - api-catalogue
+        timestamp:
+          type: string
+          format: date-time
+          description: Server-generated UTC timestamp.
+          examples:
+            - '2026-05-13T00:00:00.000Z'
+    HelloResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - message
+        - authenticated
+        - note
+      properties:
+        message:
+          type: string
+          const: Hello, Martin
+          description: v0 greeting.
+          examples:
+            - Hello, Martin
+        authenticated:
+          type: boolean
+          const: false
+          description: Always false until real authentication is implemented.
+          examples:
+            - false
+        note:
+          type: string
+          const: Authentication placeholder; JWT enforcement comes in the next milestone.
+          description: Explicit auth implementation status.
+          examples:
+            - Authentication placeholder; JWT enforcement comes in the next milestone.
