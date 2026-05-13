@@ -1,0 +1,52 @@
+name: Codex Auto-Merge
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to enable auto-merge for
+        required: true
+        type: number
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: codex-automerge-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  enable-auto-merge:
+    name: enable auto-merge
+    runs-on: ubuntu-latest
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event.pull_request.draft == false &&
+          (
+            startsWith(github.event.pull_request.head.ref, 'codex/') ||
+            startsWith(github.event.pull_request.head.ref, 'codex-') ||
+            contains(github.event.pull_request.labels.*.name, 'codex-automerge')
+          )
+        )
+      }}
+    steps:
+      - name: Enable GitHub-native auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${PR_NUMBER:-}" ]; then
+            gh pr merge "$PR_NUMBER" --repo "$REPOSITORY" --auto --squash --delete-branch
+          else
+            gh pr merge "$PR_URL" --auto --squash --delete-branch
+          fi
