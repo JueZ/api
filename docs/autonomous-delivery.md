@@ -57,9 +57,9 @@ Production deployment uses repository or environment variables, not long-lived A
 - `AZURE_TENANT_ID` - Azure tenant ID.
 - `AZURE_SUBSCRIPTION_ID` - Azure subscription ID.
 - `AZURE_RESOURCE_GROUP` - Production resource group.
-- `AZURE_FUNCTIONAPP_NAME` - Production Azure Functions app name, when Functions are present.
-- `AZURE_STATIC_WEB_STORAGE_ACCOUNT` - Azure Storage static website account used for Angular static hosting, when Angular is present.
-- `PRODUCTION_BASE_URL` - Public base URL used by smoke tests.
+- `AZURE_FUNCTIONAPP_NAME` - Optional override for the production Azure Functions app name. If unset, deployment uses the `functionAppResourceName` Bicep output.
+- `AZURE_STATIC_WEB_STORAGE_ACCOUNT` - Optional override for the Azure Storage static website account. If unset, deployment uses the `storageAccountResourceName` Bicep output.
+- `PRODUCTION_BASE_URL` - Optional public base URL override used by smoke tests. If unset, deployment discovers the Function App `defaultHostName` and uses `https://<defaultHostName>`.
 
 ## Build and deployment assumptions
 
@@ -87,10 +87,10 @@ Complete these steps before setting `DEPLOY_PRODUCTION_ENABLED=true`:
 5. Create the GitHub `production` environment if you want environment-scoped variables or environment-level deployment history. Do not add a required human approval gate if routine autonomous production deploys are desired after all checks pass.
 6. Create an Entra application or user-assigned managed identity and configure GitHub OIDC federated credentials for this repository.
 7. Grant the Azure identity only the minimum RBAC required at the production resource-group scope. Avoid subscription-wide Owner permissions.
-8. Add repository or production-environment variables for `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `PRODUCTION_BASE_URL`, and, only when applicable, `AZURE_FUNCTIONAPP_NAME` and `AZURE_STATIC_WEB_STORAGE_ACCOUNT`.
+8. Add repository or production-environment variables for `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, and `AZURE_RESOURCE_GROUP`. Add `PRODUCTION_BASE_URL`, `AZURE_FUNCTIONAPP_NAME`, or `AZURE_STATIC_WEB_STORAGE_ACCOUNT` only when overriding the values discovered from deployment outputs.
 9. Run CI and policy checks on a pull request and confirm branch protection blocks merge when any required check fails.
-10. Confirm the production smoke endpoint responds at `PRODUCTION_BASE_URL/health` or `/`.
-11. Only after the above are complete, set `DEPLOY_PRODUCTION_ENABLED=true` to allow `main` pushes to deploy.
+10. Only after the above are complete, set `DEPLOY_PRODUCTION_ENABLED=true` to allow `main` pushes or a manual `deploy-production.yml` dispatch to deploy.
+11. Confirm the production smoke endpoint responds at `/health` and verify `/api/hello` with the expected v0 access controls.
 
 ## Azure OIDC bootstrap
 
@@ -119,7 +119,46 @@ Long-lived Azure client secrets are not part of the normal autonomous path. If O
 
 ## Smoke tests
 
-`Deploy Production` requires `PRODUCTION_BASE_URL` and checks `/health`, falling back to `/`. Failed smoke tests fail the workflow and create a repair issue. The workflow does not retry deployment indefinitely.
+`Deploy Production` resolves `EFFECTIVE_PRODUCTION_BASE_URL` at runtime. It uses `PRODUCTION_BASE_URL` when set; otherwise it reads the deployed Function App name from the `functionAppResourceName` Bicep output and discovers the Function App `defaultHostName`, using `https://<defaultHostName>`. It checks `/health`, falling back to `/`. Failed smoke tests fail the workflow and create a repair issue. The workflow does not retry deployment indefinitely.
+
+After these workflow updates are merged and production deployment is intentionally enabled, deploy and verify the app with:
+
+```bash
+gh variable set DEPLOY_PRODUCTION_ENABLED \
+  --body "true" \
+  --repo OWNER/REPO
+
+gh workflow run deploy-production.yml \
+  --ref main \
+  --repo OWNER/REPO
+
+RUN_ID="$(gh run list \
+  --repo OWNER/REPO \
+  --workflow deploy-production.yml \
+  --branch main \
+  --limit 1 \
+  --json databaseId \
+  --jq '.[0].databaseId')"
+
+gh run watch "$RUN_ID" \
+  --repo OWNER/REPO \
+  --exit-status
+
+FUNCTION_APP_NAME="$(az deployment group show \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --name main \
+  --query properties.outputs.functionAppResourceName.value \
+  -o tsv)"
+
+PRODUCTION_BASE_URL="https://$(az functionapp show \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --name "$FUNCTION_APP_NAME" \
+  --query defaultHostName \
+  -o tsv)"
+
+curl --fail --show-error --silent "$PRODUCTION_BASE_URL/health"
+curl --fail --show-error --silent "$PRODUCTION_BASE_URL/api/hello"
+```
 
 ## Bounded repair
 
