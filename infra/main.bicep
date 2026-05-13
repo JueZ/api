@@ -73,7 +73,7 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
     serverFarmId: hostingPlan.id
     httpsOnly: true
     siteConfig: {
-      linuxFxVersion: 'Node|22'
+      linuxFxVersion: 'NODE|24'
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       appSettings: [
