@@ -70,6 +70,10 @@ The workflows are intentionally scaffold-safe for this repository's current stat
 - Bicep validation compiles every `*.bicep` file with `az bicep build`; it does not deploy infrastructure during CI. Production deployment only targets `infra/main.bicep` after `DEPLOY_PRODUCTION_ENABLED=true`.
 - No Azure SQL, Cosmos DB, API Management, Front Door, or other additional paid Azure services are introduced by this setup. New paid services require a cost note under `docs/cost/`.
 
+## Codex host environment
+
+Codex hosts can be prepared with `scripts/setup-codex-env.sh` and refreshed with `scripts/maintain-codex-env.sh`. Setup installs `az` and `gh`, logs into Azure with Codex-specific Azure service principal environment variables, selects `AZURE_SUBSCRIPTION_ID`, and logs into GitHub CLI with `CODEX_GH_TOKEN` after clearing `GH_TOKEN` and `GITHUB_TOKEN` so `gh` persists credentials. Maintenance reinstalls/verifies the tools and checks cached authentication only; it must not print secrets or deploy anything. See `docs/setup/codex-environment.md`.
+
 ## Manual bootstrap checklist
 
 Complete these steps before setting `DEPLOY_PRODUCTION_ENABLED=true`:
