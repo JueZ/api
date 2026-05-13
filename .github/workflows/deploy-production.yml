@@ -198,6 +198,12 @@ jobs:
               echo "No Angular dist index.html found after build."
               exit 1
             fi
+            az storage blob service-properties update \
+              --auth-mode login \
+              --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
+              --static-website true \
+              --index-document index.html \
+              -o none
             az storage blob upload-batch \
               --auth-mode login \
               --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
