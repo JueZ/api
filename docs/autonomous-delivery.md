@@ -70,6 +70,7 @@ The workflows are intentionally scaffold-safe for this repository's current stat
 - Angular CI builds use a root `angular.json` first and then the first nested `angular.json` found outside `node_modules`. If the Angular project is nested, keep its dependency installation compatible with the root workspace or update the workflow in the same PR that introduces the app.
 - Azure Functions CI builds use `build:api` or `build:functions` when present and otherwise detect `host.json` outside `node_modules`.
 - Bicep validation compiles every `*.bicep` file with `az bicep build`; it does not deploy infrastructure during CI. Production deployment only targets `infra/main.bicep` after `DEPLOY_PRODUCTION_ENABLED=true`.
+- The Linux Consumption Function App runs on the supported Node.js 22 stack and uses its system-assigned managed identity to read the run-from-package blob from the deployment storage account. `infra/main.bicep` grants only `Storage Blob Data Reader` on that storage account so the package URL does not require a persisted SAS token.
 - No Azure SQL, Cosmos DB, API Management, Front Door, or other additional paid Azure services are introduced by this setup. New paid services require a cost note under `docs/cost/`.
 
 ## Codex host environment
@@ -86,7 +87,7 @@ Complete these steps before setting `DEPLOY_PRODUCTION_ENABLED=true`:
 4. Create labels used by automation if they do not already exist: `codex-automerge`, `codex-repair`, and `production-failure`.
 5. Create the GitHub `production` environment if you want environment-scoped variables or environment-level deployment history. Do not add a required human approval gate if routine autonomous production deploys are desired after all checks pass.
 6. Create an Entra application or user-assigned managed identity and configure GitHub OIDC federated credentials for this repository.
-7. Grant the Azure identity only the minimum RBAC required at the production resource-group scope. Avoid subscription-wide Owner permissions.
+7. Grant the Azure identity only the minimum RBAC required at the production resource-group scope. Avoid subscription-wide Owner permissions. The deployed Function App receives its own system-assigned identity and a storage-account-scoped `Storage Blob Data Reader` role assignment only for package retrieval.
 8. Add repository or production-environment variables for `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, and `AZURE_RESOURCE_GROUP`. Add `PRODUCTION_BASE_URL`, `AZURE_FUNCTIONAPP_NAME`, or `AZURE_STATIC_WEB_STORAGE_ACCOUNT` only when overriding the values discovered from deployment outputs.
 9. Run CI and policy checks on a pull request and confirm branch protection blocks merge when any required check fails.
 10. Only after the above are complete, set `DEPLOY_PRODUCTION_ENABLED=true` to allow `main` pushes or a manual `deploy-production.yml` dispatch to deploy.
@@ -101,7 +102,7 @@ Recommended federated credential subjects:
 - `repo:OWNER/REPO:ref:refs/heads/main` for production deployment from `main`.
 - `repo:OWNER/REPO:environment:production` if the production environment is used as the trust boundary.
 
-Grant only the minimum Azure RBAC permissions needed for deployment. Prefer resource-group-scoped roles over subscription-wide roles. Do not grant broad Owner permissions unless there is a documented temporary bootstrap reason.
+Grant only the minimum Azure RBAC permissions needed for deployment. Prefer resource-group-scoped roles over subscription-wide roles. Do not grant broad Owner permissions unless there is a documented temporary bootstrap reason. Because `infra/main.bicep` assigns the Function App system identity `Storage Blob Data Reader` on the deployment storage account, the deployment identity also needs resource-group-scoped permission to create role assignments, such as `Role Based Access Control Administrator`, in addition to deployment rights.
 
 Example Azure CLI outline:
 
@@ -109,6 +110,7 @@ Example Azure CLI outline:
 az ad app create --display-name github-OWNER-REPO-prod
 az ad app federated-credential create --id <app-id> --parameters credential.json
 az role assignment create --assignee <client-id> --role Contributor --scope /subscriptions/<subscription-id>/resourceGroups/<resource-group>
+az role assignment create --assignee <client-id> --role "Role Based Access Control Administrator" --scope /subscriptions/<subscription-id>/resourceGroups/<resource-group>
 ```
 
 `credential.json` should use issuer `https://token.actions.githubusercontent.com`, the exact GitHub subject, and audience `api://AzureADTokenExchange`.

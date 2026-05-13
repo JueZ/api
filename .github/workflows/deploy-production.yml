@@ -144,8 +144,6 @@ jobs:
             : "${EFFECTIVE_STORAGE_ACCOUNT:?EFFECTIVE_STORAGE_ACCOUNT is required for run-from-package deployment}"
             release_container="function-releases"
             release_blob="functionapp-${GITHUB_SHA}-${GITHUB_RUN_ID}.zip"
-            # User delegation SAS tokens must expire within 7 days; keep this below the service limit.
-            sas_expiry=$(date -u -d "6 days" '+%Y-%m-%dT%H:%MZ')
 
             az storage container create \
               --auth-mode login \
@@ -162,23 +160,14 @@ jobs:
               --overwrite true \
               -o none
 
-            package_sas=$(az storage blob generate-sas \
-              --auth-mode login \
-              --as-user \
-              --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
-              --container-name "$release_container" \
-              --name "$release_blob" \
-              --permissions r \
-              --expiry "$sas_expiry" \
-              -o tsv)
-            package_url="https://$EFFECTIVE_STORAGE_ACCOUNT.blob.core.windows.net/$release_container/$release_blob?$package_sas"
-            echo "::add-mask::$package_sas"
-            echo "::add-mask::$package_url"
+            package_url="https://$EFFECTIVE_STORAGE_ACCOUNT.blob.core.windows.net/$release_container/$release_blob"
 
             az functionapp config appsettings set \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --name "$EFFECTIVE_FUNCTIONAPP_NAME" \
-              --settings WEBSITE_RUN_FROM_PACKAGE="$package_url" \
+              --settings \
+                WEBSITE_RUN_FROM_PACKAGE="$package_url" \
+                WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID=SystemAssigned \
               -o none
             az functionapp restart \
               --resource-group "$AZURE_RESOURCE_GROUP" \
