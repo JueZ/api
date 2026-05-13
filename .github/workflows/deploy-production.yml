@@ -43,7 +43,6 @@ jobs:
           : "${AZURE_TENANT_ID:?AZURE_TENANT_ID repository variable is required}"
           : "${AZURE_SUBSCRIPTION_ID:?AZURE_SUBSCRIPTION_ID repository variable is required}"
           : "${AZURE_RESOURCE_GROUP:?AZURE_RESOURCE_GROUP repository variable is required}"
-          : "${PRODUCTION_BASE_URL:?PRODUCTION_BASE_URL repository variable is required for smoke tests}"
           echo "Production deployment is explicitly enabled. Continuing with OIDC login."
       - name: Azure OIDC login
         uses: azure/login@v2
@@ -71,29 +70,62 @@ jobs:
           else
             echo "No root package.json found; skipping application artifact build."
           fi
-      - name: Deploy Bicep infrastructure
+      - name: Deploy Bicep infrastructure and resolve runtime settings
         shell: bash
         run: |
           set -euo pipefail
+
+          function_app_output=""
+          storage_account_output=""
+
           if [ -f infra/main.bicep ]; then
-            az deployment group create \
+            deployment_outputs=$(az deployment group create \
+              --name main \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --template-file infra/main.bicep \
-              --parameters environmentName=prod
+              --parameters environmentName=prod \
+              --query properties.outputs \
+              -o json)
+
+            function_app_output=$(jq -r '.functionAppResourceName.value // empty' <<< "$deployment_outputs")
+            storage_account_output=$(jq -r '.storageAccountResourceName.value // empty' <<< "$deployment_outputs")
           else
             echo "No infra/main.bicep found; skipping infrastructure deployment."
           fi
+
+          effective_functionapp_name="${AZURE_FUNCTIONAPP_NAME:-$function_app_output}"
+          effective_storage_account="${AZURE_STATIC_WEB_STORAGE_ACCOUNT:-$storage_account_output}"
+          effective_production_base_url="${PRODUCTION_BASE_URL:-}"
+
+          if [ -z "$effective_production_base_url" ]; then
+            : "${effective_functionapp_name:?Function App name is required to discover PRODUCTION_BASE_URL}"
+            default_host_name=$(az functionapp show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$effective_functionapp_name" \
+              --query defaultHostName \
+              -o tsv)
+            : "${default_host_name:?Unable to discover Function App default hostname}"
+            effective_production_base_url="https://$default_host_name"
+          fi
+
+          {
+            echo "EFFECTIVE_FUNCTIONAPP_NAME=$effective_functionapp_name"
+            echo "EFFECTIVE_STORAGE_ACCOUNT=$effective_storage_account"
+            echo "EFFECTIVE_PRODUCTION_BASE_URL=$effective_production_base_url"
+          } >> "$GITHUB_ENV"
+
+          echo "Resolved effective deployment settings."
       - name: Deploy Azure Functions
         shell: bash
         run: |
           set -euo pipefail
           if find . -path './node_modules' -prune -o -name host.json -print -quit | grep -q .; then
-            : "${AZURE_FUNCTIONAPP_NAME:?AZURE_FUNCTIONAPP_NAME repository variable is required when Azure Functions are present}"
+            : "${EFFECTIVE_FUNCTIONAPP_NAME:?EFFECTIVE_FUNCTIONAPP_NAME is required when Azure Functions are present}"
             function_dir=$(dirname "$(find . -path './node_modules' -prune -o -name host.json -print -quit)")
             (cd "$function_dir" && zip -r "$RUNNER_TEMP/functionapp.zip" .)
             az functionapp deployment source config-zip \
               --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$AZURE_FUNCTIONAPP_NAME" \
+              --name "$EFFECTIVE_FUNCTIONAPP_NAME" \
               --src "$RUNNER_TEMP/functionapp.zip"
           else
             echo "No Azure Functions host.json found; skipping Functions deployment."
@@ -103,7 +135,7 @@ jobs:
         run: |
           set -euo pipefail
           if find . -path './node_modules' -prune -o -name angular.json -print -quit | grep -q .; then
-            : "${AZURE_STATIC_WEB_STORAGE_ACCOUNT:?AZURE_STATIC_WEB_STORAGE_ACCOUNT repository variable is required when Angular is present}"
+            : "${EFFECTIVE_STORAGE_ACCOUNT:?EFFECTIVE_STORAGE_ACCOUNT is required when Angular is present}"
             output_dir=$(find . -path './node_modules' -prune -o -path '*/dist/*' -type f -name index.html -print -quit | xargs -r dirname)
             if [ -z "${output_dir:-}" ]; then
               echo "No Angular dist index.html found after build."
@@ -111,7 +143,7 @@ jobs:
             fi
             az storage blob upload-batch \
               --auth-mode login \
-              --account-name "$AZURE_STATIC_WEB_STORAGE_ACCOUNT" \
+              --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
               --destination '$web' \
               --source "$output_dir" \
               --overwrite
@@ -122,9 +154,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          : "${PRODUCTION_BASE_URL:?PRODUCTION_BASE_URL repository variable is required for smoke tests}"
-          curl --fail --show-error --silent --max-time 20 "$PRODUCTION_BASE_URL/health" || \
-          curl --fail --show-error --silent --max-time 20 "$PRODUCTION_BASE_URL/"
+          : "${EFFECTIVE_PRODUCTION_BASE_URL:?EFFECTIVE_PRODUCTION_BASE_URL is required for smoke tests}"
+          curl --fail --show-error --silent --max-time 20 "$EFFECTIVE_PRODUCTION_BASE_URL/health" || \
+          curl --fail --show-error --silent --max-time 20 "$EFFECTIVE_PRODUCTION_BASE_URL/"
       - name: Create issue on failed smoke or deploy
         if: failure()
         uses: actions/github-script@v7
