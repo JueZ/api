@@ -63,7 +63,7 @@ test('invalid token returns 401 without leaking raw verifier errors or token mat
     context(),
     baseConfig,
     async () => {
-      throw new Error('internal jwt verifier failure with sensitive details');
+      throw new Error('internal verifier failure with sensitive details');
     },
   );
 
@@ -71,7 +71,7 @@ test('invalid token returns 401 without leaking raw verifier errors or token mat
   assert.equal(result.response.status, 401);
   const serializedBody = JSON.stringify(result.response.jsonBody);
   assert.equal(serializedBody.includes('header.payload.signature'), false);
-  assert.equal(serializedBody.includes('internal jwt verifier failure'), false);
+  assert.equal(serializedBody.includes('internal verifier failure'), false);
 });
 
 test('valid token missing required scope or role returns 403', async () => {
