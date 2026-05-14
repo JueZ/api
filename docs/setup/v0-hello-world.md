@@ -18,8 +18,9 @@ Bicep for low-cost Azure infrastructure planning.
   - `status: ok`
   - `service: api-catalogue`
   - current UTC `timestamp`
-- `GET /api/hello` returns the v0 Hello World payload for Martin when authentication is disabled locally, or when a valid allowlisted bearer token is supplied with `AUTH_ENABLED=true`.
-- The Angular page shows the project name, API catalogue placeholder, authentication controls, and the protected hello endpoint test action.
+- `GET /api/hello` returns the v0 Hello World payload for Martin.
+- The Angular page shows the project name, API catalogue placeholder, future hello endpoint test link,
+  and an explicit note that production authentication is not fully implemented yet.
 - Root npm scripts run local lint, type-check, test, API test, frontend build, and Functions build checks.
 - Bicep targets `westeurope` and the existing production resource group workflow (`rg-api-prod`) without
   deploying anything from this change.
@@ -27,8 +28,10 @@ Bicep for low-cost Azure infrastructure planning.
 ## Intentionally not implemented yet
 
 - Reddit integration.
-- Real catalogue integrations beyond the protected hello placeholder.
-- Paid platform services such as Azure SQL, Cosmos DB, API Management, or Front Door.
+- OAuth/OIDC/JWT authentication enforcement.
+- Production deployment or `DEPLOY_PRODUCTION_ENABLED` changes.
+- Azure SQL, Cosmos DB, API Management, Front Door, Cognitive Services, Kubernetes, or other expensive
+  always-on services.
 - Secrets or local settings committed to the repository.
 
 ## Local setup
@@ -97,6 +100,6 @@ az bicep build --file infra/main.bicep
 
 ## Next milestone
 
-Deploy and verify the shared test/production OAuth/OIDC configuration before adding real catalogue APIs.
-The `/api/hello` endpoint is a protected-placeholder only; it must not be treated as proof that all future
-production authorization requirements are complete.
+Implement real OAuth/OIDC/JWT authentication and authorization before adding protected production APIs.
+The `/api/hello` endpoint is a protected-placeholder only; it must not be treated as proof that production
+authentication exists.
