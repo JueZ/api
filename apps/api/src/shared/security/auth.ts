@@ -266,11 +266,31 @@ function logAuthFailure(context: InvocationContext, reason: string, debug: boole
 }
 
 function configuredIssuers(config: AuthConfig): string[] {
-  if (config.issuers && config.issuers.length > 0) {
-    return config.issuers;
-  }
+  const issuers = config.issuers && config.issuers.length > 0 ? config.issuers : config.issuer ? [config.issuer] : [];
+  return uniqueStrings([...issuers, ...deriveMicrosoftEntraV1IssuerAliases(issuers)]);
+}
 
-  return config.issuer ? [config.issuer] : [];
+function deriveMicrosoftEntraV1IssuerAliases(issuers: string[]): string[] {
+  return issuers.flatMap((issuer) => {
+    const match = /^(https?):\/\/([^/]+)\/([0-9a-fA-F-]{36})\/v2\.0$/.exec(issuer);
+    if (!match) {
+      return [];
+    }
+
+    const [, protocol, host, tenantId] = match;
+    const sameHostV1Issuer = `${protocol}://${host}/${tenantId}`;
+    // Microsoft Entra v1 access tokens can use an exact issuer with a trailing slash.
+    const sameHostV1IssuerWithSlash = `${sameHostV1Issuer}/`;
+    if (host.toLowerCase() !== 'login.microsoftonline.com') {
+      return [sameHostV1Issuer, sameHostV1IssuerWithSlash];
+    }
+
+    return [sameHostV1Issuer, sameHostV1IssuerWithSlash, `https://sts.windows.net/${tenantId}/`];
+  });
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)];
 }
 
 function parseCsv(value: string | undefined): string[] {

@@ -1,4 +1,28 @@
 # Next steps
+
+## 2026-05-14 post-auth-verification next steps
+
+1. Begin the next small API catalogue feature slice on top of the verified protected API foundation.
+2. Keep `/health` public and keep real catalogue data behind authenticated endpoints.
+3. Leave Reddit intentionally out of scope until a later milestone explicitly chooses it.
+
+
+## 2026-05-14 Microsoft Entra v1 trailing-slash issuer next steps
+
+1. Merge and deploy the trailing-slash v1 issuer alias fix.
+2. Retry **Call hello with access token** in the production browser session. Expected result: no `Invalid bearer token`; if the configured user gate matches, `/api/hello` returns the authenticated hello response.
+3. If the retry returns `403`, inspect only sanitized claim/config comparisons for tenant and user-gate settings.
+
+Update: PR #86 and production promotion run `25858636629` completed step 1; step 2 remains the manual browser retest.
+
+## 2026-05-14 Microsoft Entra v1 issuer next steps
+
+1. Merge and deploy the v1 issuer alias fix.
+2. Retry **Call hello with access token** in the production browser session. Expected result: no `Invalid bearer token`; if the user remains allowlisted, `/api/hello` returns the authenticated hello response.
+3. If the retry returns `403`, inspect only sanitized claim/config comparisons and verify the object ID and tenant allowlists.
+
+Update: PR #83 and production promotion run `25857793354` completed step 1; step 2 remains the manual browser retest.
+
 ## 2026-05-14 production CORS next steps
 
 1. Merge and deploy the Function App platform CORS fix.

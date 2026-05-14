@@ -235,3 +235,60 @@ test('verifyJwtWithJose discovers JWKS for the matching configured issuer', asyn
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 });
+
+test('tenant-specific Microsoft Entra v2 issuer also accepts v1 access token issuer', async () => {
+  const entraTenantId = '11111111-2222-3333-4444-555555555555';
+  const issuerKeys = await generateKeyPair('RS256');
+  const issuerJwk = await exportJWK(issuerKeys.publicKey);
+  issuerJwk.kid = 'entra-v1';
+
+  const server = createServer((request, response) => {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    if (request.url === `/${entraTenantId}/v2.0/.well-known/openid-configuration`) {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ jwks_uri: `${baseUrl}/${entraTenantId}/v2.0/jwks` }));
+      return;
+    }
+    if (request.url === `/${entraTenantId}/.well-known/openid-configuration`) {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ jwks_uri: `${baseUrl}/${entraTenantId}/jwks` }));
+      return;
+    }
+    if (request.url === `/${entraTenantId}/v2.0/jwks`) {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ keys: [] }));
+      return;
+    }
+    if (request.url === `/${entraTenantId}/jwks`) {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ keys: [issuerJwk] }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end();
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    const token = await new SignJWT({ scp: 'api.access' })
+      .setProtectedHeader({ alg: 'RS256', kid: 'entra-v1' })
+      .setIssuer(`${baseUrl}/${entraTenantId}/`)
+      .setAudience('api://catalogue-test')
+      .setSubject('allowed-sub')
+      .setExpirationTime('5m')
+      .sign(issuerKeys.privateKey);
+
+    const payload = await verifyJwtWithJose(token, {
+      ...baseConfig,
+      issuer: `${baseUrl}/${entraTenantId}/v2.0`,
+      issuers: [`${baseUrl}/${entraTenantId}/v2.0`],
+      audience: 'api://catalogue-test',
+    });
+
+    assert.equal(payload.iss, `${baseUrl}/${entraTenantId}/`);
+    assert.equal(payload.sub, 'allowed-sub');
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+});

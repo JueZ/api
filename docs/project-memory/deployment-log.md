@@ -1,6 +1,28 @@
 # Deployment log
 
+## 2026-05-14 — Microsoft Entra v1 issuer alias fix deployed to production
+
+- Event: PR #83 was merged after passing CI and Policy Check, then `Deploy Test` run `25857723653` and `Promote Production` run `25857793354` completed successfully.
+- Result: Production deployment and smoke tests succeeded.
+- Verification: Workflow smoke tests passed for public `/health`, unauthenticated protected `/api/hello`, and configured browser preflight checks. Interactive authenticated browser verification still requires a manual retry.
+- Follow-up: Retry **Call hello with access token** in the production browser session.
+
+
 Entries are reverse chronological. Do not include secrets or SAS URLs.
+## 2026-05-14 — Production browser auth manually verified
+
+- Event: Manual production browser verification succeeded after PR #86 and production promotion run `25858636629`.
+- Result: The Angular app signed in `mkos_postat@outlook.com`, acquired an API access token, and called protected `GET /api/hello` successfully.
+- Verification: The response was authenticated and returned the expected v0 hello payload for Martin with subject, object ID, and tenant ID fields.
+- Follow-up: Auth milestone is browser-verified; future feature work can build on the protected API foundation.
+
+## 2026-05-14 — Trailing-slash Microsoft Entra v1 issuer fix deployed to production
+
+- Event: PR #86 was merged after passing CI and Policy Check, then `Deploy Test` run `25858558165` and `Promote Production` run `25858636629` completed successfully.
+- Result: Production deployment and smoke tests succeeded.
+- Verification: Workflow smoke tests passed for public `/health`, unauthenticated protected `/api/hello`, and configured browser preflight checks. Interactive authenticated browser verification still requires a manual retry with a fresh token.
+- Follow-up: Retry **Call hello with access token** in the production browser session.
+
 ## 2026-05-14 — Production CORS/auth browser-call fix deployed
 
 - Production promotion run `25855907807` succeeded after PR #75.

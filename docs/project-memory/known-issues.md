@@ -2,6 +2,29 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 production authenticated browser call verified
+
+- Previous issue: protected `GET /api/hello` returned `401 Invalid bearer token` during manual production browser verification.
+- Resolution: PR #86 and production promotion run `25858636629` fixed the trailing-slash Microsoft Entra v1 issuer mismatch; the subsequent manual browser call returned the authenticated hello payload.
+- Status: Resolved. Keep this note for traceability; no active auth blocker remains for the v0 protected `/api/hello` path.
+
+
+
+## 2026-05-14 production API still returns 401 due to v1 issuer slash mismatch
+
+- Symptom: protected `GET /api/hello` still returns `401 Invalid bearer token` from the production Angular session.
+- Root cause: Microsoft Entra v1 access tokens use a trailing-slash `sts.windows.net/<tenant>/` issuer; deployed code derives the v1 alias without the trailing slash.
+- Status: Code fix proposed to include the trailing-slash alias; merge, deploy, and retry the browser call.
+- Update: PR #86 has deployed; retry the browser call with a fresh token to confirm the interactive end-to-end result.
+
+## 2026-05-14 production API returns 401 for Microsoft Entra v1 access token
+
+- Symptom: protected `GET /api/hello` returns `401 Invalid bearer token` from the production Angular session even though the signed-in user is allowlisted.
+- Root cause: production accepted the tenant-specific Microsoft Entra v2 issuer but the browser access token uses the Microsoft Entra v1 `sts.windows.net` issuer form for the same tenant.
+- Status: Code fix proposed to derive the matching v1 issuer alias; merge, deploy, and retry the browser call.
+- Update: PR #83 was deployed successfully by production promotion run `25857793354`; retry the authenticated browser call to confirm the manual end-to-end flow.
+
+
 ## 2026-05-14 production API CORS preflight failure
 
 - Symptom: after successful production browser sign-in, the Angular app showed `Failed to fetch` when calling protected `GET /api/hello`; browser diagnostics reported that the preflight response from the production Function App lacked `Access-Control-Allow-Origin` for `https://stapicatalogueprodbfjsts.z6.web.core.windows.net`.

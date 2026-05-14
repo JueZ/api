@@ -2,6 +2,31 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 production browser auth verified end-to-end
+
+- Manual production browser verification succeeded after the trailing-slash Microsoft Entra v1 issuer fix. The signed-in account `mkos_postat@outlook.com` called protected `GET /api/hello` successfully and received the authenticated response for Martin with subject, object ID, and tenant ID populated.
+- This confirms production browser MSAL sign-in, token acquisition, Function App CORS, JWT issuer/JWKS/audience/scope validation, tenant gating, and server-side user gating are working together for the configured user.
+- Current production endpoint truth: `/health` remains public; unauthenticated `/api/hello` returns `401`; authenticated `/api/hello` returns the v0 authenticated hello payload for the configured user.
+
+
+
+## 2026-05-14 Microsoft Entra v1 issuer trailing-slash follow-up
+
+- A browser retry after PR #83 still returned `401 Invalid bearer token`; Application Insights showed repeated `Authentication failed: invalid_token` traces for `hello`, with no `403` authorization failures and no exception records.
+- Safe production configuration checks showed the configured audience, required scope, tenant allow entry, and user object entry matched the browser token claims; this points to token validation, not the server-side user gate.
+- Root cause: Microsoft Entra v1 access tokens use an exact issuer with a trailing slash (`sts.windows.net/<tenant>/`), while PR #83 derived the `sts.windows.net` issuer alias without that trailing slash. The verifier uses exact issuer matching, so signature/claim validation failed before the user gate.
+- Fix in progress: derive both slash and no-slash same-host v1 aliases and the trailing-slash `sts.windows.net` alias for tenant-specific Microsoft Entra v2 issuers.
+- Update: PR #86 was merged and deployed by production promotion run `25858636629`; production smoke tests passed. The remaining step is an interactive browser retry with a fresh token.
+
+## 2026-05-14 Microsoft Entra v1 access token issuer follow-up
+
+- Manual browser retry of protected `GET /api/hello` still returned `401 Invalid bearer token` after issuer-specific JWKS support.
+- Safe production app-setting comparisons showed auth enabled, the token tenant and object ID present in the allowlists, the required scope configured, and the tenant-specific Microsoft Entra v2 issuer configured, but not the Microsoft Entra v1 `sts.windows.net` issuer emitted by the browser access token.
+- The code fix now derives the Microsoft Entra v1 issuer alias for configured tenant-specific v2 issuers so the API can validate v1 access tokens for the same tenant while still enforcing exact audience, required scope/role, allowed tenant IDs, and allowed object IDs/subjects.
+- Update: PR #83 was merged and deployed by production promotion run `25857793354`; production smoke tests passed after deployment.
+- Remaining manual step: retry **Call hello with access token** in the browser because automation does not have an interactive user token.
+
+
 ## 2026-05-14 production CORS follow-up
 
 - Manual browser sign-in now reaches the signed-in Angular state for `mkos_postat@outlook.com`, but calling protected `GET /api/hello` from the production static website failed in the browser because the Azure Functions CORS preflight response did not include `Access-Control-Allow-Origin` for the production static website origin.
