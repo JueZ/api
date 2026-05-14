@@ -131,8 +131,6 @@ jobs:
           : "${WEB_AUTH_AUTHORITY:?WEB_AUTH_AUTHORITY repository variable is required for $ENVIRONMENT_NAME}"
           if [ "$ENVIRONMENT_NAME" = "prod" ]; then
             : "${WEB_AUTH_REDIRECT_URI:?WEB_AUTH_REDIRECT_URI repository variable is required for production}"
-          elif [ "$DEPLOY_FRONTEND" = "true" ]; then
-            : "${TEST_WEB_AUTH_REDIRECT_URI:?TEST_WEB_AUTH_REDIRECT_URI repository variable is required for test frontend auth}"
           fi
           : "${WEB_AUTH_API_SCOPE:?WEB_AUTH_API_SCOPE repository variable is required for $ENVIRONMENT_NAME}"
       - name: Azure OIDC login
