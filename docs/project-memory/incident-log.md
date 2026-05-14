@@ -12,6 +12,13 @@
 - Follow-up: keep test CORS validation conditional on a configured test redirect URI; production still uses `WEB_AUTH_REDIRECT_URI` for the production Angular origin.
 - Status: Repair in progress.
 
+## 2026-05-14 — Production CORS smoke needed propagation retry
+
+- Promote Production run `25855047988` applied the Function App platform CORS configuration, but the immediate smoke preflight check ran before CORS headers were visible at the production endpoint and failed closed.
+- Direct verification shortly after the failed run showed the production preflight returned `Access-Control-Allow-Origin: https://stapicatalogueprodbfjsts.z6.web.core.windows.net`, so the configuration was correct but needed bounded retry in smoke tests.
+- Follow-up: add bounded retry around CORS preflight validation after deployment.
+- Status: Repair in progress.
+
 
 Entries are reverse chronological.
 

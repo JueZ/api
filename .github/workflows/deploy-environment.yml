@@ -369,18 +369,23 @@ jobs:
           if [ -n "$api_cors_redirect_uri" ]; then
             api_cors_origin="$(API_CORS_REDIRECT_URI="$api_cors_redirect_uri" node --input-type=module --eval "process.stdout.write(new URL(process.env.API_CORS_REDIRECT_URI).origin)")"
             headers_file="$RUNNER_TEMP/api-cors-preflight-headers.txt"
-            preflight_status=$(curl --show-error --silent --output /dev/null --dump-header "$headers_file" --write-out '%{http_code}' --max-time 20 \
-              -X OPTIONS "$EFFECTIVE_BASE_URL/api/hello" \
-              -H "Origin: $api_cors_origin" \
-              -H "Access-Control-Request-Method: GET" \
-              -H "Access-Control-Request-Headers: authorization")
-            if [ "$preflight_status" != "204" ] && [ "$preflight_status" != "200" ]; then
-              echo "Expected CORS preflight for /api/hello to return 200 or 204; got $preflight_status." >&2
-              exit 1
-            fi
-            allow_origin_header="$(awk -F': *' 'tolower($1)=="access-control-allow-origin" {gsub(/\r/, "", $2); print $2; exit}' "$headers_file")"
-            if [ "$allow_origin_header" != "*" ] && [ "$allow_origin_header" != "$api_cors_origin" ]; then
-              echo "Expected CORS preflight for /api/hello to allow origin $api_cors_origin." >&2
+            preflight_ok=false
+            for attempt in {1..12}; do
+              preflight_status=$(curl --show-error --silent --output /dev/null --dump-header "$headers_file" --write-out '%{http_code}' --max-time 20 \
+                -X OPTIONS "$EFFECTIVE_BASE_URL/api/hello" \
+                -H "Origin: $api_cors_origin" \
+                -H "Access-Control-Request-Method: GET" \
+                -H "Access-Control-Request-Headers: authorization")
+              allow_origin_header="$(awk -F': *' 'tolower($1)=="access-control-allow-origin" {gsub(/\r/, "", $2); value=$2} END {print value}' "$headers_file")"
+              if { [ "$preflight_status" = "204" ] || [ "$preflight_status" = "200" ]; } && { [ "$allow_origin_header" = "*" ] || [ "$allow_origin_header" = "$api_cors_origin" ]; }; then
+                preflight_ok=true
+                break
+              fi
+              echo "Waiting for CORS preflight to allow $api_cors_origin (attempt $attempt/12, status $preflight_status)."
+              sleep 5
+            done
+            if [ "$preflight_ok" != "true" ]; then
+              echo "Expected CORS preflight for /api/hello to allow origin $api_cors_origin; got status $preflight_status and allow-origin '${allow_origin_header:-<missing>}'." >&2
               exit 1
             fi
           fi
