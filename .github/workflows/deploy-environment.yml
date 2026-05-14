@@ -107,6 +107,8 @@ jobs:
           fetch-depth: 0
       - name: Validate deployment source
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           deployment_ref="${SOURCE_REF:-${GITHUB_SHA}}"
@@ -124,6 +126,22 @@ jobs:
           if ! git merge-base --is-ancestor "$resolved_head" origin/main; then
             echo "sourceRef must point to a commit already present in the main branch history." >&2
             exit 1
+          fi
+          successful_ci_runs=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&head_sha=${deployment_ref}&status=completed&per_page=20" \
+            --jq '[.workflow_runs[] | select(.conclusion == "success")] | length')
+          if [ "$successful_ci_runs" -lt 1 ]; then
+            echo "sourceRef must match a commit that completed CI successfully." >&2
+            exit 1
+          fi
+          if [ "$ENVIRONMENT_NAME" = "prod" ]; then
+            successful_test_runs=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-test.yml/runs?branch=main&head_sha=${deployment_ref}&status=completed&per_page=20" \
+              --jq '[.workflow_runs[] | select(.conclusion == "success")] | length')
+            if [ "$successful_test_runs" -lt 1 ]; then
+              echo "Production sourceRef must match a commit that completed Deploy Test successfully." >&2
+              exit 1
+            fi
           fi
       - name: Validate deployment configuration
         shell: bash
