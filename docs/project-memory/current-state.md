@@ -2,12 +2,18 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 Codex host git remote repair in progress
 
-## 2026-05-14 deployment secret scoping hardening
+- Current Codex checkout had GitHub CLI authentication for `JueZ/api` but no configured git remote, which can make final PR URL reporting fail even after the local commit and PR metadata are recorded.
+- Fix in progress: Codex setup and maintenance scripts now add a missing git `origin` remote for `JueZ/api` (or `CODEX_GITHUB_REPOSITORY` when explicitly set) without printing secrets or deploying code.
 
-- Aardvark identified that the reusable deployment workflow exposed `REDDIT_CLIENT_SECRET` at job scope while building an operator-selected deployment ref.
-- Fix in progress: deployment callers pass only the Reddit secret explicitly, the reusable workflow no longer exports that secret to checkout/install/build steps, and manual deployment refs are restricted to full commit SHAs already present in the `main` branch history before any build or secret-bearing infrastructure step runs.
-- The Reddit secret remains available only to the Bicep infrastructure deployment step that needs to pass the secure parameter into Azure.
+## 2026-05-14 production deployment source hardening in progress
+
+- Aardvark reported that production rollback/promote could deploy operator-supplied branches or tags and run checked-out npm lifecycle/build scripts after Azure OIDC login, while setup docs also allowed no production reviewers and standing production RBAC-admin access.
+- PR #107 remediated the related Aardvark finding that the reusable deployment workflow exposed `REDDIT_CLIENT_SECRET` at job scope while building an operator-selected deployment ref. Deployment callers now pass only the Reddit secret explicitly, the reusable workflow no longer exports that secret to checkout/install/build steps, and the secret remains scoped to the Bicep infrastructure step.
+- Fix in progress: deployment workflows validate refs before Azure login and only allow immutable commits that are ancestors of `main`; branch and tag inputs are rejected. This follow-up additionally requires every deployment to have a successful `CI` workflow run for the exact commit, and requires production deployments to have a successful `Deploy Test` workflow run for that commit before any Azure login, build, infrastructure, or secret-bearing step runs.
+- Setup docs now require an independent production reviewer, prevent self-review, and document `Role Based Access Control Administrator` only as a temporary bootstrap exception that must be revoked.
+- Production promotion run `25890276402` passed for PR #107, including deployment and smoke tests for the production Function App and static web storage account.
 
 ## 2026-05-14 app-only OAuth service-client auth implementation
 

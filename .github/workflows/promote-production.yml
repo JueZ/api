@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       commit_sha:
-        description: Commit SHA on main to promote. Defaults to the selected ref SHA.
+        description: Immutable 40-character commit SHA from main to promote. Defaults to the selected ref SHA.
         required: false
         type: string
       deploy_frontend:

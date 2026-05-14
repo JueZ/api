@@ -1,5 +1,20 @@
 # Decision log
 
+## 2026-05-14 — Harden production deployment refs and Azure RBAC bootstrap
+
+- Decision: production deploy, promote, and rollback refs must be immutable commit SHAs that resolve to commits already on `main`; branches and tags are rejected before Azure OIDC login and before npm install/build commands can run with Azure deployment context.
+- Decision: production GitHub Environment setup should require an independent reviewer with prevent-self-review. If no independent reviewer is available, keep `DEPLOY_PRODUCTION_ENABLED=false` rather than permitting unreviewed production rollback or promotion.
+- Decision: keep `Role Based Access Control Administrator` out of standing deployment identity access. Use it only as a documented, time-bound resource-group bootstrap exception for the Function App package-reader role assignment, then revoke it immediately.
+- Rationale: these controls break the branch/tag workflow-dispatch abuse chain reported by Aardvark and reduce the blast radius of the Azure deployment identity.
+- Status: In progress.
+
+## 2026-05-14: Treat PR creation as mandatory task completion for repository changes
+
+Decision: Codex must commit repository-changing work and open or update a pull request before reporting the task as complete. If PR creation is blocked by authentication, network, permissions, or branch state, Codex must fail closed and report that blocker instead of silently stopping after implementation.
+
+Rationale: The user observed repeated successful Codex tasks that did not create pull requests. Making PR creation an explicit completion requirement aligns agent behavior with the autonomous delivery pipeline. A follow-up clarified that Codex should repair common local checkout issues before giving up, including restoring the `origin` remote to `https://github.com/JueZ/api.git`, wiring Git to GitHub CLI credentials with `gh auth setup-git --hostname github.com`, pushing the branch, and creating/updating the PR with `--repo JueZ/api`.
+
+
 ## 2026-05-14: Use Entra app roles for service/e2e OAuth instead of static tokens
 
 Decision: support other applications and deployed test-zone service/e2e tests with Microsoft Entra OAuth 2.0 client credentials, app roles, tenant validation, and explicit service-client allowlists. Do not introduce custom static bearer tokens, password-grant test login, or deployed auth bypasses.
@@ -119,6 +134,13 @@ Entries are reverse chronological.
 - Context: Node 24 caused production HTTP 503/runtime startup issues. Node 22 is the validated runtime for the current Azure Functions app.
 - Consequences: Keep local, CI, infrastructure, and production runtime expectations aligned on Node 22 until Azure Functions support changes are intentionally validated.
 - Status: Active; PR #34 fixed the production runtime.
+
+## 2026-05-14 — Repair missing git origin during Codex host setup
+
+- Decision: Codex setup and maintenance scripts add a missing git `origin` remote pointing at `https://github.com/JueZ/api.git` by default, with `CODEX_GITHUB_REPOSITORY` available as an explicit override.
+- Context: A Codex checkout can have working `gh` authentication but no git remotes, causing hosted PR URL resolution and branch push workflows to report unavailable PR URLs.
+- Consequences: Existing origins are left unchanged, setup remains deployment-free, and maintenance can repair remote-less checkouts without requiring secrets.
+- Status: Active.
 
 ## 2026-05-14 — Protect `/api/hello` when auth is enabled
 
