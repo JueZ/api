@@ -1,4 +1,13 @@
 # Incident log
+
+## 2026-05-14 — Microsoft Entra v1 access token rejected by v2 issuer-only config
+
+- Symptom: Production Angular sign-in succeeded, but authenticated `GET /api/hello` returned `401 Invalid bearer token`.
+- Impact: Manual end-to-end browser verification for the protected API remained blocked.
+- Root cause: The SPA received a Microsoft Entra v1 access token whose issuer used the tenant-specific `sts.windows.net` form, while production backend configuration included the tenant-specific Microsoft Entra v2 issuer and did not include the v1 issuer alias. Signature verification therefore failed before allowlist checks, even though safe comparisons showed the token tenant, object ID, and scope matched configured policy.
+- Fix: Derive Microsoft Entra v1 issuer aliases from configured tenant-specific v2 issuers and verify each issuer with its own discovered JWKS.
+- Status: Code fix proposed; deployment and manual browser retest pending.
+
 ## 2026-05-14 — Production protected API call blocked by CORS preflight
 
 - Symptom: Production Angular sign-in completed for the user, but the protected `/api/hello` call failed with a browser CORS error because the preflight response lacked `Access-Control-Allow-Origin`.
