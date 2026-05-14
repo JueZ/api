@@ -6,7 +6,7 @@
 - Impact: Manual end-to-end browser verification for the protected API remained blocked.
 - Root cause: The SPA received a Microsoft Entra v1 access token whose issuer used the tenant-specific `sts.windows.net` form, while production backend configuration included the tenant-specific Microsoft Entra v2 issuer and did not include the v1 issuer alias. Signature verification therefore failed before allowlist checks, even though safe comparisons showed the token tenant, object ID, and scope matched configured policy.
 - Fix: Derive Microsoft Entra v1 issuer aliases from configured tenant-specific v2 issuers and verify each issuer with its own discovered JWKS.
-- Status: Code fix proposed; deployment and manual browser retest pending.
+- Status: Code fix merged in PR #83 and deployed by production promotion run `25857793354`; manual browser retest is pending.
 
 ## 2026-05-14 — Production protected API call blocked by CORS preflight
 

@@ -7,6 +7,7 @@ Last updated: 2026-05-14
 - Symptom: protected `GET /api/hello` returns `401 Invalid bearer token` from the production Angular session even though the signed-in user is allowlisted.
 - Root cause: production accepted the tenant-specific Microsoft Entra v2 issuer but the browser access token uses the Microsoft Entra v1 `sts.windows.net` issuer form for the same tenant.
 - Status: Code fix proposed to derive the matching v1 issuer alias; merge, deploy, and retry the browser call.
+- Update: PR #83 was deployed successfully by production promotion run `25857793354`; retry the authenticated browser call to confirm the manual end-to-end flow.
 
 
 ## 2026-05-14 production API CORS preflight failure
