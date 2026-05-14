@@ -9,8 +9,9 @@ test('logged-out state is visible in the Angular auth UI', () => {
   assert.match(mainSource, /Authentication config is incomplete\./);
 });
 
-test('login button exists', () => {
+test('login button exists and uses a redirect flow', () => {
   assert.match(mainSource, />\s*Sign in\s*</);
+  assert.match(mainSource, /loginRedirect\(\{ scopes: \[config\.authApiScope\] \}\)/);
 });
 
 test('API call sends a bearer token and requires authentication config', () => {
@@ -21,4 +22,8 @@ test('API call sends a bearer token and requires authentication config', () => {
 test('API errors are displayed clearly', () => {
   assert.match(mainSource, /role="alert"/);
   assert.match(mainSource, /API returned \$\{response\.status\}/);
+});
+
+test('MSAL does not navigate back to the login request URL after processing auth code redirects', () => {
+  assert.match(mainSource, /navigateToLoginRequestUrl: false/);
 });
