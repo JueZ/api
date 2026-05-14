@@ -1,5 +1,13 @@
 # Deployment log
 
+## 2026-05-14 OpenAPI generated artifacts removed from version control
+
+- PR #103 (`Stop committing generated OpenAPI web artifacts`) merged via GitHub-native auto-merge at merge commit `21b4dcc81d055ecce728494ef7e5c14de411f8f3` after PR CI and Policy Check passed.
+- A main-branch `CI` workflow run `25890171719` was manually dispatched for the merge commit and passed all required checks.
+- `Deploy Test` workflow run `25890206895` deployed the merge commit to the `test` environment and passed smoke tests.
+- `Promote Production` workflow run `25890276402` completed successfully and passed production smoke tests after the same main-branch delivery sequence.
+- Result: `contracts/openapi.yaml` is the only committed OpenAPI YAML contract; Angular copies it as a build asset and parses it at runtime for the interactive catalogue.
+
 ## 2026-05-14 OpenAPI-driven API catalogue deployed to test and production
 
 - PR #99 (`OpenAPI-driven interactive API catalogue UI and sync script`) merged via GitHub-native auto-merge at merge commit `30f948b70d9d71f4eb39cacfa5d28838d1035e8b` after PR CI and Policy Check passed.
