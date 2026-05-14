@@ -10,6 +10,11 @@ v0 Hello World skeleton for a personal API catalogue platform.
 - Low-cost Bicep infrastructure skeleton in `infra/main.bicep`.
 - Setup documentation in `docs/setup/v0-hello-world.md`.
 
+
+## Project memory
+
+This repository keeps repo-based project memory in [`docs/project-memory/README.md`](docs/project-memory/README.md). Codex uses it to preserve important project context across sessions, including current state, decisions, deployment history, incidents, known issues, glossary terms, and next steps.
+
 ## Quick start
 
 ```bash

@@ -162,6 +162,11 @@ curl --fail --show-error --silent "$PRODUCTION_BASE_URL/health"
 curl --fail --show-error --silent "$PRODUCTION_BASE_URL/api/hello"
 ```
 
+
+## Project memory
+
+Meaningful deployment incidents, root causes, operational decisions, and follow-up risks should be recorded in `docs/project-memory/` so future Codex sessions can preserve context without relying on hidden model memory. Keep entries concise and never include secrets, tokens, SAS URLs, connection strings, or full environment dumps.
+
 ## Bounded repair
 
 `Codex Autofix` is bounded to two attempts per pull request. It creates a repair task instead of weakening checks. If the same failure repeats after two attempts, automation stops and the failure must be summarized.
