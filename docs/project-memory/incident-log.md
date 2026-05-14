@@ -4,33 +4,33 @@
 - Symptom: Production Angular sign-in completed for the user, but the protected `/api/hello` call failed with a browser CORS error because the preflight response lacked `Access-Control-Allow-Origin`.
 - Impact: Authenticated browser verification of `/api/hello` is blocked even though API smoke tests for unauthenticated `401` continue to pass.
 - Fix: Configure Function App platform CORS for the deployed Angular origin and add preflight validation to deployment smoke tests.
-- Status: Fix in progress.
+- Status: Resolved by PRs #66, #67, #70, #73, and #75 plus successful production promotion run `25855907807`.
 
 ## 2026-05-14 — Deploy Test failed after first CORS fix because test redirect URI is unset
 
 - Run `25854845137` failed during deployment configuration validation because the first CORS fix made `TEST_WEB_AUTH_REDIRECT_URI` required whenever the test frontend deploys, but the repository currently leaves that variable unset.
 - Follow-up: keep test CORS validation conditional on a configured test redirect URI; production still uses `WEB_AUTH_REDIRECT_URI` for the production Angular origin.
-- Status: Repair in progress.
+- Status: Resolved by successful production promotion run `25855907807`.
 
 ## 2026-05-14 — Production CORS smoke needed propagation retry
 
 - Promote Production run `25855047988` applied the Function App platform CORS configuration, but the immediate smoke preflight check ran before CORS headers were visible at the production endpoint and failed closed.
 - Direct verification shortly after the failed run showed the production preflight returned `Access-Control-Allow-Origin: https://stapicatalogueprodbfjsts.z6.web.core.windows.net`, so the configuration was correct but needed bounded retry in smoke tests.
 - Follow-up: add bounded retry around CORS preflight validation after deployment.
-- Status: Repair in progress.
+- Status: Resolved by successful production promotion run `25855907807`.
 
 ## 2026-05-14 — Production CORS smoke header parser split URL value
 
 - Promote Production run `25855376487` failed because the smoke parser split `Access-Control-Allow-Origin: https://...` on colon characters and compared only `https` to the expected origin.
 - Direct endpoint behavior remained correct; the failure was in smoke-test parsing, not in the deployed CORS configuration.
 - Follow-up: parse the CORS header by removing only the header-name prefix and preserving the full URL value.
-- Status: Repair in progress.
+- Status: Resolved by successful production promotion run `25855907807`.
 
 ## 2026-05-14 — Production health route needed explicit restart/readiness retry
 
 - Promote Production run `25855574430` failed because `/health` returned `404` immediately after package deployment even though function metadata existed. A direct Azure Resource Manager restart with a non-empty body restored `/health` to `200`.
 - Follow-up: use an explicit ARM restart call that includes a request body and add bounded readiness retry for `/health` and unauthenticated `/api/hello` before CORS preflight smoke validation.
-- Status: Repair in progress.
+- Status: Resolved by successful production promotion run `25855907807`.
 
 
 Entries are reverse chronological.
