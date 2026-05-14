@@ -19,6 +19,13 @@
 - Follow-up: add bounded retry around CORS preflight validation after deployment.
 - Status: Repair in progress.
 
+## 2026-05-14 — Production CORS smoke header parser split URL value
+
+- Promote Production run `25855376487` failed because the smoke parser split `Access-Control-Allow-Origin: https://...` on colon characters and compared only `https` to the expected origin.
+- Direct endpoint behavior remained correct; the failure was in smoke-test parsing, not in the deployed CORS configuration.
+- Follow-up: parse the CORS header by removing only the header-name prefix and preserving the full URL value.
+- Status: Repair in progress.
+
 
 Entries are reverse chronological.
 
