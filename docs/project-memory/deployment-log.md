@@ -2,6 +2,13 @@
 
 Entries are reverse chronological. Do not include secrets or SAS URLs.
 
+## 2026-05-14 — Final readiness production promotion succeeded
+
+- Event: After PR #60 merged, `Deploy Test` run `25852557000` and `Promote Production` run `25852638254` were manually dispatched from `main`.
+- Result: Both workflows succeeded. Production deployment, Angular deployment, smoke tests, and warning-only repository-variable metadata updates completed without failing the workflow.
+- Verification: Production `GET /health` returned `200`; unauthenticated `GET /api/hello` returned `401`.
+- Follow-up: Manual browser/MSAL sign-in verification and Entra app-registration visibility remain the only setup-readiness items requiring a human/delegated directory context.
+
 ## 2026-05-14 — Consolidation verification found production still pre-auth
 
 - Event: Consolidation sprint inspected repo, GitHub Actions, GitHub variables, Azure resources, and public production endpoints without deploying production.
