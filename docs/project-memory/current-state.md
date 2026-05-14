@@ -2,6 +2,12 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 app-only OAuth service-client auth implementation
+
+- Backend authorization now supports Microsoft Entra app-only OAuth client-credentials tokens alongside delegated user tokens. User tokens remain gated by `OIDC_ALLOWED_OBJECT_IDS`/`OIDC_ALLOWED_SUBJECTS`; app-only tokens are gated separately by `OIDC_ALLOWED_APP_OBJECT_IDS` and/or `OIDC_ALLOWED_CLIENT_IDS` after issuer, audience, tenant, and required scope/role validation.
+- Deployment wiring now passes the service-client allowlist variables into Azure Function App settings. The recommended test-zone setup is an Entra API app role such as `api.test`, a dedicated service-client app registration, and a GitHub Actions OIDC federated credential instead of a client secret.
+- Codex attempted to inspect Entra app registrations with the current Azure CLI identity, but Microsoft Graph returned insufficient privileges. The repo now includes `scripts/configure-entra-service-oauth.sh` so an identity with app-registration permissions can complete the Azure/GitHub configuration from Cloud Shell.
+
 ## 2026-05-14 GitHub Actions Node 24 and production variable warning follow-up
 
 - Workflow maintenance moved first-party actions to Node 24-compatible major versions and replaced `gitleaks/gitleaks-action@v2` with the Gitleaks CLI to avoid the remaining Node.js 20 action runtime warning.
