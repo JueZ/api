@@ -2,22 +2,18 @@
 
 Last updated: 2026-05-14
 
-## Current corrected status from 2026-05-14 consolidation
+## Active
 
-- Production has not yet been verified as auth-enabled. On 2026-05-14, unauthenticated `GET /api/hello` at the production API URL still returned the old public placeholder response instead of `401`.
-- `Deploy Test` has succeeded on `main`, but production promotion most recently skipped; the staged test-to-production path is not yet fully end-to-end verified for an auth-enabled production rollout.
-- Codex Azure identity currently lacks sufficient Microsoft Entra directory permissions to list or inspect app registrations/federated credentials; `az ad app list --filter "appId eq '<client-id>'"` failed with insufficient privileges on 2026-05-14.
-- Deployment-principal RBAC on `rg-api-test` and `rg-api-prod` could not be verified from the available client/app ID because Graph lookup was insufficient and project memory does not contain the service principal object ID.
-- The older bullets below that say auth implementation pieces are still needed are superseded for code on `main`; auth deployment verification remains open. They are retained for guardrail traceability rather than deleted in this consolidation PR.
+- `Promote Production` run `25852035606` successfully deployed production and passed smoke tests, but the workflow concluded `failure` because `GITHUB_TOKEN` could not write repository variables in the post-smoke metadata update step. This is a workflow correctness issue, not an application deployment failure. Fix by making that metadata update idempotent/best-effort or by documenting a safe token strategy; do not fail a successful deployment solely because repository metadata could not be rewritten.
+- Codex Azure identity lacks sufficient Microsoft Graph directory permissions to list or inspect Microsoft Entra app registrations and federated credentials. During the readiness sprint, `az ad sp list --filter "appId eq '<client-id>'"` and `az ad app federated-credential list --id '<client-id>'` failed with insufficient privileges. A delegated identity with app-registration read permissions is needed for full Entra/OIDC verification.
+- Deployment-principal RBAC could be inspected at resource-group scope and required service-principal role assignments were present, but Graph limits prevented mapping all service-principal assignments to the exact display name/object ID from Codex.
+- Interactive Angular/MSAL login and allowlisted authenticated `GET /api/hello` were not browser-verified by Codex because the environment cannot complete interactive Entra sign-in. Manual verification remains required.
+- GitHub Actions reported Node.js 20 action runtime deprecation warnings for upstream actions (`actions/checkout@v4`, `actions/setup-node@v4`, `actions/github-script@v7`, `azure/login@v2`). Runtime application code is Node 22; monitor upstream action updates or GitHub runner defaults before June 2026.
 
-- API authentication is implemented in PR #40 but not yet merged/deployed.
-- Production `GET /api/hello` remains a public placeholder until PR #40 is merged and deployed with auth variables.
-- Codex Azure identity currently lacks sufficient Microsoft Entra directory permissions to list/create/update app registrations; `az ad app list --display-name juez-api-catalogue-api-prod --query "[0]" -o json` failed with insufficient privileges on 2026-05-14.
-- `OIDC_ALLOWED_OBJECT_IDS` is still unknown because the current Azure login is not a delegated user flow; do not guess it.
-- Production auth promotion is blocked until the GitHub Actions Azure deployment identity can manage required Bicep role assignments at `rg-api-prod` scope, or the role assignment is safely pre-provisioned/removed from the template.
-- Deployment uses storage-backed `WEBSITE_RUN_FROM_PACKAGE`; durable deployment hardening may still be useful later if operational needs grow.
-- Entra/OIDC/JWT design and app registrations are still needed.
-- Angular login flow is still needed.
-- Backend token validation and user allowlist are still needed.
-- Budget/cost alert documentation should be confirmed or added if not already present.
-- Decide later whether API Management is needed; it is not part of v0.
+## Historical / resolved
+
+- Production previously served the pre-auth public placeholder for unauthenticated `GET /api/hello`; this was resolved by the 2026-05-14 production promotion, and unauthenticated production `GET /api/hello` now returns `401`.
+- Production Function App previously lacked an observable system-assigned identity before the auth-enabled production deployment; this is resolved after the production promotion.
+- Earlier notes about auth implementation being unmerged or PR #40 being open are superseded; auth code is on `main`.
+- Historical SAS-backed package URL issues are superseded by managed-identity package access.
+- Historical storage upload/RBAC, static website, and Node runtime deployment failures are recorded in `incident-log.md`.

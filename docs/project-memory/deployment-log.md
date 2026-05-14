@@ -1,6 +1,21 @@
 # Deployment log
 
-Entries are reverse chronological. Do not include secrets or SAS URLs.
+Entries are reverse chronological.
+
+## 2026-05-14 — Auth-enabled production deployment smoke passed; workflow failed on metadata update
+
+- Event: `Promote Production` was manually dispatched from `main` at run `25852035606` after `Deploy Test` succeeded.
+- Result: Production infrastructure deployment, Functions deployment, Angular static site deployment, and smoke tests passed. The workflow conclusion was `failure` because the post-smoke repository-variable update step could not write repository variables with `GITHUB_TOKEN` (`HTTP 403: Resource not accessible by integration`).
+- Verification: Direct production smoke after the run returned `200` for `GET /health` and `401` for unauthenticated `GET /api/hello` at <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net>.
+- Follow-up: Merge the workflow fix that makes production metadata updates best-effort/idempotent, then re-run production promotion to get a green workflow conclusion.
+
+## 2026-05-14 — Auth-enabled test deployment succeeded
+
+- Event: `Deploy Test` was manually dispatched from `main` at run `25851944897`.
+- Result: Success.
+- Verification: Direct test smoke returned `200` for `GET /health` and `401` for unauthenticated `GET /api/hello` at `https://func-api-catalogue-test-iwt54bovfzvrc.azurewebsites.net`.
+- Follow-up: Keep test deployment as the required promotion gate before production.
+
 
 ## 2026-05-14 — Consolidation verification found production still pre-auth
 
