@@ -2,6 +2,13 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 production authenticated browser call verified
+
+- Previous issue: protected `GET /api/hello` returned `401 Invalid bearer token` during manual production browser verification.
+- Resolution: PR #86 and production promotion run `25858636629` fixed the trailing-slash Microsoft Entra v1 issuer mismatch; the subsequent manual browser call returned the authenticated hello payload.
+- Status: Resolved. Keep this note for traceability; no active auth blocker remains for the v0 protected `/api/hello` path.
+
+
 
 ## 2026-05-14 production API still returns 401 due to v1 issuer slash mismatch
 

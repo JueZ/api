@@ -2,6 +2,13 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 production browser auth verified end-to-end
+
+- Manual production browser verification succeeded after the trailing-slash Microsoft Entra v1 issuer fix. The signed-in account `mkos_postat@outlook.com` called protected `GET /api/hello` successfully and received the authenticated response for Martin with subject, object ID, and tenant ID populated.
+- This confirms production browser MSAL sign-in, token acquisition, Function App CORS, JWT issuer/JWKS/audience/scope validation, tenant gating, and server-side user gating are working together for the configured user.
+- Current production endpoint truth: `/health` remains public; unauthenticated `/api/hello` returns `401`; authenticated `/api/hello` returns the v0 authenticated hello payload for the configured user.
+
+
 
 ## 2026-05-14 Microsoft Entra v1 issuer trailing-slash follow-up
 

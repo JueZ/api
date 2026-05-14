@@ -1,5 +1,12 @@
 # Next steps
 
+## 2026-05-14 post-auth-verification next steps
+
+1. Begin the next small API catalogue feature slice on top of the verified protected API foundation.
+2. Keep `/health` public and keep real catalogue data behind authenticated endpoints.
+3. Leave Reddit intentionally out of scope until a later milestone explicitly chooses it.
+
+
 ## 2026-05-14 Microsoft Entra v1 trailing-slash issuer next steps
 
 1. Merge and deploy the trailing-slash v1 issuer alias fix.
