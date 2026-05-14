@@ -176,6 +176,21 @@ test('app-only service token can be allowed by client ID', async () => {
   assert.equal(result.user.clientId, 'allowed-client-id');
 });
 
+test('roles-only token without app-only marker cannot bypass user allowlist via allowed client ID', async () => {
+  const result = await authorize('Bearer valid-token', {
+    sub: 'blocked-sub',
+    oid: 'blocked-user-oid',
+    tid: 'tenant-id',
+    azp: 'allowed-client-id',
+    roles: ['api.access'],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.code, 'forbidden');
+  assert.equal(result.response.jsonBody.error.message, 'User is not allowed.');
+});
+
 test('app-only service token outside app allowlists returns 403', async () => {
   const result = await authorize('Bearer valid-token', {
     sub: 'service-subject',
