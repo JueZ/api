@@ -96,7 +96,7 @@ The workflows are intentionally scaffold-safe for this repository's current stat
 
 ## Codex host environment
 
-Codex hosts can be prepared with `scripts/setup-codex-env.sh` and refreshed with `scripts/maintain-codex-env.sh`. Setup installs `az` and `gh`, logs into Azure with Codex-specific Azure service principal environment variables, selects `AZURE_SUBSCRIPTION_ID`, and logs into GitHub CLI with `CODEX_GH_TOKEN` after clearing `GH_TOKEN` and `GITHUB_TOKEN` so `gh` persists credentials. Maintenance reinstalls/verifies the tools and checks cached authentication only; it must not print secrets or deploy anything. See `docs/setup/codex-environment.md`.
+Codex hosts can be prepared with `scripts/setup-codex-env.sh` and refreshed with `scripts/maintain-codex-env.sh`. Setup installs `az` and `gh`, logs into Azure with Codex-specific Azure service principal environment variables, selects `AZURE_SUBSCRIPTION_ID`, logs into GitHub CLI with `CODEX_GH_TOKEN` after clearing `GH_TOKEN` and `GITHUB_TOKEN` so `gh` persists credentials, and configures a missing git `origin` remote. Maintenance reinstalls/verifies the tools, checks cached authentication only, and repairs a missing `origin` remote; it must not print secrets or deploy anything. See `docs/setup/codex-environment.md`.
 
 ## Manual bootstrap checklist
 

@@ -135,6 +135,13 @@ Entries are reverse chronological.
 - Consequences: Keep local, CI, infrastructure, and production runtime expectations aligned on Node 22 until Azure Functions support changes are intentionally validated.
 - Status: Active; PR #34 fixed the production runtime.
 
+## 2026-05-14 — Repair missing git origin during Codex host setup
+
+- Decision: Codex setup and maintenance scripts add a missing git `origin` remote pointing at `https://github.com/JueZ/api.git` by default, with `CODEX_GITHUB_REPOSITORY` available as an explicit override.
+- Context: A Codex checkout can have working `gh` authentication but no git remotes, causing hosted PR URL resolution and branch push workflows to report unavailable PR URLs.
+- Consequences: Existing origins are left unchanged, setup remains deployment-free, and maintenance can repair remote-less checkouts without requiring secrets.
+- Status: Active.
+
 ## 2026-05-14 — Protect `/api/hello` when auth is enabled
 
 - Decision: `GET /api/hello` is a v0 placeholder that remains open only when `AUTH_ENABLED=false`; staged and production auth deployments require unauthenticated requests to return `401`.
