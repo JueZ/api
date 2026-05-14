@@ -5,6 +5,8 @@
 2. Retry **Call hello with access token** in the production browser session. Expected result: no `Invalid bearer token`; if the user remains allowlisted, `/api/hello` returns the authenticated hello response.
 3. If the retry returns `403`, inspect only sanitized claim/config comparisons and verify the object ID and tenant allowlists.
 
+Update: PR #83 and production promotion run `25857793354` completed step 1; step 2 remains the manual browser retest.
+
 ## 2026-05-14 production CORS next steps
 
 1. Merge and deploy the Function App platform CORS fix.

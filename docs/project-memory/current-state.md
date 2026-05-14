@@ -7,6 +7,8 @@ Last updated: 2026-05-14
 - Manual browser retry of protected `GET /api/hello` still returned `401 Invalid bearer token` after issuer-specific JWKS support.
 - Safe production app-setting comparisons showed auth enabled, the token tenant and object ID present in the allowlists, the required scope configured, and the tenant-specific Microsoft Entra v2 issuer configured, but not the Microsoft Entra v1 `sts.windows.net` issuer emitted by the browser access token.
 - The code fix now derives the Microsoft Entra v1 issuer alias for configured tenant-specific v2 issuers so the API can validate v1 access tokens for the same tenant while still enforcing exact audience, required scope/role, allowed tenant IDs, and allowed object IDs/subjects.
+- Update: PR #83 was merged and deployed by production promotion run `25857793354`; production smoke tests passed after deployment.
+- Remaining manual step: retry **Call hello with access token** in the browser because automation does not have an interactive user token.
 
 
 ## 2026-05-14 production CORS follow-up
