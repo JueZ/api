@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       commit_sha:
-        description: Immutable 40-character commit SHA from main to deploy. Prefer promote-production.yml for normal promotion.
+        description: Immutable 40-character commit SHA from main to deploy after CI and Deploy Test succeed. Prefer promote-production.yml for normal promotion.
         required: false
         type: string
 
