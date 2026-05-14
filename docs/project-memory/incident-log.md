@@ -7,6 +7,7 @@
 - Root cause: PR #83 derived `https://sts.windows.net/<tenant>` but Microsoft Entra v1 access tokens emit the exact issuer as `https://sts.windows.net/<tenant>/`. Exact issuer matching rejected the token before authorization reached scope or user checks.
 - Fix: Add the trailing-slash v1 issuer alias while retaining exact audience, scope or role, tenant, and user checks.
 - Status: Code fix proposed; deployment and manual browser retest pending.
+- Update: PR #86 deployed the fix via production promotion run `25858636629`; manual browser retest remains pending.
 
 
 ## 2026-05-14 — Microsoft Entra v1 access token rejected by v2 issuer-only config
