@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import test from 'node:test';
-import { authorizeRequest, readAuthConfig } from '../dist/shared/security/auth.js';
+import { exportJWK, generateKeyPair, SignJWT } from 'jose';
+import { authorizeRequest, readAuthConfig, verifyJwtWithJose } from '../dist/shared/security/auth.js';
 
 const baseConfig = Object.freeze({
   enabled: true,
@@ -172,4 +174,64 @@ test('readAuthConfig supports multiple comma-separated issuers', () => {
     'https://login.example.test/tenant/v2.0',
     'https://login.example.test/consumers/v2.0',
   ]);
+});
+
+
+test('verifyJwtWithJose discovers JWKS for the matching configured issuer', async () => {
+  const issuerAKeys = await generateKeyPair('RS256');
+  const issuerBKeys = await generateKeyPair('RS256');
+  const issuerAJwk = await exportJWK(issuerAKeys.publicKey);
+  const issuerBJwk = await exportJWK(issuerBKeys.publicKey);
+  issuerAJwk.kid = 'issuer-a';
+  issuerBJwk.kid = 'issuer-b';
+
+  const server = createServer((request, response) => {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    if (request.url === '/issuer-a/.well-known/openid-configuration') {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ jwks_uri: `${baseUrl}/issuer-a/jwks` }));
+      return;
+    }
+    if (request.url === '/issuer-b/.well-known/openid-configuration') {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ jwks_uri: `${baseUrl}/issuer-b/jwks` }));
+      return;
+    }
+    if (request.url === '/issuer-a/jwks') {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ keys: [issuerAJwk] }));
+      return;
+    }
+    if (request.url === '/issuer-b/jwks') {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ keys: [issuerBJwk] }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end();
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    const token = await new SignJWT({ scp: 'api.access' })
+      .setProtectedHeader({ alg: 'RS256', kid: 'issuer-b' })
+      .setIssuer(`${baseUrl}/issuer-b`)
+      .setAudience('api://catalogue-test')
+      .setSubject('allowed-sub')
+      .setExpirationTime('5m')
+      .sign(issuerBKeys.privateKey);
+
+    const payload = await verifyJwtWithJose(token, {
+      ...baseConfig,
+      issuer: `${baseUrl}/issuer-a`,
+      issuers: [`${baseUrl}/issuer-a`, `${baseUrl}/issuer-b`],
+      audience: 'api://catalogue-test',
+    });
+
+    assert.equal(payload.iss, `${baseUrl}/issuer-b`);
+    assert.equal(payload.sub, 'allowed-sub');
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
 });

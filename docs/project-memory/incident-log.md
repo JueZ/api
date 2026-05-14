@@ -39,6 +39,13 @@
 - Fix: allow comma-separated accepted issuer URLs in `OIDC_ISSUER`; deployment configuration must add the explicit Microsoft account issuer, tenant ID, and stable home-account object ID while retaining the existing allowlist.
 - Status: Code/config fix deployed by PR #77 and production promotion run `25856534002`; manual browser retry is pending to confirm the authenticated response.
 
+## 2026-05-14 — Multi-issuer auth still used first issuer JWKS
+
+- Symptom: production continued returning `401 Invalid bearer token` for the signed-in personal Microsoft account after PR #77 and production promotion run `25856534002`.
+- Root cause: the backend accepted multiple exact issuer strings but, without an explicit `OIDC_JWKS_URI`, discovered JWKS only from the first configured issuer. A token from the personal Microsoft account issuer can have a valid issuer but fail signature validation against the organization issuer JWKS.
+- Fix: verify tokens by trying each configured exact issuer with that issuer's own discovered JWKS endpoint, without logging token material.
+- Status: Fix in progress.
+
 
 Entries are reverse chronological.
 
