@@ -282,7 +282,7 @@ Authentication variables are shared by `Deploy Test` and `Promote Production`; k
 
 ```bash
 gh variable set AUTH_ENABLED --repo "$REPOSITORY" --body "true"
-gh variable set OIDC_ISSUER --repo "$REPOSITORY" --body "<issuer URL>"
+gh variable set OIDC_ISSUER --repo "$REPOSITORY" --body "<issuer URL or comma-separated issuer URLs>"
 gh variable set OIDC_AUDIENCE --repo "$REPOSITORY" --body "<API application ID URI or client ID>"
 gh variable set OIDC_REQUIRED_SCOPES --repo "$REPOSITORY" --body "api.access"
 gh variable set OIDC_ALLOWED_OBJECT_IDS --repo "$REPOSITORY" --body "<allowed user object ID>"

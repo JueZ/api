@@ -139,9 +139,7 @@ export class AppComponent {
     }
 
     this.apiError.set(null);
-    const result = await msalClient.loginPopup({ scopes: [config.authApiScope] });
-    msalClient.setActiveAccount(result.account);
-    this.activeAccount.set(result.account);
+    await msalClient.loginRedirect({ scopes: [config.authApiScope] });
   }
 
   async logout(): Promise<void> {
@@ -199,7 +197,7 @@ async function initializeMsal(): Promise<void> {
   }
 
   await msalClient.initialize();
-  const redirectResult = await msalClient.handleRedirectPromise();
+  const redirectResult = await msalClient.handleRedirectPromise({ navigateToLoginRequestUrl: false });
   if (redirectResult?.account) {
     msalClient.setActiveAccount(redirectResult.account);
   } else if (!msalClient.getActiveAccount()) {
@@ -223,8 +221,8 @@ async function acquireAccessToken(account: AccountInfo): Promise<string> {
     return result.accessToken;
   } catch (error) {
     if (error instanceof InteractionRequiredAuthError) {
-      const result = await msalClient.acquireTokenPopup({ account, scopes: [config.authApiScope] });
-      return result.accessToken;
+      await msalClient.acquireTokenRedirect({ account, scopes: [config.authApiScope] });
+      throw new Error('Redirecting to sign in for API access.');
     }
     throw error;
   }

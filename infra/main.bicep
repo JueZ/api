@@ -19,7 +19,7 @@ param workloadName string = 'api-catalogue'
 @description('Enable application-level OAuth/OIDC/JWT authentication for protected API routes. Production must use true.')
 param authEnabled string = 'false'
 
-@description('OIDC issuer URL used for JWT issuer validation and discovery.')
+@description('Comma-separated OIDC issuer URLs used for JWT issuer validation. When oidcJwksUri is empty, each issuer uses its own OpenID discovery JWKS URI.')
 param oidcIssuer string = ''
 
 @description('Expected JWT audience, usually the API application ID URI or client ID.')
@@ -43,6 +43,9 @@ param oidcAllowedTenants string = ''
 @description('Enable sanitized authentication diagnostics without logging tokens or claims.')
 param authDebug string = 'false'
 
+@description('Comma-separated browser origins allowed to call the Function App API. Needed because Azure Functions handles CORS preflight before app code.')
+param apiCorsAllowedOrigins string = ''
+
 var nameSuffix = uniqueString(resourceGroup().id, workloadName, environmentName)
 var normalizedWorkload = replace(workloadName, '-', '')
 var storageAccountName = take('st${normalizedWorkload}${environmentName}${nameSuffix}', 24)
@@ -55,6 +58,7 @@ var tags = {
   costProfile: 'serverless-consumption'
   region: location
 }
+var apiCorsAllowedOriginList = empty(apiCorsAllowedOrigins) ? [] : split(apiCorsAllowedOrigins, ',')
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
@@ -110,6 +114,10 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       linuxFxVersion: 'NODE|22'
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
+      cors: {
+        allowedOrigins: apiCorsAllowedOriginList
+        supportCredentials: false
+      }
       appSettings: [
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'

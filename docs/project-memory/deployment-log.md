@@ -1,6 +1,38 @@
 # Deployment log
 
 Entries are reverse chronological. Do not include secrets or SAS URLs.
+## 2026-05-14 — Production CORS/auth browser-call fix deployed
+
+- Production promotion run `25855907807` succeeded after PR #75.
+- Verification: production `GET /health` returned `200`; unauthenticated `GET /api/hello` returned `401`; `OPTIONS /api/hello` from origin `https://stapicatalogueprodbfjsts.z6.web.core.windows.net` returned `204` with `Access-Control-Allow-Origin` set to that origin.
+- Production-failure issues #68, #72, and #74 were closed after the successful promotion and endpoint verification.
+## 2026-05-14 — Issuer-specific JWKS auth fix deployed
+
+- Production promotion run `25857092220` succeeded after PR #80.
+- Verification: production `GET /health` returned `200`; unauthenticated `GET /api/hello` returned `401`; CORS preflight from the production Angular origin returned `204` with the expected `Access-Control-Allow-Origin`.
+- Follow-up: manual browser retry of **Call hello with access token** is still needed because Codex cannot complete interactive Entra/MSA login.
+
+
+## 2026-05-14 — Multi-issuer Microsoft account auth fix deployed
+
+- Production promotion run `25856534002` succeeded after PR #77.
+- Non-secret auth variables were updated to include both the organization tenant issuer/tenant/object allowlist and the explicit Microsoft account issuer/tenant/home-account object ID for `mkos_postat@outlook.com`.
+- Verification: production `GET /health` returned `200`; unauthenticated `GET /api/hello` returned `401`; CORS preflight from the production Angular origin returned `204` with the expected `Access-Control-Allow-Origin`.
+- Follow-up: manual browser retry of **Call hello with access token** is still needed because Codex cannot complete interactive Entra/MSA login.
+
+
+## 2026-05-14 — MSAL redirect-flow fix deployed to production
+
+- Event: PR #64 changed the Angular frontend to use MSAL redirect APIs for sign-in and interactive token fallback after production browser auth returned with an auth-code hash but did not complete UI sign-in.
+- Result: `Deploy Test` run `25854175773` passed and `Promote Production` run `25854251983` passed. Production smoke tests remained healthy.
+- Follow-up: Manually retest browser sign-in at the production Angular URL and confirm the page leaves the `#code` callback state and shows the signed-in account.
+
+## 2026-05-14 — Final readiness production promotion succeeded
+
+- Event: After PR #60 merged, `Deploy Test` run `25852557000` and `Promote Production` run `25852638254` were manually dispatched from `main`.
+- Result: Both workflows succeeded. Production deployment, Angular deployment, smoke tests, and warning-only repository-variable metadata updates completed without failing the workflow.
+- Verification: Production `GET /health` returned `200`; unauthenticated `GET /api/hello` returned `401`.
+- Follow-up: Manual browser/MSAL sign-in verification and Entra app-registration visibility remain the only setup-readiness items requiring a human/delegated directory context.
 
 ## 2026-05-14 — Consolidation verification found production still pre-auth
 

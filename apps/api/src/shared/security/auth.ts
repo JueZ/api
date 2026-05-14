@@ -10,6 +10,7 @@ export interface AuthenticatedUser {
 export interface AuthConfig {
   enabled: boolean;
   issuer?: string;
+  issuers?: string[];
   audience?: string;
   jwksUri?: string;
   requiredScopes: string[];
@@ -36,9 +37,12 @@ const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 const discoveryCache = new Map<string, Promise<string>>();
 
 export function readAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
+  const issuers = parseCsv(env['OIDC_ISSUER']).map((issuer) => normalizeUrl(issuer));
+
   return {
     enabled: env['AUTH_ENABLED'] === 'true',
-    issuer: normalizeOptionalUrl(env['OIDC_ISSUER']),
+    issuer: issuers[0],
+    issuers,
     audience: normalizeOptionalString(env['OIDC_AUDIENCE']),
     jwksUri: normalizeOptionalUrl(env['OIDC_JWKS_URI']),
     requiredScopes: parseCsv(env['OIDC_REQUIRED_SCOPES'] ?? 'api.access'),
@@ -120,22 +124,41 @@ export async function authorizeRequest(
 }
 
 export async function verifyJwtWithJose(token: string, config: AuthConfig): Promise<JWTPayload> {
-  if (!config.issuer || !config.audience) {
+  const issuers = configuredIssuers(config);
+  if (issuers.length === 0 || !config.audience) {
     throw new Error('OIDC issuer and audience are required.');
   }
 
-  const jwksUri = config.jwksUri ?? (await discoverJwksUri(config.issuer));
-  const jwks = getJwks(jwksUri);
-  const result = await jwtVerify(token, jwks, {
-    issuer: config.issuer,
-    audience: config.audience,
-  });
+  if (config.jwksUri) {
+    const jwks = getJwks(config.jwksUri);
+    const result = await jwtVerify(token, jwks, {
+      issuer: issuers.length === 1 ? issuers[0] : issuers,
+      audience: config.audience,
+    });
 
-  return result.payload;
+    return result.payload;
+  }
+
+  for (const issuer of issuers) {
+    try {
+      const jwksUri = await discoverJwksUri(issuer);
+      const jwks = getJwks(jwksUri);
+      const result = await jwtVerify(token, jwks, {
+        issuer,
+        audience: config.audience,
+      });
+
+      return result.payload;
+    } catch {
+      // Try the next exact issuer/JWKS pair without leaking token details.
+    }
+  }
+
+  throw new Error('JWT verification failed for all configured issuers.');
 }
 
 function validateConfig(config: AuthConfig): string | undefined {
-  if (!config.issuer) {
+  if (configuredIssuers(config).length === 0) {
     return 'OIDC_ISSUER';
   }
   if (!config.audience) {
@@ -242,6 +265,14 @@ function logAuthFailure(context: InvocationContext, reason: string, debug: boole
   context.warn('Authentication failed.', { reason, errorName });
 }
 
+function configuredIssuers(config: AuthConfig): string[] {
+  if (config.issuers && config.issuers.length > 0) {
+    return config.issuers;
+  }
+
+  return config.issuer ? [config.issuer] : [];
+}
+
 function parseCsv(value: string | undefined): string[] {
   return (value ?? '')
     .split(',')
@@ -256,5 +287,9 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
 
 function normalizeOptionalUrl(value: string | undefined): string | undefined {
   const normalized = normalizeOptionalString(value);
-  return normalized?.replace(/\/$/, '');
+  return normalized ? normalizeUrl(normalized) : undefined;
+}
+
+function normalizeUrl(value: string): string {
+  return value.trim().replace(/\/$/, '');
 }

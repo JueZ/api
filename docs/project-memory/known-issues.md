@@ -2,7 +2,31 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 production API CORS preflight failure
+
+- Symptom: after successful production browser sign-in, the Angular app showed `Failed to fetch` when calling protected `GET /api/hello`; browser diagnostics reported that the preflight response from the production Function App lacked `Access-Control-Allow-Origin` for `https://stapicatalogueprodbfjsts.z6.web.core.windows.net`.
+- Root cause: Azure Functions platform CORS handles browser preflight before the application-level `OPTIONS` handler can add CORS headers, so the Function App needs platform CORS configured for the deployed static website origin.
+- Status: Fix in progress; deployment smoke tests are being extended to check `/api/hello` CORS preflight.
+
 ## Current corrected status from 2026-05-14 consolidation
+
+## 2026-05-14 production browser login redirect hang
+
+- Production browser sign-in returned to the static Angular URL with an authorization `code` in the hash but did not complete the UI sign-in. The likely cause is using MSAL popup APIs with the main Angular route as the redirect target instead of a redirect flow that processes the returned auth-code hash in the top-level window.
+- Fix deployed: PR #64 switched the SPA sign-in and interactive token fallback to MSAL redirect APIs and processes the returned auth-code hash without navigating back to the original request URL. Manual browser retest remains pending.
+
+## 2026-05-14 final readiness residual risks
+
+- The previous production metadata-update workflow failure is resolved by PR #60 and successful production promotion run `25852638254`.
+- Remaining setup visibility limitation: Codex still cannot inspect Microsoft Entra app registrations or federated credentials because the Azure identity lacks Microsoft Graph directory permissions.
+- Remaining manual verification: interactive Angular/MSAL sign-in for the allowlisted user must be completed in a browser by a human/delegated user.
+
+## 2026-05-14 readiness sprint active issues
+
+- `Promote Production` run `25852035606` successfully deployed production and passed smoke tests, but the workflow concluded `failure` because `GITHUB_TOKEN` could not write repository variables in the post-smoke metadata update step. This is a workflow correctness issue, not an application deployment failure.
+- Codex Azure identity still lacks sufficient Microsoft Graph directory permissions to list or inspect Microsoft Entra app registrations and federated credentials.
+- Interactive Angular/MSAL login and the allowlisted authenticated browser call were not manually verified by Codex because this environment cannot complete interactive Entra sign-in.
+- GitHub Actions reported Node.js 20 action runtime deprecation warnings for upstream actions; application/runtime code remains Node 22.
 
 - Production has not yet been verified as auth-enabled. On 2026-05-14, unauthenticated `GET /api/hello` at the production API URL still returned the old public placeholder response instead of `401`.
 - `Deploy Test` has succeeded on `main`, but production promotion most recently skipped; the staged test-to-production path is not yet fully end-to-end verified for an auth-enabled production rollout.

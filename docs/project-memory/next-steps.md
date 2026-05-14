@@ -1,6 +1,41 @@
 # Next steps
+## 2026-05-14 production CORS next steps
+
+1. Merge and deploy the Function App platform CORS fix.
+2. Confirm the deployment smoke test checks `/api/hello` CORS preflight for the production static website origin.
+3. Re-test production browser sign-in and click **Call hello with access token**. Expected result: browser request is no longer blocked by CORS; if token claims and allowlist are correct, `/api/hello` returns the authenticated hello response.
+## 2026-05-14 issuer-specific JWKS next steps
+
+1. Retry **Call hello with access token** in the production browser session. Expected result: no CORS block and no `Invalid bearer token`.
+2. If the API returns `403`, inspect only non-secret claims shape with sanitized diagnostics and confirm the token `oid`/tenant matches the explicit allowlist.
+3. After the manual browser authenticated call succeeds, mark the auth setup as fully browser-verified.
+
+
+## 2026-05-14 personal Microsoft account auth next steps
+
+1. Merge and deploy the multi-issuer JWT validation fix.
+2. Update non-secret GitHub auth variables to include the Microsoft account issuer, tenant ID, and stable home-account object ID for `mkos_postat@outlook.com` while retaining the existing organization allowlist.
+3. Re-run test deployment and production promotion.
+4. Retry **Call hello with access token** in the browser; expected result is no CORS block and no `Invalid bearer token`.
+
 
 ## Current active next steps from 2026-05-14 consolidation
+
+## 2026-05-14 final readiness next steps
+
+0. Re-test production browser sign-in at <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/> after PR #64 and production promotion run `25854251983`.
+1. Verify Microsoft Entra app registrations and GitHub OIDC federated credentials with a delegated identity that has app-registration read permissions.
+2. Manually verify browser sign-in at the production Angular URL with the allowlisted user.
+3. Begin normal feature development with a small non-Reddit, non-expensive API catalogue slice after the manual auth checks are accepted or completed.
+
+## 2026-05-14 readiness sprint next steps
+
+1. Merge the readiness follow-up PR that makes production repository-variable updates best-effort/idempotent after smoke tests.
+2. Re-run `Deploy Test` on `main` and confirm it passes.
+3. Re-run `Promote Production` on `main` and confirm the whole workflow concludes success, not just deployment/smoke success.
+4. Use a delegated Microsoft Entra identity with app-registration read permissions to verify API app, SPA app, redirect URIs, delegated permission, consent state, and GitHub OIDC federated credentials.
+5. Manually verify browser authentication at the production Angular URL with the allowlisted Microsoft Entra user.
+6. After the production workflow concludes green and manual browser auth is verified, begin normal feature development with a small non-Reddit, non-expensive API catalogue slice.
 
 1. Verify Microsoft Entra app registration state with a delegated identity that can read app registrations, including API scope/role exposure, SPA app registration, production/test redirect URIs, and intended GitHub OIDC federated credentials.
 2. Verify the GitHub Actions deployment service principal object ID, then confirm least-privilege RBAC on `rg-api-test` and `rg-api-prod`.

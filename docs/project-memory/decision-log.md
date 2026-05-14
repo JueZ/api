@@ -1,6 +1,48 @@
 # Decision log
+## 2026-05-14 — Configure Function App platform CORS for the Angular origin
+
+- Decision: Configure Azure Functions platform CORS from the deployed web redirect origin and verify `/api/hello` preflight during environment smoke tests.
+- Rationale: Browser calls with an Authorization header require a successful CORS preflight, and Azure Functions can answer preflight before application code runs. Application-level CORS headers on `GET`/`OPTIONS` are not sufficient for the production static website path.
+- Status: In progress.
+
+## 2026-05-14 — Support explicit multi-issuer auth for the allowlisted Microsoft account
+
+- Decision: Treat `OIDC_ISSUER` as a comma-separated exact allowlist of accepted token issuers while keeping audience, scope/role, tenant, and object-ID checks mandatory.
+- Rationale: The first production browser user is a personal Microsoft account, which can receive tokens from the Microsoft account tenant issuer rather than the organization tenant issuer. Accepting multiple exact issuers is narrower than disabling issuer validation or switching to a broad wildcard issuer.
+- Status: In progress.
+
+## 2026-05-14 — Use issuer-specific JWKS for multi-issuer validation
+
+- Decision: When multiple exact OIDC issuers are configured and `OIDC_JWKS_URI` is unset, discover and cache JWKS per issuer rather than reusing the first issuer's JWKS for every issuer.
+- Rationale: Multi-issuer validation must keep exact issuer checks while using the key material published by the issuer that signed the token.
+- Status: In progress.
+
 
 Entries are reverse chronological.
+
+## 2026-05-14 — Use MSAL redirect flow for production browser auth
+
+- Decision: Use MSAL redirect APIs for SPA sign-in and interactive API-token fallback instead of popup APIs.
+- Rationale: Production sign-in was returning to the static site with an auth-code hash and then stalling; redirect handling is a better fit for the deployed static site callback URL.
+- Consequence: Users navigate away during sign-in and return to the app after MSAL processes the auth-code hash; the app does not navigate back to the initiating URL after processing the redirect.
+
+## 2026-05-14 — Setup phase is ready except delegated/manual auth verification
+
+- Decision: Treat the automated GitHub/Azure/test/production deployment setup as operationally ready after PR #60 and successful promotion run `25852638254`.
+- Rationale: Required PR checks passed, auto-merge worked, test deployment passed, production promotion passed, and public/protected endpoint smoke checks match the intended auth behavior.
+- Consequence: Normal feature development can start after acknowledging that Entra app-registration inspection and interactive Angular login still require a delegated user/manual browser context.
+
+## 2026-05-14 — Treat production variable rewrite as metadata, not deployment health
+
+- Decision: A successful production deployment and smoke test must not be marked failed solely because the workflow token cannot rewrite repository variables after smoke tests.
+- Rationale: `Promote Production` run `25852035606` deployed auth-enabled production and passed smoke tests, but failed during a post-smoke metadata update to repository variables that already represented the production endpoint names.
+- Consequence: Make the metadata update idempotent/best-effort and continue to fail closed for actual deployment or smoke-test failures.
+
+## 2026-05-14 — Production auth endpoint behavior is now deployed
+
+- Decision: Treat code and deployed production endpoint behavior as auth-enabled after the readiness sprint direct smoke checks.
+- Rationale: Production `GET /health` returned `200`, and unauthenticated production `GET /api/hello` returned `401` after promotion run `25852035606`.
+- Consequence: Normal feature development is nearly unblocked, pending a green production workflow conclusion after the metadata-update fix and manual browser/MSAL verification.
 
 ## 2026-05-14 — Consolidated actual auth/deployment state after fast iterations
 
