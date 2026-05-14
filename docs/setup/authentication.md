@@ -129,7 +129,7 @@ For browser testing, open the Angular frontend, sign in with the SPA app registr
 store tokens in `localStorage`.
 
 For CLI testing, acquire an access token for the API scope with your preferred Microsoft tool.
-Do not paste real tokens into logs, issues, or commits.
+Do not paste real bearer values into logs, issues, or commits.
 
 ```bash
 az account get-access-token --scope 'api://<api-app-client-id>/api.access' --query accessToken -o tsv
@@ -158,9 +158,9 @@ curl --show-error --silent --output - --write-out '\n%{http_code}\n' \
 Authenticated protected endpoint:
 
 ```bash
-ACCESS_TOKEN='<access token from Authorization Code + PKCE or a safe CLI flow>'
+API_BEARER='<paste bearer value from Authorization Code + PKCE or a safe CLI flow>'
 curl --fail --show-error --silent \
-  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  -H "Authorization: Bearer ${API_BEARER}" \
   https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net/api/hello
 ```
 
