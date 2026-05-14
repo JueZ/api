@@ -8,7 +8,7 @@ v0 Hello World skeleton for a personal API catalogue platform.
 - Azure Functions TypeScript backend in `apps/api`.
 - OpenAPI contract in `contracts/openapi.yaml`.
 - Low-cost Bicep infrastructure skeleton in `infra/main.bicep`.
-- Setup documentation in `docs/setup/v0-hello-world.md`.
+- Setup documentation in `docs/setup/v0-hello-world.md` and staged deployment setup commands in `docs/setup/staged-deployment.md`.
 
 
 ## Project memory
@@ -74,6 +74,8 @@ gh workflow run rollback-production.yml \
 ```
 
 This is enough for a small personal project because it proves the exact commit in a separate Azure resource group before production without adding always-on services or expensive routing infrastructure. Blue/green and canary deployments are overkill for v0. Azure Functions deployment slots could be a later hardening upgrade, but this task deliberately keeps the current low-cost consumption-style model and does not switch to a more expensive plan for slots.
+
+See [`docs/setup/staged-deployment.md`](docs/setup/staged-deployment.md) for the exact Azure CLI and GitHub CLI setup commands for environments, resource groups, OIDC federated credentials, RBAC, manual deployment, promotion, and rollback.
 
 <!-- markdownlint-disable MD013 -->
 

@@ -22,3 +22,6 @@ Last updated: 2026-05-14
 - Next milestone: real OAuth/OIDC/JWT authentication for protected API routes.
 - Deployment flow: staged test-to-production promotion is being introduced. `Deploy Test` targets `rg-api-test` with `environmentName=test`; `Promote Production` targets `rg-api-prod` with `environmentName=prod` only after test smoke tests pass.
 - Important warning: deployment currently uses storage-backed `WEBSITE_RUN_FROM_PACKAGE` package URLs and should be hardened later if operational needs require it.
+
+- Rollback support: repo skill `.agents/skills/production-rollback/SKILL.md` records the standard `rollback-production.yml` flow for future Codex sessions.
+- Staged deployment setup commands: `docs/setup/staged-deployment.md` records the Azure CLI and GitHub CLI commands for environments, OIDC, RBAC, deployment, promotion, and rollback.
