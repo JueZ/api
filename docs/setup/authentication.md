@@ -51,11 +51,12 @@ Set `OIDC_ISSUER` to the exact issuer expected in the access token `iss` claim.
 If the app supports both an organization tenant and a personal Microsoft account, set
 `OIDC_ISSUER` to a comma-separated list of exact accepted issuers and keep
 `OIDC_ALLOWED_TENANTS` and `OIDC_ALLOWED_OBJECT_IDS` scoped to the explicitly allowed
-tenant/user IDs. If `OIDC_JWKS_URI` is not set, the backend discovers JWKS from the
-first configured issuer:
+tenant/user IDs. If `OIDC_JWKS_URI` is not set, the backend uses OpenID discovery for
+each configured issuer and verifies each token against the matching exact issuer/JWKS
+pair:
 
 ```text
-<first OIDC_ISSUER entry>/.well-known/openid-configuration
+<each OIDC_ISSUER entry>/.well-known/openid-configuration
 ```
 
 ## Find your user object ID
