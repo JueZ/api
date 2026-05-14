@@ -9,38 +9,31 @@ Last updated: 2026-05-14
 - Backend: Azure Functions TypeScript app in `apps/api`.
 - API contract: `contracts/openapi.yaml`.
 - Infrastructure: `infra/main.bicep`.
-- Azure tenant: `7ac3dfd6-e810-4693-805a-9535eb3ab166`.
-- Azure subscription: `cb89936b-f739-42db-bd9f-bbdd0f052ee7`.
 - Azure resource groups: `rg-api-test` for test and `rg-api-prod` for production.
 - Azure region: `westeurope`.
 - Production API base URL: <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net>.
 - Production Angular static website URL: <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/>.
 - Production Function App: `func-api-catalogue-prod-bfjstshehpbfk`.
 - Production static website storage account: `stapicatalogueprodbfjsts`.
-- Test Function App verified during the readiness sprint: `func-api-catalogue-test-iwt54bovfzvrc`.
-- Test static website storage account verified during the readiness sprint: `stapicataloguetestiwt54b`.
 - Azure Functions runtime: Node 22.
-- Code on `main` includes OAuth/OIDC JWT validation, a server-side object-ID/user allowlist, protected `GET /api/hello` behavior when `AUTH_ENABLED=true`, Angular MSAL sign-in/token acquisition, OpenAPI bearer security, and Bicep auth app settings.
-- Current endpoint truth after the 2026-05-14 readiness sprint:
-  - Test `GET /health` returns `200`.
-  - Test unauthenticated `GET /api/hello` returns `401` when `AUTH_ENABLED=true`.
-  - Production `GET /health` returns `200`.
-  - Production unauthenticated `GET /api/hello` returns `401` when `AUTH_ENABLED=true`.
+- Current code on `main` includes OAuth/OIDC JWT validation, a server-side user allowlist, protected `GET /api/hello` behavior when `AUTH_ENABLED=true`, Angular MSAL sign-in/token acquisition, OpenAPI bearer security, and Bicep auth app settings.
+- Current production deployment does **not** yet match the auth-enabled code on `main`: direct verification on 2026-05-14 showed `GET /health` returns `200` and unauthenticated `GET /api/hello` still returns the pre-auth public placeholder response with `authenticated:false`.
+- Current v0 endpoint truth:
+  - Code: `GET /health` is public; `GET /api/hello` is protected by application-level JWT validation when `AUTH_ENABLED=true`.
+  - Production as verified on 2026-05-14: `GET /health` is public; `GET /api/hello` is still public/pre-auth until a successful auth-enabled deployment reaches production.
 - GitHub auth-related repository variables are present, including `AUTH_ENABLED=true`, OIDC variables, and web auth variables. Variable values are non-secret configuration, but project memory intentionally records only presence/status, not full auth configuration.
-- `DEPLOY_PRODUCTION_ENABLED=true` was intentionally set during the readiness sprint so guarded production promotion can run after test deployment succeeds.
+- `DEPLOY_PRODUCTION_ENABLED=false` remains set as a fail-safe variable. The reusable deployment workflow now fails closed for `prod` unless this variable is explicitly `true`. The current staged promotion workflows are `deploy-test.yml`, `promote-production.yml`, `rollback-production.yml`, and reusable `deploy-environment.yml`; production was not deployed during the consolidation sprint.
 - Deployment packaging uses storage-backed `WEBSITE_RUN_FROM_PACKAGE` with managed-identity package access (`WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID=SystemAssigned`), not SAS-backed package URLs.
-- Staged deployment status verified on 2026-05-14:
+- Staged deployment bootstrap status verified on 2026-05-14:
   - GitHub environments `test` and `production` exist.
-  - Azure resource groups `rg-api-test` and `rg-api-prod` exist in `westeurope`.
-  - Test and production Function Apps, system-assigned managed identities, App Insights instances, plans, and storage accounts exist.
-  - `Deploy Test` succeeded on `main` at run `25851944897`.
-  - `Promote Production` at run `25852035606` deployed the auth-enabled code and passed smoke tests, but the workflow concluded `failure` because its post-smoke repository-variable update step could not write variables with `GITHUB_TOKEN`.
-  - PR follow-up should make post-smoke repository-variable updates best-effort/idempotent so successful production deployments are not marked failed for metadata-only updates.
-  - Codex could not verify Microsoft Entra app registrations or federated credentials because the current Azure principal lacks sufficient Microsoft Graph privileges.
-  - Codex verified resource-group-scoped RBAC role assignments for service principals are present on `rg-api-test` and `rg-api-prod`, including `Contributor`, `Storage Blob Data Contributor`, and `Role Based Access Control Administrator`; Graph limits prevented mapping every assignment to the exact app display name/object ID.
+  - Azure resource groups `rg-api-test` and `rg-api-prod` exist.
+  - Test and production Function Apps, App Insights instances, plans, and storage accounts exist.
+  - `Deploy Test` most recently succeeded on `main` at run `25849812564`.
+  - `Promote Production` most recently skipped after test; production auth deployment remains unverified.
+  - Codex could not verify Microsoft Entra app registrations or federated credentials because the current Azure principal lacked sufficient Microsoft Graph privileges.
+  - Codex could not verify deployment-principal RBAC assignments from the available app/client ID because Graph lookup was insufficient and no object ID was available in project memory.
 - `deploy-production.yml` is retained as a manual legacy wrapper; normal flow should use `Deploy Test` followed by `Promote Production`.
-- Rollback uses `.github/workflows/rollback-production.yml`, which calls the same reusable deployment path for the requested commit and production environment.
-- Setup is close to ready for normal feature development. The remaining platform blocker is merging the metadata-update workflow fix and re-running production promotion to get a fully green production workflow conclusion. Manual browser sign-in remains pending because Codex cannot perform interactive Entra login in this environment.
+- Next milestone: finish verifying staged deployment prerequisites that require directory/RBAC visibility, then run an auth-enabled test deployment and promote to production only through guarded workflows after test smoke tests pass.
 
 ## 2026-05-14 readiness sprint update
 
