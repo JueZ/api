@@ -6,6 +6,12 @@
 - Fix: Configure Function App platform CORS for the deployed Angular origin and add preflight validation to deployment smoke tests.
 - Status: Fix in progress.
 
+## 2026-05-14 — Deploy Test failed after first CORS fix because test redirect URI is unset
+
+- Run `25854845137` failed during deployment configuration validation because the first CORS fix made `TEST_WEB_AUTH_REDIRECT_URI` required whenever the test frontend deploys, but the repository currently leaves that variable unset.
+- Follow-up: keep test CORS validation conditional on a configured test redirect URI; production still uses `WEB_AUTH_REDIRECT_URI` for the production Angular origin.
+- Status: Repair in progress.
+
 
 Entries are reverse chronological.
 
