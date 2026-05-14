@@ -296,9 +296,11 @@ jobs:
                 WEBSITE_RUN_FROM_PACKAGE="$package_url" \
                 WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID=SystemAssigned \
               -o none
-            az functionapp restart \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$EFFECTIVE_FUNCTIONAPP_NAME" \
+            function_app_id="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$EFFECTIVE_FUNCTIONAPP_NAME"
+            az rest \
+              --method post \
+              --url "https://management.azure.com${function_app_id}/restart?api-version=2023-12-01" \
+              --body '{}' \
               -o none
           else
             echo "No Azure Functions host.json found; skipping Functions deployment."
@@ -347,14 +349,32 @@ jobs:
         run: |
           set -euo pipefail
           : "${EFFECTIVE_BASE_URL:?EFFECTIVE_BASE_URL is required for smoke tests}"
-          curl --fail --show-error --silent --max-time 20 "$EFFECTIVE_BASE_URL/health"
-          hello_status=$(curl --show-error --silent --output /dev/null --write-out '%{http_code}' --max-time 20 "$EFFECTIVE_BASE_URL/api/hello")
-          if [ "$AUTH_ENABLED" = "true" ]; then
-            if [ "$hello_status" != "401" ]; then
+          health_ok=false
+          hello_status=""
+          for attempt in {1..18}; do
+            health_status=$(curl --show-error --silent --output /dev/null --write-out '%{http_code}' --max-time 20 "$EFFECTIVE_BASE_URL/health")
+            hello_status=$(curl --show-error --silent --output /dev/null --write-out '%{http_code}' --max-time 20 "$EFFECTIVE_BASE_URL/api/hello")
+            if [ "$health_status" = "200" ]; then
+              if [ "$AUTH_ENABLED" = "true" ] && [ "$hello_status" = "401" ]; then
+                health_ok=true
+                break
+              elif [ "$AUTH_ENABLED" != "true" ] && [ "$hello_status" = "200" ]; then
+                health_ok=true
+                break
+              fi
+            fi
+            echo "Waiting for Function App routes to become healthy (attempt $attempt/18, health $health_status, hello $hello_status)."
+            sleep 5
+          done
+          if [ "$health_ok" != "true" ]; then
+            if [ "$health_status" != "200" ]; then
+              echo "Expected /health to return 200; got $health_status." >&2
+              exit 1
+            fi
+            if [ "$AUTH_ENABLED" = "true" ]; then
               echo "Expected unauthenticated /api/hello to return 401 when auth is enabled; got $hello_status." >&2
               exit 1
             fi
-          elif [ "$hello_status" != "200" ]; then
             echo "Expected /api/hello to return 200 when auth is disabled; got $hello_status." >&2
             exit 1
           fi
