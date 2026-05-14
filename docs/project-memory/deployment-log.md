@@ -11,12 +11,19 @@ Entries are reverse chronological. Do not include secrets or SAS URLs.
 - Missing values: API app client ID, SPA app client ID, API App ID URI, `api.access` scope ID, and `OIDC_ALLOWED_OBJECT_IDS`.
 - Next step: A sufficiently privileged delegated user must create/reuse the Entra app registrations and provide the allowed user object ID before merge/deploy.
 
+## 2026-05-14 — Staged deployment flow prepared in PR
+
+- Event: Added workflows and documentation for test-first deployment and production promotion.
+- Result: Pending merge and workflow execution.
+- Evidence / command summary: `deploy-test.yml` will deploy `main` to `rg-api-test` and smoke `/health` plus `/api/hello`; `promote-production.yml` will promote the same commit to `rg-api-prod` after the test workflow succeeds.
+- Follow-up: After merge, verify the first test deployment and production promotion workflow runs; configure GitHub `production` required reviewers if manual approval is desired.
+
 ## 2026-05-14 — v0 production deployment succeeded
 
 - Event: Production deployment completed after the Function App runtime was changed to Node 22.
 - Result: Success.
 - Evidence / command summary: Production base URL responded successfully for `GET /health` and `GET /api/hello` at <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net>.
-- Follow-up: Implement real OAuth/OIDC/JWT auth before protected production APIs. Harden SAS-backed `WEBSITE_RUN_FROM_PACKAGE` later.
+- Follow-up: Implement real OAuth/OIDC/JWT auth before protected production APIs. Harden storage-backed `WEBSITE_RUN_FROM_PACKAGE` later if needed.
 
 ## 2026-05-14 — Production failure issues closed after successful deployment
 

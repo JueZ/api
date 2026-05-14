@@ -8,5 +8,7 @@
 6. Re-run PR #40 checks, then squash merge through branch protection.
 7. Re-enable `DEPLOY_PRODUCTION_ENABLED=true` only when auth variables are configured and deploy PR #40 from `main`.
 8. Verify `/health` remains public, unauthenticated `/api/hello` returns 401, and browser login can call `/api/hello` as the allowlisted user.
-9. Harden run-from-package deployment away from expiring SAS if feasible.
-10. Add the first real API connector after auth works.
+9. After staged deployment merges, run or inspect `Deploy Test` on `main`, confirm the test base URL and smoke tests, then inspect automatic `Promote Production`.
+10. Decide whether the GitHub `production` environment should require reviewers; for a solo project, avoid preventing self-review unless another reviewer exists.
+11. Harden run-from-package deployment away from expiring SAS if feasible.
+12. Add the first real API connector after auth works.
