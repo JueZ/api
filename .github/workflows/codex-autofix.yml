@@ -29,7 +29,7 @@ jobs:
     steps:
       - name: Resolve PR and attempt
         id: resolve
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const run = context.payload.workflow_run;
@@ -73,13 +73,13 @@ jobs:
             }
       - name: Checkout PR branch
         if: steps.resolve.outputs.attempt <= '2'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: refs/pull/${{ steps.resolve.outputs.pr_number }}/head
           fetch-depth: 0
       - name: Capture failing workflow context
         if: steps.resolve.outputs.attempt <= '2'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const body = [
@@ -97,7 +97,7 @@ jobs:
             });
       - name: Create repair task issue
         if: steps.resolve.outputs.attempt <= '2'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const title = `Codex repair needed for PR #${{ steps.resolve.outputs.pr_number }} attempt ${{ steps.resolve.outputs.attempt }}`;

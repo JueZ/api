@@ -25,7 +25,7 @@ on:
 permissions:
   contents: read
   id-token: write
-  actions: write
+  actions: read
   issues: write
 
 concurrency:

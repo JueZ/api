@@ -20,7 +20,7 @@ jobs:
     name: cost-policy check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Detect paid Azure service additions without cost note
@@ -53,7 +53,7 @@ jobs:
     name: guardrail policy check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Fail closed on forbidden security or automation changes

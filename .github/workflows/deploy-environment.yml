@@ -31,7 +31,7 @@ on:
         default: ''
         type: string
       updateProductionVariables:
-        description: Update production GitHub variables after successful smoke tests.
+        description: Report resolved production values after successful smoke tests.
         required: false
         default: false
         type: boolean
@@ -53,7 +53,7 @@ on:
 permissions:
   contents: read
   id-token: write
-  actions: write
+  actions: read
   issues: write
 
 jobs:
@@ -100,7 +100,7 @@ jobs:
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
     steps:
       - name: Checkout deployment source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.sourceRef || github.sha }}
       - name: Validate deployment configuration
@@ -144,13 +144,13 @@ jobs:
           : "${REDDIT_USER_AGENT:?REDDIT_USER_AGENT environment variable is required for $ENVIRONMENT_NAME}"
           : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
       - name: Azure OIDC login
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           client-id: ${{ env.AZURE_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
       - name: Install dependencies
@@ -221,8 +221,8 @@ jobs:
           effective_storage_account="${{ steps.infra.outputs.storage_account_name }}"
 
           if [ "$ENVIRONMENT_NAME" = "prod" ]; then
-            effective_functionapp_name="${AZURE_FUNCTIONAPP_NAME:-$effective_functionapp_name}"
-            effective_storage_account="${AZURE_STATIC_WEB_STORAGE_ACCOUNT:-$effective_storage_account}"
+            effective_functionapp_name="${effective_functionapp_name:-${AZURE_FUNCTIONAPP_NAME:-}}"
+            effective_storage_account="${effective_storage_account:-${AZURE_STATIC_WEB_STORAGE_ACCOUNT:-}}"
             effective_base_url="${PRODUCTION_BASE_URL:-}"
           else
             effective_base_url=""
@@ -431,39 +431,25 @@ jobs:
               echo "- $EFFECTIVE_BASE_URL/api/hello CORS preflight allowed $api_cors_origin"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Update production repository variables after smoke tests
+      - name: Report production deployment values after smoke tests
         if: ${{ inputs.updateProductionVariables }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
 
-          update_variable() {
-            local name="$1"
-            local desired_value="$2"
-            local current_value
+          {
+            echo "### Production deployment values"
+            echo "- PRODUCTION_BASE_URL: $EFFECTIVE_BASE_URL"
+            echo "- AZURE_FUNCTIONAPP_NAME: $EFFECTIVE_FUNCTIONAPP_NAME"
+            echo "- AZURE_STATIC_WEB_STORAGE_ACCOUNT: $EFFECTIVE_STORAGE_ACCOUNT"
+            echo ""
+            echo "Repository variables are treated as operator-provided defaults and are not mutated by the workflow token."
+          } >> "$GITHUB_STEP_SUMMARY"
 
-            if current_value=$(gh variable get "$name" --repo "$REPOSITORY" 2>/dev/null) && [ "$current_value" = "$desired_value" ]; then
-              echo "$name already matches the successful production deployment." >> "$GITHUB_STEP_SUMMARY"
-              return 0
-            fi
-
-            if gh variable set "$name" --repo "$REPOSITORY" --body "$desired_value"; then
-              echo "Updated $name after successful production smoke tests." >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "::warning title=Production variable update skipped::$name could not be updated with the workflow token. Deployment and smoke tests already passed; update this repository variable manually if it differs."
-              echo "Skipped $name update because the workflow token could not write repository variables." >> "$GITHUB_STEP_SUMMARY"
-            fi
-          }
-
-          update_variable PRODUCTION_BASE_URL "$EFFECTIVE_BASE_URL"
-          update_variable AZURE_FUNCTIONAPP_NAME "$EFFECTIVE_FUNCTIONAPP_NAME"
-          update_variable AZURE_STATIC_WEB_STORAGE_ACCOUNT "$EFFECTIVE_STORAGE_ACCOUNT"
+          echo "::notice title=Production values resolved::Smoke tests passed for $EFFECTIVE_BASE_URL using Function App $EFFECTIVE_FUNCTIONAPP_NAME and storage account $EFFECTIVE_STORAGE_ACCOUNT."
       - name: Create production issue on failed deploy or smoke
         if: ${{ failure() && inputs.environmentName == 'prod' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const title = `Production deployment failed for ${context.sha.substring(0, 7)}`;
