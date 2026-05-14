@@ -2,6 +2,14 @@
 
 Last updated: 2026-05-14
 
+## Current corrected status from 2026-05-14 consolidation
+
+- Production has not yet been verified as auth-enabled. On 2026-05-14, unauthenticated `GET /api/hello` at the production API URL still returned the old public placeholder response instead of `401`.
+- `Deploy Test` has succeeded on `main`, but production promotion most recently skipped; the staged test-to-production path is not yet fully end-to-end verified for an auth-enabled production rollout.
+- Codex Azure identity currently lacks sufficient Microsoft Entra directory permissions to list or inspect app registrations/federated credentials; `az ad app list --filter "appId eq '<client-id>'"` failed with insufficient privileges on 2026-05-14.
+- Deployment-principal RBAC on `rg-api-test` and `rg-api-prod` could not be verified from the available client/app ID because Graph lookup was insufficient and project memory does not contain the service principal object ID.
+- The older bullets below that say auth implementation pieces are still needed are superseded for code on `main`; auth deployment verification remains open. They are retained for guardrail traceability rather than deleted in this consolidation PR.
+
 - API authentication is implemented in PR #40 but not yet merged/deployed.
 - Production `GET /api/hello` remains a public placeholder until PR #40 is merged and deployed with auth variables.
 - Codex Azure identity currently lacks sufficient Microsoft Entra directory permissions to list/create/update app registrations; `az ad app list --display-name juez-api-catalogue-api-prod --query "[0]" -o json` failed with insufficient privileges on 2026-05-14.

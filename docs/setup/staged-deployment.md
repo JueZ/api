@@ -4,6 +4,25 @@ This guide contains the Azure CLI and GitHub CLI commands needed to finish the l
 
 The commands intentionally avoid secrets. They create/verify GitHub environments, Azure resource groups, GitHub OIDC federated credentials, least-privilege deployment RBAC, and then show how to run test deploy, production promotion, and rollback.
 
+## Verified consolidation status on 2026-05-14
+
+Safe inspection during the consolidation sprint found:
+
+- GitHub environments `test` and `production` exist.
+- Azure resource groups `rg-api-test` and `rg-api-prod` exist in `westeurope`.
+- Test and production Function Apps, plans, App Insights instances, and storage accounts exist.
+- Production Function App runtime is Node 22.
+- The latest inspected `Deploy Test` run on `main` succeeded (`25849812564`).
+- Subsequent `Promote Production` runs were skipped; production auth deployment remains unverified. Production deployment is also expected to fail closed while `DEPLOY_PRODUCTION_ENABLED=false`.
+- Production API remains <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net>.
+- Production Angular frontend remains <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/>.
+- The deployment workflow uses managed-identity run-from-package blob access, not SAS package URLs.
+- Codex could not verify Entra app registrations, federated credentials, or deployment-principal RBAC because the current Azure identity lacked sufficient Microsoft Graph visibility and project memory does not contain the deployment service principal object ID.
+
+Complete the relevant checklist sections below before relying on auth-enabled
+production promotion. Do not store secrets, SAS URLs, connection strings, or full
+app settings in project memory or docs.
+
 ## 1. Local shell variables
 
 Set these values in your shell. Keep using `westeurope` and the existing GitHub Actions Azure OIDC application.
@@ -252,6 +271,9 @@ These repository variables should already exist. Set or correct them only with n
 gh variable set AZURE_CLIENT_ID --repo "$REPOSITORY" --body "$AZURE_CLIENT_ID"
 gh variable set AZURE_TENANT_ID --repo "$REPOSITORY" --body "$AZURE_TENANT_ID"
 gh variable set AZURE_SUBSCRIPTION_ID --repo "$REPOSITORY" --body "$AZURE_SUBSCRIPTION_ID"
+
+# Keep false until you intentionally allow guarded production promotion.
+gh variable set DEPLOY_PRODUCTION_ENABLED --repo "$REPOSITORY" --body "false"
 
 gh variable list --repo "$REPOSITORY"
 ```

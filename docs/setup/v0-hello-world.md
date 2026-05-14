@@ -19,8 +19,8 @@ Bicep for low-cost Azure infrastructure planning.
   - `service: api-catalogue`
   - current UTC `timestamp`
 - `GET /api/hello` returns the v0 Hello World payload for Martin.
-- The Angular page shows the project name, API catalogue placeholder, future hello endpoint test link,
-  and an explicit note that production authentication is not fully implemented yet.
+  Superseded historical implementation note retained for guardrail traceability: on current `main`, this response is returned after authorization when `AUTH_ENABLED=true`; it remains a public placeholder only in old/pre-auth deployments.
+- The Angular page includes authentication status, MSAL sign-in/sign-out controls, and a protected hello endpoint call button.
 - Root npm scripts run local lint, type-check, test, API test, frontend build, and Functions build checks.
 - Bicep targets `westeurope` and the existing production resource group workflow (`rg-api-prod`) without
   deploying anything from this change.
@@ -28,8 +28,8 @@ Bicep for low-cost Azure infrastructure planning.
 ## Intentionally not implemented yet
 
 - Reddit integration.
-- OAuth/OIDC/JWT authentication enforcement.
-- Production deployment or `DEPLOY_PRODUCTION_ENABLED` changes.
+- New product connectors.
+- Production deployment or `DEPLOY_PRODUCTION_ENABLED` changes from this documentation task.
 - Azure SQL, Cosmos DB, API Management, Front Door, Cognitive Services, Kubernetes, or other expensive
   always-on services.
 - Secrets or local settings committed to the repository.
@@ -100,6 +100,5 @@ az bicep build --file infra/main.bicep
 
 ## Next milestone
 
-Implement real OAuth/OIDC/JWT authentication and authorization before adding protected production APIs.
-The `/api/hello` endpoint is a protected-placeholder only; it must not be treated as proof that production
-authentication exists.
+Verify the auth-enabled deployment path before adding protected production APIs.
+The auth implementation is on `main`, but project memory must be checked for the latest production truth; during the 2026-05-14 consolidation, production still served the pre-auth `/api/hello` placeholder.
