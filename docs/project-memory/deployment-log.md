@@ -1,5 +1,13 @@
 # Deployment log
 
+## 2026-05-14 OpenAPI-driven API catalogue deployed to test and production
+
+- PR #99 (`OpenAPI-driven interactive API catalogue UI and sync script`) merged via GitHub-native auto-merge at merge commit `30f948b70d9d71f4eb39cacfa5d28838d1035e8b` after PR CI and Policy Check passed.
+- A main-branch `CI` workflow run `25889283198` was manually dispatched for the merge commit because the auto-merge was performed by GitHub automation; it passed all required checks.
+- `Deploy Test` workflow run `25889311885` deployed the merge commit to the `test` environment and passed smoke tests.
+- `Promote Production` workflow run `25889385460` then deployed the same merge commit to production and passed smoke tests.
+- Result: the Angular API catalogue now renders OpenAPI-driven endpoint documentation and browser try-it controls from the synced contract assets in both test and production.
+
 ## 2026-05-14 Reddit thread endpoint test deployment succeeded
 
 - PR #90 was merged at commit `62f5a0b44c109cf80749c3556d2f77b3f074cd86`.
