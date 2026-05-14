@@ -19,6 +19,19 @@ env:
   AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
   AZURE_STATIC_WEB_STORAGE_ACCOUNT: ${{ vars.AZURE_STATIC_WEB_STORAGE_ACCOUNT }}
   PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+  AUTH_ENABLED: ${{ vars.AUTH_ENABLED }}
+  OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
+  OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
+  OIDC_REQUIRED_SCOPES: ${{ vars.OIDC_REQUIRED_SCOPES }}
+  OIDC_ALLOWED_OBJECT_IDS: ${{ vars.OIDC_ALLOWED_OBJECT_IDS }}
+  OIDC_ALLOWED_SUBJECTS: ${{ vars.OIDC_ALLOWED_SUBJECTS }}
+  OIDC_ALLOWED_TENANTS: ${{ vars.OIDC_ALLOWED_TENANTS }}
+  WEB_AUTH_ENABLED: ${{ vars.WEB_AUTH_ENABLED }}
+  WEB_AUTH_CLIENT_ID: ${{ vars.WEB_AUTH_CLIENT_ID }}
+  WEB_AUTH_AUTHORITY: ${{ vars.WEB_AUTH_AUTHORITY }}
+  WEB_AUTH_REDIRECT_URI: ${{ vars.WEB_AUTH_REDIRECT_URI }}
+  WEB_AUTH_API_SCOPE: ${{ vars.WEB_AUTH_API_SCOPE }}
+  WEB_API_BASE_URL: ${{ vars.WEB_API_BASE_URL }}
 
 concurrency:
   group: deploy-production
@@ -43,7 +56,20 @@ jobs:
           : "${AZURE_TENANT_ID:?AZURE_TENANT_ID repository variable is required}"
           : "${AZURE_SUBSCRIPTION_ID:?AZURE_SUBSCRIPTION_ID repository variable is required}"
           : "${AZURE_RESOURCE_GROUP:?AZURE_RESOURCE_GROUP repository variable is required}"
-          echo "Production deployment is explicitly enabled. Continuing with OIDC login."
+          : "${AUTH_ENABLED:?AUTH_ENABLED repository variable is required}"
+          if [ "$AUTH_ENABLED" != "true" ]; then
+            echo "AUTH_ENABLED must be true for production deployment after the auth milestone."
+            exit 1
+          fi
+          : "${OIDC_ISSUER:?OIDC_ISSUER repository variable is required}"
+          : "${OIDC_AUDIENCE:?OIDC_AUDIENCE repository variable is required}"
+          : "${OIDC_REQUIRED_SCOPES:?OIDC_REQUIRED_SCOPES repository variable is required}"
+          : "${OIDC_ALLOWED_OBJECT_IDS:?OIDC_ALLOWED_OBJECT_IDS repository variable is required}"
+          : "${WEB_AUTH_ENABLED:?WEB_AUTH_ENABLED repository variable is required}"
+          : "${WEB_AUTH_CLIENT_ID:?WEB_AUTH_CLIENT_ID repository variable is required}"
+          : "${WEB_AUTH_AUTHORITY:?WEB_AUTH_AUTHORITY repository variable is required}"
+          : "${WEB_AUTH_API_SCOPE:?WEB_AUTH_API_SCOPE repository variable is required}"
+          echo "Production deployment is explicitly enabled and auth config variables are present. Continuing with OIDC login."
       - name: Azure OIDC login
         uses: azure/login@v2
         with:
@@ -84,6 +110,13 @@ jobs:
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --template-file infra/main.bicep \
               --parameters environmentName=prod \
+                authEnabled="$AUTH_ENABLED" \
+                oidcIssuer="$OIDC_ISSUER" \
+                oidcAudience="$OIDC_AUDIENCE" \
+                oidcRequiredScopes="$OIDC_REQUIRED_SCOPES" \
+                oidcAllowedObjectIds="$OIDC_ALLOWED_OBJECT_IDS" \
+                oidcAllowedSubjects="$OIDC_ALLOWED_SUBJECTS" \
+                oidcAllowedTenants="$OIDC_ALLOWED_TENANTS" \
               --query properties.outputs \
               -o json)
 
@@ -187,6 +220,23 @@ jobs:
               echo "No Angular dist index.html found after build."
               exit 1
             fi
+            mkdir -p "$output_dir/assets"
+            effective_web_api_base_url="${WEB_API_BASE_URL:-$EFFECTIVE_PRODUCTION_BASE_URL}"
+            effective_web_redirect_uri="${WEB_AUTH_REDIRECT_URI:-$effective_web_api_base_url}"
+            export EFFECTIVE_WEB_API_BASE_URL="$effective_web_api_base_url"
+            export EFFECTIVE_WEB_REDIRECT_URI="$effective_web_redirect_uri"
+            node --input-type=module > "$output_dir/assets/config.js" <<'NODE'
+const config = {
+  authEnabled: process.env.WEB_AUTH_ENABLED === 'true',
+  authClientId: process.env.WEB_AUTH_CLIENT_ID || '',
+  authAuthority: process.env.WEB_AUTH_AUTHORITY || '',
+  authRedirectUri: process.env.EFFECTIVE_WEB_REDIRECT_URI || '',
+  authApiScope: process.env.WEB_AUTH_API_SCOPE || '',
+  apiBaseUrl: process.env.EFFECTIVE_WEB_API_BASE_URL || '',
+};
+process.stdout.write(`window.API_CATALOGUE_CONFIG = ${JSON.stringify(config)};
+`);
+NODE
             az storage blob service-properties update \
               --auth-mode login \
               --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
@@ -208,7 +258,11 @@ jobs:
           set -euo pipefail
           : "${EFFECTIVE_PRODUCTION_BASE_URL:?EFFECTIVE_PRODUCTION_BASE_URL is required for smoke tests}"
           curl --fail --show-error --silent --max-time 20 "$EFFECTIVE_PRODUCTION_BASE_URL/health"
-          curl --fail --show-error --silent --max-time 20 "$EFFECTIVE_PRODUCTION_BASE_URL/api/hello"
+          hello_status=$(curl --show-error --silent --output /dev/null --write-out '%{http_code}' --max-time 20 "$EFFECTIVE_PRODUCTION_BASE_URL/api/hello")
+          if [ "$hello_status" != "401" ]; then
+            echo "Expected unauthenticated /api/hello to return 401 after auth is enabled; got $hello_status."
+            exit 1
+          fi
       - name: Create issue on failed smoke or deploy
         if: failure()
         uses: actions/github-script@v7
