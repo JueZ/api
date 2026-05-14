@@ -1,4 +1,10 @@
 # Decision log
+## 2026-05-14 — Configure Function App platform CORS for the Angular origin
+
+- Decision: Configure Azure Functions platform CORS from the deployed web redirect origin and verify `/api/hello` preflight during environment smoke tests.
+- Rationale: Browser calls with an Authorization header require a successful CORS preflight, and Azure Functions can answer preflight before application code runs. Application-level CORS headers on `GET`/`OPTIONS` are not sufficient for the production static website path.
+- Status: In progress.
+
 
 Entries are reverse chronological.
 

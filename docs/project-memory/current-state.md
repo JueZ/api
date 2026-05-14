@@ -2,6 +2,11 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 production CORS follow-up
+
+- Manual browser sign-in now reaches the signed-in Angular state for `mkos_postat@outlook.com`, but calling protected `GET /api/hello` from the production static website failed in the browser because the Azure Functions CORS preflight response did not include `Access-Control-Allow-Origin` for the production static website origin.
+- A follow-up fix is in progress to configure Function App platform CORS from the deployed frontend redirect URI and to add a deployment smoke check for authenticated-browser preflight behavior.
+
 - Project name: JueZ API Catalogue.
 - Repository: `JueZ/api`.
 - Goal: personal API catalogue platform.
