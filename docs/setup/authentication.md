@@ -19,11 +19,12 @@ production promotion; do not deploy production outside the guarded workflows.
 A non-destructive planning helper is available at `scripts/plan-entra-auth-apps.sh`. It prints the required Entra setup shape without creating or modifying resources.
 
 
-Create two Microsoft Entra or Entra External ID app registrations:
+Create at least two Microsoft Entra or Entra External ID app registrations for browser auth, and add a third service-client registration when app-only tests or integrations need API access:
 
 1. **API app registration**
    - Represents the Azure Functions API.
-   - Expose an API scope named `api.access`.
+   - Expose a delegated API scope named `api.access`.
+   - Expose application app roles for app-only callers, for example `api.test` for test/e2e clients and `api.service` for trusted backend applications.
    - Use an Application ID URI such as `api://<api-app-client-id>`.
    - The backend `OIDC_AUDIENCE` must match the access token `aud` claim. For Microsoft
      Entra this is commonly the API Application ID URI or API client ID, depending on the
@@ -37,7 +38,12 @@ Create two Microsoft Entra or Entra External ID app registrations:
    - Grant delegated permission to the API scope, for example
      `api://<api-app-client-id>/api.access`.
 
-Do not create a client secret for the SPA. Public clients must use Authorization Code + PKCE.
+3. **Service/e2e app registration**
+   - Represents non-browser callers such as CI service tests or trusted backend applications.
+   - Uses OAuth 2.0 client credentials. Prefer a GitHub Actions OIDC federated credential over a client secret.
+   - Is assigned an API app role such as `api.test` or `api.service`; app-only tokens should carry the role in the `roles` claim.
+
+Do not create a client secret for the SPA. Public clients must use Authorization Code + PKCE. Avoid static bearer tokens, Resource Owner Password Credentials, or disabling auth in the deployed test zone.
 
 ## Issuer URL
 
@@ -90,6 +96,8 @@ OIDC_AUDIENCE=<API application ID URI or API client ID expected in aud>
 OIDC_REQUIRED_SCOPES=api.access
 OIDC_ALLOWED_OBJECT_IDS=<your user object ID>
 OIDC_ALLOWED_SUBJECTS=<optional comma-separated fallback subject IDs>
+OIDC_ALLOWED_APP_OBJECT_IDS=<optional comma-separated service-principal object IDs for app-only tokens>
+OIDC_ALLOWED_CLIENT_IDS=<optional comma-separated service-client/application IDs for app-only tokens>
 OIDC_ALLOWED_TENANTS=<comma-separated tenant IDs>
 WEB_AUTH_ENABLED=true
 WEB_AUTH_CLIENT_ID=<SPA application client ID>
@@ -106,6 +114,8 @@ needs a fixed redirect value; when omitted, the Angular app uses the deployed te
 origin at runtime. If you provide it, add that exact URI to the same SPA app registration that
 production uses. `TEST_WEB_API_BASE_URL` is normally omitted so the test frontend calls the
 Function App discovered during the test deployment instead of the production API.
+
+For test-zone app-only service tests, set `OIDC_REQUIRED_SCOPES=api.access,api.test` as an environment-level variable for the GitHub `test` environment and set the service allowlists there. Leave production service allowlists empty unless production app-to-app access is intentionally required.
 
 `OIDC_JWKS_URI` and `AUTH_DEBUG` are supported backend app settings but are not normally
 needed as repository variables. Keep `AUTH_DEBUG=false` in production unless temporarily
@@ -143,6 +153,8 @@ az functionapp config appsettings set \
     OIDC_REQUIRED_SCOPES='api.access' \
     OIDC_ALLOWED_OBJECT_IDS='<allowed object ID>' \
     OIDC_ALLOWED_SUBJECTS='' \
+    OIDC_ALLOWED_APP_OBJECT_IDS='' \
+    OIDC_ALLOWED_CLIENT_IDS='' \
     OIDC_ALLOWED_TENANTS='' \
     AUTH_DEBUG=false \
   -o none

@@ -37,6 +37,12 @@ param oidcAllowedObjectIds string = ''
 @description('Comma-separated allowed subjects used only as fallback when oid is absent.')
 param oidcAllowedSubjects string = ''
 
+@description('Comma-separated allowed Microsoft Entra service-principal object IDs for app-only OAuth client-credentials tokens.')
+param oidcAllowedAppObjectIds string = ''
+
+@description('Comma-separated allowed Microsoft Entra application/client IDs for app-only OAuth client-credentials tokens.')
+param oidcAllowedClientIds string = ''
+
 @description('Optional comma-separated allowed tenant IDs.')
 param oidcAllowedTenants string = ''
 
@@ -174,6 +180,14 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'OIDC_ALLOWED_SUBJECTS'
           value: oidcAllowedSubjects
+        }
+        {
+          name: 'OIDC_ALLOWED_APP_OBJECT_IDS'
+          value: oidcAllowedAppObjectIds
+        }
+        {
+          name: 'OIDC_ALLOWED_CLIENT_IDS'
+          value: oidcAllowedClientIds
         }
         {
           name: 'OIDC_ALLOWED_TENANTS'
