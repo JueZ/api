@@ -1,5 +1,18 @@
 # Next steps
 
+## Current active next steps from 2026-05-14 consolidation
+
+1. Verify Microsoft Entra app registration state with a delegated identity that can read app registrations, including API scope/role exposure, SPA app registration, production/test redirect URIs, and intended GitHub OIDC federated credentials.
+2. Verify the GitHub Actions deployment service principal object ID, then confirm least-privilege RBAC on `rg-api-test` and `rg-api-prod`.
+3. Run `Deploy Test` from `main` after prerequisite verification and confirm smoke tests use the auth-enabled expectation (`/health` returns `200`; unauthenticated `/api/hello` returns `401`).
+4. Promote production through `promote-production.yml` only after test passes, `DEPLOY_PRODUCTION_ENABLED=true` is intentionally set, and any required GitHub environment approvals are satisfied.
+5. After production promotion, verify production `/health`, unauthenticated `/api/hello`, and browser sign-in to `/api/hello` for the configured allowlisted user.
+6. Update project memory immediately after the first successful auth-enabled production deployment.
+7. Keep `deploy-production.yml` as a legacy/manual wrapper unless a later cleanup decides to remove it safely.
+8. Add the first real API connector only after auth-enabled production is verified. Reddit remains intentionally out of scope.
+
+The older numbered list below is retained for guardrail traceability. Items about implementing auth code are superseded by PR #40 on `main`; remaining deployment/prerequisite work is captured above.
+
 1. Implement real OAuth/OIDC/JWT authentication.
 2. Add backend JWT validation with issuer, audience, scope, and user allowlist checks.
 3. Add Angular login UI and token acquisition.

@@ -75,6 +75,7 @@ jobs:
       AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
       AZURE_STATIC_WEB_STORAGE_ACCOUNT: ${{ vars.AZURE_STATIC_WEB_STORAGE_ACCOUNT }}
       PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+      DEPLOY_PRODUCTION_ENABLED: ${{ vars.DEPLOY_PRODUCTION_ENABLED }}
       AUTH_ENABLED: ${{ vars.AUTH_ENABLED }}
       OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
       OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
@@ -107,6 +108,10 @@ jobs:
             test|prod) ;;
             *) echo "environmentName must be test or prod." >&2; exit 1 ;;
           esac
+          if [ "$ENVIRONMENT_NAME" = "prod" ] && [ "${DEPLOY_PRODUCTION_ENABLED:-false}" != "true" ]; then
+            echo "DEPLOY_PRODUCTION_ENABLED must be true for production deployment." >&2
+            exit 1
+          fi
           : "${AUTH_ENABLED:?AUTH_ENABLED repository variable is required for $ENVIRONMENT_NAME}"
           if [ "$AUTH_ENABLED" != "true" ]; then
             echo "AUTH_ENABLED must be true for $ENVIRONMENT_NAME deployment after the auth milestone." >&2
@@ -137,7 +142,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Install dependencies
         shell: bash
         run: |

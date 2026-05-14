@@ -2,6 +2,27 @@
 
 Entries are reverse chronological. Do not include secrets or SAS URLs.
 
+## 2026-05-14 — Consolidation verification found production still pre-auth
+
+- Event: Consolidation sprint inspected repo, GitHub Actions, GitHub variables, Azure resources, and public production endpoints without deploying production.
+- Result: Code on `main` contains auth, but production still serves the old public `/api/hello` placeholder. `GET /health` returned `200`; unauthenticated `GET /api/hello` returned `200` with `authenticated:false`.
+- Production API URL: <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net>.
+- Production Angular URL: <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/>.
+- Follow-up: Verify Entra/OIDC/RBAC prerequisites, run `Deploy Test`, and promote production only through guarded workflows after `DEPLOY_PRODUCTION_ENABLED=true` is intentionally set.
+
+## 2026-05-14 — Staged deployment bootstrap partially verified
+
+- Event: Safe GitHub/Azure inspection checked repository environments, resource groups, resource inventory, Function App runtime, recent workflow runs, and repository variable names.
+- Result: GitHub environments `test` and `production` exist. Azure resource groups `rg-api-test` and `rg-api-prod` exist. Production Function App runtime is `Node|22`. `Deploy Test` run `25849812564` succeeded on `main`; subsequent `Promote Production` workflow runs skipped.
+- Unknowns: Microsoft Entra app registrations, federated credentials, and deployment-principal RBAC could not be fully verified because the current Azure principal lacked sufficient Microsoft Graph privileges and project memory does not contain the deployment service principal object ID.
+- Follow-up: Complete verification with a delegated identity or object ID that can inspect app registrations/federated credentials and role assignments.
+
+## 2026-05-14 — Managed-identity package access replaced SAS-backed run-from-package
+
+- Event: Reusable deployment workflow stores the Function App package in blob storage and configures `WEBSITE_RUN_FROM_PACKAGE` with `WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID=SystemAssigned`.
+- Result: Current workflow no longer writes expiring SAS package URLs.
+- Follow-up: Keep verifying storage/RBAC prerequisites during staged deployment.
+
 ## 2026-05-14 — Auth production promotion blocked by deployment RBAC
 
 - Event: PR #40 was squash-merged and main CI, Policy Check, and Deploy Test passed. Production promotion was triggered manually after auth GitHub variables were configured.
@@ -13,7 +34,7 @@ Entries are reverse chronological. Do not include secrets or SAS URLs.
 ## 2026-05-14 — Auth deployment preparation blocked by Entra permissions
 
 - Action: Set GitHub repository variable `DEPLOY_PRODUCTION_ENABLED=false` as a fail-safe before configuring authentication.
-- PR: #40 remains open and passing CI/Policy with OAuth/OIDC/JWT implementation and frontend MSAL wiring.
+- PR: Historical status only; PR #40 was later merged with OAuth/OIDC/JWT implementation and frontend MSAL wiring.
 - Production state: unchanged pre-auth deployment; `/health` is public and `/api/hello` is still the public placeholder.
 - Blocker: Codex Azure identity could not list app registrations by display name due to insufficient Microsoft Entra directory privileges.
 - Missing values: API app client ID, SPA app client ID, API App ID URI, `api.access` scope ID, and `OIDC_ALLOWED_OBJECT_IDS`.
@@ -37,7 +58,7 @@ Entries are reverse chronological. Do not include secrets or SAS URLs.
 - Event: Production deployment completed after the Function App runtime was changed to Node 22.
 - Result: Success.
 - Evidence / command summary: Production base URL responded successfully for `GET /health` and `GET /api/hello` at <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net>.
-- Follow-up: Implement real OAuth/OIDC/JWT auth before protected production APIs. Harden storage-backed `WEBSITE_RUN_FROM_PACKAGE` later if needed.
+- Follow-up: Historical note superseded by PR #40 for code-level auth and by later managed-identity package access; production still needs auth-enabled deployment verification.
 
 ## 2026-05-14 — Production failure issues closed after successful deployment
 
@@ -65,7 +86,7 @@ Entries are reverse chronological. Do not include secrets or SAS URLs.
 - Event: Deployment attempted to create a user delegation SAS with a 30-day expiry.
 - Result: Failed because user delegation SAS expiry must be within 7 days.
 - Evidence / command summary: Azure Storage rejected the SAS expiry window.
-- Follow-up: Use shorter SAS expiry while SAS-backed package deployment remains in place, and harden away from expiring SAS if feasible.
+- Follow-up: Historical note superseded by later managed-identity package access; do not reintroduce persisted SAS package URLs.
 
 ## 2026-05-14 — Storage upload failed because RBAC was incomplete
 

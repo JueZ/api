@@ -4,6 +4,16 @@ This project uses standards-based OAuth 2.0 / OpenID Connect with JWT bearer acc
 Browser and future iOS clients should use Authorization Code + PKCE. The Azure Functions
 backend validates access tokens server-side and authorizes only the configured allowlisted user.
 
+## Current production status
+
+As of the 2026-05-14 consolidation, the authentication implementation is merged to
+`main`, and GitHub auth-related repository variables are present. Production has
+not yet been verified as auth-enabled: unauthenticated `GET /api/hello` at the
+production API URL still returned the pre-auth public placeholder response. Treat
+the commands below as setup/verification for the next staged test deployment and
+production promotion; do not deploy production outside the guarded workflows.
+
+
 ## Required app registrations
 
 A non-destructive planning helper is available at `scripts/plan-entra-auth-apps.sh`. It prints the required Entra setup shape without creating or modifying resources.
