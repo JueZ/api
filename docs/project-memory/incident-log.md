@@ -10,6 +10,14 @@ Entries are reverse chronological.
 - Prevention / lesson: Keep deployment and smoke failures fail-closed, but avoid coupling successful production health to non-critical repository metadata rewrites unless a token with documented permissions is intentionally used.
 - Links: Workflow run `25852035606`; readiness follow-up PR.
 
+## 2026-05-14 — Production promotion falsely failed after smoke success
+
+- Symptom: `Promote Production` run `25852035606` concluded `failure` even though production deployment and smoke tests passed.
+- Root cause: The reusable deployment workflow attempted to update repository variables after smoke tests using `GITHUB_TOKEN`, and GitHub returned `HTTP 403: Resource not accessible by integration` for the variables API.
+- Fix: Make the post-smoke repository-variable update idempotent/best-effort so metadata rewrite failures do not create a false production deployment failure.
+- Prevention / lesson: Keep deployment and smoke failures fail-closed, but avoid coupling successful production health to non-critical repository metadata rewrites unless a token with documented permissions is intentionally used.
+- Links: Workflow run `25852035606`; readiness follow-up PR.
+
 
 ## 2026-05-14 — HTTP 503 after deployment
 

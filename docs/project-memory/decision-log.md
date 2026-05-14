@@ -8,6 +8,18 @@ Entries are reverse chronological.
 - Rationale: `Promote Production` run `25852035606` deployed auth-enabled production and passed smoke tests, but failed during a post-smoke metadata update to repository variables that already represented the production endpoint names.
 - Consequence: Make the metadata update idempotent/best-effort and continue to fail closed for actual deployment or smoke-test failures.
 
+## 2026-05-14 — Production auth endpoint behavior is now deployed
+
+- Decision: Treat code and deployed production endpoint behavior as auth-enabled after the readiness sprint direct smoke checks.
+- Rationale: Production `GET /health` returned `200`, and unauthenticated production `GET /api/hello` returned `401` after promotion run `25852035606`.
+- Consequence: Normal feature development is nearly unblocked, pending a green production workflow conclusion after the metadata-update fix and manual browser/MSAL verification.
+
+## 2026-05-14 — Treat production variable rewrite as metadata, not deployment health
+
+- Decision: A successful production deployment and smoke test must not be marked failed solely because the workflow token cannot rewrite repository variables after smoke tests.
+- Rationale: `Promote Production` run `25852035606` deployed auth-enabled production and passed smoke tests, but failed during a post-smoke metadata update to repository variables that already represented the production endpoint names.
+- Consequence: Make the metadata update idempotent/best-effort and continue to fail closed for actual deployment or smoke-test failures.
+
 ## 2026-05-14 — Production auth is now deployed, with manual browser auth still pending
 
 - Decision: Treat code and deployed production endpoint behavior as auth-enabled after the readiness sprint direct smoke checks.
