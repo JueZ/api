@@ -43,6 +43,9 @@ param oidcAllowedTenants string = ''
 @description('Enable sanitized authentication diagnostics without logging tokens or claims.')
 param authDebug string = 'false'
 
+@description('Comma-separated browser origins allowed to call the Function App API. Needed because Azure Functions handles CORS preflight before app code.')
+param apiCorsAllowedOrigins string = ''
+
 var nameSuffix = uniqueString(resourceGroup().id, workloadName, environmentName)
 var normalizedWorkload = replace(workloadName, '-', '')
 var storageAccountName = take('st${normalizedWorkload}${environmentName}${nameSuffix}', 24)
@@ -55,6 +58,7 @@ var tags = {
   costProfile: 'serverless-consumption'
   region: location
 }
+var apiCorsAllowedOriginList = empty(apiCorsAllowedOrigins) ? [] : split(apiCorsAllowedOrigins, ',')
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
@@ -110,6 +114,10 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       linuxFxVersion: 'NODE|22'
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
+      cors: {
+        allowedOrigins: apiCorsAllowedOriginList
+        supportCredentials: false
+      }
       appSettings: [
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'

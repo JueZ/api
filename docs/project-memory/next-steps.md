@@ -1,4 +1,10 @@
 # Next steps
+## 2026-05-14 production CORS next steps
+
+1. Merge and deploy the Function App platform CORS fix.
+2. Confirm the deployment smoke test checks `/api/hello` CORS preflight for the production static website origin.
+3. Re-test production browser sign-in and click **Call hello with access token**. Expected result: browser request is no longer blocked by CORS; if token claims and allowlist are correct, `/api/hello` returns the authenticated hello response.
+
 
 ## Current active next steps from 2026-05-14 consolidation
 

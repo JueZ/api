@@ -2,6 +2,12 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 production API CORS preflight failure
+
+- Symptom: after successful production browser sign-in, the Angular app showed `Failed to fetch` when calling protected `GET /api/hello`; browser diagnostics reported that the preflight response from the production Function App lacked `Access-Control-Allow-Origin` for `https://stapicatalogueprodbfjsts.z6.web.core.windows.net`.
+- Root cause: Azure Functions platform CORS handles browser preflight before the application-level `OPTIONS` handler can add CORS headers, so the Function App needs platform CORS configured for the deployed static website origin.
+- Status: Fix in progress; deployment smoke tests are being extended to check `/api/hello` CORS preflight.
+
 ## Current corrected status from 2026-05-14 consolidation
 
 ## 2026-05-14 production browser login redirect hang
