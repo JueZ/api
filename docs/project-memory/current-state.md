@@ -78,7 +78,7 @@ Last updated: 2026-05-14
 - Frontend: Angular app in `apps/web`.
 - Backend: Azure Functions TypeScript app in `apps/api`.
 - API contract: `contracts/openapi.yaml`.
-- Frontend API catalogue: Angular renders endpoint documentation, request payload fields, response schemas, examples, and browser try-it controls from synced OpenAPI assets generated from `contracts/openapi.yaml`.
+- Frontend API catalogue: Angular renders endpoint documentation, request payload fields, response schemas, examples, and browser try-it controls from OpenAPI artifacts generated during build from `contracts/openapi.yaml`; the generated web asset and TypeScript document are intentionally not committed.
 - Infrastructure: `infra/main.bicep`.
 - Azure resource groups: `rg-api-test` for test and `rg-api-prod` for production.
 - Azure region: `westeurope`.

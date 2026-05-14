@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const mainSource = await readFile(new URL('../src/main.ts', import.meta.url), 'utf8');
+const gitignoreSource = await readFile(new URL('../../../.gitignore', import.meta.url), 'utf8');
 
 test('logged-out state is visible in the Angular auth UI', () => {
   assert.match(mainSource, /Signed out\./);
@@ -38,6 +39,12 @@ test('OpenAPI request payload fields render interactive controls', () => {
   assert.match(mainSource, /setInputValue\(operation\.id, field\.name/);
   assert.match(mainSource, /buildRequestBody\(operation/);
   assert.doesNotMatch(mainSource, /sort: 'confidence'/);
+});
+
+
+test('generated OpenAPI web artifacts stay out of version control', () => {
+  assert.match(gitignoreSource, /apps\/web\/src\/assets\/openapi\.yaml/);
+  assert.match(gitignoreSource, /apps\/web\/src\/app\/openapi\.generated\.ts/);
 });
 
 test('MSAL does not navigate back to the login request URL after processing auth code redirects', () => {

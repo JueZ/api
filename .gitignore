@@ -8,3 +8,7 @@ local.settings.json
 !.env.example
 
 infra/*.json
+
+# Generated from contracts/openapi.yaml by scripts/sync-openapi-web.mjs.
+apps/web/src/assets/openapi.yaml
+apps/web/src/app/openapi.generated.ts
