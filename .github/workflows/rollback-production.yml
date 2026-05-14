@@ -1,11 +1,11 @@
-name: Deploy Production Legacy
+name: Rollback Production
 
 on:
   workflow_dispatch:
     inputs:
       commit_sha:
-        description: Commit SHA, branch, or tag to deploy. Prefer promote-production.yml for normal promotion.
-        required: false
+        description: Previous commit SHA, branch, or tag to redeploy to production.
+        required: true
         type: string
 
 permissions:
@@ -15,12 +15,12 @@ permissions:
   issues: write
 
 concurrency:
-  group: deploy-production-legacy
+  group: promote-production
   cancel-in-progress: false
 
 jobs:
-  deploy-production:
-    name: deploy production legacy wrapper
+  rollback-production:
+    name: rollback production
     uses: ./.github/workflows/deploy-environment.yml
     with:
       environmentName: prod
@@ -28,5 +28,5 @@ jobs:
       githubEnvironment: production
       deployFrontend: true
       deployFunctions: true
-      sourceRef: ${{ inputs.commit_sha || github.sha }}
+      sourceRef: ${{ inputs.commit_sha }}
       updateProductionVariables: true

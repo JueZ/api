@@ -8,3 +8,7 @@
 6. Deploy auth configuration safely.
 7. Harden run-from-package deployment away from expiring SAS if feasible.
 8. Add the first real API connector after auth works.
+9. After staged deployment merges, run or inspect `Deploy Test` on `main`, confirm the test base URL and smoke tests, then inspect automatic `Promote Production`.
+10. Decide whether the GitHub `production` environment should require reviewers; for a solo project, avoid prevent self-review unless another reviewer exists.
+11. Run staged deployment setup commands in `docs/setup/staged-deployment.md` with an Azure principal that can create `rg-api-test` and assign scoped RBAC roles.
+12. Verify the repo `production-rollback` skill works during the first real rollback drill.

@@ -7,6 +7,10 @@ targetScope = 'resourceGroup'
 param location string = 'westeurope'
 
 @description('Short environment name used in resource names and tags.')
+@allowed([
+  'test'
+  'prod'
+])
 param environmentName string = 'prod'
 
 @description('Workload name used in resource names and tags.')

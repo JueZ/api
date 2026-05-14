@@ -2,6 +2,20 @@
 
 Entries are reverse chronological. Do not include secrets or SAS URLs.
 
+## 2026-05-14 — Staged deployment setup commands and rollback skill documented
+
+- Event: Added a repo-scoped production rollback skill and setup commands for GitHub environments, Azure resource groups, OIDC federated credentials, RBAC, test deployment, production promotion, and rollback.
+- Result: Documentation-only operational follow-up; no Azure resources were changed by this PR.
+- Evidence / command summary: `docs/setup/staged-deployment.md` contains the CLI command sequence; `.agents/skills/production-rollback/SKILL.md` contains the standard rollback workflow command.
+- Follow-up: Run the setup commands with an Azure principal that can create `rg-api-test` and assign scoped roles, then verify `Deploy Test` and `Promote Production`.
+
+## 2026-05-14 — Staged deployment flow prepared in PR
+
+- Event: Added workflows and documentation for test-first deployment and production promotion.
+- Result: Pending merge and workflow execution.
+- Evidence / command summary: `deploy-test.yml` will deploy `main` to `rg-api-test` and smoke `/health` plus `/api/hello`; `promote-production.yml` will promote the same commit to `rg-api-prod` after the test workflow succeeds.
+- Follow-up: After merge, verify the first test deployment and production promotion workflow runs; configure GitHub `production` required reviewers if manual approval is desired.
+
 ## 2026-05-14 — v0 production deployment succeeded
 
 - Event: Production deployment completed after the Function App runtime was changed to Node 22.
