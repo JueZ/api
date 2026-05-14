@@ -12,6 +12,8 @@ const baseConfig = Object.freeze({
   requiredScopes: ['api.access'],
   allowedObjectIds: ['allowed-oid'],
   allowedSubjects: ['allowed-sub'],
+  allowedAppObjectIds: ['allowed-app-oid'],
+  allowedClientIds: ['allowed-client-id'],
   allowedTenants: [],
   debug: false,
 });
@@ -115,6 +117,7 @@ test('valid token for allowed object ID returns 200 authorization result', async
     subject: 'user-subject',
     objectId: 'allowed-oid',
     tenantId: 'tenant-id',
+    tokenType: 'user',
   });
 });
 
@@ -129,7 +132,81 @@ test('allowed subject fallback works only when oid is absent', async () => {
     subject: 'allowed-sub',
     objectId: undefined,
     tenantId: undefined,
+    tokenType: 'user',
   });
+});
+
+
+test('app-only service token with allowed app object ID returns service authorization result', async () => {
+  const result = await authorize('Bearer valid-token', {
+    sub: 'service-subject',
+    oid: 'allowed-app-oid',
+    tid: 'tenant-id',
+    idtyp: 'app',
+    azp: 'service-client-id',
+    roles: ['api.access'],
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.user, {
+    subject: 'service-subject',
+    objectId: 'allowed-app-oid',
+    tenantId: 'tenant-id',
+    clientId: 'service-client-id',
+    tokenType: 'service',
+  });
+});
+
+test('app-only service token can be allowed by client ID', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'service-subject',
+      oid: 'unlisted-app-oid',
+      tid: 'tenant-id',
+      idtyp: 'app',
+      azp: 'allowed-client-id',
+      roles: ['api.access'],
+    },
+    { allowedAppObjectIds: [] },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.user.tokenType, 'service');
+  assert.equal(result.user.clientId, 'allowed-client-id');
+});
+
+test('app-only service token outside app allowlists returns 403', async () => {
+  const result = await authorize('Bearer valid-token', {
+    sub: 'service-subject',
+    oid: 'blocked-app-oid',
+    tid: 'tenant-id',
+    idtyp: 'app',
+    azp: 'blocked-client-id',
+    roles: ['api.access'],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.code, 'forbidden');
+});
+
+test('app-only service token from wrong tenant returns 403 before service allowlist', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'service-subject',
+      oid: 'allowed-app-oid',
+      tid: 'wrong-tenant',
+      idtyp: 'app',
+      azp: 'allowed-client-id',
+      roles: ['api.access'],
+    },
+    { allowedTenants: ['expected-tenant'] },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
 });
 
 test('allowed tenants are enforced when configured', async () => {
@@ -167,6 +244,8 @@ test('readAuthConfig supports multiple comma-separated issuers', () => {
     OIDC_ISSUER: ' https://login.example.test/tenant/v2.0/, https://login.example.test/consumers/v2.0/ ',
     OIDC_AUDIENCE: 'api://catalogue-test',
     OIDC_ALLOWED_OBJECT_IDS: 'allowed-oid',
+    OIDC_ALLOWED_APP_OBJECT_IDS: 'allowed-app-oid',
+    OIDC_ALLOWED_CLIENT_IDS: 'allowed-client-id',
   });
 
   assert.equal(config.issuer, 'https://login.example.test/tenant/v2.0');
@@ -174,6 +253,8 @@ test('readAuthConfig supports multiple comma-separated issuers', () => {
     'https://login.example.test/tenant/v2.0',
     'https://login.example.test/consumers/v2.0',
   ]);
+  assert.deepEqual(config.allowedAppObjectIds, ['allowed-app-oid']);
+  assert.deepEqual(config.allowedClientIds, ['allowed-client-id']);
 });
 
 

@@ -5,6 +5,8 @@ export interface AuthenticatedUser {
   subject: string;
   objectId?: string;
   tenantId?: string;
+  clientId?: string;
+  tokenType: 'user' | 'service';
 }
 
 export interface AuthConfig {
@@ -16,6 +18,8 @@ export interface AuthConfig {
   requiredScopes: string[];
   allowedObjectIds: string[];
   allowedSubjects: string[];
+  allowedAppObjectIds: string[];
+  allowedClientIds: string[];
   allowedTenants: string[];
   debug: boolean;
 }
@@ -48,6 +52,8 @@ export function readAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
     requiredScopes: parseCsv(env['OIDC_REQUIRED_SCOPES'] ?? 'api.access'),
     allowedObjectIds: parseCsv(env['OIDC_ALLOWED_OBJECT_IDS']),
     allowedSubjects: parseCsv(env['OIDC_ALLOWED_SUBJECTS']),
+    allowedAppObjectIds: parseCsv(env['OIDC_ALLOWED_APP_OBJECT_IDS']),
+    allowedClientIds: parseCsv(env['OIDC_ALLOWED_CLIENT_IDS']),
     allowedTenants: parseCsv(env['OIDC_ALLOWED_TENANTS']),
     debug: env['AUTH_DEBUG'] === 'true',
   };
@@ -64,6 +70,7 @@ export async function authorizeRequest(
       ok: true,
       user: {
         subject: 'local-dev-placeholder',
+        tokenType: 'user',
       },
     };
   }
@@ -99,7 +106,8 @@ export async function authorizeRequest(
     return forbidden('Tenant is not allowed.');
   }
 
-  if (!hasRequiredScopeOrRole(payload, config.requiredScopes)) {
+  const tokenAccess = getTokenAccess(payload, config.requiredScopes);
+  if (!tokenAccess.hasRequiredAccess) {
     return forbidden('Required scope or role is missing.');
   }
 
@@ -107,6 +115,24 @@ export async function authorizeRequest(
   const subject = typeof payload.sub === 'string' ? payload.sub : undefined;
   if (!subject) {
     return forbidden('Subject claim is missing.');
+  }
+
+  const clientId = getClientId(payload);
+  if (isServiceToken(payload, tokenAccess)) {
+    if (!isAllowedServiceClient(objectId, clientId, config)) {
+      return forbidden('Service client is not allowed.');
+    }
+
+    return {
+      ok: true,
+      user: {
+        subject,
+        objectId,
+        tenantId,
+        clientId,
+        tokenType: 'service',
+      },
+    };
   }
 
   if (!isAllowedUser(objectId, subject, config)) {
@@ -119,6 +145,7 @@ export async function authorizeRequest(
       subject,
       objectId,
       tenantId,
+      tokenType: 'user',
     },
   };
 }
@@ -167,19 +194,68 @@ function validateConfig(config: AuthConfig): string | undefined {
   if (config.requiredScopes.length === 0) {
     return 'OIDC_REQUIRED_SCOPES';
   }
-  if (config.allowedObjectIds.length === 0 && config.allowedSubjects.length === 0) {
-    return 'OIDC_ALLOWED_OBJECT_IDS or OIDC_ALLOWED_SUBJECTS';
+  if (
+    config.allowedObjectIds.length === 0 &&
+    config.allowedSubjects.length === 0 &&
+    config.allowedAppObjectIds.length === 0 &&
+    config.allowedClientIds.length === 0
+  ) {
+    return 'OIDC_ALLOWED_OBJECT_IDS, OIDC_ALLOWED_SUBJECTS, OIDC_ALLOWED_APP_OBJECT_IDS, or OIDC_ALLOWED_CLIENT_IDS';
   }
   return undefined;
 }
 
-function hasRequiredScopeOrRole(payload: JWTPayload, requiredScopes: string[]): boolean {
+interface TokenAccess {
+  hasRequiredAccess: boolean;
+  scopes: string[];
+  roles: string[];
+}
+
+function getTokenAccess(payload: JWTPayload, requiredScopes: string[]): TokenAccess {
   const scopeClaim = typeof payload['scp'] === 'string' ? payload['scp'] : '';
   const scopes = scopeClaim.split(' ').filter(Boolean);
   const rolesClaim = payload['roles'];
   const roles = Array.isArray(rolesClaim) ? rolesClaim.filter((role): role is string => typeof role === 'string') : [];
 
-  return requiredScopes.some((requiredScope) => scopes.includes(requiredScope) || roles.includes(requiredScope));
+  return {
+    hasRequiredAccess: requiredScopes.some((requiredScope) => scopes.includes(requiredScope) || roles.includes(requiredScope)),
+    scopes,
+    roles,
+  };
+}
+
+function isServiceToken(payload: JWTPayload, access: TokenAccess): boolean {
+  if (payload['idtyp'] === 'app') {
+    return true;
+  }
+
+  return access.scopes.length === 0 && access.roles.length > 0 && getClientId(payload) !== undefined;
+}
+
+function getClientId(payload: JWTPayload): string | undefined {
+  const azp = payload['azp'];
+  if (typeof azp === 'string' && azp.length > 0) {
+    return azp;
+  }
+
+  const appId = payload['appid'];
+  if (typeof appId === 'string' && appId.length > 0) {
+    return appId;
+  }
+
+  return undefined;
+}
+
+function isAllowedServiceClient(
+  objectId: string | undefined,
+  clientId: string | undefined,
+  config: AuthConfig,
+): boolean {
+  if (objectId && config.allowedAppObjectIds.includes(objectId)) {
+    return true;
+  }
+
+  return clientId !== undefined && config.allowedClientIds.includes(clientId);
 }
 
 function isAllowedUser(objectId: string | undefined, subject: string, config: AuthConfig): boolean {

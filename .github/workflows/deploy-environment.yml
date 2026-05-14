@@ -26,7 +26,7 @@ on:
         default: true
         type: boolean
       sourceRef:
-        description: Commit SHA, branch, or tag to deploy.
+        description: Commit SHA on the main branch to deploy.
         required: false
         default: ''
         type: string
@@ -86,6 +86,8 @@ jobs:
       OIDC_REQUIRED_SCOPES: ${{ vars.OIDC_REQUIRED_SCOPES }}
       OIDC_ALLOWED_OBJECT_IDS: ${{ vars.OIDC_ALLOWED_OBJECT_IDS }}
       OIDC_ALLOWED_SUBJECTS: ${{ vars.OIDC_ALLOWED_SUBJECTS }}
+      OIDC_ALLOWED_APP_OBJECT_IDS: ${{ vars.OIDC_ALLOWED_APP_OBJECT_IDS }}
+      OIDC_ALLOWED_CLIENT_IDS: ${{ vars.OIDC_ALLOWED_CLIENT_IDS }}
       OIDC_ALLOWED_TENANTS: ${{ vars.OIDC_ALLOWED_TENANTS }}
       WEB_AUTH_ENABLED: ${{ vars.WEB_AUTH_ENABLED }}
       WEB_AUTH_CLIENT_ID: ${{ vars.WEB_AUTH_CLIENT_ID }}
@@ -97,12 +99,26 @@ jobs:
       TEST_WEB_API_BASE_URL: ${{ vars.TEST_WEB_API_BASE_URL }}
       REDDIT_CLIENT_ID: ${{ vars.REDDIT_CLIENT_ID }}
       REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
-      REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
     steps:
       - name: Checkout deployment source
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.sourceRef || github.sha }}
+          fetch-depth: 0
+      - name: Validate deployment source
+        shell: bash
+        run: |
+          set -euo pipefail
+          deployment_ref="${SOURCE_REF:-${GITHUB_SHA}}"
+          if [[ ! "$deployment_ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "sourceRef must be a full 40-character commit SHA from the main branch." >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$deployment_ref" origin/main; then
+            echo "sourceRef must point to a commit already present in the main branch history." >&2
+            exit 1
+          fi
       - name: Validate deployment configuration
         shell: bash
         run: |
@@ -142,7 +158,6 @@ jobs:
           : "${WEB_AUTH_API_SCOPE:?WEB_AUTH_API_SCOPE repository variable is required for $ENVIRONMENT_NAME}"
           : "${REDDIT_CLIENT_ID:?REDDIT_CLIENT_ID environment variable is required for $ENVIRONMENT_NAME}"
           : "${REDDIT_USER_AGENT:?REDDIT_USER_AGENT environment variable is required for $ENVIRONMENT_NAME}"
-          : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
       - name: Azure OIDC login
         uses: azure/login@v3
         with:
@@ -172,8 +187,11 @@ jobs:
       - name: Deploy Bicep infrastructure
         id: infra
         shell: bash
+        env:
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
         run: |
           set -euo pipefail
+          : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
           if [ -f infra/main.bicep ]; then
             api_cors_redirect_uri=""
             if [ "$ENVIRONMENT_NAME" = "prod" ]; then
@@ -197,6 +215,8 @@ jobs:
                 oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-api.access}" \
                 oidcAllowedObjectIds="${OIDC_ALLOWED_OBJECT_IDS:-}" \
                 oidcAllowedSubjects="${OIDC_ALLOWED_SUBJECTS:-}" \
+                oidcAllowedAppObjectIds="${OIDC_ALLOWED_APP_OBJECT_IDS:-}" \
+                oidcAllowedClientIds="${OIDC_ALLOWED_CLIENT_IDS:-}" \
                 oidcAllowedTenants="${OIDC_ALLOWED_TENANTS:-}" \
                 redditClientId="${REDDIT_CLIENT_ID:-}" \
                 redditOAuthSecret="${REDDIT_CLIENT_SECRET:-}" \

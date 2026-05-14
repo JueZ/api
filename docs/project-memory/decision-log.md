@@ -1,5 +1,11 @@
 # Decision log
 
+## 2026-05-14: Use Entra app roles for service/e2e OAuth instead of static tokens
+
+Decision: support other applications and deployed test-zone service/e2e tests with Microsoft Entra OAuth 2.0 client credentials, app roles, tenant validation, and explicit service-client allowlists. Do not introduce custom static bearer tokens, password-grant test login, or deployed auth bypasses.
+
+Rationale: this keeps the API on a single standards-based OIDC/JWT validation path, supports CI automation through GitHub Actions OIDC federation without long-lived secrets, and preserves least-privilege separation between delegated users and app-only callers.
+
 ## 2026-05-14 Reddit integration uses app-only OAuth and no persistence
 
 - Decision: implement Reddit thread fetching with app-only OAuth `client_credentials`, using only configured setting names for client ID, client secret, and User-Agent. The endpoint remains protected by the same Microsoft Entra JWT authorization as `/api/hello`.

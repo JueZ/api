@@ -286,12 +286,16 @@ gh variable set OIDC_ISSUER --repo "$REPOSITORY" --body "<issuer URL or comma-se
 gh variable set OIDC_AUDIENCE --repo "$REPOSITORY" --body "<API application ID URI or client ID>"
 gh variable set OIDC_REQUIRED_SCOPES --repo "$REPOSITORY" --body "api.access"
 gh variable set OIDC_ALLOWED_OBJECT_IDS --repo "$REPOSITORY" --body "<allowed user object ID>"
+gh variable set OIDC_ALLOWED_APP_OBJECT_IDS --repo "$REPOSITORY" --body ""
+gh variable set OIDC_ALLOWED_CLIENT_IDS --repo "$REPOSITORY" --body ""
 gh variable set OIDC_ALLOWED_TENANTS --repo "$REPOSITORY" --body "<tenant ID>"
 gh variable set WEB_AUTH_ENABLED --repo "$REPOSITORY" --body "true"
 gh variable set WEB_AUTH_CLIENT_ID --repo "$REPOSITORY" --body "<SPA application client ID>"
 gh variable set WEB_AUTH_AUTHORITY --repo "$REPOSITORY" --body "<MSAL authority URL>"
 gh variable set WEB_AUTH_API_SCOPE --repo "$REPOSITORY" --body "api://<api-app-client-id>/api.access"
 ```
+
+For app-only test-zone service/e2e auth, prefer environment-level GitHub variables on the `test` environment for `OIDC_REQUIRED_SCOPES=api.access,api.test`, `OIDC_ALLOWED_APP_OBJECT_IDS`, `OIDC_ALLOWED_CLIENT_IDS`, `TEST_SERVICE_AUTH_CLIENT_ID`, `TEST_SERVICE_AUTH_TENANT_ID`, and `TEST_SERVICE_AUTH_SCOPE`; see `docs/security/service-oauth-authentication.md` and `scripts/configure-entra-service-oauth.sh`. Keep production service-client allowlists empty unless production app-to-app access is intentionally required.
 
 Use the same SPA app registration for both environments only after adding both redirect origins to that registration. Production still requires `WEB_AUTH_REDIRECT_URI`; test normally omits `TEST_WEB_AUTH_REDIRECT_URI` so the Angular app uses the deployed test frontend origin at runtime. If the identity provider requires an explicit test redirect, set `TEST_WEB_AUTH_REDIRECT_URI` to that exact registered test frontend URI. Do not set `TEST_WEB_API_BASE_URL` unless you intentionally need an override; by default the test frontend calls the test Function App discovered during deployment.
 

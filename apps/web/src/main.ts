@@ -7,6 +7,7 @@ import {
   PublicClientApplication,
   type AccountInfo,
 } from '@azure/msal-browser';
+import YAML from 'yaml';
 
 interface RuntimeConfig {
   authEnabled: boolean;
@@ -17,29 +18,96 @@ interface RuntimeConfig {
   apiBaseUrl: string;
 }
 
-interface HelloApiResponse {
-  message: string;
-  authenticated: boolean;
-  user?: {
-    subject?: string;
-    objectId?: string;
-    tenantId?: string;
+type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
+type JsonObject = Record<string, unknown>;
+
+interface OpenApiSchema {
+  $ref?: string;
+  type?: string | readonly string[];
+  format?: string;
+  const?: unknown;
+  enum?: readonly unknown[];
+  default?: unknown;
+  minimum?: number;
+  maximum?: number;
+  description?: string;
+  examples?: readonly unknown[];
+  properties?: Record<string, OpenApiSchema>;
+  required?: readonly string[];
+  items?: OpenApiSchema;
+  additionalProperties?: boolean | OpenApiSchema;
+}
+
+interface OpenApiOperation {
+  operationId?: string;
+  summary?: string;
+  description?: string;
+  tags?: readonly string[];
+  security?: readonly Record<string, readonly string[]>[];
+  requestBody?: {
+    required?: boolean;
+    content?: Record<string, { schema?: OpenApiSchema; examples?: Record<string, { value?: unknown }> }>;
+  };
+  responses?: Record<string, {
+    description?: string;
+    content?: Record<string, { schema?: OpenApiSchema; examples?: Record<string, { value?: unknown }> }>;
+  }>;
+}
+
+interface OpenApiDocument {
+  info: {
+    title: string;
+    version: string;
+    description?: string;
+  };
+  paths: Record<string, Partial<Record<HttpMethod, OpenApiOperation>>>;
+  components?: {
+    schemas?: Record<string, OpenApiSchema>;
+    securitySchemes?: Record<string, { description?: string }>;
   };
 }
 
-interface RedditThreadApiResponse {
-  source: 'reddit';
-  fetchedAt: string;
-  post: {
-    title: string;
-    selftext: string;
-  };
-  comments: unknown[];
-  stats: {
-    commentsReturned: number;
-    truncated: boolean;
-    warnings: string[];
-  };
+interface SchemaFieldDoc {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
+  defaultValue: string;
+  constraints: string;
+  enumValues: string[];
+  example: string;
+  inputType: 'text' | 'number' | 'select' | 'checkbox';
+}
+
+interface SchemaDoc {
+  name: string;
+  description: string;
+  fields: SchemaFieldDoc[];
+}
+
+interface ResponseDoc {
+  status: string;
+  description: string;
+  schemaName: string;
+  fields: SchemaFieldDoc[];
+  example: string;
+}
+
+interface ApiOperationDoc {
+  id: string;
+  method: HttpMethod;
+  path: string;
+  tag: string;
+  summary: string;
+  description: string;
+  requiresAuth: boolean;
+  requestRequired: boolean;
+  requestContentType: string;
+  requestSchemaName: string;
+  requestFields: SchemaFieldDoc[];
+  requestExample: string;
+  responses: ResponseDoc[];
+  schemas: SchemaDoc[];
 }
 
 declare global {
@@ -47,6 +115,10 @@ declare global {
     API_CATALOGUE_CONFIG?: Partial<RuntimeConfig>;
   }
 }
+
+const OPENAPI_ASSET_URL = 'assets/openapi.yaml';
+const emptyOpenApiDocument: OpenApiDocument = { info: { title: '', version: '' }, paths: {} };
+let openApiDocument = emptyOpenApiDocument;
 
 const config = readRuntimeConfig();
 const msalClient = createMsalClient(config);
@@ -96,67 +168,169 @@ const msalClient = createMsalClient(config);
         }
       </section>
 
-      <section class="card" aria-labelledby="catalogue-title">
+      <section class="card catalogue-card" aria-labelledby="catalogue-title">
         <h2 id="catalogue-title">API catalogue</h2>
         <p>
-          Fetch a Reddit thread through the protected backend. Reddit credentials stay on
-          the server; the browser sends only the Microsoft Entra access token.
+          This interactive catalogue is generated from the OpenAPI {{ openApiVersion() }} contract.
+          It shows the expected payload fields, response objects, examples, and lets you call each
+          endpoint from the browser.
         </p>
-      </section>
-
-      <section class="card" aria-labelledby="hello-title">
-        <h2 id="hello-title">Call protected <code>/api/hello</code></h2>
-        <p>
+        <p class="muted">
           This endpoint now requires a valid OAuth/OIDC access token with the configured API
           scope or role and a server-side allowlisted user identifier.
         </p>
-        <button class="button" type="button" (click)="callHello()" [disabled]="helloLoading() || !canUseAuth()">
-          {{ helloLoading() ? 'Calling…' : 'Call hello with access token' }}
-        </button>
-        @if (apiError()) {
-          <pre class="api-error" role="alert">{{ apiError() }}</pre>
+        @if (catalogueError()) {
+          <pre class="api-error" role="alert">{{ catalogueError() }}</pre>
         }
-        @if (helloResponse(); as response) {
-          <pre class="api-result">{{ response }}</pre>
-        }
+        <div class="button-row">
+          <a class="button secondary" [href]="openApiAssetUrl" target="_blank" rel="noreferrer">
+            Open raw OpenAPI YAML
+          </a>
+        </div>
       </section>
 
+      @for (operation of endpoints(); track operation.id) {
+        <section class="card endpoint-card" [attr.aria-labelledby]="operation.id + '-title'">
+          <div class="endpoint-heading">
+            <span class="method-badge" [class]="'method-badge ' + operation.method">{{ operation.method.toUpperCase() }}</span>
+            <code class="endpoint-path">{{ operation.path }}</code>
+            <span class="tag-badge">{{ operation.tag }}</span>
+          </div>
+          <h2 [id]="operation.id + '-title'">{{ operation.summary }}</h2>
+          <p>{{ operation.description }}</p>
+          <p class="status" [class.good]="!operation.requiresAuth" [class.warn]="operation.requiresAuth">
+            {{ operation.requiresAuth ? 'Requires Microsoft Entra bearer token with the configured API scope and allowlisted user.' : 'Public endpoint; no bearer token required.' }}
+          </p>
 
-      <section class="card" aria-labelledby="reddit-title">
-        <h2 id="reddit-title">Fetch Reddit thread</h2>
-        <p>
-          Enter a Reddit post URL, <code>redd.it</code> link, raw article ID, or <code>t3_</code>
-          fullname. Large threads may return partial data with warnings.
-        </p>
-        <label class="field">
-          <span>Reddit post URL or ID</span>
-          <input
-            type="text"
-            [value]="redditPostInput()"
-            (input)="redditPostInput.set($any($event.target).value)"
-            placeholder="https://www.reddit.com/r/redditdev/comments/abc123/example/"
-          />
-        </label>
-        <button class="button" type="button" (click)="fetchRedditThread()" [disabled]="redditLoading() || !canUseAuth()">
-          {{ redditLoading() ? 'Fetching…' : 'Fetch Reddit thread' }}
-        </button>
-        @if (redditResponse(); as response) {
-          <article class="reddit-summary">
-            <h3>{{ response.post.title }}</h3>
-            @if (response.post.selftext) {
-              <p>{{ response.post.selftext }}</p>
+          @if (operation.requestFields.length) {
+            <div class="docs-panel">
+              <h3>Request body: <code>{{ operation.requestSchemaName }}</code></h3>
+              <p class="muted">Content type: {{ operation.requestContentType }}{{ operation.requestRequired ? '; required' : '; optional' }}</p>
+              <div class="field-table" role="table" [attr.aria-label]="operation.summary + ' request fields'">
+                @for (field of operation.requestFields; track field.name) {
+                  <div class="field-row" role="row">
+                    <div role="cell">
+                      <strong>{{ field.name }}</strong>
+                      @if (field.required) { <span class="required">required</span> }
+                    </div>
+                    <div role="cell"><code>{{ field.type }}</code></div>
+                    <div role="cell">{{ field.description }}</div>
+                    <div role="cell" class="muted">{{ field.constraints }}</div>
+                  </div>
+                }
+              </div>
+              @if (operation.requestExample) {
+                <details>
+                  <summary>Example request payload</summary>
+                  <pre class="api-result">{{ operation.requestExample }}</pre>
+                </details>
+              }
+            </div>
+
+            <form class="try-form" (submit)="tryOperation(operation); $event.preventDefault()">
+              <h3>Try this endpoint</h3>
+              @for (field of operation.requestFields; track field.name) {
+                <label class="field">
+                  <span>{{ field.name }} @if (field.required) { <em>(required)</em> }</span>
+                  @if (field.enumValues.length) {
+                    <select [value]="inputValue(operation.id, field.name)" (change)="setInputValue(operation.id, field.name, $any($event.target).value)">
+                      @for (value of field.enumValues; track value) {
+                        <option [value]="value">{{ value }}</option>
+                      }
+                    </select>
+                  } @else if (field.inputType === 'checkbox') {
+                    <input type="checkbox" [checked]="inputValue(operation.id, field.name) === 'true'" (change)="setInputValue(operation.id, field.name, $any($event.target).checked ? 'true' : 'false')" />
+                  } @else {
+                    <input
+                      [type]="field.inputType"
+                      [min]="field.inputType === 'number' ? minimumFor(field) : null"
+                      [max]="field.inputType === 'number' ? maximumFor(field) : null"
+                      [value]="inputValue(operation.id, field.name)"
+                      (input)="setInputValue(operation.id, field.name, $any($event.target).value)"
+                    />
+                  }
+                  <small>{{ field.description }}</small>
+                </label>
+              }
+              <button class="button" type="submit" [disabled]="isOperationLoading(operation.id) || (operation.requiresAuth && !canUseAuth())">
+                {{ isOperationLoading(operation.id) ? 'Calling…' : 'Send ' + operation.method.toUpperCase() + ' ' + operation.path }}
+              </button>
+            </form>
+          } @else {
+            <div class="try-form">
+              <h3>Try this endpoint</h3>
+              <button class="button" type="button" (click)="tryOperation(operation)" [disabled]="isOperationLoading(operation.id) || (operation.requiresAuth && !canUseAuth())">
+                {{ isOperationLoading(operation.id) ? 'Calling…' : 'Send ' + operation.method.toUpperCase() + ' ' + operation.path }}
+              </button>
+            </div>
+          }
+
+          @if (operationError(operation.id)) {
+            <pre class="api-error" role="alert">{{ operationError(operation.id) }}</pre>
+          }
+          @if (operationResult(operation.id)) {
+            <pre class="api-result">{{ operationResult(operation.id) }}</pre>
+          }
+
+          <div class="docs-panel">
+            <h3>Responses</h3>
+            @for (response of operation.responses; track response.status) {
+              <details class="response-detail" [open]="response.status.startsWith('2')">
+                <summary><strong>{{ response.status }}</strong> — {{ response.description }}</summary>
+                @if (response.schemaName) {
+                  <p>Returns <code>{{ response.schemaName }}</code>.</p>
+                }
+                @if (response.fields.length) {
+                  <div class="field-table" role="table" [attr.aria-label]="operation.summary + ' response ' + response.status + ' fields'">
+                    @for (field of response.fields; track field.name) {
+                      <div class="field-row" role="row">
+                        <div role="cell">
+                          <strong>{{ field.name }}</strong>
+                          @if (field.required) { <span class="required">required</span> }
+                        </div>
+                        <div role="cell"><code>{{ field.type }}</code></div>
+                        <div role="cell">{{ field.description }}</div>
+                        <div role="cell" class="muted">{{ field.example ? 'Example: ' + field.example : field.constraints }}</div>
+                      </div>
+                    }
+                  </div>
+                }
+                @if (response.example) {
+                  <pre class="api-result">{{ response.example }}</pre>
+                }
+              </details>
             }
-            <p class="muted">
-              {{ response.stats.commentsReturned }} comments returned@if (response.stats.truncated) {; truncated}
-            </p>
-          </article>
-          <pre class="api-result">{{ redditResponseJson() }}</pre>
-        }
-      </section>
+          </div>
+
+          @if (operation.schemas.length) {
+            <div class="docs-panel">
+              <h3>Object schemas used by this API</h3>
+              @for (schema of operation.schemas; track schema.name) {
+                <details class="schema-detail">
+                  <summary><code>{{ schema.name }}</code>{{ schema.description ? ' — ' + schema.description : '' }}</summary>
+                  <div class="field-table" role="table" [attr.aria-label]="schema.name + ' fields'">
+                    @for (field of schema.fields; track field.name) {
+                      <div class="field-row" role="row">
+                        <div role="cell">
+                          <strong>{{ field.name }}</strong>
+                          @if (field.required) { <span class="required">required</span> }
+                        </div>
+                        <div role="cell"><code>{{ field.type }}</code></div>
+                        <div role="cell">{{ field.description }}</div>
+                        <div role="cell" class="muted">{{ field.constraints }}</div>
+                      </div>
+                    }
+                  </div>
+                </details>
+              }
+            </div>
+          }
+        </section>
+      }
 
       <aside class="notice" role="note">
-        <strong>/health</strong> remains public. <strong>/api/hello</strong> is protected by
-        server-side JWT validation when <code>AUTH_ENABLED=true</code>.
+        <strong>/health</strong> remains public. Protected APIs require server-side JWT validation
+        when <code>AUTH_ENABLED=true</code>; the OpenAPI explorer adds the bearer token only after sign-in.
       </aside>
     </main>
   `,
@@ -164,16 +338,12 @@ const msalClient = createMsalClient(config);
 })
 export class AppComponent {
   protected readonly activeAccount = signal<AccountInfo | null>(msalClient?.getActiveAccount() ?? null);
-  protected readonly helloLoading = signal(false);
-  protected readonly helloResponse = signal<string | null>(null);
-  protected readonly redditPostInput = signal('');
-  protected readonly redditLoading = signal(false);
-  protected readonly redditResponse = signal<RedditThreadApiResponse | null>(null);
-  protected readonly redditResponseJson = computed(() => {
-    const response = this.redditResponse();
-    return response ? JSON.stringify(response, null, 2) : '';
-  });
-  protected readonly apiError = signal<string | null>(null);
+  protected readonly endpoints = signal<ApiOperationDoc[]>([]);
+  protected readonly formValues = signal<Record<string, Record<string, string>>>({});
+  protected readonly catalogueError = signal<string | null>(null);
+  protected readonly loadingOperations = signal<Record<string, boolean>>({});
+  protected readonly operationResults = signal<Record<string, string>>({});
+  protected readonly operationErrors = signal<Record<string, string>>({});
   protected readonly canUseAuth = computed(() => Boolean(msalClient && config.authApiScope));
   protected readonly isSignedIn = computed(() => this.activeAccount() !== null);
   protected readonly statusMessage = computed(() => {
@@ -186,14 +356,42 @@ export class AppComponent {
     const account = this.activeAccount();
     return account ? `Signed in as ${account.username || account.name || 'an allowed account'}.` : 'Signed out.';
   });
+  protected readonly openApiVersion = signal('loading');
+  protected readonly openApiAssetUrl = OPENAPI_ASSET_URL;
+
+  constructor() {
+    void this.loadOpenApiDocument();
+  }
+
+
+  private async loadOpenApiDocument(): Promise<void> {
+    try {
+      const response = await fetch(OPENAPI_ASSET_URL);
+      if (!response.ok) {
+        throw new Error(`OpenAPI document returned ${response.status}.`);
+      }
+
+      openApiDocument = YAML.parse(await response.text()) as OpenApiDocument;
+      const operations = buildApiOperations(openApiDocument);
+      this.endpoints.set(operations);
+      this.formValues.set(Object.fromEntries(
+        operations.map((operation) => [operation.id, buildInitialBody(operation)]),
+      ) as Record<string, Record<string, string>>);
+      this.openApiVersion.set(openApiDocument.info.version);
+      this.catalogueError.set(null);
+    } catch (error) {
+      this.catalogueError.set(error instanceof Error ? error.message : 'Failed to load OpenAPI document.');
+      this.openApiVersion.set('unavailable');
+    }
+  }
 
   async login(): Promise<void> {
     if (!msalClient || !config.authApiScope) {
-      this.apiError.set('Authentication is not configured.');
+      this.setGlobalError('Authentication is not configured.');
       return;
     }
 
-    this.apiError.set(null);
+    this.clearAllErrors();
     await msalClient.loginRedirect({ scopes: [config.authApiScope] });
   }
 
@@ -205,90 +403,136 @@ export class AppComponent {
     const account = this.activeAccount();
     await msalClient.logoutPopup({ account });
     this.activeAccount.set(null);
-    this.helloResponse.set(null);
-    this.redditResponse.set(null);
+    this.operationResults.set({});
+    this.operationErrors.set({});
   }
 
-  async callHello(): Promise<void> {
-    if (!msalClient || !config.authApiScope) {
-      this.apiError.set('Authentication is not configured.');
-      return;
-    }
+  inputValue(operationId: string, fieldName: string): string {
+    return this.formValues()[operationId]?.[fieldName] ?? '';
+  }
 
-    this.helloLoading.set(true);
-    this.apiError.set(null);
-    this.helloResponse.set(null);
+  setInputValue(operationId: string, fieldName: string, value: string): void {
+    this.formValues.update((current) => ({
+      ...current,
+      [operationId]: {
+        ...(current[operationId] ?? {}),
+        [fieldName]: value,
+      },
+    }));
+  }
+
+  operationResult(operationId: string): string {
+    return this.operationResults()[operationId] ?? '';
+  }
+
+  operationError(operationId: string): string {
+    return this.operationErrors()[operationId] ?? '';
+  }
+
+  isOperationLoading(operationId: string): boolean {
+    return this.loadingOperations()[operationId] === true;
+  }
+
+  minimumFor(field: SchemaFieldDoc): number | null {
+    const match = /min ([^,]+)/.exec(field.constraints);
+    return match ? Number(match[1]) : null;
+  }
+
+  maximumFor(field: SchemaFieldDoc): number | null {
+    const match = /max ([^,]+)/.exec(field.constraints);
+    return match ? Number(match[1]) : null;
+  }
+
+  async tryOperation(operation: ApiOperationDoc): Promise<void> {
+    this.setOperationLoading(operation.id, true);
+    this.clearOperationMessages(operation.id);
 
     try {
-      const account = this.activeAccount() ?? msalClient.getAllAccounts()[0] ?? null;
-      if (!account) {
-        throw new Error('Sign in before calling the protected API.');
+      const headers: Record<string, string> = {};
+      if (operation.requiresAuth) {
+        if (!msalClient || !config.authApiScope) {
+          throw new Error('Authentication is not configured.');
+        }
+
+        const account = this.activeAccount() ?? msalClient.getAllAccounts()[0] ?? null;
+        if (!account) {
+          throw new Error('Sign in before calling the protected API.');
+        }
+
+        headers['Authorization'] = `Bearer ${await acquireAccessToken(account)}`;
       }
 
-      const accessToken = await acquireAccessToken(account);
-      const response = await fetch(`${config.apiBaseUrl}/api/hello`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
+      const init: RequestInit = { method: operation.method.toUpperCase(), headers };
+      if (operation.requestFields.length) {
+        headers['Content-Type'] = operation.requestContentType;
+        init.body = JSON.stringify(this.buildRequestBody(operation));
+      }
+
+      const response = await fetch(`${config.apiBaseUrl}${operation.path}`, init);
       const responseText = await response.text();
       const responseBody = parseJsonOrText(responseText);
+      const formattedBody = formatBody(responseBody, true);
 
       if (!response.ok) {
         throw new Error(`API returned ${response.status}: ${formatBody(responseBody)}`);
       }
 
-      this.helloResponse.set(JSON.stringify(responseBody as HelloApiResponse, null, 2));
+      this.operationResults.update((current) => ({
+        ...current,
+        [operation.id]: formattedBody,
+      }));
     } catch (error) {
-      this.apiError.set(error instanceof Error ? error.message : 'Unknown API error.');
+      this.operationErrors.update((current) => ({
+        ...current,
+        [operation.id]: error instanceof Error ? error.message : 'Unknown API error.',
+      }));
     } finally {
-      this.helloLoading.set(false);
+      this.setOperationLoading(operation.id, false);
     }
   }
 
-  async fetchRedditThread(): Promise<void> {
-    if (!msalClient || !config.authApiScope) {
-      this.apiError.set('Authentication is not configured.');
-      return;
-    }
+  private buildRequestBody(operation: ApiOperationDoc): JsonObject {
+    const values = this.formValues()[operation.id] ?? {};
+    const body: JsonObject = {};
 
-    this.redditLoading.set(true);
-    this.apiError.set(null);
-    this.redditResponse.set(null);
-
-    try {
-      const account = this.activeAccount() ?? msalClient.getAllAccounts()[0] ?? null;
-      if (!account) {
-        throw new Error('Sign in before calling the protected API.');
+    for (const field of operation.requestFields) {
+      const rawValue = values[field.name] ?? '';
+      if (!field.required && rawValue === '') {
+        continue;
       }
 
-      const accessToken = await acquireAccessToken(account);
-      const response = await fetch(`${config.apiBaseUrl}/api/reddit/thread`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          post: this.redditPostInput(),
-          sort: 'confidence',
-        }),
-      });
-      const responseText = await response.text();
-      const responseBody = parseJsonOrText(responseText);
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}: ${formatBody(responseBody)}`);
+      if (field.inputType === 'number') {
+        body[field.name] = Number(rawValue);
+      } else if (field.inputType === 'checkbox') {
+        body[field.name] = rawValue === 'true';
+      } else {
+        body[field.name] = rawValue;
       }
-
-      this.redditResponse.set(responseBody as RedditThreadApiResponse);
-    } catch (error) {
-      this.apiError.set(error instanceof Error ? error.message : 'Unknown API error.');
-    } finally {
-      this.redditLoading.set(false);
     }
+
+    return body;
   }
 
+  private setOperationLoading(operationId: string, loading: boolean): void {
+    this.loadingOperations.update((current) => ({ ...current, [operationId]: loading }));
+  }
+
+  private clearOperationMessages(operationId: string): void {
+    this.operationErrors.update((current) => ({ ...current, [operationId]: '' }));
+    this.operationResults.update((current) => ({ ...current, [operationId]: '' }));
+  }
+
+  private clearAllErrors(): void {
+    this.operationErrors.set({});
+  }
+
+  private setGlobalError(message: string): void {
+    const firstOperation = this.endpoints()[0];
+    this.operationErrors.update((current) => ({
+      ...current,
+      [firstOperation?.id ?? 'global']: message,
+    }));
+  }
 }
 
 async function initializeMsal(): Promise<void> {
@@ -326,6 +570,243 @@ async function acquireAccessToken(account: AccountInfo): Promise<string> {
     }
     throw error;
   }
+}
+
+function buildApiOperations(document: OpenApiDocument): ApiOperationDoc[] {
+  return Object.entries(document.paths).flatMap(([path, pathItem]) =>
+    (Object.entries(pathItem) as [HttpMethod, OpenApiOperation][]).map(([method, operation]) => {
+      const id = operation.operationId ?? `${method}-${path.replace(/[^a-z0-9]+/gi, '-')}`;
+      const requestMedia = operation.requestBody?.content?.['application/json'];
+      const requestSchema = resolveSchema(requestMedia?.schema);
+      const requestExample = firstExample(requestMedia?.examples) ?? exampleFromSchema(requestSchema);
+      const responses = Object.entries(operation.responses ?? {}).map(([status, response]) => {
+        const responseMedia = response.content?.['application/json'];
+        const responseSchema = resolveSchema(responseMedia?.schema);
+        return {
+          status,
+          description: response.description ?? '',
+          schemaName: schemaName(responseMedia?.schema),
+          fields: schemaFields(responseSchema),
+          example: stringifyExample(firstExample(responseMedia?.examples) ?? exampleFromSchema(responseSchema)),
+        };
+      });
+
+      return {
+        id,
+        method,
+        path,
+        tag: operation.tags?.[0] ?? 'API',
+        summary: operation.summary ?? `${method.toUpperCase()} ${path}`,
+        description: normalizeDescription(operation.description),
+        requiresAuth: Boolean(operation.security?.length),
+        requestRequired: operation.requestBody?.required === true,
+        requestContentType: requestMedia ? 'application/json' : '',
+        requestSchemaName: schemaName(requestMedia?.schema),
+        requestFields: schemaFields(requestSchema),
+        requestExample: stringifyExample(requestExample),
+        responses,
+        schemas: relatedSchemas([requestMedia?.schema, ...responses.map((response) => response.schemaName ? { $ref: `#/components/schemas/${response.schemaName}` } : undefined)]),
+      };
+    }),
+  );
+}
+
+function relatedSchemas(schemaRefs: (OpenApiSchema | string | undefined)[]): SchemaDoc[] {
+  const seen = new Set<string>();
+  const docs: SchemaDoc[] = [];
+
+  const visit = (schemaOrName: OpenApiSchema | string | undefined): void => {
+    const name = typeof schemaOrName === 'string' ? schemaOrName : schemaName(schemaOrName);
+    if (!name || seen.has(name)) {
+      return;
+    }
+
+    const schema = openApiDocument.components?.schemas?.[name];
+    if (!schema) {
+      return;
+    }
+
+    seen.add(name);
+    docs.push({ name, description: schema.description ?? '', fields: schemaFields(schema) });
+
+    for (const property of Object.values(schema.properties ?? {})) {
+      if (property.$ref) {
+        visit(property);
+      }
+      if (property.items?.$ref) {
+        visit(property.items);
+      }
+    }
+  };
+
+  for (const schemaRef of schemaRefs) {
+    visit(schemaRef);
+  }
+
+  return docs;
+}
+
+function schemaFields(schema: OpenApiSchema | undefined): SchemaFieldDoc[] {
+  if (!schema?.properties) {
+    return [];
+  }
+
+  const required = new Set(schema.required ?? []);
+  return Object.entries(schema.properties).map(([name, property]) => {
+    const resolved = resolveSchema(property) ?? property;
+    const enumValues = (resolved.enum ?? []).map(String);
+    return {
+      name,
+      type: describeType(property),
+      required: required.has(name),
+      description: resolved.description ?? 'No description supplied yet.',
+      defaultValue: resolved.default === undefined ? '' : String(resolved.default),
+      constraints: describeConstraints(resolved),
+      enumValues,
+      example: stringifyInlineExample(firstSchemaExample(resolved)),
+      inputType: inputTypeFor(resolved),
+    };
+  });
+}
+
+function resolveSchema(schema: OpenApiSchema | undefined): OpenApiSchema | undefined {
+  if (!schema?.$ref) {
+    return schema;
+  }
+
+  const name = schemaName(schema);
+  return name ? openApiDocument.components?.schemas?.[name] : schema;
+}
+
+function schemaName(schema: OpenApiSchema | undefined): string {
+  return schema?.$ref?.replace('#/components/schemas/', '') ?? '';
+}
+
+function describeType(schema: OpenApiSchema): string {
+  if (schema.$ref) {
+    return `${schemaName(schema)} object`;
+  }
+  if (schema.items) {
+    return `${describeType(schema.items)}[]`;
+  }
+  if (Array.isArray(schema.type)) {
+    return schema.type.join(' | ');
+  }
+  const schemaType = typeof schema.type === 'string' ? schema.type : 'value';
+  return schema.format ? `${schemaType} (${schema.format})` : schemaType;
+}
+
+function describeConstraints(schema: OpenApiSchema): string {
+  const constraints: string[] = [];
+  if (schema.minimum !== undefined) {
+    constraints.push(`min ${schema.minimum}`);
+  }
+  if (schema.maximum !== undefined) {
+    constraints.push(`max ${schema.maximum}`);
+  }
+  if (schema.default !== undefined) {
+    constraints.push(`default ${schema.default}`);
+  }
+  if (schema.const !== undefined) {
+    constraints.push(`const ${schema.const}`);
+  }
+  if (schema.enum?.length) {
+    constraints.push(`allowed ${schema.enum.join(', ')}`);
+  }
+  return constraints.join(', ');
+}
+
+function inputTypeFor(schema: OpenApiSchema): SchemaFieldDoc['inputType'] {
+  if (schema.enum?.length) {
+    return 'select';
+  }
+  if (schema.type === 'integer' || schema.type === 'number') {
+    return 'number';
+  }
+  if (schema.type === 'boolean') {
+    return 'checkbox';
+  }
+  return 'text';
+}
+
+function firstSchemaExample(schema: OpenApiSchema): unknown {
+  if (schema.examples?.length) {
+    return schema.examples[0];
+  }
+  if (schema.default !== undefined) {
+    return schema.default;
+  }
+  if (schema.const !== undefined) {
+    return schema.const;
+  }
+  return '';
+}
+
+function exampleFromSchema(schema: OpenApiSchema | undefined): unknown {
+  if (!schema) {
+    return undefined;
+  }
+  const resolved = resolveSchema(schema) ?? schema;
+  if (resolved.examples?.length) {
+    return resolved.examples[0];
+  }
+  if (resolved.const !== undefined) {
+    return resolved.const;
+  }
+  if (resolved.default !== undefined) {
+    return resolved.default;
+  }
+  if (resolved.properties) {
+    return Object.fromEntries(
+      Object.entries(resolved.properties).map(([name, property]) => [name, exampleFromSchema(property)]),
+    );
+  }
+  if (resolved.items) {
+    return [exampleFromSchema(resolved.items)];
+  }
+  if (resolved.enum?.length) {
+    return resolved.enum[0];
+  }
+  if (resolved.type === 'integer' || resolved.type === 'number') {
+    return 0;
+  }
+  if (resolved.type === 'boolean') {
+    return false;
+  }
+  if (Array.isArray(resolved.type) && resolved.type.includes('null')) {
+    return null;
+  }
+  return '';
+}
+
+function firstExample(examples: Record<string, { value?: unknown }> | undefined): unknown {
+  return Object.values(examples ?? {})[0]?.value;
+}
+
+function stringifyExample(example: unknown): string {
+  return example === undefined ? '' : JSON.stringify(example, null, 2);
+}
+
+function stringifyInlineExample(example: unknown): string {
+  if (example === undefined || example === '') {
+    return '';
+  }
+  return typeof example === 'string' ? example : JSON.stringify(example);
+}
+
+function buildInitialBody(operation: ApiOperationDoc): Record<string, string> {
+  const example = operation.requestExample ? parseJsonOrText(operation.requestExample) : {};
+  return Object.fromEntries(
+    operation.requestFields.map((field) => {
+      const exampleValue = typeof example === 'object' && example !== null ? (example as JsonObject)[field.name] : undefined;
+      const value = exampleValue ?? field.defaultValue ?? '';
+      return [field.name, value === undefined || value === null ? '' : String(value)];
+    }),
+  );
+}
+
+function normalizeDescription(description: string | undefined): string {
+  return description?.replace(/\s+/g, ' ').trim() ?? '';
 }
 
 function createMsalClient(runtimeConfig: RuntimeConfig): PublicClientApplication | null {
@@ -369,8 +850,8 @@ function parseJsonOrText(responseText: string): unknown {
   }
 }
 
-function formatBody(body: unknown): string {
-  return typeof body === 'string' ? body : JSON.stringify(body);
+function formatBody(body: unknown, pretty = false): string {
+  return typeof body === 'string' ? body : JSON.stringify(body, null, pretty ? 2 : undefined);
 }
 
 initializeMsal()

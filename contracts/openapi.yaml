@@ -2,10 +2,9 @@ openapi: 3.1.0
 info:
   title: JueZ API Catalogue
   version: 0.2.0
-  description: |
-    v0 API contract for the personal API catalogue platform. `/health` is public.
-    `/api/hello` is protected by OAuth 2.0 / OpenID Connect JWT bearer authentication
-    when `AUTH_ENABLED=true`.
+  description: v0 API contract for the personal API catalogue platform. `/health` is public. `/api/hello` and
+    `/api/reddit/thread` are protected by OAuth 2.0 / OpenID Connect JWT bearer authentication when
+    `AUTH_ENABLED=true`. The contract is the source for the Angular interactive API catalogue.
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -22,25 +21,25 @@ paths:
         - System
       security: []
       responses:
-        '200':
+        "200":
           description: Service is reachable.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HealthResponse'
+                $ref: "#/components/schemas/HealthResponse"
               examples:
                 ok:
                   summary: Healthy response
                   value:
                     status: ok
                     service: api-catalogue
-                    timestamp: '2026-05-13T00:00:00.000Z'
-        '404':
+                    timestamp: 2026-05-13T00:00:00.000Z
+        "404":
           description: Endpoint was not found on the current host.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
   /api/hello:
     get:
       operationId: getHello
@@ -57,12 +56,12 @@ paths:
         - entraOAuth2:
             - api.access
       responses:
-        '200':
+        "200":
           description: Authenticated Hello World response.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HelloResponse'
+                $ref: "#/components/schemas/HelloResponse"
               examples:
                 martin:
                   summary: Hello Martin response
@@ -70,11 +69,12 @@ paths:
                     message: Hello, Martin
                     authenticated: true
                     user:
-                      subject: '00000000-0000-0000-0000-000000000000'
-                      objectId: '11111111-1111-1111-1111-111111111111'
-                      tenantId: '22222222-2222-2222-2222-222222222222'
-        '401':
-          description: Missing, malformed, expired, not-yet-valid, incorrectly issued, incorrectly audience-bound, or unverifiable bearer token.
+                      subject: 00000000-0000-0000-0000-000000000000
+                      objectId: 11111111-1111-1111-1111-111111111111
+                      tenantId: 22222222-2222-2222-2222-222222222222
+        "401":
+          description: Missing, malformed, expired, not-yet-valid, incorrectly issued, incorrectly audience-bound, or
+            unverifiable bearer token.
           headers:
             WWW-Authenticate:
               schema:
@@ -83,31 +83,31 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthErrorResponse'
+                $ref: "#/components/schemas/AuthErrorResponse"
               examples:
                 missingToken:
                   value:
                     error:
                       code: unauthorized
                       message: Missing bearer token.
-        '403':
+        "403":
           description: Token is valid but lacks the required scope or role, tenant, or allowlisted user identifier.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthErrorResponse'
+                $ref: "#/components/schemas/AuthErrorResponse"
               examples:
                 forbidden:
                   value:
                     error:
                       code: forbidden
                       message: User is not allowed.
-        '404':
+        "404":
           description: Endpoint was not found on the current host.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
   /api/reddit/thread:
     post:
       operationId: postRedditThread
@@ -128,7 +128,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RedditThreadRequest'
+              $ref: "#/components/schemas/RedditThreadRequest"
             examples:
               redditUrl:
                 value:
@@ -136,20 +136,62 @@ paths:
                   sort: confidence
                   maxComments: 10000
       responses:
-        '200':
+        "200":
           description: Normalized Reddit thread response. Large threads may be truncated with warnings.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RedditThreadResponse'
-        '400':
+                $ref: "#/components/schemas/RedditThreadResponse"
+              examples:
+                normalizedThread:
+                  summary: Normalized Reddit thread response
+                  value:
+                    source: reddit
+                    fetchedAt: 2026-05-14T12:00:00.000Z
+                    input: https://www.reddit.com/r/redditdev/comments/abc123/example/
+                    post:
+                      id: abc123
+                      fullname: t3_abc123
+                      subreddit: redditdev
+                      title: Example Reddit API question
+                      author: example_author
+                      selftext: How should I call the Reddit API?
+                      url: https://www.reddit.com/r/redditdev/comments/abc123/example/
+                      permalink: /r/redditdev/comments/abc123/example/
+                      score: 42
+                      numComments: 7
+                      createdUtc: 1767225600
+                      over18: false
+                      locked: false
+                      archived: false
+                    comments:
+                      - id: def456
+                        fullname: t1_def456
+                        parentId: t3_abc123
+                        author: commenter
+                        body: This endpoint returns a normalized thread tree.
+                        score: 12
+                        createdUtc: 1767225660
+                        depth: 0
+                        replies: []
+                    stats:
+                      commentsReturned: 1
+                      moreChildrenRequests: 0
+                      truncated: false
+                      warnings: []
+                    redditRateLimit:
+                      used: "12.0"
+                      remaining: "588.0"
+                      resetSeconds: "600"
+        "400":
           description: Request body, post input, sort, or limit is invalid.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Missing, malformed, expired, not-yet-valid, incorrectly issued, incorrectly audience-bound, or unverifiable bearer token.
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, malformed, expired, not-yet-valid, incorrectly issued, incorrectly audience-bound, or
+            unverifiable bearer token.
           headers:
             WWW-Authenticate:
               schema:
@@ -158,31 +200,32 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthErrorResponse'
-        '403':
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "403":
           description: Token is valid but not authorized, or Reddit reports the content is inaccessible.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
           description: Reddit content or the endpoint was not found.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '429':
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
           description: Reddit rate-limited the upstream request.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '502':
-          description: Reddit upstream returned an unexpected error or invalid JSON, or Reddit integration config is missing.
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Reddit upstream returned an unexpected error or invalid JSON, or Reddit integration config is
+            missing.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   securitySchemes:
     bearerJwt:
@@ -208,7 +251,7 @@ components:
       properties:
         error:
           type: string
-          description: Human-readable error summary.
+          description: Human-readable error summary returned for non-auth application errors.
           examples:
             - Not found
     AuthErrorResponse:
@@ -229,9 +272,15 @@ components:
               enum:
                 - unauthorized
                 - forbidden
+              description: Machine-readable authorization result code.
+              examples:
+                - unauthorized
             message:
               type: string
-              description: Stable error summary that does not expose raw JWT validation internals.
+              description: Stable error summary safe for browser display.
+              examples:
+                - Missing bearer token.
+          description: Stable auth error envelope that avoids exposing raw JWT validation internals.
     HealthResponse:
       type: object
       additionalProperties: false
@@ -257,7 +306,7 @@ components:
           format: date-time
           description: Server-generated UTC timestamp.
           examples:
-            - '2026-05-13T00:00:00.000Z'
+            - 2026-05-13T00:00:00.000Z
     RedditThreadRequest:
       type: object
       additionalProperties: false
@@ -266,7 +315,10 @@ components:
       properties:
         post:
           type: string
-          description: Raw article ID, t3 fullname, redd.it URL, or reddit.com/old.reddit.com comments URL.
+          description: Raw Reddit article ID, t3 fullname, redd.it URL, or reddit.com/old.reddit.com comments URL. The
+            backend extracts only the article ID and never fetches arbitrary user-provided URLs.
+          examples:
+            - https://www.reddit.com/r/redditdev/comments/abc123/example/
         sort:
           type: string
           enum:
@@ -277,18 +329,27 @@ components:
             - old
             - qa
           default: confidence
+          description: Reddit comment sort order used when fetching the thread.
+          examples:
+            - confidence
         maxComments:
           type: integer
           minimum: 1
           maximum: 10000
           default: 10000
-          description: Maximum comments to return; values above 10000 are capped.
+          description: Maximum number of normalized comments to return. Values above 10000 are capped server-side.
+          examples:
+            - 10000
         maxMoreChildrenRequests:
           type: integer
           minimum: 0
           maximum: 5000
           default: 1000
-          description: Internal safety limit for omitted-comment expansion; values above 5000 are capped.
+          description: Safety limit for Reddit omitted-comment expansion requests. Set to 0 to disable expansion; values
+            above 5000 are capped server-side.
+          examples:
+            - 1000
+      description: Payload for requesting a normalized Reddit post and comment tree snapshot.
     RedditPost:
       type: object
       additionalProperties: false
@@ -310,32 +371,75 @@ components:
       properties:
         id:
           type: string
+          description: Reddit article ID without the `t3_` prefix.
+          examples:
+            - abc123
         fullname:
           type: string
+          description: Reddit fullname for the submission.
+          examples:
+            - t3_abc123
         subreddit:
           type: string
+          description: Subreddit display name without `/r/`.
+          examples:
+            - redditdev
         title:
           type: string
+          description: Submission title.
+          examples:
+            - Example Reddit API question
         author:
           type: string
+          description: Reddit username for the submission author, or Reddit deleted marker when unavailable.
+          examples:
+            - example_author
         selftext:
           type: string
+          description: Self-post body text. Empty for link posts or deleted content.
+          examples:
+            - How should I call the Reddit API?
         url:
           type: string
+          description: Original URL attached to the submission.
+          examples:
+            - https://www.reddit.com/r/redditdev/comments/abc123/example/
         permalink:
           type: string
+          description: Reddit permalink path for the submission.
+          examples:
+            - /r/redditdev/comments/abc123/example/
         score:
           type: number
+          description: Current Reddit score at fetch time.
+          examples:
+            - 42
         numComments:
           type: number
+          description: Reddit-reported comment count at fetch time.
+          examples:
+            - 7
         createdUtc:
           type: number
+          description: Submission creation time as Unix epoch seconds in UTC.
+          examples:
+            - 1767225600
         over18:
           type: boolean
+          description: Whether Reddit marks the submission as adult content.
+          examples:
+            - false
         locked:
           type: boolean
+          description: Whether the submission is locked against new comments.
+          examples:
+            - false
         archived:
           type: boolean
+          description: Whether the submission is archived by Reddit.
+          examples:
+            - false
+      description: Normalized metadata for the requested Reddit submission.
     RedditComment:
       type: object
       additionalProperties: false
@@ -352,24 +456,52 @@ components:
       properties:
         id:
           type: string
+          description: Reddit comment ID without the `t1_` prefix.
+          examples:
+            - def456
         fullname:
           type: string
+          description: Reddit fullname for the comment.
+          examples:
+            - t1_def456
         parentId:
           type: string
+          description: Parent fullname, usually the submission `t3_...` or another comment `t1_...`.
+          examples:
+            - t3_abc123
         author:
           type: string
+          description: Reddit username for the comment author, or Reddit deleted marker when unavailable.
+          examples:
+            - commenter
         body:
           type: string
+          description: Comment body text normalized from Reddit JSON.
+          examples:
+            - This endpoint returns a normalized thread tree.
         score:
           type: number
+          description: Current Reddit comment score at fetch time.
+          examples:
+            - 12
         createdUtc:
           type: number
+          description: Comment creation time as Unix epoch seconds in UTC.
+          examples:
+            - 1767225660
         depth:
           type: integer
+          description: Zero-based nesting depth below the submission.
+          examples:
+            - 0
         replies:
           type: array
           items:
-            $ref: '#/components/schemas/RedditComment'
+            $ref: "#/components/schemas/RedditComment"
+          description: Nested replies for this comment. Each item follows the RedditComment schema.
+          examples:
+            - []
+      description: Normalized Reddit comment node. Replies recursively contain more RedditComment objects.
     RedditThreadStats:
       type: object
       additionalProperties: false
@@ -381,14 +513,27 @@ components:
       properties:
         commentsReturned:
           type: integer
+          description: Number of normalized comments included in the response after limits are applied.
+          examples:
+            - 7
         moreChildrenRequests:
           type: integer
+          description: Number of Reddit omitted-comment expansion requests made by the backend.
+          examples:
+            - 1
         truncated:
           type: boolean
+          description: True when the response hit a configured safety limit and omitted additional comments.
+          examples:
+            - false
         warnings:
           type: array
           items:
             type: string
+          description: Human-readable warnings about truncation, inaccessible comments, or upstream limitations.
+          examples:
+            - []
+      description: Fetch and normalization statistics for the Reddit thread response.
     RedditRateLimit:
       type: object
       additionalProperties: false
@@ -400,15 +545,26 @@ components:
         used:
           type:
             - string
-            - 'null'
+            - "null"
+          description: Reddit `x-ratelimit-used` header value, or null when absent.
+          examples:
+            - "12.0"
         remaining:
           type:
             - string
-            - 'null'
+            - "null"
+          description: Reddit `x-ratelimit-remaining` header value, or null when absent.
+          examples:
+            - "588.0"
         resetSeconds:
           type:
             - string
-            - 'null'
+            - "null"
+          description: Reddit `x-ratelimit-reset` header value in seconds until reset, or null when absent.
+          examples:
+            - "600"
+      description: Reddit rate-limit response headers captured when available. Values are strings because Reddit
+        returns decimal header text; null means the header was absent.
     RedditThreadResponse:
       type: object
       additionalProperties: false
@@ -424,21 +580,35 @@ components:
         source:
           type: string
           const: reddit
+          description: Source system marker for this integration.
+          examples:
+            - reddit
         fetchedAt:
           type: string
           format: date-time
+          description: Server-generated UTC timestamp when the Reddit data was fetched.
+          examples:
+            - 2026-05-14T12:00:00.000Z
         input:
           type: string
+          description: Original caller-supplied post input after JSON parsing.
+          examples:
+            - https://www.reddit.com/r/redditdev/comments/abc123/example/
         post:
-          $ref: '#/components/schemas/RedditPost'
+          $ref: "#/components/schemas/RedditPost"
+          description: Normalized Reddit submission metadata.
         comments:
           type: array
           items:
-            $ref: '#/components/schemas/RedditComment'
+            $ref: "#/components/schemas/RedditComment"
+          description: Top-level normalized Reddit comments with recursive replies.
         stats:
-          $ref: '#/components/schemas/RedditThreadStats'
+          $ref: "#/components/schemas/RedditThreadStats"
+          description: Backend fetch and normalization statistics.
         redditRateLimit:
-          $ref: '#/components/schemas/RedditRateLimit'
+          $ref: "#/components/schemas/RedditRateLimit"
+          description: Reddit upstream rate-limit headers when available.
+      description: Normalized Reddit thread snapshot returned to the browser.
     HelloUser:
       type: object
       additionalProperties: false
@@ -448,12 +618,19 @@ components:
         subject:
           type: string
           description: Stable `sub` claim from the validated token.
+          examples:
+            - 00000000-0000-0000-0000-000000000000
         objectId:
           type: string
           description: Microsoft Entra `oid` claim when present; preferred allowlist identifier.
+          examples:
+            - 11111111-1111-1111-1111-111111111111
         tenantId:
           type: string
           description: Microsoft Entra `tid` claim when present.
+          examples:
+            - 22222222-2222-2222-2222-222222222222
+      description: Identity claims selected from the validated Microsoft Entra access token.
     HelloResponse:
       type: object
       additionalProperties: false
@@ -465,7 +642,7 @@ components:
         message:
           type: string
           const: Hello, Martin
-          description: v0 greeting.
+          description: v0 greeting returned after authorization succeeds.
           examples:
             - Hello, Martin
         authenticated:
@@ -475,4 +652,6 @@ components:
           examples:
             - true
         user:
-          $ref: '#/components/schemas/HelloUser'
+          $ref: "#/components/schemas/HelloUser"
+          description: Selected validated token claims for the signed-in caller.
+      description: Authenticated v0 Hello World response for the allowlisted user.

@@ -2,6 +2,19 @@
 
 Last updated: 2026-05-14
 
+
+## 2026-05-14 deployment secret scoping hardening
+
+- Aardvark identified that the reusable deployment workflow exposed `REDDIT_CLIENT_SECRET` at job scope while building an operator-selected deployment ref.
+- Fix in progress: deployment callers pass only the Reddit secret explicitly, the reusable workflow no longer exports that secret to checkout/install/build steps, and manual deployment refs are restricted to full commit SHAs already present in the `main` branch history before any build or secret-bearing infrastructure step runs.
+- The Reddit secret remains available only to the Bicep infrastructure deployment step that needs to pass the secure parameter into Azure.
+
+## 2026-05-14 app-only OAuth service-client auth implementation
+
+- Backend authorization now supports Microsoft Entra app-only OAuth client-credentials tokens alongside delegated user tokens. User tokens remain gated by `OIDC_ALLOWED_OBJECT_IDS`/`OIDC_ALLOWED_SUBJECTS`; app-only tokens are gated separately by `OIDC_ALLOWED_APP_OBJECT_IDS` and/or `OIDC_ALLOWED_CLIENT_IDS` after issuer, audience, tenant, and required scope/role validation.
+- Deployment wiring now passes the service-client allowlist variables into Azure Function App settings. The recommended test-zone setup is an Entra API app role such as `api.test`, a dedicated service-client app registration, and a GitHub Actions OIDC federated credential instead of a client secret.
+- Codex attempted to inspect Entra app registrations with the current Azure CLI identity, but Microsoft Graph returned insufficient privileges. The repo now includes `scripts/configure-entra-service-oauth.sh` so an identity with app-registration permissions can complete the Azure/GitHub configuration from Cloud Shell.
+
 ## 2026-05-14 GitHub Actions Node 24 and production variable warning follow-up
 
 - Workflow maintenance moved first-party actions to Node 24-compatible major versions and replaced `gitleaks/gitleaks-action@v2` with the Gitleaks CLI to avoid the remaining Node.js 20 action runtime warning.
@@ -72,6 +85,7 @@ Last updated: 2026-05-14
 - Frontend: Angular app in `apps/web`.
 - Backend: Azure Functions TypeScript app in `apps/api`.
 - API contract: `contracts/openapi.yaml`.
+- Frontend API catalogue: Angular renders endpoint documentation, request payload fields, response schemas, examples, and browser try-it controls by loading the `contracts/openapi.yaml` build asset at runtime; generated web OpenAPI copies are intentionally not committed.
 - Infrastructure: `infra/main.bicep`.
 - Azure resource groups: `rg-api-test` for test and `rg-api-prod` for production.
 - Azure region: `westeurope`.
