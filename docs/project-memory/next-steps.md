@@ -7,10 +7,9 @@
 
 ## 2026-05-14 personal Microsoft account auth next steps
 
-1. Merge and deploy the multi-issuer JWT validation fix.
-2. Update non-secret GitHub auth variables to include the Microsoft account issuer, tenant ID, and stable home-account object ID for `mkos_postat@outlook.com` while retaining the existing organization allowlist.
-3. Re-run test deployment and production promotion.
-4. Retry **Call hello with access token** in the browser; expected result is no CORS block and no `Invalid bearer token`.
+1. Retry **Call hello with access token** in the production browser session; expected result is no CORS block and no `Invalid bearer token`.
+2. If the API returns `403`, inspect only non-secret claims shape with sanitized diagnostics and confirm the token `oid`/tenant matches the explicit allowlist.
+3. After the manual browser authenticated call succeeds, mark the auth setup as fully browser-verified.
 
 
 ## Current active next steps from 2026-05-14 consolidation

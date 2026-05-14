@@ -7,6 +7,13 @@ Entries are reverse chronological. Do not include secrets or SAS URLs.
 - Verification: production `GET /health` returned `200`; unauthenticated `GET /api/hello` returned `401`; `OPTIONS /api/hello` from origin `https://stapicatalogueprodbfjsts.z6.web.core.windows.net` returned `204` with `Access-Control-Allow-Origin` set to that origin.
 - Production-failure issues #68, #72, and #74 were closed after the successful promotion and endpoint verification.
 
+## 2026-05-14 — Multi-issuer Microsoft account auth fix deployed
+
+- Production promotion run `25856534002` succeeded after PR #77.
+- Non-secret auth variables were updated to include both the organization tenant issuer/tenant/object allowlist and the explicit Microsoft account issuer/tenant/home-account object ID for `mkos_postat@outlook.com`.
+- Verification: production `GET /health` returned `200`; unauthenticated `GET /api/hello` returned `401`; CORS preflight from the production Angular origin returned `204` with the expected `Access-Control-Allow-Origin`.
+- Follow-up: manual browser retry of **Call hello with access token** is still needed because Codex cannot complete interactive Entra/MSA login.
+
 
 ## 2026-05-14 — MSAL redirect-flow fix deployed to production
 
