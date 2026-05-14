@@ -108,6 +108,81 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/reddit/thread:
+    post:
+      operationId: postRedditThread
+      summary: Fetch a protected Reddit thread snapshot
+      description: |
+        Protected endpoint that fetches a Reddit post and comments through fixed Reddit
+        OAuth API endpoints. Callers must authenticate with the same Microsoft Entra JWT
+        checks used by `/api/hello`. User-provided URLs are parsed only to extract a
+        Reddit article ID; the backend never fetches arbitrary user-provided URLs.
+      tags:
+        - Reddit
+      security:
+        - bearerJwt: []
+        - entraOAuth2:
+            - api.access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RedditThreadRequest'
+            examples:
+              redditUrl:
+                value:
+                  post: https://www.reddit.com/r/redditdev/comments/abc123/example/
+                  sort: confidence
+                  maxComments: 3000
+      responses:
+        '200':
+          description: Normalized Reddit thread response. Large threads may be truncated with warnings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RedditThreadResponse'
+        '400':
+          description: Request body, post input, sort, or limit is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing, malformed, expired, not-yet-valid, incorrectly issued, incorrectly audience-bound, or unverifiable bearer token.
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+              description: Bearer authentication challenge.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '403':
+          description: Token is valid but not authorized, or Reddit reports the content is inaccessible.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Reddit content or the endpoint was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Reddit rate-limited the upstream request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Reddit upstream returned an unexpected error or invalid JSON, or Reddit integration config is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   securitySchemes:
     bearerJwt:
@@ -183,6 +258,187 @@ components:
           description: Server-generated UTC timestamp.
           examples:
             - '2026-05-13T00:00:00.000Z'
+    RedditThreadRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - post
+      properties:
+        post:
+          type: string
+          description: Raw article ID, t3 fullname, redd.it URL, or reddit.com/old.reddit.com comments URL.
+        sort:
+          type: string
+          enum:
+            - confidence
+            - top
+            - new
+            - controversial
+            - old
+            - qa
+          default: confidence
+        maxComments:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          default: 3000
+          description: Maximum comments to return; values above 10000 are capped.
+        maxMoreChildrenRequests:
+          type: integer
+          minimum: 0
+          maximum: 150
+          default: 50
+          description: Internal safety limit for omitted-comment expansion; values above 150 are capped.
+    RedditPost:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - fullname
+        - subreddit
+        - title
+        - author
+        - selftext
+        - url
+        - permalink
+        - score
+        - numComments
+        - createdUtc
+        - over18
+        - locked
+        - archived
+      properties:
+        id:
+          type: string
+        fullname:
+          type: string
+        subreddit:
+          type: string
+        title:
+          type: string
+        author:
+          type: string
+        selftext:
+          type: string
+        url:
+          type: string
+        permalink:
+          type: string
+        score:
+          type: number
+        numComments:
+          type: number
+        createdUtc:
+          type: number
+        over18:
+          type: boolean
+        locked:
+          type: boolean
+        archived:
+          type: boolean
+    RedditComment:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - fullname
+        - parentId
+        - author
+        - body
+        - score
+        - createdUtc
+        - depth
+        - replies
+      properties:
+        id:
+          type: string
+        fullname:
+          type: string
+        parentId:
+          type: string
+        author:
+          type: string
+        body:
+          type: string
+        score:
+          type: number
+        createdUtc:
+          type: number
+        depth:
+          type: integer
+        replies:
+          type: array
+          items:
+            $ref: '#/components/schemas/RedditComment'
+    RedditThreadStats:
+      type: object
+      additionalProperties: false
+      required:
+        - commentsReturned
+        - moreChildrenRequests
+        - truncated
+        - warnings
+      properties:
+        commentsReturned:
+          type: integer
+        moreChildrenRequests:
+          type: integer
+        truncated:
+          type: boolean
+        warnings:
+          type: array
+          items:
+            type: string
+    RedditRateLimit:
+      type: object
+      additionalProperties: false
+      required:
+        - used
+        - remaining
+        - resetSeconds
+      properties:
+        used:
+          type:
+            - string
+            - 'null'
+        remaining:
+          type:
+            - string
+            - 'null'
+        resetSeconds:
+          type:
+            - string
+            - 'null'
+    RedditThreadResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - source
+        - fetchedAt
+        - input
+        - post
+        - comments
+        - stats
+        - redditRateLimit
+      properties:
+        source:
+          type: string
+          const: reddit
+        fetchedAt:
+          type: string
+          format: date-time
+        input:
+          type: string
+        post:
+          $ref: '#/components/schemas/RedditPost'
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/RedditComment'
+        stats:
+          $ref: '#/components/schemas/RedditThreadStats'
+        redditRateLimit:
+          $ref: '#/components/schemas/RedditRateLimit'
     HelloUser:
       type: object
       additionalProperties: false

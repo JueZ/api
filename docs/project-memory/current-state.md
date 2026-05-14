@@ -2,6 +2,13 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 Reddit thread endpoint in progress
+
+- A protected `POST /api/reddit/thread` endpoint is being added for authenticated Microsoft Entra callers. It uses app-only Reddit OAuth, fixed Reddit OAuth API endpoints, in-memory token caching, nested comment normalization, sequential `morechildren` expansion, and safety limits for huge threads.
+- Required runtime setting names are `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, and `REDDIT_USER_AGENT`; values must remain in GitHub/Azure configuration only and must not be committed or documented.
+- Reddit content is fetched on demand and is not persisted by the API.
+- v1 limitation: very large Reddit threads may return partial data with `stats.truncated=true`; an async Blob-backed job model can be considered later if full huge-thread exports are needed.
+
 ## 2026-05-14 production browser auth verified end-to-end
 
 - Manual production browser verification succeeded after the trailing-slash Microsoft Entra v1 issuer fix. The signed-in account `mkos_postat@outlook.com` called protected `GET /api/hello` successfully and received the authenticated response for Martin with subject, object ID, and tenant ID populated.
