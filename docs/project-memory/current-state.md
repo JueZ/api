@@ -2,12 +2,17 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 Reddit default expansion budget increased
+
+- Follow-up after testing a Reddit thread that returned `stats.truncated=true` at `moreChildrenRequests=50`: the default omitted-comment expansion budget was raised so normal requests continue well past the old 50-request cutoff and can retrieve all nested comments unless the larger safety limits, Reddit rate limits, or timeout budget are reached.
+- Current synchronous defaults: `maxComments=10000`, `maxMoreChildrenRequests=1000`, and a longer internal timeout budget. Reddit content is still fetched on demand and not persisted.
+
 ## 2026-05-14 Reddit thread endpoint in progress
 
 - A protected `POST /api/reddit/thread` endpoint is being added for authenticated Microsoft Entra callers. It uses app-only Reddit OAuth, fixed Reddit OAuth API endpoints, in-memory token caching, nested comment normalization, sequential `morechildren` expansion, and safety limits for huge threads.
 - Required runtime setting names are `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, and `REDDIT_USER_AGENT`; values must remain in GitHub/Azure configuration only and must not be committed or documented.
 - Reddit content is fetched on demand and is not persisted by the API.
-- v1 limitation: very large Reddit threads may return partial data with `stats.truncated=true`; an async Blob-backed job model can be considered later if full huge-thread exports are needed.
+- v1 limitation: very large Reddit threads above safety limits may return partial data with `stats.truncated=true`; an async Blob-backed job model can be considered later if full huge-thread exports are needed.
 
 ## 2026-05-14 production browser auth verified end-to-end
 
