@@ -2,6 +2,12 @@
 
 Entries are reverse chronological.
 
+## 2026-05-14 — Use MSAL redirect flow for production browser auth
+
+- Decision: Use MSAL redirect APIs for SPA sign-in and interactive API-token fallback instead of popup APIs.
+- Rationale: Production sign-in was returning to the static site with an auth-code hash and then stalling; redirect handling is a better fit for the deployed static site callback URL.
+- Consequence: Users navigate away during sign-in and return to the app after MSAL processes the auth-code hash; the app does not navigate back to the initiating URL after processing the redirect.
+
 ## 2026-05-14 — Setup phase is ready except delegated/manual auth verification
 
 - Decision: Treat the automated GitHub/Azure/test/production deployment setup as operationally ready after PR #60 and successful promotion run `25852638254`.
