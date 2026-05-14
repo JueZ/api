@@ -4,7 +4,7 @@
 
 ## 2026-05-14 final readiness next steps
 
-0. Deploy the MSAL redirect-flow fix and re-test production browser sign-in at <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/>.
+0. Re-test production browser sign-in at <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/> after PR #64 and production promotion run `25854251983`.
 1. Verify Microsoft Entra app registrations and GitHub OIDC federated credentials with a delegated identity that has app-registration read permissions.
 2. Manually verify browser sign-in at the production Angular URL with the allowlisted user.
 3. Begin normal feature development with a small non-Reddit, non-expensive API catalogue slice after the manual auth checks are accepted or completed.

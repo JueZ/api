@@ -7,7 +7,7 @@ Last updated: 2026-05-14
 ## 2026-05-14 production browser login redirect hang
 
 - Production browser sign-in returned to the static Angular URL with an authorization `code` in the hash but did not complete the UI sign-in. The likely cause is using MSAL popup APIs with the main Angular route as the redirect target instead of a redirect flow that processes the returned auth-code hash in the top-level window.
-- Fix in progress: switch the SPA sign-in and interactive token fallback to MSAL redirect APIs and disable navigation back to the original login request URL after redirect processing.
+- Fix deployed: PR #64 switched the SPA sign-in and interactive token fallback to MSAL redirect APIs and processes the returned auth-code hash without navigating back to the original request URL. Manual browser retest remains pending.
 
 ## 2026-05-14 final readiness residual risks
 
