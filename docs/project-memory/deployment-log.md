@@ -9,6 +9,13 @@
 
 
 Entries are reverse chronological. Do not include secrets or SAS URLs.
+## 2026-05-14 — Production browser auth manually verified
+
+- Event: Manual production browser verification succeeded after PR #86 and production promotion run `25858636629`.
+- Result: The Angular app signed in `mkos_postat@outlook.com`, acquired an API access token, and called protected `GET /api/hello` successfully.
+- Verification: The response was authenticated and returned the expected v0 hello payload for Martin with subject, object ID, and tenant ID fields.
+- Follow-up: Auth milestone is browser-verified; future feature work can build on the protected API foundation.
+
 ## 2026-05-14 — Trailing-slash Microsoft Entra v1 issuer fix deployed to production
 
 - Event: PR #86 was merged after passing CI and Policy Check, then `Deploy Test` run `25858558165` and `Promote Production` run `25858636629` completed successfully.
