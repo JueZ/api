@@ -2,6 +2,13 @@
 
 Last updated: 2026-05-14
 
+
+## 2026-05-14 deployment secret scoping hardening
+
+- Aardvark identified that the reusable deployment workflow exposed `REDDIT_CLIENT_SECRET` at job scope while building an operator-selected deployment ref.
+- Fix in progress: deployment callers pass only the Reddit secret explicitly, the reusable workflow no longer exports that secret to checkout/install/build steps, and manual deployment refs are restricted to full commit SHAs already present in the `main` branch history before any build or secret-bearing infrastructure step runs.
+- The Reddit secret remains available only to the Bicep infrastructure deployment step that needs to pass the secure parameter into Azure.
+
 ## 2026-05-14 app-only OAuth service-client auth implementation
 
 - Backend authorization now supports Microsoft Entra app-only OAuth client-credentials tokens alongside delegated user tokens. User tokens remain gated by `OIDC_ALLOWED_OBJECT_IDS`/`OIDC_ALLOWED_SUBJECTS`; app-only tokens are gated separately by `OIDC_ALLOWED_APP_OBJECT_IDS` and/or `OIDC_ALLOWED_CLIENT_IDS` after issuer, audience, tenant, and required scope/role validation.
