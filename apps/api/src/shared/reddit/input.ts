@@ -32,7 +32,7 @@ export function normalizeRedditSort(input: unknown): RedditSort {
 
 export function normalizeMaxComments(input: unknown): number {
   if (input === undefined || input === null) {
-    return 3000;
+    return 10000;
   }
   if (typeof input !== 'number' || !Number.isInteger(input) || input < 1) {
     throw new RedditInputError('maxComments must be a positive integer.');
@@ -42,12 +42,12 @@ export function normalizeMaxComments(input: unknown): number {
 
 export function normalizeMaxMoreChildrenRequests(input: unknown): number {
   if (input === undefined || input === null) {
-    return 50;
+    return 1000;
   }
   if (typeof input !== 'number' || !Number.isInteger(input) || input < 0) {
     throw new RedditInputError('maxMoreChildrenRequests must be a non-negative integer.');
   }
-  return Math.min(input, 150);
+  return Math.min(input, 5000);
 }
 
 export class RedditInputError extends Error {

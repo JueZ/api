@@ -134,7 +134,7 @@ paths:
                 value:
                   post: https://www.reddit.com/r/redditdev/comments/abc123/example/
                   sort: confidence
-                  maxComments: 3000
+                  maxComments: 10000
       responses:
         '200':
           description: Normalized Reddit thread response. Large threads may be truncated with warnings.
@@ -281,14 +281,14 @@ components:
           type: integer
           minimum: 1
           maximum: 10000
-          default: 3000
+          default: 10000
           description: Maximum comments to return; values above 10000 are capped.
         maxMoreChildrenRequests:
           type: integer
           minimum: 0
-          maximum: 150
-          default: 50
-          description: Internal safety limit for omitted-comment expansion; values above 150 are capped.
+          maximum: 5000
+          default: 1000
+          description: Internal safety limit for omitted-comment expansion; values above 5000 are capped.
     RedditPost:
       type: object
       additionalProperties: false
