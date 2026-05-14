@@ -6,9 +6,9 @@
 3. Re-test production browser sign-in and click **Call hello with access token**. Expected result: browser request is no longer blocked by CORS; if token claims and allowlist are correct, `/api/hello` returns the authenticated hello response.
 ## 2026-05-14 issuer-specific JWKS next steps
 
-1. Merge and deploy the issuer-specific JWKS validation fix.
-2. Re-run test deployment and production promotion.
-3. Retry **Call hello with access token** in the production browser session. Expected result: no CORS block and no `Invalid bearer token`.
+1. Retry **Call hello with access token** in the production browser session. Expected result: no CORS block and no `Invalid bearer token`.
+2. If the API returns `403`, inspect only non-secret claims shape with sanitized diagnostics and confirm the token `oid`/tenant matches the explicit allowlist.
+3. After the manual browser authenticated call succeeds, mark the auth setup as fully browser-verified.
 
 
 ## 2026-05-14 personal Microsoft account auth next steps
