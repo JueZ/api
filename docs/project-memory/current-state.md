@@ -9,6 +9,7 @@ Last updated: 2026-05-14
 - Safe production configuration checks showed the configured audience, required scope, tenant allow entry, and user object entry matched the browser token claims; this points to token validation, not the server-side user gate.
 - Root cause: Microsoft Entra v1 access tokens use an exact issuer with a trailing slash (`sts.windows.net/<tenant>/`), while PR #83 derived the `sts.windows.net` issuer alias without that trailing slash. The verifier uses exact issuer matching, so signature/claim validation failed before the user gate.
 - Fix in progress: derive both slash and no-slash same-host v1 aliases and the trailing-slash `sts.windows.net` alias for tenant-specific Microsoft Entra v2 issuers.
+- Update: PR #86 was merged and deployed by production promotion run `25858636629`; production smoke tests passed. The remaining step is an interactive browser retry with a fresh token.
 
 ## 2026-05-14 Microsoft Entra v1 access token issuer follow-up
 
