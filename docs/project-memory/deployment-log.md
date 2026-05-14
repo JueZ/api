@@ -2,6 +2,12 @@
 
 Entries are reverse chronological. Do not include secrets or SAS URLs.
 
+## 2026-05-14 — MSAL redirect-flow fix deployed to production
+
+- Event: PR #64 changed the Angular frontend to use MSAL redirect APIs for sign-in and interactive token fallback after production browser auth returned with an auth-code hash but did not complete UI sign-in.
+- Result: `Deploy Test` run `25854175773` passed and `Promote Production` run `25854251983` passed. Production smoke tests remained healthy.
+- Follow-up: Manually retest browser sign-in at the production Angular URL and confirm the page leaves the `#code` callback state and shows the signed-in account.
+
 ## 2026-05-14 — Final readiness production promotion succeeded
 
 - Event: After PR #60 merged, `Deploy Test` run `25852557000` and `Promote Production` run `25852638254` were manually dispatched from `main`.
