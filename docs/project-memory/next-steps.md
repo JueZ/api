@@ -5,6 +5,13 @@
 2. Confirm the deployment smoke test checks `/api/hello` CORS preflight for the production static website origin.
 3. Re-test production browser sign-in and click **Call hello with access token**. Expected result: browser request is no longer blocked by CORS; if token claims and allowlist are correct, `/api/hello` returns the authenticated hello response.
 
+## 2026-05-14 personal Microsoft account auth next steps
+
+1. Merge and deploy the multi-issuer JWT validation fix.
+2. Update non-secret GitHub auth variables to include the Microsoft account issuer, tenant ID, and stable home-account object ID for `mkos_postat@outlook.com` while retaining the existing organization allowlist.
+3. Re-run test deployment and production promotion.
+4. Retry **Call hello with access token** in the browser; expected result is no CORS block and no `Invalid bearer token`.
+
 
 ## Current active next steps from 2026-05-14 consolidation
 

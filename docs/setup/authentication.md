@@ -47,11 +47,15 @@ Common Microsoft Entra issuer patterns are:
 - `https://login.microsoftonline.com/<tenant-id>/v2.0`
 - An Entra External ID issuer URL for your external tenant.
 
-Set `OIDC_ISSUER` to the exact issuer expected in the access token `iss` claim. If
-`OIDC_JWKS_URI` is not set, the backend discovers JWKS from:
+Set `OIDC_ISSUER` to the exact issuer expected in the access token `iss` claim.
+If the app supports both an organization tenant and a personal Microsoft account, set
+`OIDC_ISSUER` to a comma-separated list of exact accepted issuers and keep
+`OIDC_ALLOWED_TENANTS` and `OIDC_ALLOWED_OBJECT_IDS` scoped to the explicitly allowed
+tenant/user IDs. If `OIDC_JWKS_URI` is not set, the backend discovers JWKS from the
+first configured issuer:
 
 ```text
-<OIDC_ISSUER>/.well-known/openid-configuration
+<first OIDC_ISSUER entry>/.well-known/openid-configuration
 ```
 
 ## Find your user object ID
@@ -80,7 +84,7 @@ environment validates the same tokens and protects the same routes before promot
 
 ```text
 AUTH_ENABLED=true
-OIDC_ISSUER=<issuer URL>
+OIDC_ISSUER=<issuer URL or comma-separated issuer URLs>
 OIDC_AUDIENCE=<API application ID URI or API client ID expected in aud>
 OIDC_REQUIRED_SCOPES=api.access
 OIDC_ALLOWED_OBJECT_IDS=<your user object ID>
