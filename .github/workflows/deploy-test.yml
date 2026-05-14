@@ -1,0 +1,50 @@
+name: Deploy Test
+
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Commit SHA, branch, or tag to deploy to test. Defaults to the selected ref.
+        required: false
+        type: string
+      deploy_frontend:
+        description: Deploy Angular static files.
+        required: false
+        default: true
+        type: boolean
+      deploy_functions:
+        description: Deploy Azure Functions package.
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+  actions: write
+  issues: write
+
+concurrency:
+  group: deploy-test
+  cancel-in-progress: false
+
+jobs:
+  deploy-test:
+    name: deploy test
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+      }}
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environmentName: test
+      azureResourceGroup: rg-api-test
+      githubEnvironment: test
+      deployFrontend: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_frontend }}
+      deployFunctions: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_functions }}
+      sourceRef: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.commit_sha || github.sha }}
