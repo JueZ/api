@@ -1,0 +1,15 @@
+# Glossary
+
+- GitHub Actions OIDC identity: The Azure federated identity used by GitHub Actions to deploy without a long-lived Azure client secret.
+- Codex direct Azure identity: The separate Azure identity used by Codex for direct diagnostics and safe operational work from the Codex environment.
+- `DEPLOY_PRODUCTION_ENABLED`: Repository variable that gates whether production deployment is allowed to proceed.
+- `rg-api-prod`: Production Azure resource group for this project.
+- Function App: Azure Functions hosting resource for the TypeScript API backend.
+- Storage account: Azure Storage resource used by the Function App and static frontend deployment flow.
+- `WEBSITE_RUN_FROM_PACKAGE`: Function App setting that points the runtime at a deployment package, currently SAS-backed and targeted for future hardening.
+- OpenAPI: API contract format used in `contracts/openapi.yaml` to describe routes, responses, and future security schemes.
+- Azure Functions `routePrefix`: Host-level route prefix setting. This project uses `routePrefix: ""`, so function routes are defined explicitly in code.
+- CI complete: Aggregate GitHub Actions check indicating the CI workflow required jobs completed successfully.
+- Policy complete: Aggregate GitHub Actions check indicating cost and guardrail policy checks completed successfully.
+- Codex Autofix: Bounded GitHub Actions workflow that can create repair tasks for failed PR checks, limited to two attempts.
+- Codex Auto-Merge: GitHub-native auto-merge workflow for eligible Codex branches or PRs labeled `codex-automerge` after required checks pass.
