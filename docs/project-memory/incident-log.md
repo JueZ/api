@@ -44,7 +44,7 @@
 - Symptom: production continued returning `401 Invalid bearer token` for the signed-in personal Microsoft account after PR #77 and production promotion run `25856534002`.
 - Root cause: the backend accepted multiple exact issuer strings but, without an explicit `OIDC_JWKS_URI`, discovered JWKS only from the first configured issuer. A token from the personal Microsoft account issuer can have a valid issuer but fail signature validation against the organization issuer JWKS.
 - Fix: verify tokens by trying each configured exact issuer with that issuer's own discovered JWKS endpoint, without logging token material.
-- Status: Fix in progress.
+- Status: Code fix deployed by PR #80 and production promotion run `25857092220`; manual browser retry is pending to confirm the authenticated response.
 
 
 Entries are reverse chronological.
