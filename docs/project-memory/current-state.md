@@ -11,9 +11,9 @@ Last updated: 2026-05-14
 
 ## 2026-05-14 deployment secret scoping hardening
 
-- Aardvark identified that the reusable deployment workflow exposed `REDDIT_CLIENT_SECRET` at job scope while building an operator-selected deployment ref.
-- Fix in progress: deployment callers pass only the Reddit secret explicitly, the reusable workflow no longer exports that secret to checkout/install/build steps, and manual deployment refs are restricted to full commit SHAs already present in the `main` branch history before any build or secret-bearing infrastructure step runs.
-- The Reddit secret remains available only to the Bicep infrastructure deployment step that needs to pass the secure parameter into Azure.
+- PR #107 remediated the Aardvark finding that the reusable deployment workflow exposed `REDDIT_CLIENT_SECRET` at job scope while building an operator-selected deployment ref.
+- Deployment callers now pass only the Reddit secret explicitly, the reusable workflow no longer exports that secret to checkout/install/build steps, and deployment refs are restricted to full commit SHAs already present in the `main` branch history before build or secret-bearing infrastructure steps run.
+- Production promotion run `25890276402` passed, including deployment and smoke tests for the production Function App and static web storage account.
 
 ## 2026-05-14 app-only OAuth service-client auth implementation
 

@@ -1,5 +1,13 @@
 # Deployment log
 
+## 2026-05-14 OpenAPI generated artifacts removed from version control
+
+- PR #103 (`Stop committing generated OpenAPI web artifacts`) merged via GitHub-native auto-merge at merge commit `21b4dcc81d055ecce728494ef7e5c14de411f8f3` after PR CI and Policy Check passed.
+- A main-branch `CI` workflow run `25890171719` was manually dispatched for the merge commit and passed all required checks.
+- `Deploy Test` workflow run `25890206895` deployed the merge commit to the `test` environment and passed smoke tests.
+- `Promote Production` workflow run `25890276402` completed successfully and passed production smoke tests after the same main-branch delivery sequence.
+- Result: `contracts/openapi.yaml` is the only committed OpenAPI YAML contract; Angular copies it as a build asset and parses it at runtime for the interactive catalogue.
+
 ## 2026-05-14 OpenAPI-driven API catalogue deployed to test and production
 
 - PR #99 (`OpenAPI-driven interactive API catalogue UI and sync script`) merged via GitHub-native auto-merge at merge commit `30f948b70d9d71f4eb39cacfa5d28838d1035e8b` after PR CI and Policy Check passed.
@@ -36,6 +44,13 @@ Entries are reverse chronological. Do not include secrets or SAS URLs.
 - Result: The Angular app signed in `mkos_postat@outlook.com`, acquired an API access token, and called protected `GET /api/hello` successfully.
 - Verification: The response was authenticated and returned the expected v0 hello payload for Martin with subject, object ID, and tenant ID fields.
 - Follow-up: Auth milestone is browser-verified; future feature work can build on the protected API foundation.
+
+
+## 2026-05-14 — Deployment secret scoping hardening deployed
+
+- Event: PR #107 was squash-merged after CI and Policy Check passed, then `Promote Production` run `25890276402` deployed commit `3e4149265f8f3c8feb365a5a4933ff16b68edc83`.
+- Result: Production deployment succeeded. The reusable deployment workflow now validates deployment refs as full SHAs in `main`, uses explicit Reddit secret passing from callers, and scopes `REDDIT_CLIENT_SECRET` only to the Bicep infrastructure step.
+- Verification: Production workflow smoke tests passed for `https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net`; no production repair issue was created.
 
 ## 2026-05-14 — Trailing-slash Microsoft Entra v1 issuer fix deployed to production
 
