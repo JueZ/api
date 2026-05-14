@@ -1,5 +1,13 @@
 # Incident log
 
+## 2026-05-14 — Production browser auth verified after trailing-slash issuer fix
+
+- Symptom resolved: Production browser calls to protected `GET /api/hello` no longer return `401 Invalid bearer token` for the signed-in `mkos_postat@outlook.com` account.
+- Verification: Manual browser test returned `authenticated: true`, `message: Hello, Martin`, and populated subject, object ID, and tenant ID fields.
+- Resolution: PR #86 added the exact trailing-slash Microsoft Entra v1 issuer alias; production promotion run `25858636629` deployed it successfully.
+- Status: Resolved; continue treating `/api/hello` as protected when `AUTH_ENABLED=true`.
+
+
 ## 2026-05-14 — Microsoft Entra v1 issuer alias missed trailing slash
 
 - Symptom: Authenticated production browser calls to `GET /api/hello` continued returning `401 Invalid bearer token` after PR #83.
