@@ -23,7 +23,7 @@ Entries are reverse chronological.
 - Symptom: Deployment failed when creating a user delegation SAS with a 30-day expiry.
 - Root cause: User delegation SAS expiry cannot exceed 7 days.
 - Fix: Use a SAS expiry within the allowed 7-day window.
-- Prevention / lesson: Keep SAS lifetimes short and consider hardening away from SAS-backed `WEBSITE_RUN_FROM_PACKAGE`.
+- Prevention / lesson: Keep SAS lifetimes short. Later workflow updates replaced SAS-backed `WEBSITE_RUN_FROM_PACKAGE` with managed-identity package access.
 - Links: Related production-failure issue set included issue #28.
 
 ## 2026-05-14 — Static website upload failure

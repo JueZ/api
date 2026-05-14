@@ -1,6 +1,6 @@
 # JueZ API Catalogue
 
-v0 Hello World skeleton for a personal API catalogue platform.
+v0 serverless foundation for a personal API catalogue platform.
 
 ## What is here
 
@@ -8,7 +8,7 @@ v0 Hello World skeleton for a personal API catalogue platform.
 - Azure Functions TypeScript backend in `apps/api`.
 - OpenAPI contract in `contracts/openapi.yaml`.
 - Low-cost Bicep infrastructure skeleton in `infra/main.bicep`.
-- Setup documentation in `docs/setup/v0-hello-world.md` and staged deployment setup commands in `docs/setup/staged-deployment.md`.
+- Setup documentation in `docs/setup/v0-hello-world.md`, authentication setup in `docs/setup/authentication.md`, and staged deployment setup commands in `docs/setup/staged-deployment.md`.
 
 
 ## Project memory
@@ -23,9 +23,19 @@ npm run build
 npm test
 ```
 
-The v0 backend exposes public `GET /health` and protected `GET /api/hello` when
+The v0 backend code exposes public `GET /health` and protected `GET /api/hello` when
 `AUTH_ENABLED=true`. Test and production deployments use the same OAuth/OIDC JWT
 configuration so authentication is validated before production promotion.
+
+Current production URLs:
+
+- API: <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net>
+- Angular frontend: <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/>
+
+As of the 2026-05-14 consolidation, auth code is on `main`, but production was
+still verified as the pre-auth deployment: unauthenticated `GET /api/hello`
+returned `200` with `authenticated:false`. After the next successful auth-enabled
+production promotion, unauthenticated `GET /api/hello` should return `401`.
 
 ## Lightweight staged deployment
 
@@ -36,7 +46,7 @@ This project now uses a simple **test -> production** promotion flow for the sma
 3. `Deploy Test` runs smoke tests against the discovered test Function App URL:
    - `GET /health` must stay public.
    - unauthenticated `GET /api/hello` must return `401` when auth is enabled.
-4. Only after the test deployment and smoke tests pass, `Promote Production` deploys the same commit to `rg-api-prod` with `environmentName=prod`.
+4. Only after the test deployment and smoke tests pass, `Promote Production` can deploy the same commit to `rg-api-prod` with `environmentName=prod`; production deployment fails closed unless `DEPLOY_PRODUCTION_ENABLED=true`.
 5. `Promote Production` runs the same production smoke tests and then updates the non-secret GitHub repository variables `PRODUCTION_BASE_URL`, `AZURE_FUNCTIONAPP_NAME`, and `AZURE_STATIC_WEB_STORAGE_ACCOUNT`.
 
 The normal path needs no routine human input. If the GitHub `production` environment has required reviewers configured, GitHub pauses the production job for approval before Azure changes are made. For a solo project, configure required reviewers only if you want that gate, and do not enable "prevent self-review" unless another reviewer exists. The `test` environment should normally have no reviewer approval.
@@ -76,7 +86,7 @@ gh workflow run rollback-production.yml \
 
 This is enough for a small personal project because it proves the exact commit in a separate Azure resource group before production without adding always-on services or expensive routing infrastructure. Blue/green and canary deployments are overkill for v0. Azure Functions deployment slots could be a later hardening upgrade, but this task deliberately keeps the current low-cost consumption-style model and does not switch to a more expensive plan for slots.
 
-See [`docs/setup/staged-deployment.md`](docs/setup/staged-deployment.md) for the exact Azure CLI and GitHub CLI setup commands for environments, resource groups, OIDC federated credentials, RBAC, manual deployment, promotion, and rollback.
+See [`docs/setup/staged-deployment.md`](docs/setup/staged-deployment.md) for the exact Azure CLI and GitHub CLI setup commands for environments, resource groups, OIDC federated credentials, RBAC, manual deployment, promotion, and rollback. See [`docs/project-memory/current-state.md`](docs/project-memory/current-state.md) before operational work; it records the latest verified difference between code on `main` and production.
 
 <!-- markdownlint-disable MD013 -->
 

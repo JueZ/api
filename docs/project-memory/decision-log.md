@@ -2,6 +2,34 @@
 
 Entries are reverse chronological.
 
+## 2026-05-14 — Consolidated actual auth/deployment state after fast iterations
+
+- Decision: Treat OAuth/OIDC JWT auth as merged to `main` in code, but not yet verified in production.
+- Rationale: `main` contains backend JWT validation, the `/api/hello` authorization path, Angular MSAL wiring, OpenAPI security, and Bicep auth settings, while direct production smoke verification still returns the old unauthenticated placeholder response for `/api/hello`.
+- Consequence: Docs and project memory must distinguish code truth from deployed production truth until the next successful auth-enabled production promotion.
+- Status: Active.
+
+## 2026-05-14 — Reaffirm production deployment gate in staged workflow
+
+- Decision: Normal deployment remains `Deploy Test` -> `Promote Production` using `deploy-environment.yml`, and production deploy jobs fail closed unless `DEPLOY_PRODUCTION_ENABLED=true`.
+- Rationale: Repository guardrails say production must not deploy unless the deployment flag is intentionally enabled, even though production promotion is test-first.
+- Consequence: `Deploy Test` can still verify test, while production promotion and rollback require the explicit production enablement variable plus GitHub environment gates.
+- Status: Active.
+
+## 2026-05-14 — Align CI/deploy Node version with Azure Functions runtime
+
+- Decision: GitHub Actions Node setup and the package engine declaration should target Node 22.
+- Rationale: Azure Functions production runtime is `Node|22`; CI should exercise the same major runtime that runs in Azure.
+- Consequence: Contributors and automation should use Node 22 or newer for local builds/tests.
+- Status: Active.
+
+## 2026-05-14 — Package deployment should avoid SAS URLs
+
+- Decision: Store Function App packages in a private storage container and configure `WEBSITE_RUN_FROM_PACKAGE` to the blob URL with `WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID=SystemAssigned`.
+- Rationale: Managed-identity package access avoids expiring SAS URLs in app settings.
+- Consequence: Storage/RBAC prerequisites matter for deployment, but project memory must not store secrets, SAS URLs, or connection strings.
+- Status: Active.
+
 ## 2026-05-14 — Reuse production auth configuration in test
 
 - Decision: `Deploy Test` and `Promote Production` use the same non-secret OAuth/OIDC repository variables for backend JWT validation and browser MSAL configuration.
