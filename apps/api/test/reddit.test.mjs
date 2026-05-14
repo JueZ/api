@@ -105,6 +105,36 @@ test('RedditThreadService expands MoreChildren placeholders when limits allow', 
   assert.equal(calls.filter((url) => url.includes('/api/morechildren')).length, 1);
 });
 
+
+test('RedditThreadService default MoreChildren budget fetches beyond the old 50 request cutoff', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  let moreCalls = 0;
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) {
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      }
+      if (String(input).includes('/comments/abc123')) {
+        return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      }
+      if (String(input).includes('/api/morechildren')) {
+        moreCalls += 1;
+        return jsonResponse(chainedMoreChildrenFixture(moreCalls, 75), 200, rateHeaders(1 + moreCalls));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThread({ post: 'abc123' });
+
+  assert.equal(moreCalls, 75);
+  assert.equal(response.stats.moreChildrenRequests, 75);
+  assert.equal(response.stats.truncated, false);
+  assert.equal(response.stats.commentsReturned, 77);
+});
+
 test('RedditThreadService expands MoreChildren sequentially and reports truncation limits', async () => {
   process.env.REDDIT_CLIENT_ID = config.clientId;
   process.env.REDDIT_CLIENT_SECRET = config.secret;
@@ -251,6 +281,36 @@ function threadFixture() {
       },
     },
   ];
+}
+
+
+function chainedMoreChildrenFixture(index, total) {
+  const things = [
+    {
+      kind: 't1',
+      data: {
+        id: `cx${index}`,
+        name: `t1_cx${index}`,
+        parent_id: 't1_c1',
+        author: 'expanded-user',
+        body: `expanded comment ${index}`,
+        score: 1,
+        created_utc: 200 + index,
+        replies: '',
+      },
+    },
+  ];
+  if (index < total) {
+    things.push({
+      kind: 'more',
+      data: {
+        parent_id: 't1_c1',
+        children: [`cx${index + 1}`],
+        depth: 1,
+      },
+    });
+  }
+  return { json: { data: { things } } };
 }
 
 function moreChildrenFixture() {

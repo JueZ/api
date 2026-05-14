@@ -4,7 +4,7 @@ Last updated: 2026-05-14
 
 ## 2026-05-14 Reddit huge-thread truncation v1 limitation
 
-- The synchronous Reddit thread endpoint has bounded limits: default `maxComments=3000`, hard max `10000`, default `maxMoreChildrenRequests=50`, hard max `150`, and an internal timeout budget. Very large threads may return partial data with warnings.
+- The synchronous Reddit thread endpoint has bounded limits: default `maxComments=10000`, hard max `10000`, default `maxMoreChildrenRequests=1000`, hard max `5000`, and an internal timeout budget. Very large threads above those larger safety limits may return partial data with warnings.
 - Future enhancement: add an async Blob-backed job flow if complete huge-thread exports are required.
 
 ## 2026-05-14 production authenticated browser call verified

@@ -4,7 +4,7 @@ import { normalizeMaxComments, normalizeMaxMoreChildrenRequests, normalizeReddit
 import { attachMoreChildren, commentsPath, commentsQuery, createThreadResponse, normalizeInitialThread, RedditContentError, type MorePlaceholder } from './normalize.js';
 import type { RedditRateLimit, RedditThreadRequest, RedditThreadResponse } from './types.js';
 
-const TIMEOUT_BUDGET_MS = 25_000;
+const TIMEOUT_BUDGET_MS = 110_000;
 const MORE_CHILDREN_BATCH_SIZE = 100;
 
 export interface RedditThreadServiceOptions {
