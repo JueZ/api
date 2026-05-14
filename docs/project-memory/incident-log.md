@@ -37,7 +37,7 @@
 - Symptom: after CORS was fixed, the production Angular call to protected `/api/hello` reached the API but returned `401` with `Invalid bearer token`.
 - Root cause: the configured backend issuer accepted only the organization tenant issuer, while the signed-in `mkos_postat@outlook.com` browser session uses the Microsoft account tenant issuer.
 - Fix: allow comma-separated accepted issuer URLs in `OIDC_ISSUER`; deployment configuration must add the explicit Microsoft account issuer, tenant ID, and stable home-account object ID while retaining the existing allowlist.
-- Status: Fix in progress.
+- Status: Code/config fix deployed by PR #77 and production promotion run `25856534002`; manual browser retry is pending to confirm the authenticated response.
 
 
 Entries are reverse chronological.
