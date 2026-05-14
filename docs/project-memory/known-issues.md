@@ -8,6 +8,7 @@ Last updated: 2026-05-14
 - Symptom: protected `GET /api/hello` still returns `401 Invalid bearer token` from the production Angular session.
 - Root cause: Microsoft Entra v1 access tokens use a trailing-slash `sts.windows.net/<tenant>/` issuer; deployed code derives the v1 alias without the trailing slash.
 - Status: Code fix proposed to include the trailing-slash alias; merge, deploy, and retry the browser call.
+- Update: PR #86 has deployed; retry the browser call with a fresh token to confirm the interactive end-to-end result.
 
 ## 2026-05-14 production API returns 401 for Microsoft Entra v1 access token
 
