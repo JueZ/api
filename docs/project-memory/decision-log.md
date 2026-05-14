@@ -1,4 +1,11 @@
 # Decision log
+
+## 2026-05-14 Reddit integration uses app-only OAuth and no persistence
+
+- Decision: implement Reddit thread fetching with app-only OAuth `client_credentials`, using only configured setting names for client ID, client secret, and User-Agent. The endpoint remains protected by the same Microsoft Entra JWT authorization as `/api/hello`.
+- Decision: parse user-provided Reddit post inputs to an article ID and call only fixed `oauth.reddit.com` endpoints; never fetch arbitrary user-provided URLs.
+- Decision: do not persist Reddit content in v1. Return normalized JSON directly, with truncation warnings when safety limits are reached.
+
 ## 2026-05-14 — Configure Function App platform CORS for the Angular origin
 
 - Decision: Configure Azure Functions platform CORS from the deployed web redirect origin and verify `/api/hello` preflight during environment smoke tests.
