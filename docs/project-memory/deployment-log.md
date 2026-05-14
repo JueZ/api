@@ -10,6 +10,12 @@ Entries are reverse chronological. Do not include secrets or SAS URLs.
 - Blocker: Codex Azure identity could not list app registrations by display name due to insufficient Microsoft Entra directory privileges.
 - Missing values: API app client ID, SPA app client ID, API App ID URI, `api.access` scope ID, and `OIDC_ALLOWED_OBJECT_IDS`.
 - Next step: A sufficiently privileged delegated user must create/reuse the Entra app registrations and provide the allowed user object ID before merge/deploy.
+## 2026-05-14 — Staged deployment setup commands and rollback skill documented
+
+- Event: Added a repo-scoped production rollback skill and setup commands for GitHub environments, Azure resource groups, OIDC federated credentials, RBAC, test deployment, production promotion, and rollback.
+- Result: Documentation-only operational follow-up; no Azure resources were changed by this PR.
+- Evidence / command summary: `docs/setup/staged-deployment.md` contains the CLI command sequence; `.agents/skills/production-rollback/SKILL.md` contains the standard rollback workflow command.
+- Follow-up: Run the setup commands with an Azure principal that can create `rg-api-test` and assign scoped roles, then verify `Deploy Test` and `Promote Production`.
 
 ## 2026-05-14 — Staged deployment flow prepared in PR
 

@@ -21,3 +21,5 @@
 6. Re-run PR #40 checks, then squash merge through branch protection.
 7. Re-enable `DEPLOY_PRODUCTION_ENABLED=true` only when auth variables are configured and deploy PR #40 from `main`.
 8. Verify `/health` remains public, unauthenticated `/api/hello` returns 401, and browser login can call `/api/hello` as the allowlisted user.
+11. Run staged deployment setup commands in `docs/setup/staged-deployment.md` with an Azure principal that can create `rg-api-test` and assign scoped RBAC roles.
+12. Verify the repo `production-rollback` skill works during the first real rollback drill.

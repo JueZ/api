@@ -2,6 +2,13 @@
 
 Entries are reverse chronological.
 
+## 2026-05-14 — Store production rollback as a Codex skill
+
+- Decision: Add a repo-scoped `production-rollback` Codex skill for redeploying previous known-good commits through `rollback-production.yml`.
+- Context: Rollback must reuse the same production workflow path, GitHub `production` environment approval, and smoke tests instead of ad hoc commands.
+- Consequences: Future Codex sessions should trigger this skill for production rollback requests and must not bypass environment approval or smoke tests.
+- Status: Active.
+
 ## 2026-05-14 — Introduce lightweight test-to-production promotion
 
 - Decision: Deploy merged commits to a separate test environment first, then promote the same commit to production only after test smoke tests pass.

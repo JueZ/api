@@ -131,7 +131,7 @@ gh run list --repo JueZ/api --workflow deploy-test.yml --branch main --limit 1
 gh run list --repo JueZ/api --workflow promote-production.yml --branch main --limit 1
 ```
 
-Manual deployment and rollback commands are listed in the staged deployment section below.
+Manual deployment and rollback commands are listed in the staged deployment section below. The full Azure CLI and GitHub CLI setup guide is in [`docs/setup/staged-deployment.md`](setup/staged-deployment.md).
 
 ## Lightweight staged deployment
 
