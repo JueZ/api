@@ -23,6 +23,14 @@ Decision: Codex must commit repository-changing work and open or update a pull r
 Rationale: The user observed repeated successful Codex tasks that did not create pull requests. Making PR creation an explicit completion requirement aligns agent behavior with the autonomous delivery pipeline. A follow-up clarified that Codex should repair common local checkout issues before giving up, including restoring the `origin` remote to `https://github.com/JueZ/api.git`, wiring Git to GitHub CLI credentials with `gh auth setup-git --hostname github.com`, pushing the branch, and creating/updating the PR with `--repo JueZ/api`.
 
 
+## 2026-05-14: Require explicit app-only token marker for service-client authorization
+
+Decision: classify API callers as service clients only when the verified JWT contains the unambiguous Microsoft Entra app-only marker `idtyp=app`. Tokens that merely contain app roles plus `azp` or `appid` continue through delegated user authorization and must satisfy `OIDC_ALLOWED_OBJECT_IDS` or `OIDC_ALLOWED_SUBJECTS`.
+
+Rationale: role claims and client identifiers are not sufficient proof that a token is client-credentials/app-only. This preserves the central user allowlist for delegated callers while keeping separately allowlisted service clients available for explicit app-only tokens.
+
+Status: In progress.
+
 ## 2026-05-14: Use Entra app roles for service/e2e OAuth instead of static tokens
 
 Decision: support other applications and deployed test-zone service/e2e tests with Microsoft Entra OAuth 2.0 client credentials, app roles, tenant validation, and explicit service-client allowlists. Do not introduce custom static bearer tokens, password-grant test login, or deployed auth bypasses.

@@ -118,7 +118,7 @@ export async function authorizeRequest(
   }
 
   const clientId = getClientId(payload);
-  if (isServiceToken(payload, tokenAccess)) {
+  if (isServiceToken(payload)) {
     if (!isAllowedServiceClient(objectId, clientId, config)) {
       return forbidden('Service client is not allowed.');
     }
@@ -224,12 +224,8 @@ function getTokenAccess(payload: JWTPayload, requiredScopes: string[]): TokenAcc
   };
 }
 
-function isServiceToken(payload: JWTPayload, access: TokenAccess): boolean {
-  if (payload['idtyp'] === 'app') {
-    return true;
-  }
-
-  return access.scopes.length === 0 && access.roles.length > 0 && getClientId(payload) !== undefined;
+function isServiceToken(payload: JWTPayload): boolean {
+  return payload['idtyp'] === 'app';
 }
 
 function getClientId(payload: JWTPayload): string | undefined {
