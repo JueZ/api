@@ -18,6 +18,11 @@ Last updated: 2026-05-14
 - Manual browser retry after the CORS fix reached the API, but production returned `401` with `Invalid bearer token`. The signed-in account was `mkos_postat@outlook.com`, whose MSAL home account tenant segment is the Microsoft account tenant `9188040d-6c67-4c5b-b112-36a304b66dad`.
 - PR #77 added comma-separated `OIDC_ISSUER` support so the backend can validate both the existing organization issuer and the explicit personal Microsoft account issuer while still enforcing exact audience, required scope, allowed tenant IDs, and allowed object IDs. It was deployed by production promotion run `25856534002`.
 
+## 2026-05-14 issuer-specific JWKS follow-up
+
+- Manual browser retry still returned `401 Invalid bearer token` after multi-issuer deployment because PR #77 accepted multiple issuer strings but still used only the first issuer's JWKS discovery URI for signature verification.
+- A follow-up fix is in progress so, when `OIDC_JWKS_URI` is not explicitly set, each configured issuer is verified with its own discovered JWKS endpoint.
+
 - Project name: JueZ API Catalogue.
 - Repository: `JueZ/api`.
 - Goal: personal API catalogue platform.

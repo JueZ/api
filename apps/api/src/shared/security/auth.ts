@@ -129,14 +129,32 @@ export async function verifyJwtWithJose(token: string, config: AuthConfig): Prom
     throw new Error('OIDC issuer and audience are required.');
   }
 
-  const jwksUri = config.jwksUri ?? (await discoverJwksUri(issuers[0]));
-  const jwks = getJwks(jwksUri);
-  const result = await jwtVerify(token, jwks, {
-    issuer: issuers.length === 1 ? issuers[0] : issuers,
-    audience: config.audience,
-  });
+  if (config.jwksUri) {
+    const jwks = getJwks(config.jwksUri);
+    const result = await jwtVerify(token, jwks, {
+      issuer: issuers.length === 1 ? issuers[0] : issuers,
+      audience: config.audience,
+    });
 
-  return result.payload;
+    return result.payload;
+  }
+
+  for (const issuer of issuers) {
+    try {
+      const jwksUri = await discoverJwksUri(issuer);
+      const jwks = getJwks(jwksUri);
+      const result = await jwtVerify(token, jwks, {
+        issuer,
+        audience: config.audience,
+      });
+
+      return result.payload;
+    } catch {
+      // Try the next exact issuer/JWKS pair without leaking token details.
+    }
+  }
+
+  throw new Error('JWT verification failed for all configured issuers.');
 }
 
 function validateConfig(config: AuthConfig): string | undefined {

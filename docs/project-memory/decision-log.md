@@ -11,6 +11,12 @@
 - Rationale: The first production browser user is a personal Microsoft account, which can receive tokens from the Microsoft account tenant issuer rather than the organization tenant issuer. Accepting multiple exact issuers is narrower than disabling issuer validation or switching to a broad wildcard issuer.
 - Status: In progress.
 
+## 2026-05-14 — Use issuer-specific JWKS for multi-issuer validation
+
+- Decision: When multiple exact OIDC issuers are configured and `OIDC_JWKS_URI` is unset, discover and cache JWKS per issuer rather than reusing the first issuer's JWKS for every issuer.
+- Rationale: Multi-issuer validation must keep exact issuer checks while using the key material published by the issuer that signed the token.
+- Status: In progress.
+
 
 Entries are reverse chronological.
 
