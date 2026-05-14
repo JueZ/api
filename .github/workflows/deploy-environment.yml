@@ -35,6 +35,10 @@ on:
         required: false
         default: false
         type: boolean
+    secrets:
+      REDDIT_CLIENT_SECRET:
+        description: Reddit OAuth client secret for app-only API access.
+        required: true
     outputs:
       effectiveBaseUrl:
         description: Resolved Function App base URL.
@@ -91,6 +95,9 @@ jobs:
       WEB_AUTH_API_SCOPE: ${{ vars.WEB_AUTH_API_SCOPE }}
       WEB_API_BASE_URL: ${{ vars.WEB_API_BASE_URL }}
       TEST_WEB_API_BASE_URL: ${{ vars.TEST_WEB_API_BASE_URL }}
+      REDDIT_CLIENT_ID: ${{ vars.REDDIT_CLIENT_ID }}
+      REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
+      REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
     steps:
       - name: Checkout deployment source
         uses: actions/checkout@v4
@@ -133,6 +140,9 @@ jobs:
             : "${WEB_AUTH_REDIRECT_URI:?WEB_AUTH_REDIRECT_URI repository variable is required for production}"
           fi
           : "${WEB_AUTH_API_SCOPE:?WEB_AUTH_API_SCOPE repository variable is required for $ENVIRONMENT_NAME}"
+          : "${REDDIT_CLIENT_ID:?REDDIT_CLIENT_ID environment variable is required for $ENVIRONMENT_NAME}"
+          : "${REDDIT_USER_AGENT:?REDDIT_USER_AGENT environment variable is required for $ENVIRONMENT_NAME}"
+          : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
       - name: Azure OIDC login
         uses: azure/login@v2
         with:
@@ -188,6 +198,9 @@ jobs:
                 oidcAllowedObjectIds="${OIDC_ALLOWED_OBJECT_IDS:-}" \
                 oidcAllowedSubjects="${OIDC_ALLOWED_SUBJECTS:-}" \
                 oidcAllowedTenants="${OIDC_ALLOWED_TENANTS:-}" \
+                redditClientId="${REDDIT_CLIENT_ID:-}" \
+                redditOAuthSecret="${REDDIT_CLIENT_SECRET:-}" \
+                redditUserAgent="${REDDIT_USER_AGENT:-}" \
                 apiCorsAllowedOrigins="$api_cors_allowed_origins" \
               --query properties.outputs \
               -o json)

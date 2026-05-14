@@ -43,6 +43,17 @@ param oidcAllowedTenants string = ''
 @description('Enable sanitized authentication diagnostics without logging tokens or claims.')
 param authDebug string = 'false'
 
+
+@description('Reddit OAuth client ID for app-only API access.')
+param redditClientId string = ''
+
+@secure()
+@description('Reddit OAuth client secret for app-only API access.')
+param redditOAuthSecret string = ''
+
+@description('Reddit API User-Agent sent on every Reddit request.')
+param redditUserAgent string = ''
+
 @description('Comma-separated browser origins allowed to call the Function App API. Needed because Azure Functions handles CORS preflight before app code.')
 param apiCorsAllowedOrigins string = ''
 
@@ -171,6 +182,19 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'AUTH_DEBUG'
           value: authDebug
+        }
+
+        {
+          name: 'REDDIT_CLIENT_ID'
+          value: redditClientId
+        }
+        {
+          name: 'REDDIT_CLIENT_SECRET'
+          value: redditOAuthSecret
+        }
+        {
+          name: 'REDDIT_USER_AGENT'
+          value: redditUserAgent
         }
       ]
     }
