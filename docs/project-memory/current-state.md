@@ -2,12 +2,11 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 production deployment source hardening in progress
 
-## 2026-05-14 deployment secret scoping hardening deployed
+- Aardvark reported that production rollback/promote could deploy operator-supplied branches or tags and run checked-out npm lifecycle/build scripts after Azure OIDC login, while setup docs also allowed no production reviewers and standing production RBAC-admin access.
+- Fix in progress: deployment workflows validate refs before Azure login and only allow immutable commits that are ancestors of `main`; branch and tag inputs are rejected. Setup docs now require an independent production reviewer, prevent self-review, and document `Role Based Access Control Administrator` only as a temporary bootstrap exception that must be revoked.
 
-- PR #107 remediated the Aardvark finding that the reusable deployment workflow exposed `REDDIT_CLIENT_SECRET` at job scope while building an operator-selected deployment ref.
-- Deployment callers now pass only the Reddit secret explicitly, the reusable workflow no longer exports that secret to checkout/install/build steps, and deployment refs are restricted to full commit SHAs already present in the `main` branch history before build or secret-bearing infrastructure steps run.
-- Production promotion run `25890276402` passed, including deployment and smoke tests for the production Function App and static web storage account.
 
 ## 2026-05-14 app-only OAuth service-client auth implementation
 
