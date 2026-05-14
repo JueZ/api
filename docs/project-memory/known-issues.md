@@ -2,6 +2,13 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 production API returns 401 for Microsoft Entra v1 access token
+
+- Symptom: protected `GET /api/hello` returns `401 Invalid bearer token` from the production Angular session even though the signed-in user is allowlisted.
+- Root cause: production accepted the tenant-specific Microsoft Entra v2 issuer but the browser access token uses the Microsoft Entra v1 `sts.windows.net` issuer form for the same tenant.
+- Status: Code fix proposed to derive the matching v1 issuer alias; merge, deploy, and retry the browser call.
+
+
 ## 2026-05-14 production API CORS preflight failure
 
 - Symptom: after successful production browser sign-in, the Angular app showed `Failed to fetch` when calling protected `GET /api/hello`; browser diagnostics reported that the preflight response from the production Function App lacked `Access-Control-Allow-Origin` for `https://stapicatalogueprodbfjsts.z6.web.core.windows.net`.
