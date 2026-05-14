@@ -118,6 +118,20 @@ A repository-changing task is not complete until all of the following are true:
 
 If PR creation fails because of authentication, network, GitHub, branch, or permission problems, Codex must fail closed: keep the commit on the branch, do not claim autonomous delivery completed, and report the exact blocker plus the command or API action that failed. Codex must not silently skip PR creation after a successful implementation.
 
+
+## Pull request environment preflight and recovery
+
+Before giving up on pull request creation, Codex must verify and repair common local checkout issues when safe:
+
+1. Run `git remote -v`.
+2. If no remote is configured for this repository, add or restore `origin` as `https://github.com/JueZ/api.git`.
+3. Run `gh auth status` and `gh repo view JueZ/api` to verify GitHub CLI authentication and repository access.
+4. Run `gh auth setup-git --hostname github.com` so `git push` can use the authenticated GitHub CLI credential helper.
+5. Push the current non-`main` branch to `origin` with upstream tracking.
+6. Create or update the pull request with `gh pr create --repo JueZ/api` or `gh pr view`/`gh pr edit` using `--repo JueZ/api` explicitly.
+
+If any of these recovery steps fail, Codex must report the failed command and stop without claiming the task is complete.
+
 ## Files requiring extra protection
 
 Changes to these paths must be treated as high risk:

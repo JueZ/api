@@ -22,6 +22,19 @@ For any task that changes repository files, opening or updating a pull request i
 
 Documentation-only and guardrail-only changes still require the same branch, commit, and pull request flow. No PR is required only when the task intentionally makes no repository change, such as a read-only investigation or answer.
 
+
+### Missing remote or Git credential recovery
+
+Codex hosts may occasionally start from a checkout that has GitHub CLI authentication but no `origin` remote, or where Git itself is not wired to the GitHub CLI credential helper. In that case, Codex should repair the local PR path before declaring a blocker:
+
+1. Check `git remote -v`.
+2. Restore the repository remote with `git remote add origin https://github.com/JueZ/api.git` or `git remote set-url origin https://github.com/JueZ/api.git` when `origin` exists but points elsewhere.
+3. Verify access with `gh auth status` and `gh repo view JueZ/api`.
+4. Run `gh auth setup-git --hostname github.com`.
+5. Push the feature branch with upstream tracking and create/update the PR using `--repo JueZ/api` explicitly.
+
+Only after those steps fail should Codex report PR creation as blocked.
+
 ## Required branch protection and repository settings
 
 Configure these settings in GitHub before relying on autonomous delivery:

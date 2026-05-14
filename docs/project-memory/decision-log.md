@@ -12,7 +12,7 @@
 
 Decision: Codex must commit repository-changing work and open or update a pull request before reporting the task as complete. If PR creation is blocked by authentication, network, permissions, or branch state, Codex must fail closed and report that blocker instead of silently stopping after implementation.
 
-Rationale: The user observed repeated successful Codex tasks that did not create pull requests. Making PR creation an explicit completion requirement aligns agent behavior with the autonomous delivery pipeline.
+Rationale: The user observed repeated successful Codex tasks that did not create pull requests. Making PR creation an explicit completion requirement aligns agent behavior with the autonomous delivery pipeline. A follow-up clarified that Codex should repair common local checkout issues before giving up, including restoring the `origin` remote to `https://github.com/JueZ/api.git`, wiring Git to GitHub CLI credentials with `gh auth setup-git --hostname github.com`, pushing the branch, and creating/updating the PR with `--repo JueZ/api`.
 
 
 ## 2026-05-14: Use Entra app roles for service/e2e OAuth instead of static tokens
