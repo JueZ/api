@@ -343,10 +343,10 @@ jobs:
             rm -rf "$package_dir" "$RUNNER_TEMP/functionapp.zip"
             mkdir -p "$package_dir"
 
-            cp apps/api/host.json apps/api/package.json "$package_dir/"
+            cp apps/api/host.json apps/api/package.json apps/api/package-lock.json "$package_dir/"
             cp -R apps/api/dist "$package_dir/dist"
 
-            npm install --omit=dev --package-lock=false --prefix "$package_dir"
+            npm ci --omit=dev --ignore-scripts --prefix "$package_dir"
 
             (cd "$package_dir" && zip -r "$RUNNER_TEMP/functionapp.zip" .)
 
