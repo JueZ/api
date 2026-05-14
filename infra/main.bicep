@@ -7,10 +7,41 @@ targetScope = 'resourceGroup'
 param location string = 'westeurope'
 
 @description('Short environment name used in resource names and tags.')
+@allowed([
+  'test'
+  'prod'
+])
 param environmentName string = 'prod'
 
 @description('Workload name used in resource names and tags.')
 param workloadName string = 'api-catalogue'
+
+@description('Enable application-level OAuth/OIDC/JWT authentication for protected API routes. Production must use true.')
+param authEnabled string = 'false'
+
+@description('OIDC issuer URL used for JWT issuer validation and discovery.')
+param oidcIssuer string = ''
+
+@description('Expected JWT audience, usually the API application ID URI or client ID.')
+param oidcAudience string = ''
+
+@description('Optional explicit JWKS URI. Leave empty to use issuer discovery.')
+param oidcJwksUri string = ''
+
+@description('Comma-separated scopes or app roles required by protected API routes.')
+param oidcRequiredScopes string = 'api.access'
+
+@description('Comma-separated allowed Microsoft Entra user object IDs.')
+param oidcAllowedObjectIds string = ''
+
+@description('Comma-separated allowed subjects used only as fallback when oid is absent.')
+param oidcAllowedSubjects string = ''
+
+@description('Optional comma-separated allowed tenant IDs.')
+param oidcAllowedTenants string = ''
+
+@description('Enable sanitized authentication diagnostics without logging tokens or claims.')
+param authDebug string = 'false'
 
 var nameSuffix = uniqueString(resourceGroup().id, workloadName, environmentName)
 var normalizedWorkload = replace(workloadName, '-', '')
@@ -95,6 +126,43 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'FUNCTIONS_WORKER_RUNTIME'
           value: 'node'
+        }
+
+        {
+          name: 'AUTH_ENABLED'
+          value: authEnabled
+        }
+        {
+          name: 'OIDC_ISSUER'
+          value: oidcIssuer
+        }
+        {
+          name: 'OIDC_AUDIENCE'
+          value: oidcAudience
+        }
+        {
+          name: 'OIDC_JWKS_URI'
+          value: oidcJwksUri
+        }
+        {
+          name: 'OIDC_REQUIRED_SCOPES'
+          value: oidcRequiredScopes
+        }
+        {
+          name: 'OIDC_ALLOWED_OBJECT_IDS'
+          value: oidcAllowedObjectIds
+        }
+        {
+          name: 'OIDC_ALLOWED_SUBJECTS'
+          value: oidcAllowedSubjects
+        }
+        {
+          name: 'OIDC_ALLOWED_TENANTS'
+          value: oidcAllowedTenants
+        }
+        {
+          name: 'AUTH_DEBUG'
+          value: authDebug
         }
       ]
     }

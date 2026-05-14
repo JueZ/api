@@ -10,18 +10,18 @@ body {
 }
 
 .shell {
+  align-content: center;
   box-sizing: border-box;
   display: grid;
   gap: 1.5rem;
   min-height: 100vh;
   padding: clamp(2rem, 7vw, 5rem);
-  align-content: center;
 }
 
 .hero,
 .card,
 .notice {
-  max-width: 48rem;
+  max-width: 52rem;
 }
 
 .eyebrow {
@@ -59,14 +59,85 @@ h1 {
   padding: 1.5rem;
 }
 
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
 .button {
   background: #38bdf8;
+  border: 0;
   border-radius: 999px;
   color: #082f49;
+  cursor: pointer;
   display: inline-block;
+  font: inherit;
   font-weight: 800;
   padding: 0.75rem 1rem;
   text-decoration: none;
+}
+
+.button.secondary {
+  background: #cbd5e1;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.status,
+.muted {
+  color: #cbd5e1;
+}
+
+.status.good {
+  color: #86efac;
+}
+
+.status.warn {
+  color: #fde68a;
+}
+
+.claims {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.claims div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.claims dt {
+  color: #bae6fd;
+  font-weight: 700;
+}
+
+.claims dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.api-result,
+.api-error {
+  border-radius: 0.75rem;
+  margin: 1rem 0 0;
+  overflow: auto;
+  padding: 1rem;
+  white-space: pre-wrap;
+}
+
+.api-result {
+  background: rgb(22 101 52 / 30%);
+  border: 1px solid rgb(134 239 172 / 45%);
+}
+
+.api-error {
+  background: rgb(127 29 29 / 42%);
+  border: 1px solid rgb(252 165 165 / 45%);
+  color: #fecaca;
 }
 
 .notice {

@@ -4,10 +4,16 @@ export interface HealthResponse {
   timestamp: string;
 }
 
+export interface HelloUser {
+  subject: string;
+  objectId?: string;
+  tenantId?: string;
+}
+
 export interface HelloResponse {
   message: 'Hello, Martin';
-  authenticated: false;
-  note: 'Authentication placeholder; JWT enforcement comes in the next milestone.';
+  authenticated: true;
+  user: HelloUser;
 }
 
 export function createHealthResponse(now: Date = new Date()): HealthResponse {
@@ -18,10 +24,10 @@ export function createHealthResponse(now: Date = new Date()): HealthResponse {
   };
 }
 
-export function createHelloResponse(): HelloResponse {
+export function createHelloResponse(user: HelloUser): HelloResponse {
   return {
     message: 'Hello, Martin',
-    authenticated: false,
-    note: 'Authentication placeholder; JWT enforcement comes in the next milestone.',
+    authenticated: true,
+    user,
   };
 }

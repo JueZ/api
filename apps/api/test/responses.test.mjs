@@ -12,12 +12,20 @@ test('createHealthResponse returns the public health payload', () => {
   });
 });
 
-test('createHelloResponse returns the v0 auth placeholder payload', () => {
-  const response = createHelloResponse();
+test('createHelloResponse returns an authenticated v0 payload without raw claims', () => {
+  const response = createHelloResponse({
+    subject: 'subject-id',
+    objectId: 'object-id',
+    tenantId: 'tenant-id',
+  });
 
   assert.deepEqual(response, {
     message: 'Hello, Martin',
-    authenticated: false,
-    note: 'Authentication placeholder; JWT enforcement comes in the next milestone.',
+    authenticated: true,
+    user: {
+      subject: 'subject-id',
+      objectId: 'object-id',
+      tenantId: 'tenant-id',
+    },
   });
 });
