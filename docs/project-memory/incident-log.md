@@ -26,6 +26,12 @@
 - Follow-up: parse the CORS header by removing only the header-name prefix and preserving the full URL value.
 - Status: Repair in progress.
 
+## 2026-05-14 — Production health route needed explicit restart/readiness retry
+
+- Promote Production run `25855574430` failed because `/health` returned `404` immediately after package deployment even though function metadata existed. A direct Azure Resource Manager restart with a non-empty body restored `/health` to `200`.
+- Follow-up: use an explicit ARM restart call that includes a request body and add bounded readiness retry for `/health` and unauthenticated `/api/hello` before CORS preflight smoke validation.
+- Status: Repair in progress.
+
 
 Entries are reverse chronological.
 
