@@ -376,7 +376,7 @@ jobs:
                 -H "Origin: $api_cors_origin" \
                 -H "Access-Control-Request-Method: GET" \
                 -H "Access-Control-Request-Headers: authorization")
-              allow_origin_header="$(awk -F': *' 'tolower($1)=="access-control-allow-origin" {gsub(/\r/, "", $2); value=$2} END {print value}' "$headers_file")"
+              allow_origin_header="$(tr -d '\r' < "$headers_file" | awk 'BEGIN { IGNORECASE=1 } /^access-control-allow-origin:/ { sub(/^[^:]*:[[:space:]]*/, ""); value=$0 } END { print value }')"
               if { [ "$preflight_status" = "204" ] || [ "$preflight_status" = "200" ]; } && { [ "$allow_origin_header" = "*" ] || [ "$allow_origin_header" = "$api_cors_origin" ]; }; then
                 preflight_ok=true
                 break
