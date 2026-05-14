@@ -256,6 +256,23 @@ gh variable set AZURE_SUBSCRIPTION_ID --repo "$REPOSITORY" --body "$AZURE_SUBSCR
 gh variable list --repo "$REPOSITORY"
 ```
 
+Authentication variables are shared by `Deploy Test` and `Promote Production`; keep them identical so test validates the same Microsoft Entra issuer, API audience, scope, tenant, and allowlisted user as production before promotion. Set these non-secret values before running the first authenticated test deployment:
+
+```bash
+gh variable set AUTH_ENABLED --repo "$REPOSITORY" --body "true"
+gh variable set OIDC_ISSUER --repo "$REPOSITORY" --body "<issuer URL>"
+gh variable set OIDC_AUDIENCE --repo "$REPOSITORY" --body "<API application ID URI or client ID>"
+gh variable set OIDC_REQUIRED_SCOPES --repo "$REPOSITORY" --body "api.access"
+gh variable set OIDC_ALLOWED_OBJECT_IDS --repo "$REPOSITORY" --body "<allowed user object ID>"
+gh variable set OIDC_ALLOWED_TENANTS --repo "$REPOSITORY" --body "<tenant ID>"
+gh variable set WEB_AUTH_ENABLED --repo "$REPOSITORY" --body "true"
+gh variable set WEB_AUTH_CLIENT_ID --repo "$REPOSITORY" --body "<SPA application client ID>"
+gh variable set WEB_AUTH_AUTHORITY --repo "$REPOSITORY" --body "<MSAL authority URL>"
+gh variable set WEB_AUTH_API_SCOPE --repo "$REPOSITORY" --body "api://<api-app-client-id>/api.access"
+```
+
+Use the same SPA app registration for both environments only after adding both redirect origins to that registration. Production still requires `WEB_AUTH_REDIRECT_URI`; test normally omits `TEST_WEB_AUTH_REDIRECT_URI` so the Angular app uses the deployed test frontend origin at runtime. If the identity provider requires an explicit test redirect, set `TEST_WEB_AUTH_REDIRECT_URI` to that exact registered test frontend URI. Do not set `TEST_WEB_API_BASE_URL` unless you intentionally need an override; by default the test frontend calls the test Function App discovered during deployment.
+
 Production variables are updated by `Promote Production` after production smoke tests pass. If you need to seed them with the current known production values before the first staged promotion, use:
 
 ```bash

@@ -86,8 +86,10 @@ jobs:
       WEB_AUTH_CLIENT_ID: ${{ vars.WEB_AUTH_CLIENT_ID }}
       WEB_AUTH_AUTHORITY: ${{ vars.WEB_AUTH_AUTHORITY }}
       WEB_AUTH_REDIRECT_URI: ${{ vars.WEB_AUTH_REDIRECT_URI }}
+      TEST_WEB_AUTH_REDIRECT_URI: ${{ vars.TEST_WEB_AUTH_REDIRECT_URI }}
       WEB_AUTH_API_SCOPE: ${{ vars.WEB_AUTH_API_SCOPE }}
       WEB_API_BASE_URL: ${{ vars.WEB_API_BASE_URL }}
+      TEST_WEB_API_BASE_URL: ${{ vars.TEST_WEB_API_BASE_URL }}
     steps:
       - name: Checkout deployment source
         uses: actions/checkout@v4
@@ -105,23 +107,27 @@ jobs:
             test|prod) ;;
             *) echo "environmentName must be test or prod." >&2; exit 1 ;;
           esac
-          if [ "$ENVIRONMENT_NAME" = "prod" ]; then
-            : "${AUTH_ENABLED:?AUTH_ENABLED repository variable is required for production}"
-            if [ "$AUTH_ENABLED" != "true" ]; then
-              echo "AUTH_ENABLED must be true for production deployment after the auth milestone." >&2
-              exit 1
-            fi
-            : "${OIDC_ISSUER:?OIDC_ISSUER repository variable is required for production}"
-            : "${OIDC_AUDIENCE:?OIDC_AUDIENCE repository variable is required for production}"
-            : "${OIDC_REQUIRED_SCOPES:?OIDC_REQUIRED_SCOPES repository variable is required for production}"
-            : "${OIDC_ALLOWED_OBJECT_IDS:?OIDC_ALLOWED_OBJECT_IDS repository variable is required for production}"
-            : "${OIDC_ALLOWED_TENANTS:?OIDC_ALLOWED_TENANTS repository variable is required for production}"
-            : "${WEB_AUTH_ENABLED:?WEB_AUTH_ENABLED repository variable is required for production}"
-            : "${WEB_AUTH_CLIENT_ID:?WEB_AUTH_CLIENT_ID repository variable is required for production}"
-            : "${WEB_AUTH_AUTHORITY:?WEB_AUTH_AUTHORITY repository variable is required for production}"
-            : "${WEB_AUTH_REDIRECT_URI:?WEB_AUTH_REDIRECT_URI repository variable is required for production}"
-            : "${WEB_AUTH_API_SCOPE:?WEB_AUTH_API_SCOPE repository variable is required for production}"
+          : "${AUTH_ENABLED:?AUTH_ENABLED repository variable is required for $ENVIRONMENT_NAME}"
+          if [ "$AUTH_ENABLED" != "true" ]; then
+            echo "AUTH_ENABLED must be true for $ENVIRONMENT_NAME deployment after the auth milestone." >&2
+            exit 1
           fi
+          : "${OIDC_ISSUER:?OIDC_ISSUER repository variable is required for $ENVIRONMENT_NAME}"
+          : "${OIDC_AUDIENCE:?OIDC_AUDIENCE repository variable is required for $ENVIRONMENT_NAME}"
+          : "${OIDC_REQUIRED_SCOPES:?OIDC_REQUIRED_SCOPES repository variable is required for $ENVIRONMENT_NAME}"
+          : "${OIDC_ALLOWED_OBJECT_IDS:?OIDC_ALLOWED_OBJECT_IDS repository variable is required for $ENVIRONMENT_NAME}"
+          : "${OIDC_ALLOWED_TENANTS:?OIDC_ALLOWED_TENANTS repository variable is required for $ENVIRONMENT_NAME}"
+          : "${WEB_AUTH_ENABLED:?WEB_AUTH_ENABLED repository variable is required for $ENVIRONMENT_NAME}"
+          if [ "$WEB_AUTH_ENABLED" != "true" ]; then
+            echo "WEB_AUTH_ENABLED must be true for $ENVIRONMENT_NAME deployment after the auth milestone." >&2
+            exit 1
+          fi
+          : "${WEB_AUTH_CLIENT_ID:?WEB_AUTH_CLIENT_ID repository variable is required for $ENVIRONMENT_NAME}"
+          : "${WEB_AUTH_AUTHORITY:?WEB_AUTH_AUTHORITY repository variable is required for $ENVIRONMENT_NAME}"
+          if [ "$ENVIRONMENT_NAME" = "prod" ]; then
+            : "${WEB_AUTH_REDIRECT_URI:?WEB_AUTH_REDIRECT_URI repository variable is required for production}"
+          fi
+          : "${WEB_AUTH_API_SCOPE:?WEB_AUTH_API_SCOPE repository variable is required for $ENVIRONMENT_NAME}"
       - name: Azure OIDC login
         uses: azure/login@v2
         with:
@@ -293,10 +299,13 @@ jobs:
               exit 1
             fi
             mkdir -p "$output_dir/assets"
-            effective_web_api_base_url="${WEB_API_BASE_URL:-$EFFECTIVE_BASE_URL}"
-            effective_web_redirect_uri="${WEB_AUTH_REDIRECT_URI:-}"
             if [ "$ENVIRONMENT_NAME" = "prod" ]; then
+              effective_web_api_base_url="${WEB_API_BASE_URL:-$EFFECTIVE_BASE_URL}"
+              effective_web_redirect_uri="${WEB_AUTH_REDIRECT_URI:-}"
               : "${effective_web_redirect_uri:?WEB_AUTH_REDIRECT_URI is required for production frontend auth}"
+            else
+              effective_web_api_base_url="${TEST_WEB_API_BASE_URL:-$EFFECTIVE_BASE_URL}"
+              effective_web_redirect_uri="${TEST_WEB_AUTH_REDIRECT_URI:-}"
             fi
             export EFFECTIVE_WEB_API_BASE_URL="$effective_web_api_base_url"
             export EFFECTIVE_WEB_REDIRECT_URI="$effective_web_redirect_uri"
