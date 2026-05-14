@@ -27,15 +27,15 @@ The v0 backend code exposes public `GET /health` and protected `GET /api/hello` 
 `AUTH_ENABLED=true`. Test and production deployments use the same OAuth/OIDC JWT
 configuration so authentication is validated before production promotion.
 
-Current production URLs:
+Current deployment URLs, verified on 2026-05-14:
 
-- API: <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net>
-- Angular frontend: <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/>
+| Environment | API base URL | Angular frontend |
+| --- | --- | --- |
+| Test | <https://func-api-catalogue-test-iwt54bovfzvrc.azurewebsites.net> | <https://stapicataloguetestiwt54b.z6.web.core.windows.net/> |
+| Production | <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net> | <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/> |
 
-As of the 2026-05-14 consolidation, auth code is on `main`, but production was
-still verified as the pre-auth deployment: unauthenticated `GET /api/hello`
-returned `200` with `authenticated:false`. After the next successful auth-enabled
-production promotion, unauthenticated `GET /api/hello` should return `401`.
+For both environments, `GET /health` is public and unauthenticated
+`GET /api/hello` returns `401` when auth is enabled.
 
 ## Lightweight staged deployment
 
