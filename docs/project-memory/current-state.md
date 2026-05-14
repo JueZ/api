@@ -21,7 +21,7 @@ Last updated: 2026-05-14
 ## 2026-05-14 issuer-specific JWKS follow-up
 
 - Manual browser retry still returned `401 Invalid bearer token` after multi-issuer deployment because PR #77 accepted multiple issuer strings but still used only the first issuer's JWKS discovery URI for signature verification.
-- A follow-up fix is in progress so, when `OIDC_JWKS_URI` is not explicitly set, each configured issuer is verified with its own discovered JWKS endpoint.
+- PR #80 fixed multi-issuer verification so, when `OIDC_JWKS_URI` is not explicitly set, each configured issuer is verified with its own discovered JWKS endpoint. It was deployed by production promotion run `25857092220`.
 
 - Project name: JueZ API Catalogue.
 - Repository: `JueZ/api`.
