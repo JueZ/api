@@ -136,6 +136,37 @@ test('allowed subject fallback works only when oid is absent', async () => {
   });
 });
 
+test('roles-only delegated token with allowed client ID still requires user allowlist', async () => {
+  const result = await authorize('Bearer valid-token', {
+    sub: 'blocked-sub',
+    oid: 'blocked-user-oid',
+    tid: 'tenant-id',
+    azp: 'allowed-client-id',
+    roles: ['api.access'],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.code, 'forbidden');
+});
+
+test('roles-only delegated token with allowed user and client ID stays a user token', async () => {
+  const result = await authorize('Bearer valid-token', {
+    sub: 'user-subject',
+    oid: 'allowed-oid',
+    tid: 'tenant-id',
+    appid: 'allowed-client-id',
+    roles: ['api.access'],
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.user, {
+    subject: 'user-subject',
+    objectId: 'allowed-oid',
+    tenantId: 'tenant-id',
+    tokenType: 'user',
+  });
+});
 
 test('app-only service token with allowed app object ID returns service authorization result', async () => {
   const result = await authorize('Bearer valid-token', {

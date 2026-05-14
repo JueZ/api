@@ -3,6 +3,12 @@
 Last updated: 2026-05-14
 
 
+## 2026-05-14 service-token classification hardening
+
+- Security finding verified: the service-token fallback that treated roles-only tokens with `azp`/`appid` as service tokens could let a delegated/user token use an allowlisted client ID instead of the protected user allowlist.
+- Fix in progress: service authorization now requires the explicit Microsoft Entra app-only `idtyp=app` signal; roles-only tokens without that signal remain on the user authorization path and must satisfy `OIDC_ALLOWED_OBJECT_IDS`/`OIDC_ALLOWED_SUBJECTS`.
+- Regression coverage now asserts that roles-only delegated tokens with an allowlisted client ID cannot bypass the user allowlist and that allowlisted users with role claims are still authorized as user tokens.
+
 ## 2026-05-14 deployment secret scoping hardening
 
 - Aardvark identified that the reusable deployment workflow exposed `REDDIT_CLIENT_SECRET` at job scope while building an operator-selected deployment ref.
