@@ -63,7 +63,10 @@ az ad user show --id martin@example.com --query id -o tsv
 
 ## GitHub repository variables
 
-Set these non-secret repository variables before production deployment:
+Set these non-secret repository variables before staged test and production deployment. The
+`Deploy Environment` reusable workflow intentionally uses the same backend OIDC issuer,
+audience, required scope, tenant filter, and user allowlist for `test` and `prod` so the test
+environment validates the same tokens and protects the same routes before promotion.
 
 ```text
 AUTH_ENABLED=true
@@ -72,14 +75,22 @@ OIDC_AUDIENCE=<API application ID URI or API client ID expected in aud>
 OIDC_REQUIRED_SCOPES=api.access
 OIDC_ALLOWED_OBJECT_IDS=<your user object ID>
 OIDC_ALLOWED_SUBJECTS=<optional comma-separated fallback subject IDs>
-OIDC_ALLOWED_TENANTS=<optional comma-separated tenant IDs>
+OIDC_ALLOWED_TENANTS=<comma-separated tenant IDs>
 WEB_AUTH_ENABLED=true
 WEB_AUTH_CLIENT_ID=<SPA application client ID>
 WEB_AUTH_AUTHORITY=<MSAL authority URL, usually issuer without token-specific assumptions>
-WEB_AUTH_REDIRECT_URI=<frontend redirect URI>
+WEB_AUTH_REDIRECT_URI=<production frontend redirect URI>
 WEB_AUTH_API_SCOPE=api://<api-app-client-id>/api.access
 WEB_API_BASE_URL=https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net
+TEST_WEB_AUTH_REDIRECT_URI=<optional test frontend redirect URI override>
+TEST_WEB_API_BASE_URL=<optional test API base URL override>
 ```
+
+For the test frontend, omit `TEST_WEB_AUTH_REDIRECT_URI` unless the same SPA app registration
+needs a fixed redirect value; when omitted, the Angular app uses the deployed test frontend
+origin at runtime. If you provide it, add that exact URI to the same SPA app registration that
+production uses. `TEST_WEB_API_BASE_URL` is normally omitted so the test frontend calls the
+Function App discovered during the test deployment instead of the production API.
 
 `OIDC_JWKS_URI` and `AUTH_DEBUG` are supported backend app settings but are not normally
 needed as repository variables. Keep `AUTH_DEBUG=false` in production unless temporarily
@@ -91,9 +102,9 @@ not print it in logs.
 
 ## Azure Function app settings
 
-Production deployment applies the backend settings through Bicep and GitHub repository
-variables. To inspect whether a setting exists without printing values, use narrow Azure CLI
-queries such as:
+Staged test and production deployments apply the backend settings through Bicep and GitHub
+repository variables. To inspect whether a setting exists without printing values, use narrow
+Azure CLI queries such as:
 
 ```bash
 az functionapp config appsettings list \

@@ -2,6 +2,13 @@
 
 Entries are reverse chronological.
 
+## 2026-05-14 — Reuse production auth configuration in test
+
+- Decision: `Deploy Test` and `Promote Production` use the same non-secret OAuth/OIDC repository variables for backend JWT validation and browser MSAL configuration.
+- Context: A separate test resource group and GitHub test environment exist, and the user wants test to validate the same authentication behavior as production before promotion.
+- Consequences: Test deployments now fail closed if auth variables are missing or auth is disabled. The same SPA app registration may be reused only when both test and production redirect origins are registered; test frontend defaults to its own deployed origin and test API base URL unless explicit `TEST_WEB_*` overrides are set.
+- Status: Active.
+
 ## 2026-05-14 — Store production rollback as a Codex skill
 
 - Decision: Add a repo-scoped `production-rollback` Codex skill for redeploying previous known-good commits through `rollback-production.yml`.
@@ -30,12 +37,12 @@ Entries are reverse chronological.
 - Consequences: Keep local, CI, infrastructure, and production runtime expectations aligned on Node 22 until Azure Functions support changes are intentionally validated.
 - Status: Active; PR #34 fixed the production runtime.
 
-## 2026-05-14 — Keep `/api/hello` public only for v0
+## 2026-05-14 — Protect `/api/hello` when auth is enabled
 
-- Decision: `GET /api/hello` remains public as a v0 placeholder only.
-- Context: The endpoint verifies the end-to-end path before real auth exists.
-- Consequences: Protect this endpoint or replace it with protected routes in the next auth milestone. Do not treat it as proof that production auth exists.
-- Status: Temporary.
+- Decision: `GET /api/hello` is a v0 placeholder that remains open only when `AUTH_ENABLED=false`; staged and production auth deployments require unauthenticated requests to return `401`.
+- Context: The endpoint originally verified the end-to-end path before real auth existed. It now provides a low-risk protected route for validating OAuth/OIDC wiring.
+- Consequences: Keep `/health` public for liveness, but do not add real catalogue data behind unauthenticated routes.
+- Status: Active.
 
 ## 2026-05-14 — Keep `/health` public
 

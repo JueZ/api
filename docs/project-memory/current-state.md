@@ -18,10 +18,10 @@ Last updated: 2026-05-14
 - Runtime: Azure Functions Node 22.
 - Current v0 endpoints:
   - `GET /health` is public.
-  - `GET /api/hello` is a public placeholder in production until PR #40 is merged/deployed.
-- Authentication: implemented in PR #40 but not yet merged or deployed. Production still runs the pre-auth placeholder.
-- Next milestone: create/reuse Microsoft Entra app registrations, set GitHub auth variables, merge PR #40, and deploy auth.
-- Deployment flow: staged test-to-production promotion is being introduced. `Deploy Test` targets `rg-api-test` with `environmentName=test`; `Promote Production` targets `rg-api-prod` with `environmentName=prod` only after test smoke tests pass.
+  - `GET /api/hello` is protected when `AUTH_ENABLED=true`; unauthenticated smoke tests should receive `401`.
+- Authentication: OAuth/OIDC JWT validation and Angular MSAL plumbing are in the codebase. Test and production deployments must use the same issuer, audience, required scope, tenant filter, and allowed user object IDs so test validates the production auth shape before promotion.
+- Next milestone: create/reuse Microsoft Entra app registrations, add both production and test frontend redirect origins to the SPA registration, set GitHub auth variables, and deploy through test before production promotion.
+- Deployment flow: staged test-to-production promotion is active. `Deploy Test` targets `rg-api-test` with `environmentName=test`; `Promote Production` targets `rg-api-prod` with `environmentName=prod` only after test smoke tests pass.
 - Production deployment: currently passing after the Node runtime fix, but `DEPLOY_PRODUCTION_ENABLED=false` was set on 2026-05-14 as a fail-safe while auth configuration is incomplete.
 - Important warning: deployment currently uses storage-backed `WEBSITE_RUN_FROM_PACKAGE` package URLs and should be hardened later if operational needs require it.
 

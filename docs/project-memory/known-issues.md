@@ -6,6 +6,7 @@ Last updated: 2026-05-14
 - Production `GET /api/hello` remains a public placeholder until PR #40 is merged and deployed with auth variables.
 - Codex Azure identity currently lacks sufficient Microsoft Entra directory permissions to list/create/update app registrations; `az ad app list --display-name juez-api-catalogue-api-prod --query "[0]" -o json` failed with insufficient privileges on 2026-05-14.
 - `OIDC_ALLOWED_OBJECT_IDS` is still unknown because the current Azure login is not a delegated user flow; do not guess it.
+- Production auth promotion is blocked until the GitHub Actions Azure deployment identity can manage required Bicep role assignments at `rg-api-prod` scope, or the role assignment is safely pre-provisioned/removed from the template.
 - Deployment uses storage-backed `WEBSITE_RUN_FROM_PACKAGE`; durable deployment hardening may still be useful later if operational needs grow.
 - Entra/OIDC/JWT design and app registrations are still needed.
 - Angular login flow is still needed.

@@ -170,7 +170,7 @@ Rollback is not a slot swap; it is a bounded redeploy through the same smoke-tes
 
 ### Cost and guardrails
 
-The staged model adds a second resource group, `rg-api-test`, using the same serverless Bicep resources and `westeurope` region as production. It does not add Azure SQL, Cosmos DB, API Management, Front Door, Cognitive Services, Kubernetes, or other expensive services. It does not add authentication or weaken any existing CI, policy, secret-scan, security-scan, branch-protection, or auto-merge guardrails.
+The staged model adds a second resource group, `rg-api-test`, using the same serverless Bicep resources and `westeurope` region as production. It does not add Azure SQL, Cosmos DB, API Management, Front Door, Cognitive Services, Kubernetes, or other expensive services. Test and production share the same OAuth/OIDC repository variables so test validates production-equivalent authentication before promotion, and the workflow must not weaken any existing CI, policy, secret-scan, security-scan, branch-protection, or auto-merge guardrails.
 
 ## Project memory
 

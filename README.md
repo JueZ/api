@@ -23,8 +23,9 @@ npm run build
 npm test
 ```
 
-The v0 backend exposes `GET /health` and `GET /api/hello`. Authentication is
-intentionally a placeholder until the next OAuth/OIDC/JWT milestone.
+The v0 backend exposes public `GET /health` and protected `GET /api/hello` when
+`AUTH_ENABLED=true`. Test and production deployments use the same OAuth/OIDC JWT
+configuration so authentication is validated before production promotion.
 
 ## Lightweight staged deployment
 
@@ -33,8 +34,8 @@ This project now uses a simple **test -> production** promotion flow for the sma
 1. Pull requests must pass CI and Policy Check before merge.
 2. After `main` CI succeeds, `Deploy Test` deploys the same commit to the low-cost test resource group `rg-api-test` with `environmentName=test`.
 3. `Deploy Test` runs smoke tests against the discovered test Function App URL:
-   - `GET /health`
-   - `GET /api/hello`
+   - `GET /health` must stay public.
+   - unauthenticated `GET /api/hello` must return `401` when auth is enabled.
 4. Only after the test deployment and smoke tests pass, `Promote Production` deploys the same commit to `rg-api-prod` with `environmentName=prod`.
 5. `Promote Production` runs the same production smoke tests and then updates the non-secret GitHub repository variables `PRODUCTION_BASE_URL`, `AZURE_FUNCTIONAPP_NAME`, and `AZURE_STATIC_WEB_STORAGE_ACCOUNT`.
 

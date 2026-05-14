@@ -2,6 +2,14 @@
 
 Entries are reverse chronological. Do not include secrets or SAS URLs.
 
+## 2026-05-14 — Auth production promotion blocked by deployment RBAC
+
+- Event: PR #40 was squash-merged and main CI, Policy Check, and Deploy Test passed. Production promotion was triggered manually after auth GitHub variables were configured.
+- Result: Failed closed during the Bicep infrastructure step before package/frontend deployment and smoke tests.
+- Root cause: The GitHub Actions Azure deployment identity lacks permission to create/update `Microsoft.Authorization/roleAssignments` in `rg-api-prod`; `infra/main.bicep` manages a storage role assignment for the Function App identity.
+- Follow-up: Grant the deployment identity `Role Based Access Control Administrator` at `rg-api-prod` scope, or pre-provision/remove the Bicep-managed role assignment in a safe PR. `DEPLOY_PRODUCTION_ENABLED=false` was restored after the failed promotion.
+- Links: Production-failure issues #50 and #51 were created for commit `a025c76`.
+
 ## 2026-05-14 — Auth deployment preparation blocked by Entra permissions
 
 - Action: Set GitHub repository variable `DEPLOY_PRODUCTION_ENABLED=false` as a fail-safe before configuring authentication.
