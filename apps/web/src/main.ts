@@ -27,6 +27,21 @@ interface HelloApiResponse {
   };
 }
 
+interface RedditThreadApiResponse {
+  source: 'reddit';
+  fetchedAt: string;
+  post: {
+    title: string;
+    selftext: string;
+  };
+  comments: unknown[];
+  stats: {
+    commentsReturned: number;
+    truncated: boolean;
+    warnings: string[];
+  };
+}
+
 declare global {
   interface Window {
     API_CATALOGUE_CONFIG?: Partial<RuntimeConfig>;
@@ -82,10 +97,10 @@ const msalClient = createMsalClient(config);
       </section>
 
       <section class="card" aria-labelledby="catalogue-title">
-        <h2 id="catalogue-title">API catalogue placeholder</h2>
+        <h2 id="catalogue-title">API catalogue</h2>
         <p>
-          Integrations will appear here in later milestones. Reddit is intentionally not
-          implemented in this authentication milestone.
+          Fetch a Reddit thread through the protected backend. Reddit credentials stay on
+          the server; the browser sends only the Microsoft Entra access token.
         </p>
       </section>
 
@@ -106,6 +121,39 @@ const msalClient = createMsalClient(config);
         }
       </section>
 
+
+      <section class="card" aria-labelledby="reddit-title">
+        <h2 id="reddit-title">Fetch Reddit thread</h2>
+        <p>
+          Enter a Reddit post URL, <code>redd.it</code> link, raw article ID, or <code>t3_</code>
+          fullname. Large threads may return partial data with warnings.
+        </p>
+        <label class="field">
+          <span>Reddit post URL or ID</span>
+          <input
+            type="text"
+            [value]="redditPostInput()"
+            (input)="redditPostInput.set($any($event.target).value)"
+            placeholder="https://www.reddit.com/r/redditdev/comments/abc123/example/"
+          />
+        </label>
+        <button class="button" type="button" (click)="fetchRedditThread()" [disabled]="redditLoading() || !canUseAuth()">
+          {{ redditLoading() ? 'Fetching…' : 'Fetch Reddit thread' }}
+        </button>
+        @if (redditResponse(); as response) {
+          <article class="reddit-summary">
+            <h3>{{ response.post.title }}</h3>
+            @if (response.post.selftext) {
+              <p>{{ response.post.selftext }}</p>
+            }
+            <p class="muted">
+              {{ response.stats.commentsReturned }} comments returned@if (response.stats.truncated) {; truncated}
+            </p>
+          </article>
+          <pre class="api-result">{{ redditResponseJson() }}</pre>
+        }
+      </section>
+
       <aside class="notice" role="note">
         <strong>/health</strong> remains public. <strong>/api/hello</strong> is protected by
         server-side JWT validation when <code>AUTH_ENABLED=true</code>.
@@ -118,6 +166,13 @@ export class AppComponent {
   protected readonly activeAccount = signal<AccountInfo | null>(msalClient?.getActiveAccount() ?? null);
   protected readonly helloLoading = signal(false);
   protected readonly helloResponse = signal<string | null>(null);
+  protected readonly redditPostInput = signal('');
+  protected readonly redditLoading = signal(false);
+  protected readonly redditResponse = signal<RedditThreadApiResponse | null>(null);
+  protected readonly redditResponseJson = computed(() => {
+    const response = this.redditResponse();
+    return response ? JSON.stringify(response, null, 2) : '';
+  });
   protected readonly apiError = signal<string | null>(null);
   protected readonly canUseAuth = computed(() => Boolean(msalClient && config.authApiScope));
   protected readonly isSignedIn = computed(() => this.activeAccount() !== null);
@@ -151,6 +206,7 @@ export class AppComponent {
     await msalClient.logoutPopup({ account });
     this.activeAccount.set(null);
     this.helloResponse.set(null);
+    this.redditResponse.set(null);
   }
 
   async callHello(): Promise<void> {
@@ -189,6 +245,50 @@ export class AppComponent {
       this.helloLoading.set(false);
     }
   }
+
+  async fetchRedditThread(): Promise<void> {
+    if (!msalClient || !config.authApiScope) {
+      this.apiError.set('Authentication is not configured.');
+      return;
+    }
+
+    this.redditLoading.set(true);
+    this.apiError.set(null);
+    this.redditResponse.set(null);
+
+    try {
+      const account = this.activeAccount() ?? msalClient.getAllAccounts()[0] ?? null;
+      if (!account) {
+        throw new Error('Sign in before calling the protected API.');
+      }
+
+      const accessToken = await acquireAccessToken(account);
+      const response = await fetch(`${config.apiBaseUrl}/api/reddit/thread`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          post: this.redditPostInput(),
+          sort: 'confidence',
+        }),
+      });
+      const responseText = await response.text();
+      const responseBody = parseJsonOrText(responseText);
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}: ${formatBody(responseBody)}`);
+      }
+
+      this.redditResponse.set(responseBody as RedditThreadApiResponse);
+    } catch (error) {
+      this.apiError.set(error instanceof Error ? error.message : 'Unknown API error.');
+    } finally {
+      this.redditLoading.set(false);
+    }
+  }
+
 }
 
 async function initializeMsal(): Promise<void> {

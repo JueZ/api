@@ -1,5 +1,18 @@
 # Deployment log
 
+## 2026-05-14 Reddit thread endpoint test deployment succeeded
+
+- PR #90 was merged at commit `62f5a0b44c109cf80749c3556d2f77b3f074cd86`.
+- Manual `Deploy Test` workflow run `25879066023` deployed that commit to the `test` environment and passed smoke tests.
+- Production promotion run `25879156975` was skipped because the test deployment was manually dispatched; production was not promoted for this task.
+- Reddit setting names are wired into the Function App deployment; secret values remain only in GitHub/Azure secret stores and are not documented.
+
+## 2026-05-14 Reddit configuration prepared for staged deployment
+
+- GitHub environment variables for Reddit client ID and User-Agent were configured for `test` and `production`; the Reddit client secret was configured as an environment secret. Secret values were not logged or documented.
+- Deployment wiring is being updated so `infra/main.bicep` applies the Reddit setting names to the Azure Function App in both environments.
+- No production promotion was triggered as part of this change.
+
 ## 2026-05-14 — Microsoft Entra v1 issuer alias fix deployed to production
 
 - Event: PR #83 was merged after passing CI and Policy Check, then `Deploy Test` run `25857723653` and `Promote Production` run `25857793354` completed successfully.

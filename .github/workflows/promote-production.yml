@@ -41,6 +41,7 @@ jobs:
         (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event == 'workflow_run')
       }}
     uses: ./.github/workflows/deploy-environment.yml
+    secrets: inherit
     with:
       environmentName: prod
       azureResourceGroup: rg-api-prod

@@ -22,6 +22,7 @@ jobs:
   rollback-production:
     name: rollback production
     uses: ./.github/workflows/deploy-environment.yml
+    secrets: inherit
     with:
       environmentName: prod
       azureResourceGroup: rg-api-prod
