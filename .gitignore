@@ -9,6 +9,6 @@ local.settings.json
 
 infra/*.json
 
-# Generated from contracts/openapi.yaml by scripts/sync-openapi-web.mjs.
+# Generated locally from contracts/openapi.yaml for the Angular app.
 apps/web/src/assets/openapi.yaml
 apps/web/src/app/openapi.generated.ts

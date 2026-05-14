@@ -4,6 +4,8 @@ import test from 'node:test';
 
 const mainSource = await readFile(new URL('../src/main.ts', import.meta.url), 'utf8');
 const gitignoreSource = await readFile(new URL('../../../.gitignore', import.meta.url), 'utf8');
+const angularConfigSource = await readFile(new URL('../../../angular.json', import.meta.url), 'utf8');
+const packageSource = await readFile(new URL('../../../package.json', import.meta.url), 'utf8');
 
 test('logged-out state is visible in the Angular auth UI', () => {
   assert.match(mainSource, /Signed out\./);
@@ -16,7 +18,7 @@ test('login button exists and uses a redirect flow', () => {
 });
 
 test('OpenAPI contract drives the interactive API catalogue', () => {
-  assert.match(mainSource, /OPENAPI_DOCUMENT/);
+  assert.match(mainSource, /YAML\.parse/);
   assert.match(mainSource, /buildApiOperations\(openApiDocument\)/);
   assert.match(mainSource, /assets\/openapi\.yaml/);
   assert.match(mainSource, /expected payload fields, response objects, examples/);
@@ -42,9 +44,12 @@ test('OpenAPI request payload fields render interactive controls', () => {
 });
 
 
-test('generated OpenAPI web artifacts stay out of version control', () => {
+test('only the canonical OpenAPI YAML is committed while Angular copies it as an asset', () => {
   assert.match(gitignoreSource, /apps\/web\/src\/assets\/openapi\.yaml/);
   assert.match(gitignoreSource, /apps\/web\/src\/app\/openapi\.generated\.ts/);
+  assert.match(angularConfigSource, /\"input\": \"contracts\"/);
+  assert.match(angularConfigSource, /\"glob\": \"openapi\.yaml\"/);
+  assert.doesNotMatch(packageSource, /sync:openapi/);
 });
 
 test('MSAL does not navigate back to the login request URL after processing auth code redirects', () => {
