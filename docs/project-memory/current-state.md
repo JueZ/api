@@ -15,6 +15,11 @@ Last updated: 2026-05-14
 - Setup docs now require an independent production reviewer, prevent self-review, and document `Role Based Access Control Administrator` only as a temporary bootstrap exception that must be revoked.
 - Production promotion run `25890276402` passed for PR #107, including deployment and smoke tests for the production Function App and static web storage account.
 
+## 2026-05-14 service-token detection hardening in progress
+
+- Aardvark reported that a roles-only token with an allowlisted `azp`/`appid` but without an unambiguous app-only marker could be classified as a service token and bypass the delegated user allowlist.
+- Fix in progress: service-token classification now requires `idtyp=app`; roles-only tokens without that marker remain on the delegated user allowlist path even when they include an allowlisted client ID.
+
 ## 2026-05-14 app-only OAuth service-client auth implementation
 
 - Backend authorization now supports Microsoft Entra app-only OAuth client-credentials tokens alongside delegated user tokens. User tokens remain gated by `OIDC_ALLOWED_OBJECT_IDS`/`OIDC_ALLOWED_SUBJECTS`; app-only tokens are gated separately by `OIDC_ALLOWED_APP_OBJECT_IDS` and/or `OIDC_ALLOWED_CLIENT_IDS` after issuer, audience, tenant, and required scope/role validation.
