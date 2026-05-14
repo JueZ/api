@@ -143,6 +143,19 @@ When chaining workflows, prefer explicit `workflow_dispatch` or `repository_disp
 
 Do not design accidental recursive workflow loops.
 
+
+## Project memory
+
+This repo uses repo-based project memory under `docs/project-memory/`.
+
+Codex should read project memory before non-trivial tasks. Codex should update project memory when important project state changes.
+
+Project memory must never contain secrets, tokens, SAS URLs, connection strings, full environment dumps, or private credentials.
+
+Use the `project-memory-maintainer` skill for architecture, deployment, auth/security, Azure/GitHub setup, CI/CD, production incidents, known issues, and next-step changes.
+
+`AGENTS.md` remains the global rulebook; project memory is factual project history and current state.
+
 ## Final summary requirement
 
 For every autonomous task, Codex must report:
