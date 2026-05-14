@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       commit_sha:
-        description: Previous commit SHA on main to redeploy to production.
+        description: Previous immutable 40-character commit SHA from main to redeploy to production.
         required: true
         type: string
 

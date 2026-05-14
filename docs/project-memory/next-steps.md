@@ -1,5 +1,13 @@
 # Next steps
 
+## 2026-05-14 production deployment hardening next steps
+
+1. Merge the production deployment ref/RBAC hardening PR after CI and Policy Check pass.
+2. Verify the GitHub `production` environment has at least one independent required reviewer and prevent-self-review enabled.
+3. Verify the GitHub Actions deployment identity does not retain standing `Role Based Access Control Administrator` on `rg-api-prod`; if bootstrap role-assignment permissions are needed, grant them only temporarily and revoke immediately after the single bootstrap run.
+4. Use only immutable 40-character `main` commit SHAs for manual production promote/rollback workflow inputs.
+
+
 ## 2026-05-14 app-only OAuth service-test next steps
 
 1. Run `scripts/configure-entra-service-oauth.sh` from Azure Cloud Shell or another Azure CLI session with Microsoft Graph app-registration permissions, using `API_APP_ID` from the API app registration.
@@ -87,9 +95,9 @@ The older numbered list below is retained for guardrail traceability. Items abou
 6. Deploy auth configuration safely.
 7. Harden run-from-package deployment away from expiring SAS if feasible.
 8. Add the first real API connector after auth works.
-9. Grant the GitHub Actions Azure deployment identity `Role Based Access Control Administrator` at `rg-api-prod` scope, or make a safe infra change that avoids deployment-time role assignment writes.
+9. Avoid standing `Role Based Access Control Administrator` on the GitHub Actions Azure deployment identity; if deployment-time role-assignment writes are unavoidable, use a temporary scoped bootstrap grant and revoke it immediately after the run.
 10. After staged deployment merges, run or inspect `Deploy Test` on `main`, confirm the test base URL and smoke tests, then inspect automatic `Promote Production`.
-11. Decide whether the GitHub `production` environment should require reviewers; for a solo project, avoid prevent self-review unless another reviewer exists.
+11. Verify the GitHub `production` environment requires an independent reviewer with prevent self-review; if no independent reviewer exists, keep `DEPLOY_PRODUCTION_ENABLED=false`.
 
 ## Auth setup detail for PR #40
 
