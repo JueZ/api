@@ -1,4 +1,11 @@
 # Incident log
+## 2026-05-14 — Production protected API call blocked by CORS preflight
+
+- Symptom: Production Angular sign-in completed for the user, but the protected `/api/hello` call failed with a browser CORS error because the preflight response lacked `Access-Control-Allow-Origin`.
+- Impact: Authenticated browser verification of `/api/hello` is blocked even though API smoke tests for unauthenticated `401` continue to pass.
+- Fix: Configure Function App platform CORS for the deployed Angular origin and add preflight validation to deployment smoke tests.
+- Status: Fix in progress.
+
 
 Entries are reverse chronological.
 
