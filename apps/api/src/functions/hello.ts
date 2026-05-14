@@ -1,19 +1,51 @@
 import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
 import { createHelloResponse } from '../shared/responses.js';
+import { authorizeRequest } from '../shared/security/auth.js';
 
 export async function helloHandler(
-  _request: HttpRequest,
-  _context: InvocationContext,
+  request: HttpRequest,
+  context: InvocationContext,
 ): Promise<HttpResponseInit> {
-  return {
+  if (request.method === 'OPTIONS') {
+    return {
+      status: 204,
+      headers: corsHeaders(),
+    };
+  }
+
+  const authorization = await authorizeRequest(request, context);
+
+  if (!authorization.ok) {
+    return withCors(authorization.response);
+  }
+
+  return withCors({
     status: 200,
-    jsonBody: createHelloResponse(),
-  };
+    jsonBody: createHelloResponse(authorization.user),
+  });
 }
 
 app.http('hello', {
-  methods: ['GET'],
+  methods: ['GET', 'OPTIONS'],
   authLevel: 'anonymous',
   route: 'api/hello',
   handler: helloHandler,
 });
+
+function withCors(response: HttpResponseInit): HttpResponseInit {
+  return {
+    ...response,
+    headers: {
+      ...corsHeaders(),
+      ...response.headers,
+    },
+  };
+}
+
+function corsHeaders(): Record<string, string> {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  };
+}

@@ -75,6 +75,19 @@ jobs:
       AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
       AZURE_STATIC_WEB_STORAGE_ACCOUNT: ${{ vars.AZURE_STATIC_WEB_STORAGE_ACCOUNT }}
       PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+      AUTH_ENABLED: ${{ vars.AUTH_ENABLED }}
+      OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
+      OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
+      OIDC_REQUIRED_SCOPES: ${{ vars.OIDC_REQUIRED_SCOPES }}
+      OIDC_ALLOWED_OBJECT_IDS: ${{ vars.OIDC_ALLOWED_OBJECT_IDS }}
+      OIDC_ALLOWED_SUBJECTS: ${{ vars.OIDC_ALLOWED_SUBJECTS }}
+      OIDC_ALLOWED_TENANTS: ${{ vars.OIDC_ALLOWED_TENANTS }}
+      WEB_AUTH_ENABLED: ${{ vars.WEB_AUTH_ENABLED }}
+      WEB_AUTH_CLIENT_ID: ${{ vars.WEB_AUTH_CLIENT_ID }}
+      WEB_AUTH_AUTHORITY: ${{ vars.WEB_AUTH_AUTHORITY }}
+      WEB_AUTH_REDIRECT_URI: ${{ vars.WEB_AUTH_REDIRECT_URI }}
+      WEB_AUTH_API_SCOPE: ${{ vars.WEB_AUTH_API_SCOPE }}
+      WEB_API_BASE_URL: ${{ vars.WEB_API_BASE_URL }}
     steps:
       - name: Checkout deployment source
         uses: actions/checkout@v4
@@ -92,6 +105,23 @@ jobs:
             test|prod) ;;
             *) echo "environmentName must be test or prod." >&2; exit 1 ;;
           esac
+          if [ "$ENVIRONMENT_NAME" = "prod" ]; then
+            : "${AUTH_ENABLED:?AUTH_ENABLED repository variable is required for production}"
+            if [ "$AUTH_ENABLED" != "true" ]; then
+              echo "AUTH_ENABLED must be true for production deployment after the auth milestone." >&2
+              exit 1
+            fi
+            : "${OIDC_ISSUER:?OIDC_ISSUER repository variable is required for production}"
+            : "${OIDC_AUDIENCE:?OIDC_AUDIENCE repository variable is required for production}"
+            : "${OIDC_REQUIRED_SCOPES:?OIDC_REQUIRED_SCOPES repository variable is required for production}"
+            : "${OIDC_ALLOWED_OBJECT_IDS:?OIDC_ALLOWED_OBJECT_IDS repository variable is required for production}"
+            : "${OIDC_ALLOWED_TENANTS:?OIDC_ALLOWED_TENANTS repository variable is required for production}"
+            : "${WEB_AUTH_ENABLED:?WEB_AUTH_ENABLED repository variable is required for production}"
+            : "${WEB_AUTH_CLIENT_ID:?WEB_AUTH_CLIENT_ID repository variable is required for production}"
+            : "${WEB_AUTH_AUTHORITY:?WEB_AUTH_AUTHORITY repository variable is required for production}"
+            : "${WEB_AUTH_REDIRECT_URI:?WEB_AUTH_REDIRECT_URI repository variable is required for production}"
+            : "${WEB_AUTH_API_SCOPE:?WEB_AUTH_API_SCOPE repository variable is required for production}"
+          fi
       - name: Azure OIDC login
         uses: azure/login@v2
         with:
@@ -129,6 +159,13 @@ jobs:
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --template-file infra/main.bicep \
               --parameters environmentName="$ENVIRONMENT_NAME" \
+                authEnabled="${AUTH_ENABLED:-false}" \
+                oidcIssuer="${OIDC_ISSUER:-}" \
+                oidcAudience="${OIDC_AUDIENCE:-}" \
+                oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-api.access}" \
+                oidcAllowedObjectIds="${OIDC_ALLOWED_OBJECT_IDS:-}" \
+                oidcAllowedSubjects="${OIDC_ALLOWED_SUBJECTS:-}" \
+                oidcAllowedTenants="${OIDC_ALLOWED_TENANTS:-}" \
               --query properties.outputs \
               -o json)
 
@@ -255,6 +292,15 @@ jobs:
               echo "No Angular dist index.html found after build."
               exit 1
             fi
+            mkdir -p "$output_dir/assets"
+            effective_web_api_base_url="${WEB_API_BASE_URL:-$EFFECTIVE_BASE_URL}"
+            effective_web_redirect_uri="${WEB_AUTH_REDIRECT_URI:-}"
+            if [ "$ENVIRONMENT_NAME" = "prod" ]; then
+              : "${effective_web_redirect_uri:?WEB_AUTH_REDIRECT_URI is required for production frontend auth}"
+            fi
+            export EFFECTIVE_WEB_API_BASE_URL="$effective_web_api_base_url"
+            export EFFECTIVE_WEB_REDIRECT_URI="$effective_web_redirect_uri"
+            node --input-type=module --eval "const config={authEnabled:process.env.WEB_AUTH_ENABLED==='true',authClientId:process.env.WEB_AUTH_CLIENT_ID||'',authAuthority:process.env.WEB_AUTH_AUTHORITY||'',authRedirectUri:process.env.EFFECTIVE_WEB_REDIRECT_URI||'',authApiScope:process.env.WEB_AUTH_API_SCOPE||'',apiBaseUrl:process.env.EFFECTIVE_WEB_API_BASE_URL||''}; process.stdout.write('window.API_CATALOGUE_CONFIG = '+JSON.stringify(config)+';\n');" > "$output_dir/assets/config.js"
             az storage blob service-properties update \
               --auth-mode login \
               --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
@@ -276,11 +322,20 @@ jobs:
           set -euo pipefail
           : "${EFFECTIVE_BASE_URL:?EFFECTIVE_BASE_URL is required for smoke tests}"
           curl --fail --show-error --silent --max-time 20 "$EFFECTIVE_BASE_URL/health"
-          curl --fail --show-error --silent --max-time 20 "$EFFECTIVE_BASE_URL/api/hello"
+          hello_status=$(curl --show-error --silent --output /dev/null --write-out '%{http_code}' --max-time 20 "$EFFECTIVE_BASE_URL/api/hello")
+          if [ "$AUTH_ENABLED" = "true" ]; then
+            if [ "$hello_status" != "401" ]; then
+              echo "Expected unauthenticated /api/hello to return 401 when auth is enabled; got $hello_status." >&2
+              exit 1
+            fi
+          elif [ "$hello_status" != "200" ]; then
+            echo "Expected /api/hello to return 200 when auth is disabled; got $hello_status." >&2
+            exit 1
+          fi
           {
             echo "### Smoke tests passed"
             echo "- $EFFECTIVE_BASE_URL/health"
-            echo "- $EFFECTIVE_BASE_URL/api/hello"
+            echo "- $EFFECTIVE_BASE_URL/api/hello returned $hello_status"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Update production repository variables after smoke tests
         if: ${{ inputs.updateProductionVariables }}
