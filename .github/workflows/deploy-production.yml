@@ -225,18 +225,7 @@ jobs:
             effective_web_redirect_uri="${WEB_AUTH_REDIRECT_URI:-$effective_web_api_base_url}"
             export EFFECTIVE_WEB_API_BASE_URL="$effective_web_api_base_url"
             export EFFECTIVE_WEB_REDIRECT_URI="$effective_web_redirect_uri"
-            node --input-type=module > "$output_dir/assets/config.js" <<'NODE'
-const config = {
-  authEnabled: process.env.WEB_AUTH_ENABLED === 'true',
-  authClientId: process.env.WEB_AUTH_CLIENT_ID || '',
-  authAuthority: process.env.WEB_AUTH_AUTHORITY || '',
-  authRedirectUri: process.env.EFFECTIVE_WEB_REDIRECT_URI || '',
-  authApiScope: process.env.WEB_AUTH_API_SCOPE || '',
-  apiBaseUrl: process.env.EFFECTIVE_WEB_API_BASE_URL || '',
-};
-process.stdout.write(`window.API_CATALOGUE_CONFIG = ${JSON.stringify(config)};
-`);
-NODE
+            node --input-type=module --eval "const config={authEnabled:process.env.WEB_AUTH_ENABLED==='true',authClientId:process.env.WEB_AUTH_CLIENT_ID||'',authAuthority:process.env.WEB_AUTH_AUTHORITY||'',authRedirectUri:process.env.EFFECTIVE_WEB_REDIRECT_URI||'',authApiScope:process.env.WEB_AUTH_API_SCOPE||'',apiBaseUrl:process.env.EFFECTIVE_WEB_API_BASE_URL||''}; process.stdout.write('window.API_CATALOGUE_CONFIG = '+JSON.stringify(config)+';\n');" > "$output_dir/assets/config.js"
             az storage blob service-properties update \
               --auth-mode login \
               --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
