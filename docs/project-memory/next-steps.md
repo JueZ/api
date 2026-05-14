@@ -2,6 +2,12 @@
 
 ## Current active next steps from 2026-05-14 consolidation
 
+## 2026-05-14 final readiness next steps
+
+1. Verify Microsoft Entra app registrations and GitHub OIDC federated credentials with a delegated identity that has app-registration read permissions.
+2. Manually verify browser sign-in at the production Angular URL with the allowlisted user.
+3. Begin normal feature development with a small non-Reddit, non-expensive API catalogue slice after the manual auth checks are accepted or completed.
+
 ## 2026-05-14 readiness sprint next steps
 
 1. Merge the readiness follow-up PR that makes production repository-variable updates best-effort/idempotent after smoke tests.

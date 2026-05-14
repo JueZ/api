@@ -43,3 +43,11 @@ Last updated: 2026-05-14
 - `DEPLOY_PRODUCTION_ENABLED=true` was intentionally set during this readiness sprint so guarded production promotion can run after test deployment succeeds.
 - Production Function App system-assigned managed identity was verified after the production promotion.
 - Rollback remains workflow-based through `.github/workflows/rollback-production.yml`, using the same reusable deployment path for a requested known-good commit.
+
+## 2026-05-14 final readiness verification update
+
+- PR #60 was merged by auto-merge after CI and Policy Check passed.
+- `Deploy Test` was manually re-run from `main` after PR #60 at run `25852557000` and succeeded.
+- `Promote Production` was manually re-run from `main` after PR #60 at run `25852638254` and succeeded end-to-end.
+- Production smoke remained healthy after the final promotion: `GET /health` returned `200`, and unauthenticated `GET /api/hello` returned `401`.
+- The post-smoke repository-variable metadata updates now produce warnings if `GITHUB_TOKEN` cannot write repository variables, but they no longer fail a healthy deployment.

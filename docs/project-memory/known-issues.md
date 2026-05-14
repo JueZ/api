@@ -4,6 +4,12 @@ Last updated: 2026-05-14
 
 ## Current corrected status from 2026-05-14 consolidation
 
+## 2026-05-14 final readiness residual risks
+
+- The previous production metadata-update workflow failure is resolved by PR #60 and successful production promotion run `25852638254`.
+- Remaining setup visibility limitation: Codex still cannot inspect Microsoft Entra app registrations or federated credentials because the Azure identity lacks Microsoft Graph directory permissions.
+- Remaining manual verification: interactive Angular/MSAL sign-in for the allowlisted user must be completed in a browser by a human/delegated user.
+
 ## 2026-05-14 readiness sprint active issues
 
 - `Promote Production` run `25852035606` successfully deployed production and passed smoke tests, but the workflow concluded `failure` because `GITHUB_TOKEN` could not write repository variables in the post-smoke metadata update step. This is a workflow correctness issue, not an application deployment failure.

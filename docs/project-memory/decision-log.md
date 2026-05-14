@@ -2,6 +2,12 @@
 
 Entries are reverse chronological.
 
+## 2026-05-14 — Setup phase is ready except delegated/manual auth verification
+
+- Decision: Treat the automated GitHub/Azure/test/production deployment setup as operationally ready after PR #60 and successful promotion run `25852638254`.
+- Rationale: Required PR checks passed, auto-merge worked, test deployment passed, production promotion passed, and public/protected endpoint smoke checks match the intended auth behavior.
+- Consequence: Normal feature development can start after acknowledging that Entra app-registration inspection and interactive Angular login still require a delegated user/manual browser context.
+
 ## 2026-05-14 — Treat production variable rewrite as metadata, not deployment health
 
 - Decision: A successful production deployment and smoke test must not be marked failed solely because the workflow token cannot rewrite repository variables after smoke tests.
