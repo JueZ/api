@@ -135,13 +135,37 @@ jobs:
             exit 1
           fi
           if [ "$ENVIRONMENT_NAME" = "prod" ]; then
-            successful_test_runs=$(gh api \
+            mapfile -t successful_test_run_ids < <(gh api \
               "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-test.yml/runs?branch=main&head_sha=${deployment_ref}&status=completed&per_page=20" \
-              --jq '[.workflow_runs[] | select(.conclusion == "success")] | length')
-            if [ "$successful_test_runs" -lt 1 ]; then
-              echo "Production sourceRef must match a commit that completed Deploy Test successfully." >&2
+              --jq '.workflow_runs[] | select(.conclusion == "success" and .event == "workflow_run") | .id')
+            valid_test_run_id=""
+            provenance_dir="$(mktemp -d)"
+            for test_run_id in "${successful_test_run_ids[@]}"; do
+              rm -rf "${provenance_dir:?}"/*
+              if gh run download "$test_run_id" \
+                --repo "$GITHUB_REPOSITORY" \
+                --name "deploy-test-provenance-${deployment_ref}" \
+                --dir "$provenance_dir" >/dev/null 2>&1; then
+                provenance_file="$provenance_dir/deploy-test-provenance.json"
+                if [ -f "$provenance_file" ] && jq -e \
+                  --arg source_ref "$deployment_ref" \
+                  '.environmentName == "test"
+                    and .sourceRef == $source_ref
+                    and .resolvedHead == $source_ref
+                    and .deployFrontend == "true"
+                    and .deployFunctions == "true"
+                    and .eventName == "workflow_run"' \
+                  "$provenance_file" >/dev/null; then
+                  valid_test_run_id="$test_run_id"
+                  break
+                fi
+              fi
+            done
+            if [ -z "$valid_test_run_id" ]; then
+              echo "Production sourceRef must match a successful CI-triggered Deploy Test run that uploaded matching full-deployment provenance." >&2
               exit 1
             fi
+            echo "Validated Deploy Test provenance from run $valid_test_run_id for production sourceRef $deployment_ref."
           fi
       - name: Validate deployment configuration
         shell: bash
@@ -475,6 +499,43 @@ jobs:
               echo "- $EFFECTIVE_BASE_URL/api/hello CORS preflight allowed $api_cors_origin"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Record test deployment provenance
+        if: ${{ inputs.environmentName == 'test' && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github
+          jq -n \
+            --arg environmentName "$ENVIRONMENT_NAME" \
+            --arg sourceRef "${SOURCE_REF:-${GITHUB_SHA}}" \
+            --arg resolvedHead "$(git rev-parse HEAD)" \
+            --arg deployFrontend "$DEPLOY_FRONTEND" \
+            --arg deployFunctions "$DEPLOY_FUNCTIONS" \
+            --arg eventName "$GITHUB_EVENT_NAME" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            '{
+              environmentName: $environmentName,
+              sourceRef: $sourceRef,
+              resolvedHead: $resolvedHead,
+              deployFrontend: $deployFrontend,
+              deployFunctions: $deployFunctions,
+              eventName: $eventName,
+              workflow: $workflow,
+              repository: $repository,
+              runId: $runId,
+              runAttempt: $runAttempt
+            }' > .github/deploy-test-provenance.json
+      - name: Upload test deployment provenance
+        if: ${{ inputs.environmentName == 'test' && success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-test-provenance-${{ inputs.sourceRef || github.sha }}
+          path: .github/deploy-test-provenance.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Report production deployment values after smoke tests
         if: ${{ inputs.updateProductionVariables }}
         shell: bash
