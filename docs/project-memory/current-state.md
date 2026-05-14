@@ -2,6 +2,12 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 GitHub Actions Node 24 and production variable warning follow-up
+
+- Workflow maintenance is in progress to remove GitHub Actions Node.js 20 runtime warnings by moving first-party actions to Node 24-compatible major versions.
+- The production deployment reusable workflow no longer tries to mutate repository variables with `GITHUB_TOKEN` after smoke tests, because the workflow token cannot write repository variables. Instead, it records the resolved production URL, Function App, and storage account in the run summary after smoke tests pass.
+- Production runtime resolution now prefers fresh Bicep deployment outputs and treats repository variables as fallbacks, reducing reliance on stale repository variable values.
+
 ## 2026-05-14 Reddit default expansion budget increased
 
 - Follow-up after testing a Reddit thread that returned `stats.truncated=true` at `moreChildrenRequests=50`: the default omitted-comment expansion budget was raised so normal requests continue well past the old 50-request cutoff and can retrieve all nested comments unless the larger safety limits, Reddit rate limits, or timeout budget are reached.
