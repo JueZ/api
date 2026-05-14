@@ -6,13 +6,14 @@
   "type": "module",
   "scripts": {
     "lint": "npm run type-check",
-    "type-check": "tsc -p apps/api/tsconfig.json --noEmit && ng build --configuration development --no-progress",
+    "type-check": "npm run sync:openapi && tsc -p apps/api/tsconfig.json --noEmit && ng build --configuration development --no-progress",
     "test": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs apps/web/test/*.test.mjs'",
     "test:api": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs'",
     "build": "npm run build:web && npm run build:api",
-    "build:web": "ng build --configuration production --no-progress",
+    "build:web": "npm run sync:openapi && ng build --configuration production --no-progress",
     "build:api": "tsc -p apps/api/tsconfig.json",
-    "build:functions": "npm run build:api"
+    "build:functions": "npm run build:api",
+    "sync:openapi": "node scripts/sync-openapi-web.mjs"
   },
   "dependencies": {
     "@angular/common": "21.2.12",
@@ -31,7 +32,8 @@
     "@angular/cli": "21.2.10",
     "@angular/compiler-cli": "21.2.12",
     "@types/node": "24.10.1",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "yaml": "^2.9.0"
   },
   "engines": {
     "node": ">=22.0.0"
