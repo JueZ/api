@@ -19,7 +19,7 @@ param workloadName string = 'api-catalogue'
 @description('Enable application-level OAuth/OIDC/JWT authentication for protected API routes. Production must use true.')
 param authEnabled string = 'false'
 
-@description('OIDC issuer URL used for JWT issuer validation and discovery.')
+@description('Comma-separated OIDC issuer URLs used for JWT issuer validation. The first issuer is used for JWKS discovery unless oidcJwksUri is set.')
 param oidcIssuer string = ''
 
 @description('Expected JWT audience, usually the API application ID URI or client ID.')

@@ -5,6 +5,12 @@
 - Rationale: Browser calls with an Authorization header require a successful CORS preflight, and Azure Functions can answer preflight before application code runs. Application-level CORS headers on `GET`/`OPTIONS` are not sufficient for the production static website path.
 - Status: In progress.
 
+## 2026-05-14 — Support explicit multi-issuer auth for the allowlisted Microsoft account
+
+- Decision: Treat `OIDC_ISSUER` as a comma-separated exact allowlist of accepted token issuers while keeping audience, scope/role, tenant, and object-ID checks mandatory.
+- Rationale: The first production browser user is a personal Microsoft account, which can receive tokens from the Microsoft account tenant issuer rather than the organization tenant issuer. Accepting multiple exact issuers is narrower than disabling issuer validation or switching to a broad wildcard issuer.
+- Status: In progress.
+
 
 Entries are reverse chronological.
 

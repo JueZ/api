@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { authorizeRequest } from '../dist/shared/security/auth.js';
+import { authorizeRequest, readAuthConfig } from '../dist/shared/security/auth.js';
 
 const baseConfig = Object.freeze({
   enabled: true,
   issuer: 'https://login.example.test/tenant/v2.0',
+  issuers: ['https://login.example.test/tenant/v2.0'],
   audience: 'api://catalogue-test',
   requiredScopes: ['api.access'],
   allowedObjectIds: ['allowed-oid'],
@@ -149,10 +150,26 @@ test('missing required OIDC config fails closed when auth is enabled', async () 
   const result = await authorizeRequest(
     requestWithAuthorization('Bearer valid-token'),
     context(),
-    { ...baseConfig, issuer: undefined },
+    { ...baseConfig, issuer: undefined, issuers: [] },
     await verifierReturning({ sub: 'allowed-sub', scp: 'api.access' }),
   );
 
   assert.equal(result.ok, false);
   assert.equal(result.response.status, 401);
+});
+
+
+test('readAuthConfig supports multiple comma-separated issuers', () => {
+  const config = readAuthConfig({
+    AUTH_ENABLED: 'true',
+    OIDC_ISSUER: ' https://login.example.test/tenant/v2.0/, https://login.example.test/consumers/v2.0/ ',
+    OIDC_AUDIENCE: 'api://catalogue-test',
+    OIDC_ALLOWED_OBJECT_IDS: 'allowed-oid',
+  });
+
+  assert.equal(config.issuer, 'https://login.example.test/tenant/v2.0');
+  assert.deepEqual(config.issuers, [
+    'https://login.example.test/tenant/v2.0',
+    'https://login.example.test/consumers/v2.0',
+  ]);
 });
