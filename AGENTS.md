@@ -2,7 +2,7 @@
 
 The user wants this project to run with no routine human approval.
 
-Codex may create or update pull requests. If all required checks pass and repository auto-merge is enabled, PRs may be merged automatically. Production deployment may run automatically after merge to `main`.
+Codex must create or update a pull request for every task that changes repository files. This is not optional for successful code, documentation, configuration, workflow, guardrail, or project-memory changes. If all required checks pass and repository auto-merge is enabled, PRs may be merged automatically. Production deployment may run automatically after merge to `main`.
 
 However, autonomous delivery must be guarded by strict automated policy checks.
 
@@ -34,17 +34,18 @@ CLI use does not override repository guardrails:
 
 ## Required autonomous pipeline
 
-The normal loop should be:
+The normal loop is mandatory for every repository-changing task unless the user explicitly asks for a no-change investigation only:
 
-1. Codex implements a change on a branch.
-2. Codex opens or updates a pull request.
-3. CI runs.
-4. If CI fails, Codex may inspect logs and make the smallest safe fix.
-5. Codex may repeat the fix loop at most 2 times.
-6. If CI passes and policy checks pass, the PR may auto-merge.
-7. Merge to `main` triggers production deployment.
-8. Production smoke tests run.
-9. If smoke tests fail, automation must fail closed and create a repair issue or PR.
+1. Codex implements a change on a non-`main` branch.
+2. Codex commits the change on that branch.
+3. Codex opens a new pull request, or updates the existing pull request for the current branch, before reporting the task as complete.
+4. CI runs.
+5. If CI fails, Codex may inspect logs and make the smallest safe fix.
+6. Codex may repeat the fix loop at most 2 times.
+7. If CI passes and policy checks pass, the PR may auto-merge.
+8. Merge to `main` triggers production deployment.
+9. Production smoke tests run.
+10. If smoke tests fail, automation must fail closed and create a repair issue or PR.
 
 ## No-human auto-merge rules
 
@@ -105,6 +106,17 @@ Limits:
 - no committing secrets
 
 If the same failure repeats after 2 attempts, Codex must stop and summarize the failure.
+
+
+## Pull request completion requirement
+
+A repository-changing task is not complete until all of the following are true:
+
+- Changes are committed on the current branch.
+- A pull request exists for the branch, or the existing pull request for the branch has been updated.
+- The final response includes the pull request URL and current CI/auto-merge/deployment status.
+
+If PR creation fails because of authentication, network, GitHub, branch, or permission problems, Codex must fail closed: keep the commit on the branch, do not claim autonomous delivery completed, and report the exact blocker plus the command or API action that failed. Codex must not silently skip PR creation after a successful implementation.
 
 ## Files requiring extra protection
 

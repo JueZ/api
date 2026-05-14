@@ -8,6 +8,12 @@
 - Rationale: these controls break the branch/tag workflow-dispatch abuse chain reported by Aardvark and reduce the blast radius of the Azure deployment identity.
 - Status: In progress.
 
+## 2026-05-14: Treat PR creation as mandatory task completion for repository changes
+
+Decision: Codex must commit repository-changing work and open or update a pull request before reporting the task as complete. If PR creation is blocked by authentication, network, permissions, or branch state, Codex must fail closed and report that blocker instead of silently stopping after implementation.
+
+Rationale: The user observed repeated successful Codex tasks that did not create pull requests. Making PR creation an explicit completion requirement aligns agent behavior with the autonomous delivery pipeline.
+
 
 ## 2026-05-14: Use Entra app roles for service/e2e OAuth instead of static tokens
 

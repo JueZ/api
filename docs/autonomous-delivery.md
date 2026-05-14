@@ -4,7 +4,7 @@ This repository is configured for routine changes to move from Codex-created pul
 
 ## Delivery flow
 
-1. Codex implements a change on a feature branch and opens a pull request.
+1. Codex implements a change on a feature branch, commits it, and opens or updates a pull request before reporting the task as complete.
 2. `Codex Auto-Merge` enables GitHub-native squash auto-merge for Codex branches (`codex/` or `codex-`) or pull requests labeled `codex-automerge`.
 3. `CI` and `Policy Check` run on the pull request.
 4. GitHub branch protection blocks merge until every required status check passes.
@@ -14,6 +14,13 @@ This repository is configured for routine changes to move from Codex-created pul
 8. If deployment or smoke tests fail, the workflow fails closed. Production is not promoted unless test smoke tests have passed.
 
 Codex can use the repo-scoped `github-cli-devops` and `azure-cli-devops` skills for safe GitHub CLI and Azure CLI diagnostics during this flow. Direct CLI diagnostics do not override CI, Policy Check, branch protection, environment approvals, deployment staging, or secret-handling rules.
+
+
+## Codex completion contract
+
+For any task that changes repository files, opening or updating a pull request is part of completing the task. Codex should not stop at a successful local implementation, successful tests, or a commit. If GitHub authentication, network access, repository permissions, or branch state prevent PR creation, Codex must report the failed PR step as a blocker instead of presenting the task as fully complete.
+
+Documentation-only and guardrail-only changes still require the same branch, commit, and pull request flow. No PR is required only when the task intentionally makes no repository change, such as a read-only investigation or answer.
 
 ## Required branch protection and repository settings
 
