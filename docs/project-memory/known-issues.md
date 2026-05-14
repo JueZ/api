@@ -4,6 +4,13 @@ Last updated: 2026-05-14
 
 ## Current corrected status from 2026-05-14 consolidation
 
+## 2026-05-14 readiness sprint active issues
+
+- `Promote Production` run `25852035606` successfully deployed production and passed smoke tests, but the workflow concluded `failure` because `GITHUB_TOKEN` could not write repository variables in the post-smoke metadata update step. This is a workflow correctness issue, not an application deployment failure.
+- Codex Azure identity still lacks sufficient Microsoft Graph directory permissions to list or inspect Microsoft Entra app registrations and federated credentials.
+- Interactive Angular/MSAL login and the allowlisted authenticated browser call were not manually verified by Codex because this environment cannot complete interactive Entra sign-in.
+- GitHub Actions reported Node.js 20 action runtime deprecation warnings for upstream actions; application/runtime code remains Node 22.
+
 - Production has not yet been verified as auth-enabled. On 2026-05-14, unauthenticated `GET /api/hello` at the production API URL still returned the old public placeholder response instead of `401`.
 - `Deploy Test` has succeeded on `main`, but production promotion most recently skipped; the staged test-to-production path is not yet fully end-to-end verified for an auth-enabled production rollout.
 - Codex Azure identity currently lacks sufficient Microsoft Entra directory permissions to list or inspect app registrations/federated credentials; `az ad app list --filter "appId eq '<client-id>'"` failed with insufficient privileges on 2026-05-14.

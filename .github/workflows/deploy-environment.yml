@@ -359,10 +359,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh variable set PRODUCTION_BASE_URL --repo "$REPOSITORY" --body "$EFFECTIVE_BASE_URL"
-          gh variable set AZURE_FUNCTIONAPP_NAME --repo "$REPOSITORY" --body "$EFFECTIVE_FUNCTIONAPP_NAME"
-          gh variable set AZURE_STATIC_WEB_STORAGE_ACCOUNT --repo "$REPOSITORY" --body "$EFFECTIVE_STORAGE_ACCOUNT"
-          echo "Updated production repository variables after successful smoke tests." >> "$GITHUB_STEP_SUMMARY"
+
+          update_variable() {
+            local name="$1"
+            local desired_value="$2"
+            local current_value
+
+            if current_value=$(gh variable get "$name" --repo "$REPOSITORY" 2>/dev/null) && [ "$current_value" = "$desired_value" ]; then
+              echo "$name already matches the successful production deployment." >> "$GITHUB_STEP_SUMMARY"
+              return 0
+            fi
+
+            if gh variable set "$name" --repo "$REPOSITORY" --body "$desired_value"; then
+              echo "Updated $name after successful production smoke tests." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning title=Production variable update skipped::$name could not be updated with the workflow token. Deployment and smoke tests already passed; update this repository variable manually if it differs."
+              echo "Skipped $name update because the workflow token could not write repository variables." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
+
+          update_variable PRODUCTION_BASE_URL "$EFFECTIVE_BASE_URL"
+          update_variable AZURE_FUNCTIONAPP_NAME "$EFFECTIVE_FUNCTIONAPP_NAME"
+          update_variable AZURE_STATIC_WEB_STORAGE_ACCOUNT "$EFFECTIVE_STORAGE_ACCOUNT"
       - name: Create production issue on failed deploy or smoke
         if: ${{ failure() && inputs.environmentName == 'prod' }}
         uses: actions/github-script@v7

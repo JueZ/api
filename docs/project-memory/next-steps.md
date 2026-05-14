@@ -2,6 +2,15 @@
 
 ## Current active next steps from 2026-05-14 consolidation
 
+## 2026-05-14 readiness sprint next steps
+
+1. Merge the readiness follow-up PR that makes production repository-variable updates best-effort/idempotent after smoke tests.
+2. Re-run `Deploy Test` on `main` and confirm it passes.
+3. Re-run `Promote Production` on `main` and confirm the whole workflow concludes success, not just deployment/smoke success.
+4. Use a delegated Microsoft Entra identity with app-registration read permissions to verify API app, SPA app, redirect URIs, delegated permission, consent state, and GitHub OIDC federated credentials.
+5. Manually verify browser authentication at the production Angular URL with the allowlisted Microsoft Entra user.
+6. After the production workflow concludes green and manual browser auth is verified, begin normal feature development with a small non-Reddit, non-expensive API catalogue slice.
+
 1. Verify Microsoft Entra app registration state with a delegated identity that can read app registrations, including API scope/role exposure, SPA app registration, production/test redirect URIs, and intended GitHub OIDC federated credentials.
 2. Verify the GitHub Actions deployment service principal object ID, then confirm least-privilege RBAC on `rg-api-test` and `rg-api-prod`.
 3. Run `Deploy Test` from `main` after prerequisite verification and confirm smoke tests use the auth-enabled expectation (`/health` returns `200`; unauthenticated `/api/hello` returns `401`).
