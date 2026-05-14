@@ -2,6 +2,15 @@
 
 Entries are reverse chronological. Do not include secrets or SAS URLs.
 
+## 2026-05-14 — Auth deployment preparation blocked by Entra permissions
+
+- Action: Set GitHub repository variable `DEPLOY_PRODUCTION_ENABLED=false` as a fail-safe before configuring authentication.
+- PR: #40 remains open and passing CI/Policy with OAuth/OIDC/JWT implementation and frontend MSAL wiring.
+- Production state: unchanged pre-auth deployment; `/health` is public and `/api/hello` is still the public placeholder.
+- Blocker: Codex Azure identity could not list app registrations by display name due to insufficient Microsoft Entra directory privileges.
+- Missing values: API app client ID, SPA app client ID, API App ID URI, `api.access` scope ID, and `OIDC_ALLOWED_OBJECT_IDS`.
+- Next step: A sufficiently privileged delegated user must create/reuse the Entra app registrations and provide the allowed user object ID before merge/deploy.
+
 ## 2026-05-14 — v0 production deployment succeeded
 
 - Event: Production deployment completed after the Function App runtime was changed to Node 22.
