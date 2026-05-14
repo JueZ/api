@@ -2,6 +2,13 @@
 
 Entries are reverse chronological.
 
+## 2026-05-14 — Introduce lightweight test-to-production promotion
+
+- Decision: Deploy merged commits to a separate test environment first, then promote the same commit to production only after test smoke tests pass.
+- Context: Production deployment works, but the project needs a small staged release path without adding expensive services or authentication in this task.
+- Consequences: `Deploy Test` uses `rg-api-test` and `environmentName=test`; `Promote Production` uses `rg-api-prod`, `environmentName=prod`, and the GitHub `production` environment approval gate if configured. Rollback redeploys a previous commit through the same path.
+- Status: Active.
+
 ## 2026-05-14 — Keep expensive services out of v0
 
 - Decision: Avoid Azure SQL, Cosmos DB, API Management, Front Door, and other paid always-on services in v0.
@@ -32,10 +39,10 @@ Entries are reverse chronological.
 
 ## 2026-05-14 — Gate production deployment with `DEPLOY_PRODUCTION_ENABLED`
 
-- Decision: Keep production deployment gated by the repository variable `DEPLOY_PRODUCTION_ENABLED`.
-- Context: Autonomous delivery can deploy after merge, but production deploys must fail closed unless intentionally enabled outside the repo.
-- Consequences: Do not enable or disable the gate in code changes unless explicitly requested.
-- Status: Active.
+- Decision: Previously kept direct production deployment gated by the repository variable `DEPLOY_PRODUCTION_ENABLED`.
+- Context: Autonomous delivery could deploy after merge, but production deploys needed to fail closed unless intentionally enabled outside the repo.
+- Consequences: Superseded by test-first promotion and optional GitHub `production` environment approval; avoid reintroducing direct production-on-push without test promotion.
+- Status: Superseded by the lightweight test-to-production promotion decision.
 
 ## 2026-05-14 — Use GitHub CLI and Azure CLI skills
 
