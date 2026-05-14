@@ -12,3 +12,9 @@
 10. Decide whether the GitHub `production` environment should require reviewers; for a solo project, avoid preventing self-review unless another reviewer exists.
 11. Harden run-from-package deployment away from expiring SAS if feasible.
 12. Add the first real API connector after auth works.
+13. Implement real OAuth/OIDC/JWT authentication.
+14. Add backend JWT validation with issuer, audience, scope, and user allowlist checks.
+15. Add Angular login UI and token acquisition.
+16. Update the OpenAPI security scheme.
+17. Add tests for 401, 403, and allowed-user behavior.
+18. Deploy auth configuration safely.
