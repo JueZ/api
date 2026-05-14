@@ -1,5 +1,14 @@
 # Incident log
 
+## 2026-05-14 — Microsoft Entra v1 issuer alias missed trailing slash
+
+- Symptom: Authenticated production browser calls to `GET /api/hello` continued returning `401 Invalid bearer token` after PR #83.
+- Evidence: Application Insights request telemetry showed recent `hello` requests returning `401`, traces showed `Authentication failed: invalid_token`, exceptions were empty, and safe app-setting comparisons showed audience, required scope, tenant entry, and user object entry matched the browser token claims.
+- Root cause: PR #83 derived `https://sts.windows.net/<tenant>` but Microsoft Entra v1 access tokens emit the exact issuer as `https://sts.windows.net/<tenant>/`. Exact issuer matching rejected the token before authorization reached scope or user checks.
+- Fix: Add the trailing-slash v1 issuer alias while retaining exact audience, scope or role, tenant, and user checks.
+- Status: Code fix proposed; deployment and manual browser retest pending.
+
+
 ## 2026-05-14 — Microsoft Entra v1 access token rejected by v2 issuer-only config
 
 - Symptom: Production Angular sign-in succeeded, but authenticated `GET /api/hello` returned `401 Invalid bearer token`.

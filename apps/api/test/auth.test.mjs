@@ -273,7 +273,7 @@ test('tenant-specific Microsoft Entra v2 issuer also accepts v1 access token iss
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
     const token = await new SignJWT({ scp: 'api.access' })
       .setProtectedHeader({ alg: 'RS256', kid: 'entra-v1' })
-      .setIssuer(`${baseUrl}/${entraTenantId}`)
+      .setIssuer(`${baseUrl}/${entraTenantId}/`)
       .setAudience('api://catalogue-test')
       .setSubject('allowed-sub')
       .setExpirationTime('5m')
@@ -286,7 +286,7 @@ test('tenant-specific Microsoft Entra v2 issuer also accepts v1 access token iss
       audience: 'api://catalogue-test',
     });
 
-    assert.equal(payload.iss, `${baseUrl}/${entraTenantId}`);
+    assert.equal(payload.iss, `${baseUrl}/${entraTenantId}/`);
     assert.equal(payload.sub, 'allowed-sub');
   } finally {
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));

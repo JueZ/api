@@ -279,11 +279,13 @@ function deriveMicrosoftEntraV1IssuerAliases(issuers: string[]): string[] {
 
     const [, protocol, host, tenantId] = match;
     const sameHostV1Issuer = `${protocol}://${host}/${tenantId}`;
+    // Microsoft Entra v1 access tokens can use an exact issuer with a trailing slash.
+    const sameHostV1IssuerWithSlash = `${sameHostV1Issuer}/`;
     if (host.toLowerCase() !== 'login.microsoftonline.com') {
-      return [sameHostV1Issuer];
+      return [sameHostV1Issuer, sameHostV1IssuerWithSlash];
     }
 
-    return [sameHostV1Issuer, `https://sts.windows.net/${tenantId}`];
+    return [sameHostV1Issuer, sameHostV1IssuerWithSlash, `https://sts.windows.net/${tenantId}/`];
   });
 }
 
