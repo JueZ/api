@@ -4,7 +4,7 @@ This repository is configured for routine changes to move from Codex-created pul
 
 ## Delivery flow
 
-1. Codex implements a change on a feature branch and opens a pull request.
+1. Codex implements a change on a feature branch, commits it, and opens or updates a pull request before reporting the task as complete.
 2. `Codex Auto-Merge` enables GitHub-native squash auto-merge for Codex branches (`codex/` or `codex-`) or pull requests labeled `codex-automerge`.
 3. `CI` and `Policy Check` run on the pull request.
 4. GitHub branch protection blocks merge until every required status check passes.
@@ -14,6 +14,26 @@ This repository is configured for routine changes to move from Codex-created pul
 8. If deployment or smoke tests fail, the workflow fails closed. Production is not promoted unless test smoke tests have passed.
 
 Codex can use the repo-scoped `github-cli-devops` and `azure-cli-devops` skills for safe GitHub CLI and Azure CLI diagnostics during this flow. Direct CLI diagnostics do not override CI, Policy Check, branch protection, environment approvals, deployment staging, or secret-handling rules.
+
+
+## Codex completion contract
+
+For any task that changes repository files, opening or updating a pull request is part of completing the task. Codex should not stop at a successful local implementation, successful tests, or a commit. If GitHub authentication, network access, repository permissions, or branch state prevent PR creation, Codex must report the failed PR step as a blocker instead of presenting the task as fully complete.
+
+Documentation-only and guardrail-only changes still require the same branch, commit, and pull request flow. No PR is required only when the task intentionally makes no repository change, such as a read-only investigation or answer.
+
+
+### Missing remote or Git credential recovery
+
+Codex hosts may occasionally start from a checkout that has GitHub CLI authentication but no `origin` remote, or where Git itself is not wired to the GitHub CLI credential helper. In that case, Codex should repair the local PR path before declaring a blocker:
+
+1. Check `git remote -v`.
+2. Restore the repository remote with `git remote add origin https://github.com/JueZ/api.git` or `git remote set-url origin https://github.com/JueZ/api.git` when `origin` exists but points elsewhere.
+3. Verify access with `gh auth status` and `gh repo view JueZ/api`.
+4. Run `gh auth setup-git --hostname github.com`.
+5. Push the feature branch with upstream tracking and create/update the PR using `--repo JueZ/api` explicitly.
+
+Only after those steps fail should Codex report PR creation as blocked.
 
 ## Required branch protection and repository settings
 
