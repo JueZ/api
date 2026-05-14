@@ -2,6 +2,12 @@
 
 Last updated: 2026-05-14
 
+## 2026-05-14 Codex host git remote repair in progress
+
+- Current Codex checkout had GitHub CLI authentication for `JueZ/api` but no configured git remote, which can make final PR URL reporting fail even after the local commit and PR metadata are recorded.
+- Fix in progress: Codex setup and maintenance scripts now add a missing git `origin` remote for `JueZ/api` (or `CODEX_GITHUB_REPOSITORY` when explicitly set) without printing secrets or deploying code.
+
+
 ## 2026-05-14 production deployment source hardening in progress
 
 - Aardvark reported that production rollback/promote could deploy operator-supplied branches or tags and run checked-out npm lifecycle/build scripts after Azure OIDC login, while setup docs also allowed no production reviewers and standing production RBAC-admin access.

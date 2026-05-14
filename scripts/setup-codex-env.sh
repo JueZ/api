@@ -25,6 +25,26 @@ require_env() {
   fi
 }
 
+
+configure_git_remote() {
+  local repository="${CODEX_GITHUB_REPOSITORY:-JueZ/api}"
+  local remote_url="https://github.com/${repository}.git"
+  local worktree
+
+  if ! worktree="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    echo "Skipping git remote configuration because the current directory is not a git worktree."
+    return 0
+  fi
+
+  if git -C "${worktree}" remote get-url origin >/dev/null 2>&1; then
+    echo "Git remote 'origin' is already configured for $(git -C "${worktree}" remote get-url origin)."
+    return 0
+  fi
+
+  echo "Configuring git remote 'origin' for ${repository}."
+  git -C "${worktree}" remote add origin "${remote_url}"
+}
+
 install_tools() {
   if [[ "${EUID}" -ne 0 ]]; then
     echo "This setup script must run as root so it can configure apt repositories." >&2
@@ -47,7 +67,7 @@ install_tools() {
   export DEBIAN_FRONTEND=noninteractive
 
   apt-get update
-  apt-get install -y ca-certificates curl apt-transport-https lsb-release gnupg
+  apt-get install -y ca-certificates curl apt-transport-https lsb-release gnupg git
 
   install -m 0755 -d /etc/apt/keyrings
 
@@ -121,5 +141,6 @@ az version --output table
 gh --version
 login_azure
 login_github
+configure_git_remote
 
 echo "Codex environment setup complete."

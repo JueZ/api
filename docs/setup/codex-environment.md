@@ -1,6 +1,6 @@
 # Codex environment setup and maintenance
 
-Use `scripts/setup-codex-env.sh` once per fresh Codex host to install required CLIs and cache authentication for Azure CLI and GitHub CLI. Use `scripts/maintain-codex-env.sh` later to refresh the tools and verify that cached authentication still works.
+Use `scripts/setup-codex-env.sh` once per fresh Codex host to install required CLIs, cache authentication for Azure CLI and GitHub CLI, and ensure the checkout has a GitHub `origin` remote. Use `scripts/maintain-codex-env.sh` later to refresh the tools, verify that cached authentication still works, and repair a missing `origin` remote.
 
 Both scripts are deployment-free. They install or verify tooling only and must not deploy infrastructure or application code.
 
@@ -10,7 +10,7 @@ Use the repo-scoped `github-cli-devops` skill for GitHub CLI work, pull requests
 
 `CODEX_AZURE_TENANT_ID` is the canonical tenant variable for Codex direct setup. Do not introduce `AZURE_TENANT_ID` for Codex direct setup unless the setup script is intentionally changed later.
 
-`CODEX_GH_TOKEN` is for setup only and must not be printed, logged, echoed, or committed. Setup clears `GH_TOKEN` and `GITHUB_TOKEN` before `gh auth login --with-token` so GitHub CLI can persist credentials instead of relying on environment-only token authentication. Maintenance verifies cached Azure CLI and GitHub CLI authentication and must not require or print secrets.
+`CODEX_GH_TOKEN` is for setup only and must not be printed, logged, echoed, or committed. Setup clears `GH_TOKEN` and `GITHUB_TOKEN` before `gh auth login --with-token` so GitHub CLI can persist credentials instead of relying on environment-only token authentication. Maintenance verifies cached Azure CLI and GitHub CLI authentication and must not require or print secrets. Both setup and maintenance configure a missing git `origin` remote to `https://github.com/JueZ/api.git` by default, or to `https://github.com/${CODEX_GITHUB_REPOSITORY}.git` when `CODEX_GITHUB_REPOSITORY` is intentionally set.
 
 ## Required setup secrets
 
@@ -49,6 +49,7 @@ The setup script:
 5. Selects `AZURE_SUBSCRIPTION_ID` with `az account set`.
 6. Unsets `GH_TOKEN` and `GITHUB_TOKEN`.
 7. Logs into GitHub CLI by piping `CODEX_GH_TOKEN` to `gh auth login --with-token` so the credential is cached.
+8. Adds a missing git `origin` remote for the repository so hosted PR URLs can be resolved after commits.
 
 ## Maintenance
 
@@ -65,5 +66,6 @@ The maintenance script:
 3. Verifies cached Azure CLI authentication with `az account show`.
 4. Unsets `GH_TOKEN` and `GITHUB_TOKEN`.
 5. Verifies cached GitHub CLI authentication with `gh auth status`.
+6. Adds a missing git `origin` remote for the repository so hosted PR URLs can be resolved after commits.
 
 Maintenance must fail if cached authentication has expired or is missing. Re-run setup with fresh secrets instead of adding secrets to the maintenance path.
