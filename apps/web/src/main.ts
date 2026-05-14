@@ -178,6 +178,10 @@ const msalClient = createMsalClient(config);
           It shows the expected payload fields, response objects, examples, and lets you call each
           endpoint from the browser.
         </p>
+        <p class="muted">
+          This endpoint now requires a valid OAuth/OIDC access token with the configured API
+          scope or role and a server-side allowlisted user identifier.
+        </p>
         <div class="button-row">
           <a class="button secondary" href="assets/openapi.yaml" target="_blank" rel="noreferrer">
             Open raw OpenAPI YAML

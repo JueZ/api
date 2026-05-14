@@ -232,8 +232,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: OAuth/OIDC JWT access token validated server-side with issuer JWKS, issuer, audience, scope or
-        role, and user allowlist checks.
+      description: OAuth/OIDC JWT access token validated server-side with issuer JWKS, issuer, audience, scope or role, and user allowlist checks.
     entraOAuth2:
       type: oauth2
       description: Microsoft Entra-compatible OAuth 2.0 Authorization Code + PKCE flow for browser and future iOS clients.
