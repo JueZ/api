@@ -1,5 +1,13 @@
 # Decision log
 
+## 2026-05-14 — Use a locked, script-free Functions production package install
+
+- Decision: Azure Functions deployment packages must copy `apps/api/package-lock.json` with the Functions package manifest and install production dependencies with `npm ci --omit=dev --ignore-scripts`.
+- Rationale: The production deploy path must not resolve new transitive dependency versions or run dependency lifecycle scripts after Azure OIDC login.
+- Consequence: Any production dependency change for the Function App must update and review the API-local lockfile before deployment can package the app.
+- Status: Active.
+
+
 ## 2026-05-14 — Harden production deployment refs and Azure RBAC bootstrap
 
 - Decision: production deploy, promote, and rollback refs must be immutable commit SHAs that resolve to commits already on `main`; branches and tags are rejected before Azure OIDC login and before npm install/build commands can run with Azure deployment context.
