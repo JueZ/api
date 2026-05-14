@@ -1,5 +1,12 @@
 # Next steps
 
+## 2026-05-14 app-only OAuth service-test next steps
+
+1. Run `scripts/configure-entra-service-oauth.sh` from Azure Cloud Shell or another Azure CLI session with Microsoft Graph app-registration permissions, using `API_APP_ID` from the API app registration.
+2. Set or verify GitHub `test` environment variables for `OIDC_REQUIRED_SCOPES=api.access,api.test`, `OIDC_ALLOWED_APP_OBJECT_IDS`, `OIDC_ALLOWED_CLIENT_IDS`, `TEST_SERVICE_AUTH_CLIENT_ID`, `TEST_SERVICE_AUTH_TENANT_ID`, and `TEST_SERVICE_AUTH_SCOPE`.
+3. Add a GitHub Actions service/e2e test job that obtains an app-only token via the service app's federated credential and calls protected test-zone endpoints.
+4. Keep production service-client allowlists empty unless a production app-to-app integration is intentionally added and documented.
+
 ## 2026-05-14 post-auth-verification next steps
 
 1. Begin the next small API catalogue feature slice on top of the verified protected API foundation.
