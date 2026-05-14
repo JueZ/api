@@ -68,6 +68,7 @@ jobs:
           : "${WEB_AUTH_ENABLED:?WEB_AUTH_ENABLED repository variable is required}"
           : "${WEB_AUTH_CLIENT_ID:?WEB_AUTH_CLIENT_ID repository variable is required}"
           : "${WEB_AUTH_AUTHORITY:?WEB_AUTH_AUTHORITY repository variable is required}"
+          : "${WEB_AUTH_REDIRECT_URI:?WEB_AUTH_REDIRECT_URI repository variable is required}"
           : "${WEB_AUTH_API_SCOPE:?WEB_AUTH_API_SCOPE repository variable is required}"
           echo "Production deployment is explicitly enabled and auth config variables are present. Continuing with OIDC login."
       - name: Azure OIDC login
@@ -222,7 +223,7 @@ jobs:
             fi
             mkdir -p "$output_dir/assets"
             effective_web_api_base_url="${WEB_API_BASE_URL:-$EFFECTIVE_PRODUCTION_BASE_URL}"
-            effective_web_redirect_uri="${WEB_AUTH_REDIRECT_URI:-$effective_web_api_base_url}"
+            effective_web_redirect_uri="$WEB_AUTH_REDIRECT_URI"
             export EFFECTIVE_WEB_API_BASE_URL="$effective_web_api_base_url"
             export EFFECTIVE_WEB_REDIRECT_URI="$effective_web_redirect_uri"
             node --input-type=module --eval "const config={authEnabled:process.env.WEB_AUTH_ENABLED==='true',authClientId:process.env.WEB_AUTH_CLIENT_ID||'',authAuthority:process.env.WEB_AUTH_AUTHORITY||'',authRedirectUri:process.env.EFFECTIVE_WEB_REDIRECT_URI||'',authApiScope:process.env.WEB_AUTH_API_SCOPE||'',apiBaseUrl:process.env.EFFECTIVE_WEB_API_BASE_URL||''}; process.stdout.write('window.API_CATALOGUE_CONFIG = '+JSON.stringify(config)+';\n');" > "$output_dir/assets/config.js"
