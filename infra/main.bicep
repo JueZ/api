@@ -43,6 +43,9 @@ param oidcAllowedAppObjectIds string = ''
 @description('Comma-separated allowed Microsoft Entra application/client IDs for app-only OAuth client-credentials tokens.')
 param oidcAllowedClientIds string = ''
 
+@description('Optional comma-separated allowed OAuth client application IDs for delegated/user tokens. Leave empty to preserve existing delegated-token behavior.')
+param oidcAllowedDelegatedClientIds string = ''
+
 @description('Optional comma-separated allowed tenant IDs.')
 param oidcAllowedTenants string = ''
 
@@ -188,6 +191,10 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'OIDC_ALLOWED_CLIENT_IDS'
           value: oidcAllowedClientIds
+        }
+        {
+          name: 'OIDC_ALLOWED_DELEGATED_CLIENT_IDS'
+          value: oidcAllowedDelegatedClientIds
         }
         {
           name: 'OIDC_ALLOWED_TENANTS'

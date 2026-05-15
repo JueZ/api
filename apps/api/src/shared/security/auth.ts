@@ -20,6 +20,7 @@ export interface AuthConfig {
   allowedSubjects: string[];
   allowedAppObjectIds: string[];
   allowedClientIds: string[];
+  allowedDelegatedClientIds: string[];
   allowedTenants: string[];
   debug: boolean;
 }
@@ -54,6 +55,7 @@ export function readAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
     allowedSubjects: parseCsv(env['OIDC_ALLOWED_SUBJECTS']),
     allowedAppObjectIds: parseCsv(env['OIDC_ALLOWED_APP_OBJECT_IDS']),
     allowedClientIds: parseCsv(env['OIDC_ALLOWED_CLIENT_IDS']),
+    allowedDelegatedClientIds: parseCsv(env['OIDC_ALLOWED_DELEGATED_CLIENT_IDS']),
     allowedTenants: parseCsv(env['OIDC_ALLOWED_TENANTS']),
     debug: env['AUTH_DEBUG'] === 'true',
   };
@@ -137,6 +139,10 @@ export async function authorizeRequest(
 
   if (!isAllowedUser(objectId, subject, config)) {
     return forbidden('User is not allowed.');
+  }
+
+  if (!isAllowedDelegatedClient(clientId, config)) {
+    return forbidden('Delegated OAuth client is not allowed.');
   }
 
   return {
@@ -260,6 +266,14 @@ function isAllowedUser(objectId: string | undefined, subject: string, config: Au
   }
 
   return config.allowedSubjects.includes(subject);
+}
+
+function isAllowedDelegatedClient(clientId: string | undefined, config: AuthConfig): boolean {
+  if (config.allowedDelegatedClientIds.length === 0) {
+    return true;
+  }
+
+  return clientId !== undefined && config.allowedDelegatedClientIds.includes(clientId);
 }
 
 async function discoverJwksUri(issuer: string): Promise<string> {

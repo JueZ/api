@@ -1,0 +1,219 @@
+openapi: 3.1.0
+info:
+  title: JueZ API Catalogue GPT Action
+  version: 0.1.0
+  description: Minimal GPT Actions contract for the JueZ API Catalogue. Health is public; Hello and Reddit thread actions require Microsoft Entra OAuth.
+servers:
+  - url: https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net
+    description: Production API
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Check API health
+      description: Public health endpoint. No OAuth token is required.
+      security: []
+      responses:
+        '200':
+          description: API is reachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /api/hello:
+    get:
+      operationId: getHello
+      summary: Test authenticated access
+      description: Protected endpoint used to confirm the GPT Action OAuth token can call the API.
+      security:
+        - entraOAuth2:
+            - api.access
+      responses:
+        '200':
+          description: Authenticated hello response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HelloResponse'
+        '401':
+          description: Missing or invalid OAuth bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '403':
+          description: Valid token, but caller, tenant, client, scope, or role is not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+  /api/reddit/thread:
+    post:
+      operationId: postRedditThread
+      summary: Fetch a Reddit thread
+      description: Protected endpoint that fetches a Reddit post and comments server-side. The GPT authenticates to this API, not to Reddit.
+      security:
+        - entraOAuth2:
+            - api.access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RedditThreadRequest'
+      responses:
+        '200':
+          description: Normalized Reddit thread snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RedditThreadResponse'
+        '400':
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleErrorResponse'
+        '401':
+          description: Missing or invalid OAuth bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '403':
+          description: Valid token, but caller, tenant, client, scope, or role is not allowed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '429':
+          description: Reddit rate limit or upstream throttling.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleErrorResponse'
+        '502':
+          description: Reddit upstream request failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimpleErrorResponse'
+components:
+  securitySchemes:
+    entraOAuth2:
+      type: oauth2
+      description: Microsoft Entra OAuth 2.0 authorization-code flow for the dedicated ChatGPT Action client.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://login.microsoftonline.com/7ac3dfd6-e810-4693-805a-9535eb3ab166/oauth2/v2.0/authorize
+          tokenUrl: https://login.microsoftonline.com/7ac3dfd6-e810-4693-805a-9535eb3ab166/oauth2/v2.0/token
+          scopes:
+            api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access: Access protected JueZ API endpoints.
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+        service:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - status
+        - service
+        - timestamp
+    HelloResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        message:
+          type: string
+        authenticated:
+          type: boolean
+        user:
+          type: object
+          additionalProperties: true
+      required:
+        - message
+        - authenticated
+    RedditThreadRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        post:
+          type: string
+          description: Reddit post URL, Reddit comments URL, or Reddit article ID.
+        sort:
+          type: string
+          enum:
+            - confidence
+            - top
+            - new
+            - controversial
+            - old
+            - qa
+          default: confidence
+        maxComments:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          default: 100
+      required:
+        - post
+    RedditThreadResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        source:
+          type: string
+        fetchedAt:
+          type: string
+          format: date-time
+        input:
+          type: string
+        post:
+          type: object
+          additionalProperties: true
+        comments:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        warnings:
+          type: array
+          items:
+            type: string
+      required:
+        - source
+        - fetchedAt
+        - input
+        - post
+        - comments
+    AuthErrorResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+          required:
+            - code
+            - message
+      required:
+        - error
+    SimpleErrorResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        error:
+          type: string
+      required:
+        - error
