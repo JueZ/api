@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       commit_sha:
-        description: Commit SHA, branch, or tag to promote. Defaults to the selected ref.
+        description: Immutable 40-character commit SHA from main to promote. Defaults to the selected ref SHA.
         required: false
         type: string
       deploy_frontend:
@@ -41,7 +41,8 @@ jobs:
         (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event == 'workflow_run')
       }}
     uses: ./.github/workflows/deploy-environment.yml
-    secrets: inherit
+    secrets:
+      REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
     with:
       environmentName: prod
       azureResourceGroup: rg-api-prod

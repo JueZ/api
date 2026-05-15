@@ -103,15 +103,15 @@ Recommended federated credential subjects:
 - `repo:OWNER/REPO:ref:refs/heads/main` for production deployment from `main`.
 - `repo:OWNER/REPO:environment:production` if the production environment is used as the trust boundary.
 
-Grant only the minimum Azure RBAC permissions needed for deployment. Prefer resource-group-scoped roles over subscription-wide roles. Do not grant broad Owner permissions unless there is a documented temporary bootstrap reason. Because `infra/main.bicep` assigns the Function App system identity `Storage Blob Data Reader` on the deployment storage account, the deployment identity also needs resource-group-scoped permission to create role assignments, such as `Role Based Access Control Administrator`, in addition to deployment rights.
+Grant only the minimum Azure RBAC permissions needed for deployment. Prefer resource-group-scoped roles over subscription-wide roles. Do not grant broad Owner permissions. The deployment identity should keep only standing deployment/data-plane permissions such as `Contributor` and `Storage Blob Data Contributor` at resource-group scope. Because `infra/main.bicep` assigns the Function App system identity `Storage Blob Data Reader` on the deployment storage account, a bootstrap run may temporarily need permission to create role assignments, such as `Role Based Access Control Administrator`; grant that only as a documented, time-bound resource-group-scoped exception and revoke it immediately after the bootstrap run.
 
-Example Azure CLI outline:
+Example Azure CLI outline for standing access:
 
 ```bash
 az ad app create --display-name github-OWNER-REPO-prod
 az ad app federated-credential create --id <app-id> --parameters credential.json
 az role assignment create --assignee <client-id> --role Contributor --scope /subscriptions/<subscription-id>/resourceGroups/<resource-group>
-az role assignment create --assignee <client-id> --role "Role Based Access Control Administrator" --scope /subscriptions/<subscription-id>/resourceGroups/<resource-group>
+az role assignment create --assignee <client-id> --role "Storage Blob Data Contributor" --scope /subscriptions/<subscription-id>/resourceGroups/<resource-group>
 ```
 
 `credential.json` should use issuer `https://token.actions.githubusercontent.com`, the exact GitHub subject, and audience `api://AzureADTokenExchange`.
@@ -139,10 +139,10 @@ The deployment model is now intentionally staged but still small-project friendl
 
 1. `CI` and `Policy Check` remain the required pull-request gates.
 2. `Deploy Test` runs after successful `main` CI or by `workflow_dispatch`. It uses the GitHub `test` environment, Azure OIDC, `rg-api-test`, and `environmentName=test`. It deploys infrastructure from `infra/main.bicep`, deploys the Function App package, uploads Angular static files when present, discovers the test base URL, and smokes `GET /health` and `GET /api/hello`.
-3. `Promote Production` runs automatically only after `Deploy Test` completes successfully for `main`, or manually by `workflow_dispatch`. It uses the GitHub `production` environment, Azure OIDC, `rg-api-prod`, and `environmentName=prod`. It deploys the same commit reported by the successful test run, runs production smoke tests, and updates non-secret production repository variables only after smoke tests pass.
+3. `Promote Production` runs automatically only after `Deploy Test` completes successfully for `main`, or manually by `workflow_dispatch`. It uses the GitHub `production` environment, Azure OIDC, `rg-api-prod`, and `environmentName=prod`. Production deployment refs are validated before Azure login and must resolve to immutable commits that are ancestors of `main`; branch and tag inputs are rejected. The workflow deploys the same commit reported by the successful test run, runs production smoke tests, and updates non-secret production repository variables only after smoke tests pass.
 4. `Deploy Environment` is a reusable workflow shared by test, production promotion, legacy manual production deploy, and rollback so test/prod drift stays low.
 
-Production approval is controlled by GitHub Environments: `Settings -> Environments -> production -> Required reviewers`. If required reviewers are configured, GitHub pauses the production job before Azure deployment. For a solo project, do not enable "prevent self-review" unless another reviewer exists. The `test` environment should normally have no required reviewers so it can validate every merged commit automatically.
+Production approval is controlled by GitHub Environments: `Settings -> Environments -> production -> Required reviewers`. Configure an independent production reviewer and enable prevent self-review for production. If no independent reviewer exists, keep `DEPLOY_PRODUCTION_ENABLED=false` rather than allowing unreviewed production rollback or promotion. The `test` environment should normally have no required reviewers so it can validate every merged commit automatically.
 
 The previous direct production-on-push workflow has been replaced by staged promotion. The compatibility `Deploy Production Legacy` workflow is manual-only and still uses the reusable deployment path; normal production changes should flow through `Deploy Test` and then `Promote Production`.
 
@@ -154,13 +154,13 @@ Deploy a specific commit to test:
 gh workflow run deploy-test.yml --ref main --repo JueZ/api -f commit_sha=<commit-sha>
 ```
 
-Promote a specific commit to production:
+Promote a specific immutable `main` commit SHA to production:
 
 ```bash
 gh workflow run promote-production.yml --ref main --repo JueZ/api -f commit_sha=<commit-sha>
 ```
 
-Rollback production by redeploying a previous known-good commit:
+Rollback production by redeploying a previous known-good immutable `main` commit SHA:
 
 ```bash
 gh workflow run rollback-production.yml --ref main --repo JueZ/api -f commit_sha=<previous-good-commit-sha>

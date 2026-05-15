@@ -26,7 +26,7 @@ on:
         default: true
         type: boolean
       sourceRef:
-        description: Commit SHA, branch, or tag to deploy.
+        description: Immutable 40-character commit SHA from main to deploy.
         required: false
         default: ''
         type: string
@@ -99,12 +99,32 @@ jobs:
       TEST_WEB_API_BASE_URL: ${{ vars.TEST_WEB_API_BASE_URL }}
       REDDIT_CLIENT_ID: ${{ vars.REDDIT_CLIENT_ID }}
       REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
-      REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
     steps:
       - name: Checkout deployment source
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.sourceRef || github.sha }}
+          fetch-depth: 0
+      - name: Validate deployment source
+        shell: bash
+        run: |
+          set -euo pipefail
+          deployment_ref="${SOURCE_REF:-${GITHUB_SHA}}"
+          resolved_head="$(git rev-parse HEAD)"
+
+          if [[ ! "$deployment_ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "sourceRef must be a full 40-character commit SHA from the main branch." >&2
+            exit 1
+          fi
+          if [ "${deployment_ref,,}" != "$resolved_head" ]; then
+            echo "sourceRef must resolve exactly to the checked-out commit." >&2
+            exit 1
+          fi
+          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
+          if ! git merge-base --is-ancestor "$resolved_head" origin/main; then
+            echo "sourceRef must point to a commit already present in the main branch history." >&2
+            exit 1
+          fi
       - name: Validate deployment configuration
         shell: bash
         run: |
@@ -144,7 +164,6 @@ jobs:
           : "${WEB_AUTH_API_SCOPE:?WEB_AUTH_API_SCOPE repository variable is required for $ENVIRONMENT_NAME}"
           : "${REDDIT_CLIENT_ID:?REDDIT_CLIENT_ID environment variable is required for $ENVIRONMENT_NAME}"
           : "${REDDIT_USER_AGENT:?REDDIT_USER_AGENT environment variable is required for $ENVIRONMENT_NAME}"
-          : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
       - name: Azure OIDC login
         uses: azure/login@v3
         with:
@@ -174,8 +193,11 @@ jobs:
       - name: Deploy Bicep infrastructure
         id: infra
         shell: bash
+        env:
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
         run: |
           set -euo pipefail
+          : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
           if [ -f infra/main.bicep ]; then
             api_cors_redirect_uri=""
             if [ "$ENVIRONMENT_NAME" = "prod" ]; then

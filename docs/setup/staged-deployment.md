@@ -66,21 +66,7 @@ gh api \
 JSON
 ```
 
-Create the `production` environment without required reviewers if you want fully automatic promotion after test passes:
-
-```bash
-gh api \
-  --method PUT \
-  "repos/$REPOSITORY/environments/production" \
-  -H "Accept: application/vnd.github+json" \
-  --input - <<'JSON'
-{
-  "wait_timer": 0
-}
-JSON
-```
-
-Alternatively, configure a production approval gate. Replace `YOUR_GITHUB_LOGIN` with the reviewer login. For a solo project, do not enable `prevent_self_review` unless another reviewer exists.
+Configure the `production` environment with required reviewers. The production deployment workflows are additionally guarded to accept only immutable commit SHAs that are ancestors of `main`, but an environment reviewer remains a required defense-in-depth gate for manual rollback/promote dispatches. Replace `YOUR_GITHUB_LOGIN` with a reviewer login that is not the operator who will dispatch production rollback or promotion. If no independent reviewer exists, leave `DEPLOY_PRODUCTION_ENABLED=false` until one is available.
 
 ```bash
 export PRODUCTION_REVIEWER_LOGIN="YOUR_GITHUB_LOGIN"
@@ -90,7 +76,7 @@ jq -n \
   --argjson reviewer_id "$PRODUCTION_REVIEWER_ID" \
   '{
     wait_timer: 0,
-    prevent_self_review: false,
+    prevent_self_review: true,
     reviewers: [
       {type: "User", id: $reviewer_id}
     ]
@@ -214,11 +200,12 @@ Resolve the GitHub Actions service principal object ID:
 export GHA_SP_OBJECT_ID="$(az ad sp show --id "$AZURE_CLIENT_ID" --query id -o tsv)"
 ```
 
-Grant the GitHub Actions identity the least roles currently needed by the workflows at each resource-group scope:
+Grant the GitHub Actions identity the standing roles currently needed by the workflows at each resource-group scope:
 
 - `Contributor` for Bicep deployments and Function App configuration.
 - `Storage Blob Data Contributor` for uploading Function and Angular artifacts through Azure Storage data-plane APIs.
-- `Role Based Access Control Administrator` so `infra/main.bicep` can create the Function App managed identity's storage-reader role assignment. Keep this scoped to the resource groups, not the subscription.
+
+Do not keep `Role Based Access Control Administrator` as standing production access. If `infra/main.bicep` must create or repair the Function App managed identity's storage-reader role assignment during bootstrap, grant `Role Based Access Control Administrator` only as a time-bound, resource-group-scoped exception for that bootstrap run, then remove it after verifying the role assignment.
 
 ```bash
 for resource_group in "$TEST_RESOURCE_GROUP" "$PRODUCTION_RESOURCE_GROUP"; do
@@ -226,8 +213,7 @@ for resource_group in "$TEST_RESOURCE_GROUP" "$PRODUCTION_RESOURCE_GROUP"; do
 
   for role in \
     "Contributor" \
-    "Storage Blob Data Contributor" \
-    "Role Based Access Control Administrator"; do
+    "Storage Blob Data Contributor"; do
     assignment_count="$(az role assignment list \
       --assignee "$GHA_SP_OBJECT_ID" \
       --role "$role" \
@@ -246,6 +232,37 @@ for resource_group in "$TEST_RESOURCE_GROUP" "$PRODUCTION_RESOURCE_GROUP"; do
       echo "Role already assigned at $scope: $role"
     fi
   done
+done
+```
+
+If a bootstrap deployment fails because the deployment identity cannot create the storage-reader role assignment, grant the role-assignment permission temporarily, run the single bootstrap deployment, and revoke it immediately afterwards. For production, do this only while the production environment reviewer gate and immutable-main-SHA workflow guard are in place.
+
+Temporary grant before the bootstrap run:
+
+```bash
+for resource_group in "$TEST_RESOURCE_GROUP" "$PRODUCTION_RESOURCE_GROUP"; do
+  scope="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$resource_group"
+
+  az role assignment create \
+    --assignee-object-id "$GHA_SP_OBJECT_ID" \
+    --assignee-principal-type ServicePrincipal \
+    --role "Role Based Access Control Administrator" \
+    --scope "$scope" \
+    --only-show-errors
+done
+```
+
+Revoke immediately after the bootstrap run succeeds or fails:
+
+```bash
+for resource_group in "$TEST_RESOURCE_GROUP" "$PRODUCTION_RESOURCE_GROUP"; do
+  scope="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$resource_group"
+
+  az role assignment delete \
+    --assignee "$GHA_SP_OBJECT_ID" \
+    --role "Role Based Access Control Administrator" \
+    --scope "$scope" \
+    --only-show-errors
 done
 ```
 

@@ -1,5 +1,14 @@
 # Decision log
 
+## 2026-05-14 — Harden production deployment refs and Azure RBAC bootstrap
+
+- Decision: production deploy, promote, and rollback refs must be immutable commit SHAs that resolve to commits already on `main`; branches and tags are rejected before Azure OIDC login and before npm install/build commands can run with Azure deployment context.
+- Decision: production GitHub Environment setup should require an independent reviewer with prevent-self-review. If no independent reviewer is available, keep `DEPLOY_PRODUCTION_ENABLED=false` rather than permitting unreviewed production rollback or promotion.
+- Decision: keep `Role Based Access Control Administrator` out of standing deployment identity access. Use it only as a documented, time-bound resource-group bootstrap exception for the Function App package-reader role assignment, then revoke it immediately.
+- Rationale: these controls break the branch/tag workflow-dispatch abuse chain reported by Aardvark and reduce the blast radius of the Azure deployment identity.
+- Status: In progress.
+
+
 ## 2026-05-14: Use Entra app roles for service/e2e OAuth instead of static tokens
 
 Decision: support other applications and deployed test-zone service/e2e tests with Microsoft Entra OAuth 2.0 client credentials, app roles, tenant validation, and explicit service-client allowlists. Do not introduce custom static bearer tokens, password-grant test login, or deployed auth bypasses.

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       commit_sha:
-        description: Previous commit SHA, branch, or tag to redeploy to production.
+        description: Previous immutable 40-character commit SHA from main to redeploy to production.
         required: true
         type: string
 
@@ -22,7 +22,8 @@ jobs:
   rollback-production:
     name: rollback production
     uses: ./.github/workflows/deploy-environment.yml
-    secrets: inherit
+    secrets:
+      REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
     with:
       environmentName: prod
       azureResourceGroup: rg-api-prod
