@@ -4,7 +4,7 @@
 
 - Production is reachable at <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/> for the Angular frontend and <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net> for the Function API.
 - Manual smoke checks on 2026-05-15 confirmed production `/health` returns `200`, unauthenticated `/api/hello` returns `401`, the browser origin CORS preflight for `/api/hello` returns `204`, and the frontend root returns `200`.
-- Important deployment gap: latest `main` commit `fa1faef` from PR #119 has successful PR CI/policy checks and is merged, but the latest successful production promotion remains run `25890832782`, which deployed commit `e40533b`. No successful CI-triggered Deploy Test/Promote Production run for `fa1faef` was present during this verification.
+- Important deployment gap: security-finding commit `fa1faef` from PR #119 had successful PR CI/policy checks and was merged, but the latest successful production promotion remained run `25890832782`, which deployed commit `e40533b`. No successful CI-triggered Deploy Test/Promote Production run for a `main` head that includes `fa1faef` was present during this verification.
 - Runtime state checked through Azure CLI: production Function App `func-api-catalogue-prod-bfjstshehpbfk` is `Running`, uses `NODE|22`, has HTTPS-only enabled, and exposes `health`, `hello`, and `redditThread` functions.
 
 

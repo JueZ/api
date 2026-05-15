@@ -2,9 +2,9 @@
 
 ## 2026-05-15 production verification next steps
 
-1. Ensure a successful `CI` run exists for latest `main` commit `fa1faef`; if GitHub-native auto-merge did not trigger the push CI chain, manually dispatch the required workflow with the exact immutable commit SHA.
-2. After CI exists, run or observe CI-triggered `Deploy Test` for `fa1faef` and confirm it uploads matching full-deployment provenance.
-3. Promote production for `fa1faef` only after Deploy Test succeeds; then re-run smoke checks for production `/health`, unauthenticated `/api/hello`, CORS preflight, and frontend root.
+1. Ensure a successful `CI` run exists for the current `main` head that includes security-finding commit `fa1faef`; if GitHub-native auto-merge did not trigger the push CI chain, manually dispatch the required workflow with the exact immutable commit SHA.
+2. After CI exists, run or observe CI-triggered `Deploy Test` for that exact commit and confirm it uploads matching full-deployment provenance.
+3. Promote production for that exact commit only after Deploy Test succeeds; then re-run smoke checks for production `/health`, unauthenticated `/api/hello`, CORS preflight, and frontend root.
 4. After production promotion, manually browser-test the frontend at <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/> with the allowlisted account.
 
 
