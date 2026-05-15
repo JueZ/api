@@ -1,6 +1,15 @@
 # Next steps
 
+## 2026-05-15 post-production-promotion next steps
+
+1. Manually browser-test <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/> with the allowlisted account and call the protected hello endpoint with an access token.
+2. Rebase or close stale open PRs #81, #112, #118, #120, and #121; do not merge #120 or #121 without resolving conflicts and re-running the full CI/policy gate.
+3. If #112's extra regression-test coverage is still desired, reintroduce only the non-stale tests on a fresh branch from current `main` instead of merging the stale PR body/memory text.
+
+
 ## 2026-05-15 production verification next steps
+
+Update: CI run `25917321823`, Deploy Test run `25917361131`, and Promote Production run `25917450342` completed for `main` commit `91be4e72dae0a10bad79488125714899bd543f61`; automated and Codex-host smoke checks passed. The remaining step is manual browser testing with the configured permitted account.
 
 1. Ensure a successful `CI` run exists for the current `main` head that includes security-finding commit `fa1faef`; if GitHub-native auto-merge did not trigger the push CI chain, manually dispatch the required workflow with the exact immutable commit SHA.
 2. After CI exists, run or observe CI-triggered `Deploy Test` for that exact commit and confirm it uploads matching full-deployment provenance.
