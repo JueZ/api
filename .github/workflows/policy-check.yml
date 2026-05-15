@@ -65,7 +65,9 @@ jobs:
             base_ref="HEAD~1"
           fi
           diff_file=$(mktemp)
-          git diff "$base_ref" HEAD > "$diff_file" || true
+          # Exclude generated OpenAPI web artifacts from guardrail text scanning.
+          # The canonical contract in contracts/openapi.yaml and all source files remain scanned.
+          git diff "$base_ref" HEAD -- . ':!apps/web/src/assets/openapi.yaml' ':!apps/web/src/app/openapi.generated.ts' > "$diff_file" || true
           forbidden_patterns=(
             '^[+-].*(DISABLE[_]AUTH|AUTH[_]DISABLED|skip[A]uth|disable[A]uth).*true'
             '^[+-].*([j]wt|[J]WT).*(skip|disable|fals[e])'

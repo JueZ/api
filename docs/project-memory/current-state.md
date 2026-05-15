@@ -2,6 +2,13 @@
 
 Last updated: 2026-05-14
 
+
+## 2026-05-14 deployment secret scoping hardening deployed
+
+- PR #107 remediated the Aardvark finding that the reusable deployment workflow exposed `REDDIT_CLIENT_SECRET` at job scope while building an operator-selected deployment ref.
+- Deployment callers now pass only the Reddit secret explicitly, the reusable workflow no longer exports that secret to checkout/install/build steps, and deployment refs are restricted to full commit SHAs already present in the `main` branch history before build or secret-bearing infrastructure steps run.
+- Production promotion run `25890276402` passed, including deployment and smoke tests for the production Function App and static web storage account.
+
 ## 2026-05-14 app-only OAuth service-client auth implementation
 
 - Backend authorization now supports Microsoft Entra app-only OAuth client-credentials tokens alongside delegated user tokens. User tokens remain gated by `OIDC_ALLOWED_OBJECT_IDS`/`OIDC_ALLOWED_SUBJECTS`; app-only tokens are gated separately by `OIDC_ALLOWED_APP_OBJECT_IDS` and/or `OIDC_ALLOWED_CLIENT_IDS` after issuer, audience, tenant, and required scope/role validation.
@@ -78,7 +85,7 @@ Last updated: 2026-05-14
 - Frontend: Angular app in `apps/web`.
 - Backend: Azure Functions TypeScript app in `apps/api`.
 - API contract: `contracts/openapi.yaml`.
-- Frontend API catalogue: Angular renders endpoint documentation, request payload fields, response schemas, examples, and browser try-it controls from synced OpenAPI assets generated from `contracts/openapi.yaml`.
+- Frontend API catalogue: Angular renders endpoint documentation, request payload fields, response schemas, examples, and browser try-it controls by loading the `contracts/openapi.yaml` build asset at runtime; generated web OpenAPI copies are intentionally not committed.
 - Infrastructure: `infra/main.bicep`.
 - Azure resource groups: `rg-api-test` for test and `rg-api-prod` for production.
 - Azure region: `westeurope`.

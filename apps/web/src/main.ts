@@ -7,8 +7,7 @@ import {
   PublicClientApplication,
   type AccountInfo,
 } from '@azure/msal-browser';
-
-import { OPENAPI_DOCUMENT } from './app/openapi.generated';
+import YAML from 'yaml';
 
 interface RuntimeConfig {
   authEnabled: boolean;
@@ -117,11 +116,9 @@ declare global {
   }
 }
 
-const openApiDocument = OPENAPI_DOCUMENT as OpenApiDocument;
-const apiOperations = buildApiOperations(openApiDocument);
-const initialTryItBodies = Object.fromEntries(
-  apiOperations.map((operation) => [operation.id, buildInitialBody(operation)]),
-) as Record<string, Record<string, string>>;
+const OPENAPI_ASSET_URL = 'assets/openapi.yaml';
+const emptyOpenApiDocument: OpenApiDocument = { info: { title: '', version: '' }, paths: {} };
+let openApiDocument = emptyOpenApiDocument;
 
 const config = readRuntimeConfig();
 const msalClient = createMsalClient(config);
@@ -174,7 +171,7 @@ const msalClient = createMsalClient(config);
       <section class="card catalogue-card" aria-labelledby="catalogue-title">
         <h2 id="catalogue-title">API catalogue</h2>
         <p>
-          This interactive catalogue is generated from the OpenAPI {{ openApiVersion }} contract.
+          This interactive catalogue is generated from the OpenAPI {{ openApiVersion() }} contract.
           It shows the expected payload fields, response objects, examples, and lets you call each
           endpoint from the browser.
         </p>
@@ -182,8 +179,11 @@ const msalClient = createMsalClient(config);
           This endpoint now requires a valid OAuth/OIDC access token with the configured API
           scope or role and a server-side allowlisted user identifier.
         </p>
+        @if (catalogueError()) {
+          <pre class="api-error" role="alert">{{ catalogueError() }}</pre>
+        }
         <div class="button-row">
-          <a class="button secondary" href="assets/openapi.yaml" target="_blank" rel="noreferrer">
+          <a class="button secondary" [href]="openApiAssetUrl" target="_blank" rel="noreferrer">
             Open raw OpenAPI YAML
           </a>
         </div>
@@ -338,8 +338,9 @@ const msalClient = createMsalClient(config);
 })
 export class AppComponent {
   protected readonly activeAccount = signal<AccountInfo | null>(msalClient?.getActiveAccount() ?? null);
-  protected readonly endpoints = signal(apiOperations);
-  protected readonly formValues = signal(initialTryItBodies);
+  protected readonly endpoints = signal<ApiOperationDoc[]>([]);
+  protected readonly formValues = signal<Record<string, Record<string, string>>>({});
+  protected readonly catalogueError = signal<string | null>(null);
   protected readonly loadingOperations = signal<Record<string, boolean>>({});
   protected readonly operationResults = signal<Record<string, string>>({});
   protected readonly operationErrors = signal<Record<string, string>>({});
@@ -355,7 +356,34 @@ export class AppComponent {
     const account = this.activeAccount();
     return account ? `Signed in as ${account.username || account.name || 'an allowed account'}.` : 'Signed out.';
   });
-  protected readonly openApiVersion = openApiDocument.info.version;
+  protected readonly openApiVersion = signal('loading');
+  protected readonly openApiAssetUrl = OPENAPI_ASSET_URL;
+
+  constructor() {
+    void this.loadOpenApiDocument();
+  }
+
+
+  private async loadOpenApiDocument(): Promise<void> {
+    try {
+      const response = await fetch(OPENAPI_ASSET_URL);
+      if (!response.ok) {
+        throw new Error(`OpenAPI document returned ${response.status}.`);
+      }
+
+      openApiDocument = YAML.parse(await response.text()) as OpenApiDocument;
+      const operations = buildApiOperations(openApiDocument);
+      this.endpoints.set(operations);
+      this.formValues.set(Object.fromEntries(
+        operations.map((operation) => [operation.id, buildInitialBody(operation)]),
+      ) as Record<string, Record<string, string>>);
+      this.openApiVersion.set(openApiDocument.info.version);
+      this.catalogueError.set(null);
+    } catch (error) {
+      this.catalogueError.set(error instanceof Error ? error.message : 'Failed to load OpenAPI document.');
+      this.openApiVersion.set('unavailable');
+    }
+  }
 
   async login(): Promise<void> {
     if (!msalClient || !config.authApiScope) {

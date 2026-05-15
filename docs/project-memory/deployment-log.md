@@ -37,6 +37,13 @@ Entries are reverse chronological. Do not include secrets or SAS URLs.
 - Verification: The response was authenticated and returned the expected v0 hello payload for Martin with subject, object ID, and tenant ID fields.
 - Follow-up: Auth milestone is browser-verified; future feature work can build on the protected API foundation.
 
+
+## 2026-05-14 — Deployment secret scoping hardening deployed
+
+- Event: PR #107 was squash-merged after CI and Policy Check passed, then `Promote Production` run `25890276402` deployed commit `3e4149265f8f3c8feb365a5a4933ff16b68edc83`.
+- Result: Production deployment succeeded. The reusable deployment workflow now validates deployment refs as full SHAs in `main`, uses explicit Reddit secret passing from callers, and scopes `REDDIT_CLIENT_SECRET` only to the Bicep infrastructure step.
+- Verification: Production workflow smoke tests passed for `https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net`; no production repair issue was created.
+
 ## 2026-05-14 — Trailing-slash Microsoft Entra v1 issuer fix deployed to production
 
 - Event: PR #86 was merged after passing CI and Policy Check, then `Deploy Test` run `25858558165` and `Promote Production` run `25858636629` completed successfully.
