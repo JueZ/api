@@ -156,3 +156,16 @@ Last updated: 2026-05-15
 - `Promote Production` was manually re-run from `main` after PR #60 at run `25852638254` and succeeded end-to-end.
 - Production smoke remained healthy after the final promotion: `GET /health` returned `200`, and unauthenticated `GET /api/hello` returned `401`.
 - The post-smoke repository-variable metadata updates now produce warnings if `GITHUB_TOKEN` cannot write repository variables, but they no longer fail a healthy deployment.
+
+## 2026-05-15 GPT Actions OAuth preparation
+
+- Added an optional `OIDC_ALLOWED_DELEGATED_CLIENT_IDS` setting for protected API routes. When empty, delegated/user-token behavior remains backward compatible. When populated, delegated/user tokens must have an `azp` or `appid` client claim matching the allowlist, in addition to the existing tenant, scope/role, and user object ID / subject allowlists. App-only service tokens still use `OIDC_ALLOWED_APP_OBJECT_IDS` and `OIDC_ALLOWED_CLIENT_IDS`.
+- Added `contracts/openapi.gpt.yaml`, a minimal GPT Actions OpenAPI 3.1 schema for production with public `GET /health` and OAuth-protected `GET /api/hello` and `POST /api/reddit/thread`.
+- Added `scripts/configure-entra-gpt-action-oauth.sh` for Azure Cloud Shell. It creates or reuses a dedicated Microsoft Entra confidential web app registration for the ChatGPT Action, adds the GPT Builder redirect URI, verifies the existing API delegated scope, adds delegated API permission, optionally creates a client secret, and can optionally set non-secret GitHub variables and Function App app settings.
+- Current non-secret repository variables include the API audience, API scope ending in `/api.access`, primary tenant, and Angular SPA client ID. Exact values remain in GitHub variables and the OpenAPI contract rather than this memory note.
+- Codex Azure/Graph inspection on 2026-05-15 could list account/resource groups and Function App resources through ARM, but `az ad app show/list` failed with `Insufficient privileges to complete the operation`, and `az functionapp config appsettings list` failed with `Length Required`. The Cloud Shell helper is therefore the source for final Entra/GPT Action configuration under an appropriately privileged signed-in user.
+
+
+## 2026-05-15 GPT Actions helper follow-up
+
+- Fixed `scripts/configure-entra-gpt-action-oauth.sh` after Cloud Shell reported `ERROR: Couldn't find 'web' in 'web'` for an existing ChatGPT Action app registration. The helper now uses Azure CLI's web arguments instead of a generic nested `--set web...` update, and it registers both standard GPT Actions callback host variants (`chat.openai.com` and `chatgpt.com`) when one is provided.

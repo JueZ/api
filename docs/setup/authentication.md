@@ -230,3 +230,79 @@ scope/role, tenant, and allowlist enforcement.
 This milestone adds application code, app settings, and Microsoft Entra app registrations only.
 It does not add Azure SQL, Cosmos DB, API Management, Front Door, Cognitive Services,
 Kubernetes, or other paid platform services.
+
+## ChatGPT Custom GPT / GPT Actions OAuth setup
+
+A ChatGPT Custom GPT must use its own Microsoft Entra app registration. Do **not** reuse the Angular SPA app registration as the GPT Action OAuth client. The GPT authenticates to this API with the existing delegated API scope; the backend then calls Reddit with backend-only Reddit OAuth credentials.
+
+Current non-secret values discovered from repository variables on 2026-05-15:
+
+- API application/client ID: read from the non-secret `WEB_AUTH_API_SCOPE` / `OIDC_AUDIENCE` repository variables.
+- API Application ID URI / audience: read from `OIDC_AUDIENCE`.
+- Delegated API scope: read from `WEB_AUTH_API_SCOPE`; it should end with `/api.access`.
+- Primary tenant for the GPT Action OAuth URLs: read from `AZURE_TENANT_ID` / `WEB_AUTH_AUTHORITY`.
+- Existing Angular SPA client ID: read from `WEB_AUTH_CLIENT_ID`.
+- Production API base URL: `https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net`
+- GPT-specific OpenAPI schema: `contracts/openapi.gpt.yaml`
+
+The API supports an optional delegated OAuth client allowlist with `OIDC_ALLOWED_DELEGATED_CLIENT_IDS`. Leave it empty to preserve the previous behavior. When it is non-empty, user/delegated tokens must include `azp` or `appid` matching one of the configured client application IDs, while the existing user object ID / subject allowlist still applies. App-only tokens continue to use `OIDC_ALLOWED_APP_OBJECT_IDS` and `OIDC_ALLOWED_CLIENT_IDS`.
+
+### Cloud Shell helper
+
+Run the helper from Azure Cloud Shell after GPT Builder shows the OAuth callback / redirect URI:
+
+```bash
+export API_APP_ID='<paste API app client ID from WEB_AUTH_API_SCOPE or OIDC_AUDIENCE>'
+export GPT_ACTION_REDIRECT_URI='<paste GPT Builder OAuth callback URL here>'
+# Optional: add comma-separated extra callbacks. The helper automatically registers
+# both chat.openai.com and chatgpt.com variants when GPT_ACTION_REDIRECT_URI uses
+# either standard ChatGPT Actions callback host.
+export GPT_ACTION_ADDITIONAL_REDIRECT_URIS=''
+export SET_GITHUB_VARIABLES=false
+export SET_AZURE_APP_SETTINGS=false
+export CREATE_CLIENT_SECRET=false
+./scripts/configure-entra-gpt-action-oauth.sh
+```
+
+To apply configuration after reviewing the output, rerun with:
+
+```bash
+export SET_GITHUB_VARIABLES=true
+export SET_AZURE_APP_SETTINGS=true
+export CREATE_CLIENT_SECRET=true
+./scripts/configure-entra-gpt-action-oauth.sh
+```
+
+The script creates or reuses a confidential web app registration named `JueZ API Catalogue ChatGPT Action`, adds the GPT Builder redirect URI (including the alternate `chat.openai.com` / `chatgpt.com` callback host when applicable), verifies the API app exposes `api.access`, adds the delegated API permission, attempts admin consent when permissions allow it, and prints the Client ID, OAuth URLs, scope, production API URL, and OpenAPI schema path for GPT Builder. If a new client secret is created, it is printed once and must be pasted directly into GPT Builder; do not commit it or store it in GitHub variables.
+
+### GPT Builder values
+
+- Authentication type: OAuth
+- Client ID: the ChatGPT Action app registration client ID printed by the helper
+- Client Secret: the one-time secret printed only when `CREATE_CLIENT_SECRET=true`
+- Authorization URL: `https://login.microsoftonline.com/7ac3dfd6-e810-4693-805a-9535eb3ab166/oauth2/v2.0/authorize`
+- Token URL: `https://login.microsoftonline.com/7ac3dfd6-e810-4693-805a-9535eb3ab166/oauth2/v2.0/token`
+- Scope: `api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access`
+- OpenAPI schema: paste or upload `contracts/openapi.gpt.yaml`
+
+Test the GPT Action first with `GET /api/hello`, then with `POST /api/reddit/thread`. Example Reddit request:
+
+```json
+{
+  "post": "https://www.reddit.com/r/redditdev/comments/abc123/example/",
+  "sort": "confidence",
+  "maxComments": 100
+}
+```
+
+### Troubleshooting GPT Actions
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| GPT OAuth login fails | Redirect URI mismatch, wrong tenant, or app not configured as a confidential web client. | Copy the exact GPT Builder callback URL into `GPT_ACTION_REDIRECT_URI` and rerun the helper. The helper registers the alternate `chat.openai.com` / `chatgpt.com` callback host when the URL has a standard GPT Actions callback shape. |
+| Token endpoint fails | Missing/expired client secret, wrong Client ID, or wrong token URL tenant. | Create a fresh client secret with the helper and verify the GPT Builder OAuth fields. |
+| API returns `401` | Missing/invalid token, wrong audience, wrong issuer, or signature validation failure. | Confirm GPT Builder uses the `api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access` scope and the production schema server. |
+| API returns `403` | Scope, tenant, user allowlist, service allowlist, or delegated client allowlist rejected the token. | Confirm `OIDC_ALLOWED_OBJECT_IDS` / `OIDC_ALLOWED_SUBJECTS` includes the user and `OIDC_ALLOWED_DELEGATED_CLIENT_IDS` includes the GPT Action client ID when configured. |
+| Reddit endpoint returns `502` | Reddit upstream call failed or credentials/user-agent are not configured correctly. | Verify backend-only `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, and `REDDIT_USER_AGENT` in Function App settings without printing secret values. |
+| Reddit endpoint returns `429` | Reddit throttled the backend. | Reduce call frequency or `maxComments`; retry later. |
+| GPT Action importer rejects schema | Schema too large or unsupported constructs. | Use the minimal GPT-specific schema in `contracts/openapi.gpt.yaml`, not the full catalogue schema. |
