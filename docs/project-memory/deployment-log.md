@@ -1,5 +1,14 @@
 # Deployment log
 
+## 2026-05-15 production verification after PR #119 merge
+
+- Verified GitHub PR #119 (`Require explicit app-only token marker for service tokens`) was merged at 2026-05-15T07:00:03Z as `fa1faef`; its PR CI and Policy Check runs passed and GitHub-native auto-merge was enabled before merge.
+- Latest successful production promotion inspected: GitHub Actions run `25890832782`, `Promote Production`, completed successfully at 2026-05-14T23:10:00Z and deployed `e40533b`.
+- Manual production checks from Codex host on 2026-05-15: `/health` returned `200`; unauthenticated `/api/hello` returned `401`; CORS preflight from `https://stapicatalogueprodbfjsts.z6.web.core.windows.net` returned `204`; frontend root returned `200`.
+- Compatibility note: local `npm ci` succeeded with 0 vulnerabilities, `npm test` passed 36 tests, and `npm run build` completed successfully with the existing Angular initial bundle budget warning.
+- Remaining deployment action: trigger/observe CI on `main`, Deploy Test, and Promote Production for `fa1faef` before claiming the security-finding fixes are live in production.
+
+
 ## 2026-05-14 OpenAPI generated artifacts removed from version control
 
 - PR #103 (`Stop committing generated OpenAPI web artifacts`) merged via GitHub-native auto-merge at merge commit `21b4dcc81d055ecce728494ef7e5c14de411f8f3` after PR CI and Policy Check passed.
