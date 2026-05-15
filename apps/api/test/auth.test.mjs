@@ -14,6 +14,7 @@ const baseConfig = Object.freeze({
   allowedSubjects: ['allowed-sub'],
   allowedAppObjectIds: ['allowed-app-oid'],
   allowedClientIds: ['allowed-client-id'],
+  allowedDelegatedClientIds: [],
   allowedTenants: [],
   debug: false,
 });
@@ -176,6 +177,88 @@ test('app-only service token can be allowed by client ID', async () => {
   assert.equal(result.user.clientId, 'allowed-client-id');
 });
 
+test('delegated user token keeps accepting any OAuth client when delegated client allowlist is empty', async () => {
+  const result = await authorize('Bearer valid-token', {
+    sub: 'user-subject',
+    oid: 'allowed-oid',
+    tid: 'tenant-id',
+    azp: 'unlisted-delegated-client-id',
+    scp: 'api.access',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.user.tokenType, 'user');
+});
+
+test('delegated user token with allowed azp passes delegated client allowlist', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'user-subject',
+      oid: 'allowed-oid',
+      tid: 'tenant-id',
+      azp: 'allowed-delegated-client-id',
+      scp: 'api.access',
+    },
+    { allowedDelegatedClientIds: ['allowed-delegated-client-id'] },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.user.tokenType, 'user');
+});
+
+test('delegated user token with allowed appid passes delegated client allowlist', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'user-subject',
+      oid: 'allowed-oid',
+      tid: 'tenant-id',
+      appid: 'allowed-delegated-client-id',
+      scp: 'api.access',
+    },
+    { allowedDelegatedClientIds: ['allowed-delegated-client-id'] },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.user.tokenType, 'user');
+});
+
+test('delegated user token from blocked OAuth client returns 403 after user allowlist', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'user-subject',
+      oid: 'allowed-oid',
+      tid: 'tenant-id',
+      azp: 'blocked-delegated-client-id',
+      scp: 'api.access',
+    },
+    { allowedDelegatedClientIds: ['allowed-delegated-client-id'] },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.message, 'Delegated OAuth client is not allowed.');
+});
+
+test('delegated user token without client claim returns 403 when delegated client allowlist is configured', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'user-subject',
+      oid: 'allowed-oid',
+      tid: 'tenant-id',
+      scp: 'api.access',
+    },
+    { allowedDelegatedClientIds: ['allowed-delegated-client-id'] },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.message, 'Delegated OAuth client is not allowed.');
+});
+
 test('roles-only token without app-only marker cannot bypass user allowlist via allowed client ID', async () => {
   const result = await authorize('Bearer valid-token', {
     sub: 'blocked-sub',
@@ -189,6 +272,24 @@ test('roles-only token without app-only marker cannot bypass user allowlist via 
   assert.equal(result.response.status, 403);
   assert.equal(result.response.jsonBody.error.code, 'forbidden');
   assert.equal(result.response.jsonBody.error.message, 'User is not allowed.');
+});
+
+test('app-only service token ignores delegated client allowlist', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'service-subject',
+      oid: 'allowed-app-oid',
+      tid: 'tenant-id',
+      idtyp: 'app',
+      azp: 'service-client-id',
+      roles: ['api.access'],
+    },
+    { allowedDelegatedClientIds: ['different-delegated-client-id'] },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.user.tokenType, 'service');
 });
 
 test('app-only service token outside app allowlists returns 403', async () => {
@@ -261,6 +362,7 @@ test('readAuthConfig supports multiple comma-separated issuers', () => {
     OIDC_ALLOWED_OBJECT_IDS: 'allowed-oid',
     OIDC_ALLOWED_APP_OBJECT_IDS: 'allowed-app-oid',
     OIDC_ALLOWED_CLIENT_IDS: 'allowed-client-id',
+    OIDC_ALLOWED_DELEGATED_CLIENT_IDS: 'allowed-delegated-client-id, second-delegated-client-id',
   });
 
   assert.equal(config.issuer, 'https://login.example.test/tenant/v2.0');
@@ -270,6 +372,7 @@ test('readAuthConfig supports multiple comma-separated issuers', () => {
   ]);
   assert.deepEqual(config.allowedAppObjectIds, ['allowed-app-oid']);
   assert.deepEqual(config.allowedClientIds, ['allowed-client-id']);
+  assert.deepEqual(config.allowedDelegatedClientIds, ['allowed-delegated-client-id', 'second-delegated-client-id']);
 });
 
 

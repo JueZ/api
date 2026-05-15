@@ -88,6 +88,7 @@ jobs:
       OIDC_ALLOWED_SUBJECTS: ${{ vars.OIDC_ALLOWED_SUBJECTS }}
       OIDC_ALLOWED_APP_OBJECT_IDS: ${{ vars.OIDC_ALLOWED_APP_OBJECT_IDS }}
       OIDC_ALLOWED_CLIENT_IDS: ${{ vars.OIDC_ALLOWED_CLIENT_IDS }}
+      OIDC_ALLOWED_DELEGATED_CLIENT_IDS: ${{ vars.OIDC_ALLOWED_DELEGATED_CLIENT_IDS }}
       OIDC_ALLOWED_TENANTS: ${{ vars.OIDC_ALLOWED_TENANTS }}
       WEB_AUTH_ENABLED: ${{ vars.WEB_AUTH_ENABLED }}
       WEB_AUTH_CLIENT_ID: ${{ vars.WEB_AUTH_CLIENT_ID }}
@@ -265,6 +266,7 @@ jobs:
                 oidcAllowedSubjects="${OIDC_ALLOWED_SUBJECTS:-}" \
                 oidcAllowedAppObjectIds="${OIDC_ALLOWED_APP_OBJECT_IDS:-}" \
                 oidcAllowedClientIds="${OIDC_ALLOWED_CLIENT_IDS:-}" \
+                oidcAllowedDelegatedClientIds="${OIDC_ALLOWED_DELEGATED_CLIENT_IDS:-}" \
                 oidcAllowedTenants="${OIDC_ALLOWED_TENANTS:-}" \
                 redditClientId="${REDDIT_CLIENT_ID:-}" \
                 redditOAuthSecret="${REDDIT_CLIENT_SECRET:-}" \
