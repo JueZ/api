@@ -1,5 +1,14 @@
 # Deployment log
 
+## 2026-05-15 production promotion for security-finding main head
+
+- Open PR review before deployment: #81 and #118 were already no-op/empty versus current `main`; #112 was not merged because its memory text was stale despite useful duplicate test intent; #120 and #121 were not merged because they conflicted with current `main` and need rebase/refresh before reconsideration.
+- Manually dispatched `CI` run `25917321823` for `main` commit `91be4e72dae0a10bad79488125714899bd543f61`; it completed successfully across install, lint, type-check, unit/API tests, Angular build, Azure Functions build, OpenAPI/Bicep validation, security scan, secret scan, and dependency audit.
+- CI-triggered `Deploy Test` run `25917361131` deployed the same commit to test, passed smoke tests, and uploaded Deploy Test provenance.
+- `Promote Production` run `25917450342` deployed the same commit to production and reported smoke tests passed for Function App `func-api-catalogue-prod-bfjstshehpbfk` and storage account `stapicatalogueprodbfjsts`.
+- Post-deployment Codex smoke checks confirmed production `/health` returned `200`, unauthenticated `/api/hello` returned `401`, CORS preflight from `https://stapicatalogueprodbfjsts.z6.web.core.windows.net` returned `204`, and the frontend root returned `200`.
+
+
 ## 2026-05-15 production verification after PR #119 merge
 
 - Verified GitHub PR #119 (`Require explicit app-only token marker for service tokens`) was merged at 2026-05-15T07:00:03Z as `fa1faef`; its PR CI and Policy Check runs passed and GitHub-native auto-merge was enabled before merge.

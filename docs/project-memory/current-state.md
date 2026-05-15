@@ -1,5 +1,13 @@
 # Current state
 
+## 2026-05-15 production deployment gap resolved for security-finding main head
+
+- Codex reviewed open PRs #81, #112, #118, #120, and #121. None were merged: #118 and #81 were empty/no-op against current `main`; #112 contained useful duplicate regression-test intent but stale project-memory text; #120 and #121 conflicted with current `main` and would need rebase before reconsideration.
+- Current `main` commit `91be4e72dae0a10bad79488125714899bd543f61`, which includes the service-token security fix from PR #119 (`fa1faef`), completed manually dispatched `CI` run `25917321823`, CI-triggered `Deploy Test` run `25917361131`, and `Promote Production` run `25917450342`.
+- Production smoke tests passed in the workflow and from the Codex host: `/health` returned `200`, unauthenticated `/api/hello` returned `401`, production-origin CORS preflight returned `204`, and the frontend root returned `200`.
+- Production remains available at <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/> for the Angular frontend and <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net> for the Function API.
+
+
 ## 2026-05-15 production verification after security-finding merges
 
 - Production is reachable at <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/> for the Angular frontend and <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net> for the Function API.
