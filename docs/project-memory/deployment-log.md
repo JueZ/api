@@ -6,7 +6,7 @@
 - Latest successful production promotion inspected: GitHub Actions run `25890832782`, `Promote Production`, completed successfully at 2026-05-14T23:10:00Z and deployed `e40533b`.
 - Manual production checks from Codex host on 2026-05-15: `/health` returned `200`; unauthenticated `/api/hello` returned `401`; CORS preflight from `https://stapicatalogueprodbfjsts.z6.web.core.windows.net` returned `204`; frontend root returned `200`.
 - Compatibility note: local `npm ci` succeeded with 0 vulnerabilities, `npm test` passed 36 tests, and `npm run build` completed successfully with the existing Angular initial bundle budget warning.
-- Remaining deployment action: trigger/observe CI on `main`, Deploy Test, and Promote Production for `fa1faef` before claiming the security-finding fixes are live in production.
+- Remaining deployment action: trigger/observe CI on the current `main` head that includes `fa1faef`, then Deploy Test and Promote Production, before claiming the security-finding fixes are live in production.
 
 
 ## 2026-05-14 OpenAPI generated artifacts removed from version control
