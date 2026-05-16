@@ -273,7 +273,18 @@ export CREATE_CLIENT_SECRET=true
 ./scripts/configure-entra-gpt-action-oauth.sh
 ```
 
-The script creates or reuses a confidential web app registration named `JueZ API Catalogue ChatGPT Action`, adds the GPT Builder redirect URI (including the alternate `chat.openai.com` / `chatgpt.com` callback host when applicable), verifies the API app exposes `api.access`, adds the delegated API permission, attempts admin consent when permissions allow it, and prints the Client ID, OAuth URLs, scope, production API URL, and OpenAPI schema path for GPT Builder. If a new client secret is created, it is printed once and must be pasted directly into GPT Builder; do not commit it or store it in GitHub variables.
+If a generated GPT Action client secret is copied into chat, logs, shell history, or any other place outside GPT Builder, treat it as exposed and rotate it. The helper can delete previous GPT Action client secret credentials with the default display name before creating a replacement:
+
+```bash
+export DELETE_EXISTING_CLIENT_SECRETS=true
+export DELETE_CLIENT_SECRET_DISPLAY_NAME='ChatGPT Action OAuth secret'
+export CREATE_CLIENT_SECRET=true
+./scripts/configure-entra-gpt-action-oauth.sh
+```
+
+After rotation, paste only the newly printed secret into GPT Builder and remove the old value from any non-secure location where it was copied. Client secret values cannot be retrieved later; only credential metadata such as display name and key ID can be listed.
+
+The script creates or reuses a confidential web app registration named `JueZ API Catalogue ChatGPT Action`, adds the GPT Builder redirect URI (including the alternate `chat.openai.com` / `chatgpt.com` callback host when applicable), verifies the API app exposes `api.access`, adds the delegated API permission, attempts admin consent when permissions allow it, and prints the Client ID, OAuth URLs, scope, production API URL, and OpenAPI schema path for GPT Builder. If a new client secret is created, it is printed once and must be pasted directly into GPT Builder; do not commit it, store it in GitHub variables, paste it into chats, or leave it in terminal logs.
 
 ### GPT Builder values
 
@@ -300,7 +311,7 @@ Test the GPT Action first with `GET /api/hello`, then with `POST /api/reddit/thr
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | GPT OAuth login fails | Redirect URI mismatch, wrong tenant, or app not configured as a confidential web client. | Copy the exact GPT Builder callback URL into `GPT_ACTION_REDIRECT_URI` and rerun the helper. The helper registers the alternate `chat.openai.com` / `chatgpt.com` callback host when the URL has a standard GPT Actions callback shape. |
-| Token endpoint fails | Missing/expired client secret, wrong Client ID, or wrong token URL tenant. | Create a fresh client secret with the helper and verify the GPT Builder OAuth fields. |
+| Token endpoint fails | Missing/expired/exposed client secret, wrong Client ID, or wrong token URL tenant. | Create a fresh client secret with the helper, rotate old helper-created secrets with `DELETE_EXISTING_CLIENT_SECRETS=true` when needed, and verify the GPT Builder OAuth fields. |
 | API returns `401` | Missing/invalid token, wrong audience, wrong issuer, or signature validation failure. | Confirm GPT Builder uses the `api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access` scope and the production schema server. |
 | API returns `403` | Scope, tenant, user allowlist, service allowlist, or delegated client allowlist rejected the token. | Confirm `OIDC_ALLOWED_OBJECT_IDS` / `OIDC_ALLOWED_SUBJECTS` includes the user and `OIDC_ALLOWED_DELEGATED_CLIENT_IDS` includes the GPT Action client ID when configured. |
 | Reddit endpoint returns `502` | Reddit upstream call failed or credentials/user-agent are not configured correctly. | Verify backend-only `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, and `REDDIT_USER_AGENT` in Function App settings without printing secret values. |
