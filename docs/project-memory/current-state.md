@@ -1,9 +1,10 @@
 # Current state
 
-## 2026-05-16 Codex auto-merge deployment dispatch in progress
+## 2026-05-16 Codex auto-merge deployment dispatch validated
 
 - Root cause found after PR #134: GitHub-native auto-merge executed by the Actions `GITHUB_TOKEN` can merge to `main` without triggering the normal `push`-based `CI` workflow, so the subsequent `Deploy Test` and `Promote Production` chain may not run.
-- Fix in progress: add `Codex Main Delivery`, a workflow_run bridge after successful `Codex Auto-Merge` that waits for the PR to reach `MERGED`, honors explicit skip markers (`skip-autodeploy`, `[skip deploy]`, or `[skip autodeploy]`), and dispatches `CI` on `main`. Successful dispatched `main` CI should then trigger `Deploy Test`; successful CI-triggered test deployment and smoke/provenance checks should promote the same commit to production automatically when production deployment is enabled.
+- PR #135 added `Codex Main Delivery`, a workflow_run bridge after successful `Codex Auto-Merge` that waits for the PR to reach `MERGED`, honors explicit skip markers (`skip-autodeploy`, `[skip deploy]`, or `[skip autodeploy]`), and dispatches `CI` on `main`. Successful dispatched `main` CI triggers `Deploy Test`; successful CI-triggered test deployment and smoke/provenance checks promote the same commit to production automatically when production deployment is enabled.
+- Validation for main commit `8cf55a7`: manually dispatched `CI` run `25968500874` passed, triggered `Deploy Test` run `25968521526`, and then triggered `Promote Production` run `25968560857`; production smoke tests passed. Future Codex auto-merges should enter the same chain automatically via `Codex Main Delivery`.
 
 ## 2026-05-16 Reddit share URL normalization in progress
 
