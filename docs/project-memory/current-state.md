@@ -169,3 +169,9 @@ Last updated: 2026-05-15
 ## 2026-05-15 GPT Actions helper follow-up
 
 - Fixed `scripts/configure-entra-gpt-action-oauth.sh` after Cloud Shell reported `ERROR: Couldn't find 'web' in 'web'` for an existing ChatGPT Action app registration. The helper now uses Azure CLI's web arguments instead of a generic nested `--set web...` update, and it registers both standard GPT Actions callback host variants (`chat.openai.com` and `chatgpt.com`) when one is provided.
+
+
+## 2026-05-16 GPT Action client secret rotation guidance
+
+- Added `DELETE_EXISTING_CLIENT_SECRETS` and `DELETE_CLIENT_SECRET_DISPLAY_NAME` to `scripts/configure-entra-gpt-action-oauth.sh` so a leaked or misplaced GPT Action client secret created by the helper can be rotated without printing existing secrets. The helper deletes matching credential metadata by key ID and can then create one replacement secret for GPT Builder.
+- Documentation now explicitly says to treat any GPT Action client secret copied into chat, logs, shell history, or non-GPT Builder locations as exposed and to rotate it.
