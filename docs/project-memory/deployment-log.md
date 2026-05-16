@@ -1,5 +1,12 @@
 # Deployment log
 
+## 2026-05-16 Reddit thread input hardening deployed to production
+
+- PR #144 (`Harden Reddit thread input resolution`) merged at main commit `659b674daa8b26f801aec0672696d20f1b178985` after PR CI and Policy Check passed.
+- Main delivery completed successfully: `CI` run `25972576401`, `Deploy Test` run `25972596333`, and `Promote Production` run `25972641970`.
+- Production workflow smoke tests passed. Codex host post-deployment checks confirmed production `/health` returned `200`, unauthenticated `POST /api/reddit/thread` returned `401`, and the frontend root returned `200`.
+- Result: production now includes Reddit OAuth `api/info` share URL resolution, raw comment-ID-to-parent-thread fallback, and documented URL alias input tolerance.
+
 ## 2026-05-16 full Codex delivery orchestrator deployed
 
 - PR #137 updated `Codex Main Delivery` to explicitly dispatch and wait for `CI`, `Deploy Test`, and `Promote Production` after Codex auto-merge because a GitHub-token `workflow_dispatch` CI run did not trigger downstream `workflow_run` deployment workflows.
