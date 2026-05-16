@@ -1,5 +1,10 @@
 # Current state
 
+## 2026-05-16 GPT Actions OAuth documentation placement follow-up
+
+- GPT Actions delegated OAuth setup is now documented in both the operational authentication setup guide and the OAuth security guide. The setup guide lists the dedicated GPT Action app registration, repository variable, helper script flow, GPT Builder values, and troubleshooting. The security guide now clarifies that GPT Actions are delegated-user clients controlled by `OIDC_ALLOWED_DELEGATED_CLIENT_IDS`, while app-only service clients remain controlled by `OIDC_ALLOWED_APP_OBJECT_IDS` / `OIDC_ALLOWED_CLIENT_IDS`.
+- README now points readers to the setup guide for GPT Actions OAuth and to the security guide for allowlist semantics.
+
 ## 2026-05-15 production deployment gap resolved for security-finding main head
 
 - Codex reviewed open PRs #81, #112, #118, #120, and #121. None were merged: #118 and #81 were empty/no-op against current `main`; #112 contained useful duplicate regression-test intent but stale project-memory text; #120 and #121 conflicted with current `main` and would need rebase before reconsideration.
@@ -16,7 +21,7 @@
 - Runtime state checked through Azure CLI: production Function App `func-api-catalogue-prod-bfjstshehpbfk` is `Running`, uses `NODE|22`, has HTTPS-only enabled, and exposes `health`, `hello`, and `redditThread` functions.
 
 
-Last updated: 2026-05-15
+Last updated: 2026-05-16
 
 ## 2026-05-14 Codex host git remote repair in progress
 
