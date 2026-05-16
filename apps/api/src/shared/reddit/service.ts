@@ -22,15 +22,22 @@ export class RedditThreadService {
   }
 
   async fetchThread(request: RedditThreadRequest): Promise<RedditThreadResponse> {
-    const originalInput = request.post;
-    const normalizedPostInput = await this.normalizePostInput(request.post);
-    const input = parseRedditPostInput(normalizedPostInput);
+    const originalInput = normalizeRequestPostInput(request);
+    const normalizedPostInput = await this.normalizePostInput(originalInput);
+    let input = parseRedditPostInput(normalizedPostInput);
     const sort = normalizeRedditSort(request.sort);
     const maxComments = normalizeMaxComments(request.maxComments);
     const maxMoreChildrenRequests = normalizeMaxMoreChildrenRequests(request.maxMoreChildrenRequests);
     const startedAt = this.now();
 
-    const initial = await this.client.getJson<unknown>(commentsPath(input.articleId), commentsQuery(sort, maxComments));
+    let initial = await this.client.getJson<unknown>(commentsPath(input.articleId), commentsQuery(sort, maxComments));
+    if (initial.status === 404) {
+      const fallbackArticleId = await this.resolveRawCommentIdToArticleId(input.articleId);
+      if (fallbackArticleId) {
+        input = parseRedditPostInput(fallbackArticleId);
+        initial = await this.client.getJson<unknown>(commentsPath(input.articleId), commentsQuery(sort, maxComments));
+      }
+    }
     assertRedditStatus(initial.status);
     const tree = normalizeInitialThread(originalInput, initial.body, { maxComments });
     let rateLimit: RedditRateLimit = initial.rateLimit;
@@ -83,9 +90,14 @@ export class RedditThreadService {
   }
 
 
-  private async normalizePostInput(post: unknown): Promise<unknown> {
+  private async normalizePostInput(post: string): Promise<string> {
     if (!isRedditShareUrl(post)) {
       return post;
+    }
+
+    const articleId = await this.resolveRedditUrlToArticleId(post.trim());
+    if (articleId) {
+      return articleId;
     }
 
     const resolvedUrl = await this.client.resolveRedditUrl(post.trim());
@@ -100,6 +112,24 @@ export class RedditThreadService {
     }
 
     return resolvedUrl;
+  }
+
+  private async resolveRedditUrlToArticleId(url: string): Promise<string | null> {
+    const response = await this.client.getJson<unknown>('/api/info', { url, raw_json: 1 });
+    if (response.status === 403 || response.status === 404) {
+      return null;
+    }
+    assertRedditStatus(response.status, 'url info');
+    return articleIdFromInfoListing(response.body);
+  }
+
+  private async resolveRawCommentIdToArticleId(id: string): Promise<string | null> {
+    const response = await this.client.getJson<unknown>('/api/info', { id: `t1_${id}`, raw_json: 1 });
+    if (response.status === 404) {
+      return null;
+    }
+    assertRedditStatus(response.status, 'comment info');
+    return articleIdFromInfoListing(response.body);
   }
 
   private async fetchMoreChildren(linkId: string, children: string[], sort: string, more: MorePlaceholder) {
@@ -153,4 +183,43 @@ function chunk<T>(values: T[], size: number): T[][] {
     chunks.push(values.slice(index, index + size));
   }
   return chunks;
+}
+
+function normalizeRequestPostInput(request: RedditThreadRequest): string {
+  if (!request || typeof request !== 'object') {
+    throw new RedditInputError('post must be a non-empty string.');
+  }
+
+  const post = request.post ?? request.url ?? request.redditUrl ?? request.reddit_url ?? request.threadUrl ?? request.thread_url;
+  if (typeof post !== 'string') {
+    throw new RedditInputError('post must be a non-empty string.');
+  }
+  return post;
+}
+
+function articleIdFromInfoListing(value: unknown): string | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const children = (value as { data?: { children?: unknown[] } }).data?.children;
+  if (!Array.isArray(children)) {
+    return null;
+  }
+
+  for (const child of children) {
+    const thing = child as { kind?: unknown; data?: Record<string, unknown> };
+    const data = thing.data;
+    if (!data || typeof data !== 'object') {
+      continue;
+    }
+    if (thing.kind === 't3' && typeof data['id'] === 'string') {
+      return data['id'];
+    }
+    if (thing.kind === 't1' && typeof data['link_id'] === 'string') {
+      return data['link_id'].replace(/^t3_/i, '');
+    }
+  }
+
+  return null;
 }
