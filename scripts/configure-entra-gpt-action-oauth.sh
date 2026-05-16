@@ -19,6 +19,8 @@ SET_AZURE_APP_SETTINGS="${SET_AZURE_APP_SETTINGS:-false}"
 CREATE_CLIENT_SECRET="${CREATE_CLIENT_SECRET:-false}"
 CLIENT_SECRET_DISPLAY_NAME="${CLIENT_SECRET_DISPLAY_NAME:-ChatGPT Action OAuth secret}"
 CLIENT_SECRET_YEARS="${CLIENT_SECRET_YEARS:-1}"
+DELETE_EXISTING_CLIENT_SECRETS="${DELETE_EXISTING_CLIENT_SECRETS:-false}"
+DELETE_CLIENT_SECRET_DISPLAY_NAME="${DELETE_CLIENT_SECRET_DISPLAY_NAME:-$CLIENT_SECRET_DISPLAY_NAME}"
 TEST_RESOURCE_GROUP="${TEST_RESOURCE_GROUP:-rg-api-test}"
 PROD_RESOURCE_GROUP="${PROD_RESOURCE_GROUP:-rg-api-prod}"
 TEST_FUNCTION_APP="${TEST_FUNCTION_APP:-func-api-catalogue-test-iwt54bovfzvrc}"
@@ -172,6 +174,21 @@ else
   consent_status="manual-admin-consent-may-be-required"
 fi
 rm -f /tmp/gpt-action-admin-consent.out /tmp/gpt-action-admin-consent.err
+
+if bool_is_true "$DELETE_EXISTING_CLIENT_SECRETS"; then
+  echo "Deleting existing client secret credential(s) with display name '$DELETE_CLIENT_SECRET_DISPLAY_NAME'."
+  credential_key_ids="$(az ad app credential list --id "$gpt_app_id" -o json \
+    | jq -r --arg displayName "$DELETE_CLIENT_SECRET_DISPLAY_NAME" '.[] | select(.displayName == $displayName) | .keyId')"
+  if [ -z "$credential_key_ids" ]; then
+    echo "No existing client secret credentials matched that display name."
+  else
+    while IFS= read -r credential_key_id; do
+      [ -n "$credential_key_id" ] || continue
+      az ad app credential delete --id "$gpt_app_id" --key-id "$credential_key_id" >/dev/null
+      echo "Deleted one matching client secret credential."
+    done <<<"$credential_key_ids"
+  fi
+fi
 
 new_client_secret=""
 if bool_is_true "$CREATE_CLIENT_SECRET"; then
