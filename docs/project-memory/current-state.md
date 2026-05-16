@@ -8,11 +8,11 @@
 
 
 
-## 2026-05-16 Reddit Repairable Error Contract deployment repair in progress
+## 2026-05-16 Reddit Repairable Error Contract deployed after package-manifest repair
 
 - PR #140 merged and passed PR CI/policy checks, but `Deploy Test` run `25972007955` failed smoke readiness with `/health` and `/api/hello` returning `404`.
-- Root cause evidence indicates the deployed Functions package used `apps/api/package.json`, which did not include the newly imported OpenAI SDK. The repair adds `openai` to the Functions package manifest and lockfile so function indexing can load the LLM analyzer module.
-- Production promotion did not run for PR #140 because test deployment failed closed.
+- Root cause evidence indicated the deployed Functions package used `apps/api/package.json`, which did not include the newly imported OpenAI SDK. PR #142 added `openai` to the Functions package manifest and lockfile so function indexing can load the LLM analyzer module.
+- PR #142 passed PR CI/policy checks, merged, and completed main delivery: `CI` run `25972157195`, `Deploy Test` run `25972181952`, and `Promote Production` run `25972223775` all succeeded; production smoke tests passed.
 
 ## 2026-05-16 Reddit Repairable Error Contract implementation
 
