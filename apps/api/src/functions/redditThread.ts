@@ -1,9 +1,25 @@
 import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
-import { authorizeRequest } from '../shared/security/auth.js';
+import { analyzeRepairableErrorWithLlm } from '../shared/errors/llmDiagnosticAnalyzer.js';
+import { buildRedditDiagnosticCapsule, getTraceIdFromRequestOrContext, type DiagnosticCapsule } from '../shared/errors/diagnosticCapsule.js';
+import {
+  buildFallbackRepairableProblem,
+  createDiagnosticId,
+  sanitizeRepairableProblem,
+  validateRepairableProblem,
+  type RepairableProblem,
+  type RepairableProblemExpected,
+} from '../shared/errors/repairableProblem.js';
 import { mapRedditError, RedditThreadService } from '../shared/reddit/service.js';
 import type { RedditThreadRequest } from '../shared/reddit/types.js';
+import { authorizeRequest } from '../shared/security/auth.js';
 
-const redditThreadService = new RedditThreadService();
+const OPERATION_ID = 'postRedditThread';
+const ENDPOINT = '/api/reddit/thread';
+const ALLOWED_REQUEST_FIELDS = ['post', 'sort', 'maxComments', 'maxMoreChildrenRequests', 'url', 'redditUrl', 'reddit_url', 'threadUrl', 'thread_url'];
+const ALLOWED_OPERATION_IDS = [OPERATION_ID];
+
+let redditThreadService = new RedditThreadService();
+let repairableErrorAnalyzer = analyzeRepairableErrorWithLlm;
 
 export async function redditThreadHandler(
   request: HttpRequest,
@@ -21,14 +37,21 @@ export async function redditThreadHandler(
     return withCors(authorization.response);
   }
 
+  const traceId = getTraceIdFromRequestOrContext(request, context);
   let body: RedditThreadRequest;
   try {
     body = (await request.json()) as RedditThreadRequest;
   } catch {
-    return withCors({
+    const problem = await problemForRedditError({
+      request,
+      context,
+      traceId,
+      diagnosticId: createDiagnosticId(),
       status: 400,
-      jsonBody: { error: 'Request body must be valid JSON.' },
+      failureStage: 'json_parse',
+      safeError: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' },
     });
+    return problemResponse(problem);
   }
 
   try {
@@ -39,14 +62,38 @@ export async function redditThreadHandler(
     });
   } catch (error) {
     const mapped = mapRedditError(error);
-    if (mapped.status >= 500) {
-      context.warn('Reddit thread fetch failed with a sanitized upstream error.');
-    }
-    return withCors({
+    const diagnosticId = createDiagnosticId();
+    const problem = await problemForRedditError({
+      request,
+      context,
+      traceId,
+      diagnosticId,
       status: mapped.status,
-      jsonBody: { error: mapped.message },
+      failureStage: failureStageForStatus(mapped.status),
+      safeError: { code: mapped.code, message: mapped.message },
+      body,
     });
+
+    if (problem.status >= 500) {
+      context.warn('Reddit thread fetch failed with a repairable error contract.', {
+        operation_id: problem.operation_id,
+        diagnostic_id: problem.diagnostic_id,
+        classification: problem.classification,
+        status: problem.status,
+        safe_debug_summary: problem.safe_debug_summary,
+      });
+    }
+
+    return problemResponse(problem);
   }
+}
+
+export function setRedditThreadServiceForTesting(service: RedditThreadService | null): void {
+  redditThreadService = service ?? new RedditThreadService();
+}
+
+export function setRepairableErrorAnalyzerForTesting(analyzer: typeof analyzeRepairableErrorWithLlm | null): void {
+  repairableErrorAnalyzer = analyzer ?? analyzeRepairableErrorWithLlm;
 }
 
 app.http('redditThread', {
@@ -55,6 +102,68 @@ app.http('redditThread', {
   route: 'api/reddit/thread',
   handler: redditThreadHandler,
 });
+
+async function problemForRedditError(args: {
+  request: HttpRequest;
+  context: InvocationContext;
+  traceId?: string;
+  diagnosticId: string;
+  status: number;
+  failureStage: DiagnosticCapsule['failure_stage'];
+  safeError: DiagnosticCapsule['safe_error'];
+  body?: unknown;
+}): Promise<RepairableProblem> {
+  const capsule = buildRedditDiagnosticCapsule({
+    diagnostic_id: args.diagnosticId,
+    operation_id: OPERATION_ID,
+    endpoint: ENDPOINT,
+    method: args.request.method,
+    failure_stage: args.failureStage,
+    http_status: args.status,
+    trace_id: args.traceId,
+    safe_error: args.safeError,
+    body: args.body,
+  });
+  const expected: RepairableProblemExpected = {
+    operation_id: OPERATION_ID,
+    diagnostic_id: args.diagnosticId,
+    status: args.status,
+    allowedRequestFields: ALLOWED_REQUEST_FIELDS,
+    allowedOperationIds: ALLOWED_OPERATION_IDS,
+  };
+
+  const analyzed = await repairableErrorAnalyzer({ capsule, expected });
+  const validated = validateRepairableProblem(analyzed, expected);
+  const sanitized = validated
+    ? sanitizeRepairableProblem(validated, { allowedRequestFields: ALLOWED_REQUEST_FIELDS, allowedOperationIds: ALLOWED_OPERATION_IDS })
+    : null;
+  if (sanitized) return sanitized;
+
+  return buildFallbackRepairableProblem({
+    operation_id: OPERATION_ID,
+    diagnostic_id: args.diagnosticId,
+    status: args.status,
+    endpoint: ENDPOINT,
+    trace_id: args.traceId,
+    safe_error: args.safeError,
+    failure_stage: args.failureStage,
+  });
+}
+
+function problemResponse(problem: RepairableProblem): HttpResponseInit {
+  return withCors({
+    status: problem.status,
+    headers: { 'Content-Type': 'application/problem+json' },
+    jsonBody: problem,
+  });
+}
+
+function failureStageForStatus(status: number): DiagnosticCapsule['failure_stage'] {
+  if (status === 400) return 'input_validation';
+  if (status === 403 || status === 404 || status === 429) return 'upstream';
+  if (status >= 500) return 'dependency';
+  return 'unknown';
+}
 
 function withCors(response: HttpResponseInit): HttpResponseInit {
   return {

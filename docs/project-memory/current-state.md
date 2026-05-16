@@ -1,5 +1,36 @@
 # Current state
 
+## 2026-05-16 Reddit thread input hardening follow-up deployed
+
+- Follow-up analysis found that resolving Reddit `/s/` share URLs by unauthenticated web redirects can still fail when Reddit returns a web 403 instead of a redirect, and a raw ID such as `1tav2fa` may be a comment ID rather than a post ID.
+- PR #144 resolved share URLs through Reddit OAuth `api/info?url=...` before falling back to bounded Reddit-only redirects; if an initial raw-ID thread fetch returns not found, the endpoint looks up `t1_<id>` with `api/info` and fetches the parent `t3_<post_id>` thread when available.
+- PR #144 also tolerates documented URL alias fields as input fallbacks while still preserving `post` as the canonical request field. Main commit `659b674` completed CI run `25972576401`, Deploy Test run `25972596333`, and Promote Production run `25972641970`; workflow smoke tests passed and Codex host checks confirmed production `/health` returns `200`, unauthenticated Reddit thread POST returns `401`, and the frontend root returns `200`.
+
+## 2026-05-16 Codex auto-merge deployment dispatch follow-up live
+
+- Root cause found after PR #134: GitHub-native auto-merge executed by the Actions `GITHUB_TOKEN` can merge to `main` without triggering the normal `push`-based `CI` workflow, so the subsequent `Deploy Test` and `Promote Production` chain may not run.
+- PR #135 added `Codex Main Delivery` and validation for main commit `8cf55a7` showed the normal CI -> Deploy Test -> Promote Production path succeeds when CI is manually dispatched. PR #136 then showed that a GitHub-token `workflow_dispatch` of `main` CI did not trigger the downstream `workflow_run` deployment chain for commit `248ade2`.
+- PR #137 changed `Codex Main Delivery` to orchestrate the full post-merge chain explicitly: wait for `main` CI, dispatch and wait for `Deploy Test`, then dispatch and wait for `Promote Production`, while still honoring explicit deployment skip markers. Commit `06d05f3` was manually deployed through `Deploy Test` run `25968770752` and `Promote Production` run `25968813057`; production smoke tests passed.
+
+
+
+## 2026-05-16 Reddit Repairable Error Contract deployed after package-manifest repair
+
+- PR #140 merged and passed PR CI/policy checks, but `Deploy Test` run `25972007955` failed smoke readiness with `/health` and `/api/hello` returning `404`.
+- Root cause evidence indicated the deployed Functions package used `apps/api/package.json`, which did not include the newly imported OpenAI SDK. PR #142 added `openai` to the Functions package manifest and lockfile so function indexing can load the LLM analyzer module.
+- PR #142 passed PR CI/policy checks, merged, and completed main delivery: `CI` run `25972157195`, `Deploy Test` run `25972181952`, and `Promote Production` run `25972223775` all succeeded; production smoke tests passed.
+
+## 2026-05-16 Reddit Repairable Error Contract implementation
+
+- The protected `POST /api/reddit/thread` endpoint now returns Repairable Error Contract problem responses for invalid JSON and mapped Reddit service failures, using `application/problem+json` with diagnostic IDs and sanitized caller repair guidance.
+- LLM-assisted analysis is isolated behind `REPAIRABLE_ERRORS_LLM_ENABLED` and `OPENAI_API_KEY`; it sends only a sanitized diagnostic capsule to OpenAI, validates/policy-gates the model output, and falls back deterministically if disabled, unavailable, timed out, invalid, or unsafe.
+- Deterministic fallback remains the availability and safety baseline for JSON parse failures, unresolved Reddit `/s/` share URLs, 403/404/429 upstream responses, and 5xx dependency failures.
+
+## 2026-05-16 Reddit share URL normalization in progress
+
+- Reddit thread requests using Reddit short share URLs like `/r/<subreddit>/s/<token>` are being updated to follow Reddit's redirect to the canonical `/comments/<post_id>/...` URL before extracting the article ID.
+- If a Reddit share URL cannot be resolved to a canonical comments URL, the endpoint now returns a structured `UNRESOLVED_REDDIT_SHARE_URL` input error rather than proceeding with an empty or ambiguous response path.
+
 ## 2026-05-16 GPT Actions OAuth documentation placement follow-up
 
 - GPT Actions delegated OAuth setup is now documented in both the operational authentication setup guide and the OAuth security guide. The setup guide lists the dedicated GPT Action app registration, repository variable, helper script flow, GPT Builder values, and troubleshooting. The security guide now clarifies that GPT Actions are delegated-user clients controlled by `OIDC_ALLOWED_DELEGATED_CLIENT_IDS`, while app-only service clients remain controlled by `OIDC_ALLOWED_APP_OBJECT_IDS` / `OIDC_ALLOWED_CLIENT_IDS`.
