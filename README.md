@@ -9,7 +9,7 @@ v0 serverless foundation for a personal API catalogue platform.
 - OpenAPI contract in `contracts/openapi.yaml`.
 - GPT Actions OpenAPI contract in `contracts/openapi.gpt.yaml`.
 - Low-cost Bicep infrastructure skeleton in `infra/main.bicep`.
-- Setup documentation in `docs/setup/v0-hello-world.md`, authentication setup in `docs/setup/authentication.md`, and staged deployment setup commands in `docs/setup/staged-deployment.md`.
+- Setup documentation in `docs/setup/v0-hello-world.md`, authentication and GPT Actions OAuth setup in `docs/setup/authentication.md`, OAuth security guidance in `docs/security/service-oauth-authentication.md`, and staged deployment setup commands in `docs/setup/staged-deployment.md`.
 
 
 ## Project memory
