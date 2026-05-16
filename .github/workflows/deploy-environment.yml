@@ -138,7 +138,7 @@ jobs:
           if [ "$ENVIRONMENT_NAME" = "prod" ]; then
             mapfile -t successful_test_run_ids < <(gh api \
               "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-test.yml/runs?branch=main&head_sha=${deployment_ref}&status=completed&per_page=20" \
-              --jq '.workflow_runs[] | select(.conclusion == "success" and .event == "workflow_run") | .id')
+              --jq '.workflow_runs[] | select(.conclusion == "success" and (.event == "workflow_run" or .event == "workflow_dispatch")) | .id')
             valid_test_run_id=""
             provenance_dir="$(mktemp -d)"
             for test_run_id in "${successful_test_run_ids[@]}"; do
@@ -155,7 +155,7 @@ jobs:
                     and .resolvedHead == $source_ref
                     and .deployFrontend == "true"
                     and .deployFunctions == "true"
-                    and .eventName == "workflow_run"' \
+                    and (.eventName == "workflow_run" or .eventName == "workflow_dispatch")' \
                   "$provenance_file" >/dev/null; then
                   valid_test_run_id="$test_run_id"
                   break
@@ -163,7 +163,7 @@ jobs:
               fi
             done
             if [ -z "$valid_test_run_id" ]; then
-              echo "Production sourceRef must match a successful CI-triggered Deploy Test run that uploaded matching full-deployment provenance." >&2
+              echo "Production sourceRef must match a successful Deploy Test run that uploaded matching full-deployment provenance." >&2
               exit 1
             fi
             echo "Validated Deploy Test provenance from run $valid_test_run_id for production sourceRef $deployment_ref."
