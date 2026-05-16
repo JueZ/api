@@ -1,0 +1,87 @@
+name: Codex Main Delivery
+
+on:
+  workflow_run:
+    workflows: [Codex Auto-Merge]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  actions: write
+
+concurrency:
+  group: codex-main-delivery-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch-main-ci:
+    name: dispatch main CI after Codex auto-merge
+    if: >-
+      ${{
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.pull_requests[0].number > 0
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Wait for merged PR and dispatch main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_json=""
+          merge_sha=""
+          for attempt in {1..90}; do
+            pr_json="$(gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state,mergedAt,mergeCommit,body,labels,url,headRefName)"
+            state="$(jq -r '.state' <<<"$pr_json")"
+            merge_sha="$(jq -r '.mergeCommit.oid // ""' <<<"$pr_json")"
+            if [ "$state" = "MERGED" ] && [[ "$merge_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              break
+            fi
+            echo "Waiting for PR #$PR_NUMBER to finish auto-merge (attempt $attempt/90, state $state)."
+            sleep 10
+          done
+
+          if ! [[ "$merge_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "PR #$PR_NUMBER was not merged by the time the post-auto-merge dispatch window expired. No deployment dispatch was started."
+            exit 0
+          fi
+
+          skip_autodeploy="$(jq -r '(
+            ([.labels[].name] | map(ascii_downcase) | index("skip-autodeploy")) != null
+            or ((.body // "") | test("\\[skip deploy\\]|\\[skip autodeploy\\]"; "i"))
+          )' <<<"$pr_json")"
+          if [ "$skip_autodeploy" = "true" ]; then
+            pr_url="$(jq -r '.url' <<<"$pr_json")"
+            echo "PR #$PR_NUMBER ($pr_url) explicitly requested deployment skip. Main CI/deployment dispatch was not started."
+            exit 0
+          fi
+
+          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
+          main_sha="$(git rev-parse origin/main)"
+          if ! git merge-base --is-ancestor "$merge_sha" origin/main; then
+            echo "Merged PR commit $merge_sha is not an ancestor of current origin/main $main_sha. Refusing to dispatch deployment CI."
+            exit 1
+          fi
+
+          echo "Dispatching CI on main at current head $main_sha after Codex PR #$PR_NUMBER merged as $merge_sha."
+          gh workflow run ci.yml --repo "$REPOSITORY" --ref main
+
+          {
+            echo "### Main CI dispatched"
+            echo "- PR: #$PR_NUMBER"
+            echo "- Merge commit: $merge_sha"
+            echo "- Current main head: $main_sha"
+            echo "- Next expected workflow chain: CI -> Deploy Test -> Promote Production"
+          } >> "$GITHUB_STEP_SUMMARY"
