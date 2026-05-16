@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-05-16 — Test deployment smoke failed after Reddit repairable error contract merge
+
+- Symptom: After PR #140 merged, `Deploy Test` run `25972007955` deployed commit `2898d1a` but smoke tests saw `/health` and `/api/hello` return `404` for all 18 readiness attempts.
+- Evidence: The failed run showed the Functions package was built from `apps/api/package.json`; the new LLM analyzer imports the official OpenAI SDK, but only the root `package.json` included `openai`. The deployed Functions package therefore lacked a runtime dependency needed during function indexing.
+- Fix in progress: add `openai` to `apps/api/package.json` and `apps/api/package-lock.json` so the Azure Functions run-from-package artifact installs the SDK in production/test packages.
+- Status: Test deployment failed closed before production promotion; production was not changed by this failed run.
+
 ## 2026-05-14 — Production browser auth verified after trailing-slash issuer fix
 
 - Symptom resolved: Production browser calls to protected `GET /api/hello` no longer return `401 Invalid bearer token` for the signed-in `mkos_postat@outlook.com` account.
