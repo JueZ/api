@@ -31,6 +31,14 @@ test('parseRedditPostInput rejects non-Reddit URLs and invalid IDs', () => {
   assert.throws(() => parseRedditPostInput('!bad'), /valid Reddit article ID/);
 });
 
+
+test('parseRedditPostInput rejects unresolved Reddit share URLs with a structured code', () => {
+  assert.throws(
+    () => parseRedditPostInput('https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI'),
+    (error) => error.code === 'UNRESOLVED_REDDIT_SHARE_URL' && error.input === 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI',
+  );
+});
+
 test('RedditOAuthClient requests and caches app-only token with mocked fetch', async () => {
   const calls = [];
   const client = new RedditOAuthClient(
@@ -74,6 +82,64 @@ test('attachMoreChildren appends expanded comments to the matching parent', () =
   assert.equal(tree.comments[0].replies[1].depth, 1);
 });
 
+
+
+test('RedditThreadService resolves Reddit share URLs before fetching comments', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const calls = [];
+  const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
+  const canonicalUrl = 'https://www.reddit.com/r/OpenAI/comments/abc123/example/';
+  const service = new RedditThreadService({
+    fetchImpl: async (input, init) => {
+      calls.push({ input: String(input), init });
+      if (String(input) === shareUrl) {
+        return redirectResponse(canonicalUrl);
+      }
+      if (String(input) === canonicalUrl) {
+        return responseWithUrl({}, canonicalUrl);
+      }
+      if (String(input).includes('/api/v1/access_token')) {
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      }
+      if (String(input).includes('/comments/abc123')) {
+        return jsonResponse(threadFixtureWithoutMore(), 200, rateHeaders(1));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThread({ post: shareUrl, maxComments: 10 });
+
+  assert.equal(response.input, shareUrl);
+  assert.equal(response.post.id, 'abc123');
+  assert.equal(response.stats.commentsReturned, 2);
+  assert.equal(calls[0].input, shareUrl);
+  assert.equal(calls[0].init.method, 'GET');
+  assert.equal(calls[0].init.redirect, 'manual');
+  assert.equal(calls[1].input, canonicalUrl);
+  assert.equal(calls[1].init.redirect, 'manual');
+  assert.ok(calls.some((call) => call.input.includes('/comments/abc123')));
+});
+
+test('RedditThreadService returns a structured input error when share URL resolution is not canonical', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
+  const service = new RedditThreadService({
+    fetchImpl: async () => responseWithUrl({}, shareUrl),
+  });
+
+  await assert.rejects(
+    () => service.fetchThread({ post: shareUrl }),
+    (error) =>
+      error.code === 'UNRESOLVED_REDDIT_SHARE_URL' &&
+      error.message === 'Could not resolve Reddit /s/ share URL to canonical /comments/<id>/ URL.' &&
+      error.input === shareUrl,
+  );
+});
 
 test('RedditThreadService expands MoreChildren placeholders when limits allow', async () => {
   process.env.REDDIT_CLIENT_ID = config.clientId;
@@ -197,6 +263,21 @@ function jsonResponse(body, status = 200, headers = {}) {
   });
 }
 
+
+
+function redirectResponse(location, status = 302) {
+  return new Response('', {
+    status,
+    headers: { location },
+  });
+}
+
+function responseWithUrl(body, url, status = 200, headers = {}) {
+  const response = jsonResponse(body, status, headers);
+  Object.defineProperty(response, 'url', { value: url });
+  return response;
+}
+
 function rateHeaders(used) {
   return {
     'x-ratelimit-used': String(used),
@@ -283,6 +364,15 @@ function threadFixture() {
   ];
 }
 
+
+
+function threadFixtureWithoutMore() {
+  const fixture = threadFixture();
+  fixture[1].data.children[0].data.replies.data.children = fixture[1].data.children[0].data.replies.data.children.filter(
+    (child) => child.kind !== 'more',
+  );
+  return fixture;
+}
 
 function chainedMoreChildrenFixture(index, total) {
   const things = [

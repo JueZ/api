@@ -1,5 +1,16 @@
 # Current state
 
+## 2026-05-16 Codex auto-merge deployment dispatch follow-up live
+
+- Root cause found after PR #134: GitHub-native auto-merge executed by the Actions `GITHUB_TOKEN` can merge to `main` without triggering the normal `push`-based `CI` workflow, so the subsequent `Deploy Test` and `Promote Production` chain may not run.
+- PR #135 added `Codex Main Delivery` and validation for main commit `8cf55a7` showed the normal CI -> Deploy Test -> Promote Production path succeeds when CI is manually dispatched. PR #136 then showed that a GitHub-token `workflow_dispatch` of `main` CI did not trigger the downstream `workflow_run` deployment chain for commit `248ade2`.
+- PR #137 changed `Codex Main Delivery` to orchestrate the full post-merge chain explicitly: wait for `main` CI, dispatch and wait for `Deploy Test`, then dispatch and wait for `Promote Production`, while still honoring explicit deployment skip markers. Commit `06d05f3` was manually deployed through `Deploy Test` run `25968770752` and `Promote Production` run `25968813057`; production smoke tests passed.
+
+## 2026-05-16 Reddit share URL normalization in progress
+
+- Reddit thread requests using Reddit short share URLs like `/r/<subreddit>/s/<token>` are being updated to follow Reddit's redirect to the canonical `/comments/<post_id>/...` URL before extracting the article ID.
+- If a Reddit share URL cannot be resolved to a canonical comments URL, the endpoint now returns a structured `UNRESOLVED_REDDIT_SHARE_URL` input error rather than proceeding with an empty or ambiguous response path.
+
 ## 2026-05-16 GPT Actions OAuth documentation placement follow-up
 
 - GPT Actions delegated OAuth setup is now documented in both the operational authentication setup guide and the OAuth security guide. The setup guide lists the dedicated GPT Action app registration, repository variable, helper script flow, GPT Builder values, and troubleshooting. The security guide now clarifies that GPT Actions are delegated-user clients controlled by `OIDC_ALLOWED_DELEGATED_CLIENT_IDS`, while app-only service clients remain controlled by `OIDC_ALLOWED_APP_OBJECT_IDS` / `OIDC_ALLOWED_CLIENT_IDS`.

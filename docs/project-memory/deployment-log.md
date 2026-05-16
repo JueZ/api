@@ -1,5 +1,17 @@
 # Deployment log
 
+## 2026-05-16 full Codex delivery orchestrator deployed
+
+- PR #137 updated `Codex Main Delivery` to explicitly dispatch and wait for `CI`, `Deploy Test`, and `Promote Production` after Codex auto-merge because a GitHub-token `workflow_dispatch` CI run did not trigger downstream `workflow_run` deployment workflows.
+- Validation commit: `06d05f3` on `main`. Manual `Deploy Test` run `25968770752` and `Promote Production` run `25968813057` succeeded after PR #137 merged; production smoke tests passed.
+- The next Codex auto-merge should exercise the full orchestrator directly from `Codex Main Delivery`.
+
+## 2026-05-16 Codex auto-merge deployment chain validation succeeded
+
+- PR #135 added the `Codex Main Delivery` workflow to bridge GitHub-token Codex auto-merges into explicit `main` CI dispatches.
+- Validation commit: `8cf55a7` on `main`. Manual `CI` dispatch run `25968500874` passed, automatically triggered `Deploy Test` run `25968521526`, and that successful CI-triggered test deployment automatically triggered `Promote Production` run `25968560857`.
+- Production smoke tests passed for Function App `func-api-catalogue-prod-bfjstshehpbfk` and static website storage account `stapicatalogueprodbfjsts`.
+
 ## 2026-05-15 production promotion for security-finding main head
 
 - Open PR review before deployment: #81 and #118 were already no-op/empty versus current `main`; #112 was not merged because its memory text was stale despite useful duplicate test intent; #120 and #121 were not merged because they conflicted with current `main` and need rebase/refresh before reconsideration.
