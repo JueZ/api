@@ -86,27 +86,23 @@ test('attachMoreChildren appends expanded comments to the matching parent', () =
 
 
 
-test('RedditThreadService resolves Reddit share URLs before fetching comments', async () => {
+test('RedditThreadService resolves Reddit share URLs through OAuth api/info before fetching comments', async () => {
   process.env.REDDIT_CLIENT_ID = config.clientId;
   process.env.REDDIT_CLIENT_SECRET = config.secret;
   process.env.REDDIT_USER_AGENT = config.userAgent;
   const calls = [];
   const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
-  const canonicalUrl = 'https://www.reddit.com/r/OpenAI/comments/abc123/example/';
   const service = new RedditThreadService({
     fetchImpl: async (input, init) => {
       calls.push({ input: String(input), init });
-      if (String(input) === shareUrl) {
-        return redirectResponse(canonicalUrl);
-      }
-      if (String(input) === canonicalUrl) {
-        return responseWithUrl({}, canonicalUrl);
-      }
       if (String(input).includes('/api/v1/access_token')) {
         return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
       }
+      if (String(input).includes('/api/info') && String(input).includes('url=')) {
+        return jsonResponse(infoListing({ kind: 't3', data: { id: 'abc123' } }), 200, rateHeaders(1));
+      }
       if (String(input).includes('/comments/abc123')) {
-        return jsonResponse(threadFixtureWithoutMore(), 200, rateHeaders(1));
+        return jsonResponse(threadFixtureWithoutMore(), 200, rateHeaders(2));
       }
       throw new Error(`unexpected URL ${String(input)}`);
     },
@@ -117,12 +113,79 @@ test('RedditThreadService resolves Reddit share URLs before fetching comments', 
   assert.equal(response.input, shareUrl);
   assert.equal(response.post.id, 'abc123');
   assert.equal(response.stats.commentsReturned, 2);
-  assert.equal(calls[0].input, shareUrl);
-  assert.equal(calls[0].init.method, 'GET');
-  assert.equal(calls[0].init.redirect, 'manual');
-  assert.equal(calls[1].input, canonicalUrl);
-  assert.equal(calls[1].init.redirect, 'manual');
+  assert.ok(calls.some((call) => call.input.includes('/api/info') && call.input.includes('url=')));
   assert.ok(calls.some((call) => call.input.includes('/comments/abc123')));
+  assert.equal(calls.some((call) => call.input === shareUrl), false);
+});
+
+test('RedditThreadService falls back to Reddit redirect resolution when api/info has no share URL match', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const calls = [];
+  const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
+  const canonicalUrl = 'https://www.reddit.com/r/OpenAI/comments/abc123/example/';
+  const service = new RedditThreadService({
+    fetchImpl: async (input, init) => {
+      calls.push({ input: String(input), init });
+      if (String(input).includes('/api/v1/access_token')) {
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      }
+      if (String(input).includes('/api/info') && String(input).includes('url=')) {
+        return jsonResponse(infoListing(), 200, rateHeaders(1));
+      }
+      if (String(input) === shareUrl) {
+        return redirectResponse(canonicalUrl);
+      }
+      if (String(input) === canonicalUrl) {
+        return responseWithUrl({}, canonicalUrl);
+      }
+      if (String(input).includes('/comments/abc123')) {
+        return jsonResponse(threadFixtureWithoutMore(), 200, rateHeaders(2));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThread({ post: shareUrl, maxComments: 10 });
+
+  assert.equal(response.post.id, 'abc123');
+  const redirectCall = calls.find((call) => call.input === shareUrl);
+  assert.equal(redirectCall.init.method, 'GET');
+  assert.equal(redirectCall.init.redirect, 'manual');
+});
+
+test('RedditThreadService treats a raw comment ID as a pointer to its parent post thread', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const calls = [];
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      calls.push(String(input));
+      if (String(input).includes('/api/v1/access_token')) {
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      }
+      if (String(input).includes('/comments/1tav2fa')) {
+        return jsonResponse({}, 404, rateHeaders(1));
+      }
+      if (String(input).includes('/api/info') && String(input).includes('id=t1_1tav2fa')) {
+        return jsonResponse(infoListing({ kind: 't1', data: { id: '1tav2fa', link_id: 't3_abc123' } }), 200, rateHeaders(2));
+      }
+      if (String(input).includes('/comments/abc123')) {
+        return jsonResponse(threadFixtureWithoutMore(), 200, rateHeaders(3));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThread({ post: '1tav2fa', maxComments: 10 });
+
+  assert.equal(response.input, '1tav2fa');
+  assert.equal(response.post.id, 'abc123');
+  assert.ok(calls.some((url) => url.includes('/comments/1tav2fa')));
+  assert.ok(calls.some((url) => url.includes('/api/info') && url.includes('id=t1_1tav2fa')));
+  assert.ok(calls.some((url) => url.includes('/comments/abc123')));
 });
 
 test('RedditThreadService returns a structured input error when share URL resolution is not canonical', async () => {
@@ -131,7 +194,15 @@ test('RedditThreadService returns a structured input error when share URL resolu
   process.env.REDDIT_USER_AGENT = config.userAgent;
   const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
   const service = new RedditThreadService({
-    fetchImpl: async () => responseWithUrl({}, shareUrl),
+    fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) {
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      }
+      if (String(input).includes('/api/info') && String(input).includes('url=')) {
+        return jsonResponse(infoListing(), 200, rateHeaders(1));
+      }
+      return responseWithUrl({}, shareUrl);
+    },
   });
 
   await assert.rejects(
@@ -141,6 +212,29 @@ test('RedditThreadService returns a structured input error when share URL resolu
       error.message === 'Could not resolve Reddit /s/ share URL to canonical /comments/<id>/ URL.' &&
       error.input === shareUrl,
   );
+});
+
+
+test('RedditThreadService accepts documented URL aliases as post input fallbacks', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) {
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      }
+      if (String(input).includes('/comments/abc123')) {
+        return jsonResponse(threadFixtureWithoutMore(), 200, rateHeaders(1));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThread({ redditUrl: 'abc123', maxComments: 10 });
+
+  assert.equal(response.input, 'abc123');
+  assert.equal(response.post.id, 'abc123');
 });
 
 test('RedditThreadService expands MoreChildren placeholders when limits allow', async () => {
@@ -480,6 +574,14 @@ function jsonResponse(body, status = 200, headers = {}) {
 }
 
 
+
+
+function infoListing(...children) {
+  return {
+    kind: 'Listing',
+    data: { children },
+  };
+}
 
 function redirectResponse(location, status = 302) {
   return new Response('', {
