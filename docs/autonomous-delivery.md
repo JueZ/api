@@ -9,9 +9,9 @@ This repository is configured for routine changes to move from Codex-created pul
 3. `CI` and `Policy Check` run on the pull request.
 4. GitHub branch protection blocks merge until every required status check passes.
 5. GitHub-native auto-merge squash-merges the pull request after required checks pass.
-6. `Codex Main Delivery` handles Codex auto-merges made by the GitHub Actions token: after the PR reaches `MERGED`, it explicitly dispatches `CI` on `main` unless the PR label `skip-autodeploy` or PR body marker `[skip deploy]` / `[skip autodeploy]` is present. This explicit dispatch is required because push events created by `GITHUB_TOKEN` do not reliably start downstream workflows.
-7. Successful `main` CI triggers `Deploy Test`, which deploys to `rg-api-test` and runs smoke tests.
-8. `Promote Production` runs automatically only after a successful CI-triggered `Deploy Test` for the same `main` commit with full deployment provenance; the GitHub `production` environment may pause it for required-reviewer approval before Azure changes are made.
+6. `Codex Main Delivery` handles Codex auto-merges made by the GitHub Actions token: after the PR reaches `MERGED`, it explicitly dispatches and waits for `CI` on `main`, `Deploy Test`, and `Promote Production` unless the PR label `skip-autodeploy` or PR body marker `[skip deploy]` / `[skip autodeploy]` is present. These explicit dispatches are required because events created by `GITHUB_TOKEN` do not reliably start downstream workflow_run chains.
+7. `Deploy Test` deploys to `rg-api-test` and runs smoke tests after `Codex Main Delivery` observes successful `main` CI.
+8. `Promote Production` runs automatically only after successful test deployment for the same `main` commit with full deployment provenance; the GitHub `production` environment may pause it for required-reviewer approval before Azure changes are made.
 9. If deployment or smoke tests fail, the workflow fails closed. Production is not promoted unless test smoke tests have passed.
 
 Codex can use the repo-scoped `github-cli-devops` and `azure-cli-devops` skills for safe GitHub CLI and Azure CLI diagnostics during this flow. Direct CLI diagnostics do not override CI, Policy Check, branch protection, environment approvals, deployment staging, or secret-handling rules.
@@ -68,7 +68,7 @@ Required status checks:
 - `CI complete`
 - `Policy complete`
 - `enable auto-merge` should pass for Codex PRs, but branch protection must still rely on CI and policy checks as the merge gate.
-- `dispatch main CI after Codex auto-merge` should pass for Codex PRs after auto-merge. It is not a PR merge gate; it starts the post-merge CI -> test -> production chain that `GITHUB_TOKEN` merges would otherwise skip.
+- `run main delivery after Codex auto-merge` should pass for Codex PRs after auto-merge. It is not a PR merge gate; it runs the post-merge CI -> test -> production chain that `GITHUB_TOKEN` merges would otherwise skip.
 
 ## Deployment skip marker
 

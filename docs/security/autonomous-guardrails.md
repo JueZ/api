@@ -38,7 +38,7 @@ The protected branch should require CI, security, and policy checks before auto-
 
 ## GitHub token recursion caution
 
-GitHub Actions events created by the default `GITHUB_TOKEN` usually do not trigger new workflow runs, except explicit `workflow_dispatch` and `repository_dispatch`. `Codex Main Delivery` therefore uses an explicit `workflow_dispatch` of `CI` after Codex auto-merge, and the normal post-merge chain is `CI` -> `Deploy Test` -> `Promote Production`. Use explicit dispatches rather than accidental recursive workflow chains.
+GitHub Actions events created by the default `GITHUB_TOKEN` usually do not trigger new workflow runs, except explicit `workflow_dispatch` and `repository_dispatch`. `Codex Main Delivery` therefore uses explicit `workflow_dispatch` calls after Codex auto-merge and waits for `CI` -> `Deploy Test` -> `Promote Production` to succeed for the delivered `main` commit. Use explicit dispatches rather than accidental recursive workflow chains.
 
 ## Failure handling
 
