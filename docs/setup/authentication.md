@@ -21,6 +21,8 @@ A non-destructive planning helper is available at `scripts/plan-entra-auth-apps.
 
 Create at least two Microsoft Entra or Entra External ID app registrations for browser auth, and add a third service-client registration when app-only tests or integrations need API access:
 
+Add a fourth delegated confidential-client registration when a ChatGPT Custom GPT / GPT Action needs to call the protected API. This GPT Action app registration represents ChatGPT / GPT Builder as a delegated web client, uses Authorization Code against the same `api.access` API scope, and must have the exact GPT Builder OAuth callback URL registered as a web redirect URI. Once validated, list the GPT Action client/application ID in `OIDC_ALLOWED_DELEGATED_CLIENT_IDS` so only the dedicated GPT OAuth client can present delegated tokens for this integration.
+
 1. **API app registration**
    - Represents the Azure Functions API.
    - Expose a delegated API scope named `api.access`.
@@ -43,7 +45,7 @@ Create at least two Microsoft Entra or Entra External ID app registrations for b
    - Uses OAuth 2.0 client credentials. Prefer a GitHub Actions OIDC federated credential over a client secret.
    - Is assigned an API app role such as `api.test` or `api.service`; app-only tokens should carry the role in the `roles` claim.
 
-Do not create a client secret for the SPA. Public clients must use Authorization Code + PKCE. Avoid static bearer tokens, Resource Owner Password Credentials, or disabling auth in the deployed test zone.
+Do not create a client secret for the SPA. Public clients must use Authorization Code + PKCE. GPT Actions use a confidential web-client secret that belongs only in GPT Builder and must be rotated if exposed. Avoid static bearer tokens, Resource Owner Password Credentials, or disabling auth in the deployed test zone. The security details for delegated, app-only, and GPT Action OAuth callers live in `docs/security/service-oauth-authentication.md`.
 
 ## Issuer URL
 
@@ -98,6 +100,7 @@ OIDC_ALLOWED_OBJECT_IDS=<your user object ID>
 OIDC_ALLOWED_SUBJECTS=<optional comma-separated fallback subject IDs>
 OIDC_ALLOWED_APP_OBJECT_IDS=<optional comma-separated service-principal object IDs for app-only tokens>
 OIDC_ALLOWED_CLIENT_IDS=<optional comma-separated service-client/application IDs for app-only tokens>
+OIDC_ALLOWED_DELEGATED_CLIENT_IDS=<optional comma-separated delegated client/application IDs, for example the GPT Action client ID>
 OIDC_ALLOWED_TENANTS=<comma-separated tenant IDs>
 WEB_AUTH_ENABLED=true
 WEB_AUTH_CLIENT_ID=<SPA application client ID>
@@ -246,6 +249,8 @@ Current non-secret values discovered from repository variables on 2026-05-15:
 - GPT-specific OpenAPI schema: `contracts/openapi.gpt.yaml`
 
 The API supports an optional delegated OAuth client allowlist with `OIDC_ALLOWED_DELEGATED_CLIENT_IDS`. Leave it empty to preserve the previous behavior. When it is non-empty, user/delegated tokens must include `azp` or `appid` matching one of the configured client application IDs, while the existing user object ID / subject allowlist still applies. App-only tokens continue to use `OIDC_ALLOWED_APP_OBJECT_IDS` and `OIDC_ALLOWED_CLIENT_IDS`.
+
+After the dedicated GPT Action app registration is working, set `OIDC_ALLOWED_DELEGATED_CLIENT_IDS` to the GPT Action client/application ID. See `docs/security/service-oauth-authentication.md` for the security model and when to use each allowlist.
 
 ### Cloud Shell helper
 
