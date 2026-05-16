@@ -145,7 +145,7 @@ components:
       properties:
         post:
           type: string
-          description: Reddit post URL, Reddit comments URL, or Reddit article ID.
+          description: Reddit post URL, Reddit comments URL, Reddit /s/ share URL, or Reddit article ID.
         sort:
           type: string
           enum:
@@ -214,6 +214,10 @@ components:
       additionalProperties: true
       properties:
         error:
+          type: string
+        message:
+          type: string
+        input:
           type: string
       required:
         - error

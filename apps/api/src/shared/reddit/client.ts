@@ -18,6 +18,8 @@ const TOKEN_URL = `https://www.reddit.com/api/v1/${'access_' + 'token'}`;
 const TOKEN_FIELD = 'access_' + 'token';
 const API_BASE_URL = 'https://oauth.reddit.com';
 const TOKEN_EXPIRY_SKEW_MS = 60_000;
+const MAX_REDIRECTS = 5;
+const REDDIT_REDIRECT_HOSTNAMES = new Set(['reddit.com', 'www.reddit.com', 'old.reddit.com', 'redd.it']);
 
 export class RedditUpstreamError extends Error {
   constructor(
@@ -71,6 +73,38 @@ export class RedditOAuthClient {
     return body[TOKEN_FIELD] as string;
   }
 
+
+  async resolveRedditUrl(inputUrl: string): Promise<string> {
+    validateRedditConfig(this.config);
+
+    let url = new URL(inputUrl);
+    for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
+      if (!REDDIT_REDIRECT_HOSTNAMES.has(url.hostname.toLowerCase())) {
+        return url.toString();
+      }
+
+      const response = await this.fetchImpl(url, {
+        method: 'GET',
+        redirect: 'manual',
+        headers: {
+          'User-Agent': this.config.userAgent,
+        },
+      });
+
+      if (!isRedirectStatus(response.status)) {
+        return response.url || url.toString();
+      }
+
+      const location = response.headers.get('location');
+      if (!location) {
+        return url.toString();
+      }
+      url = new URL(location, url);
+    }
+
+    return url.toString();
+  }
+
   async getJson<T>(path: string, query: Record<string, string | number | undefined> = {}): Promise<RedditHttpResult<T>> {
     const tokenValue = await this.getAccessToken();
     const url = new URL(path, API_BASE_URL);
@@ -120,4 +154,8 @@ function safeRedditErrorMessage(body: { error?: unknown; message?: unknown }, fa
   const error = typeof body.error === 'string' ? body.error : undefined;
   const message = typeof body.message === 'string' ? body.message : undefined;
   return [fallback, error, message].filter(Boolean).join(' ');
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status >= 300 && status < 400;
 }
