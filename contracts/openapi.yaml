@@ -116,7 +116,7 @@ paths:
         Protected endpoint that fetches a Reddit post and comments through fixed Reddit
         OAuth API endpoints. Callers must authenticate with the same Microsoft Entra JWT
         checks used by `/api/hello`. User-provided URLs are parsed only to extract a
-        Reddit article ID; the backend never fetches arbitrary user-provided URLs.
+        Reddit article ID. Reddit `/r/<subreddit>/s/<token>` share URLs are resolved by following Reddit's redirect before ID extraction; the backend never fetches arbitrary non-Reddit user-provided URLs.
       tags:
         - Reddit
       security:
@@ -251,9 +251,9 @@ components:
       properties:
         error:
           type: string
-          description: Human-readable error summary returned for non-auth application errors.
+          description: Machine-readable error code for structured input errors, or a human-readable error summary for other non-auth application errors.
           examples:
-            - Not found
+            - UNRESOLVED_REDDIT_SHARE_URL
     AuthErrorResponse:
       type: object
       additionalProperties: false
@@ -315,8 +315,9 @@ components:
       properties:
         post:
           type: string
-          description: Raw Reddit article ID, t3 fullname, redd.it URL, or reddit.com/old.reddit.com comments URL. The
-            backend extracts only the article ID and never fetches arbitrary user-provided URLs.
+          description: Raw Reddit article ID, t3 fullname, redd.it URL, reddit.com/old.reddit.com comments URL, or Reddit
+            `/r/<subreddit>/s/<token>` share URL. Share URLs are resolved through Reddit redirects before
+            article ID extraction; arbitrary non-Reddit user-provided URLs are never fetched.
           examples:
             - https://www.reddit.com/r/redditdev/comments/abc123/example/
         sort:
