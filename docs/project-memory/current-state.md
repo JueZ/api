@@ -7,6 +7,13 @@
 - PR #137 changed `Codex Main Delivery` to orchestrate the full post-merge chain explicitly: wait for `main` CI, dispatch and wait for `Deploy Test`, then dispatch and wait for `Promote Production`, while still honoring explicit deployment skip markers. Commit `06d05f3` was manually deployed through `Deploy Test` run `25968770752` and `Promote Production` run `25968813057`; production smoke tests passed.
 
 
+
+## 2026-05-16 Reddit Repairable Error Contract deployment repair in progress
+
+- PR #140 merged and passed PR CI/policy checks, but `Deploy Test` run `25972007955` failed smoke readiness with `/health` and `/api/hello` returning `404`.
+- Root cause evidence indicates the deployed Functions package used `apps/api/package.json`, which did not include the newly imported OpenAI SDK. The repair adds `openai` to the Functions package manifest and lockfile so function indexing can load the LLM analyzer module.
+- Production promotion did not run for PR #140 because test deployment failed closed.
+
 ## 2026-05-16 Reddit Repairable Error Contract implementation
 
 - The protected `POST /api/reddit/thread` endpoint now returns Repairable Error Contract problem responses for invalid JSON and mapped Reddit service failures, using `application/problem+json` with diagnostic IDs and sanitized caller repair guidance.
