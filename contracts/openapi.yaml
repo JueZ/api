@@ -147,10 +147,12 @@ paths:
         acceptedInputFormats:
           post:
             - raw Reddit article ID
+            - raw Reddit comment ID, resolved to its parent post thread
             - t3 fullname
             - redd.it URL
             - reddit.com comments URL
             - old.reddit.com comments URL
+            - Reddit /r/<subreddit>/s/<token> share URL
         security:
           diagnosticCapsulePolicy: sanitized-only
           exposeRawRequestBody: false
@@ -277,8 +279,8 @@ paths:
                     repairable: true
                     confidence: 0.82
                     retry_policy: { can_retry: true, same_request: false }
-                    repair_plan: [{ action: replace_invalid_value, path: /post, value_hint: canonical /comments/<id> URL, redd.it URL, t3 fullname, or article ID, reason: The /s/ share URL could not be resolved deterministically. }]
-                    caller_instruction: Do not retry the same /s/ share URL. Use a canonical reddit.com /comments/<id> URL, redd.it URL, t3 fullname, or raw article ID instead.
+                    repair_plan: [{ action: replace_invalid_value, path: /post, value_hint: 'canonical /comments/<id> URL, redd.it URL, t3 fullname, raw article ID, or raw comment ID', reason: The /s/ share URL could not be resolved deterministically. }]
+                    caller_instruction: Do not retry the same /s/ share URL. Use a canonical reddit.com /comments/<id> URL, redd.it URL, t3 fullname, or raw article/comment ID instead.
                     safe_debug_summary: Sanitized unresolved share URL diagnosis.
                     analysis_mode: fallback
         "401":
@@ -550,9 +552,10 @@ components:
       properties:
         post:
           type: string
-          description: Raw Reddit article ID, t3 fullname, redd.it URL, reddit.com/old.reddit.com comments URL, or Reddit
-            `/r/<subreddit>/s/<token>` share URL. Share URLs are resolved through Reddit redirects before
-            article ID extraction; arbitrary non-Reddit user-provided URLs are never fetched.
+          description: Raw Reddit article ID, raw Reddit comment ID, t3 fullname, redd.it URL, reddit.com/old.reddit.com
+            comments URL, or Reddit `/r/<subreddit>/s/<token>` share URL. Share URLs are resolved through
+            Reddit OAuth `api/info` first, then bounded Reddit-only redirects as a fallback before article ID
+            extraction; arbitrary non-Reddit user-provided URLs are never fetched.
           examples:
             - https://www.reddit.com/r/redditdev/comments/abc123/example/
         sort:

@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-05-16 Reddit thread input hardening follow-up in progress
+
+- Follow-up analysis found that resolving Reddit `/s/` share URLs by unauthenticated web redirects can still fail when Reddit returns a web 403 instead of a redirect, and a raw ID such as `1tav2fa` may be a comment ID rather than a post ID.
+- Fix in progress: resolve share URLs through Reddit OAuth `api/info?url=...` before falling back to bounded Reddit-only redirects; if an initial raw-ID thread fetch returns not found, look up `t1_<id>` with `api/info` and fetch the parent `t3_<post_id>` thread when available.
+- The endpoint also tolerates documented URL alias fields as input fallbacks while still preserving `post` as the canonical request field.
+
 ## 2026-05-16 Codex auto-merge deployment dispatch follow-up live
 
 - Root cause found after PR #134: GitHub-native auto-merge executed by the Actions `GITHUB_TOKEN` can merge to `main` without triggering the normal `push`-based `CI` workflow, so the subsequent `Deploy Test` and `Promote Production` chain may not run.

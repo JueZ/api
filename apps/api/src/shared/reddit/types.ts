@@ -1,7 +1,12 @@
 export type RedditSort = 'confidence' | 'top' | 'new' | 'controversial' | 'old' | 'qa';
 
 export interface RedditThreadRequest {
-  post: string;
+  post?: string;
+  url?: string;
+  redditUrl?: string;
+  reddit_url?: string;
+  threadUrl?: string;
+  thread_url?: string;
   sort?: RedditSort;
   maxComments?: number;
   maxMoreChildrenRequests?: number;
