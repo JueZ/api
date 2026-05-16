@@ -1,10 +1,10 @@
 # Current state
 
-## 2026-05-16 Reddit thread input hardening follow-up in progress
+## 2026-05-16 Reddit thread input hardening follow-up deployed
 
 - Follow-up analysis found that resolving Reddit `/s/` share URLs by unauthenticated web redirects can still fail when Reddit returns a web 403 instead of a redirect, and a raw ID such as `1tav2fa` may be a comment ID rather than a post ID.
-- Fix in progress: resolve share URLs through Reddit OAuth `api/info?url=...` before falling back to bounded Reddit-only redirects; if an initial raw-ID thread fetch returns not found, look up `t1_<id>` with `api/info` and fetch the parent `t3_<post_id>` thread when available.
-- The endpoint also tolerates documented URL alias fields as input fallbacks while still preserving `post` as the canonical request field.
+- PR #144 resolved share URLs through Reddit OAuth `api/info?url=...` before falling back to bounded Reddit-only redirects; if an initial raw-ID thread fetch returns not found, the endpoint looks up `t1_<id>` with `api/info` and fetches the parent `t3_<post_id>` thread when available.
+- PR #144 also tolerates documented URL alias fields as input fallbacks while still preserving `post` as the canonical request field. Main commit `659b674` completed CI run `25972576401`, Deploy Test run `25972596333`, and Promote Production run `25972641970`; workflow smoke tests passed and Codex host checks confirmed production `/health` returns `200`, unauthenticated Reddit thread POST returns `401`, and the frontend root returns `200`.
 
 ## 2026-05-16 Codex auto-merge deployment dispatch follow-up live
 
