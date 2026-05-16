@@ -6,6 +6,13 @@
 - PR #135 added `Codex Main Delivery` and validation for main commit `8cf55a7` showed the normal CI -> Deploy Test -> Promote Production path succeeds when CI is manually dispatched. PR #136 then showed that a GitHub-token `workflow_dispatch` of `main` CI did not trigger the downstream `workflow_run` deployment chain for commit `248ade2`.
 - PR #137 changed `Codex Main Delivery` to orchestrate the full post-merge chain explicitly: wait for `main` CI, dispatch and wait for `Deploy Test`, then dispatch and wait for `Promote Production`, while still honoring explicit deployment skip markers. Commit `06d05f3` was manually deployed through `Deploy Test` run `25968770752` and `Promote Production` run `25968813057`; production smoke tests passed.
 
+
+## 2026-05-16 Reddit Repairable Error Contract implementation
+
+- The protected `POST /api/reddit/thread` endpoint now returns Repairable Error Contract problem responses for invalid JSON and mapped Reddit service failures, using `application/problem+json` with diagnostic IDs and sanitized caller repair guidance.
+- LLM-assisted analysis is isolated behind `REPAIRABLE_ERRORS_LLM_ENABLED` and `OPENAI_API_KEY`; it sends only a sanitized diagnostic capsule to OpenAI, validates/policy-gates the model output, and falls back deterministically if disabled, unavailable, timed out, invalid, or unsafe.
+- Deterministic fallback remains the availability and safety baseline for JSON parse failures, unresolved Reddit `/s/` share URLs, 403/404/429 upstream responses, and 5xx dependency failures.
+
 ## 2026-05-16 Reddit share URL normalization in progress
 
 - Reddit thread requests using Reddit short share URLs like `/r/<subreddit>/s/<token>` are being updated to follow Reddit's redirect to the canonical `/comments/<post_id>/...` URL before extracting the article ID.
