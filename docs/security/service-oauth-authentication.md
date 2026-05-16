@@ -9,16 +9,19 @@ test/e2e environments.
 
 | Caller | OAuth flow | Access claim | Backend allowlist |
 | --- | --- | --- | --- |
-| Browser / future mobile user | Authorization Code + PKCE | `scp` contains `api.access` | `OIDC_ALLOWED_OBJECT_IDS` or fallback `OIDC_ALLOWED_SUBJECTS`; optionally `OIDC_ALLOWED_DELEGATED_CLIENT_IDS` for the OAuth client |
-| ChatGPT Custom GPT / GPT Action | Authorization Code as a confidential web client | `scp` contains `api.access`; `azp` or `appid` identifies the GPT Action app registration | `OIDC_ALLOWED_OBJECT_IDS` or fallback `OIDC_ALLOWED_SUBJECTS`, plus `OIDC_ALLOWED_DELEGATED_CLIENT_IDS` when configured |
-| CI service tests / trusted backend app | Client credentials | `roles` contains `api.test` or `api.service`; `idtyp=app` marks the token as app-only | `OIDC_ALLOWED_APP_OBJECT_IDS` or `OIDC_ALLOWED_CLIENT_IDS` |
+| Browser / future mobile user | Authorization Code + PKCE | `scp` contains `api.access` | `OIDC_ALLOWED_OBJECT_IDS` or fallback `OIDC_ALLOWED_SUBJECTS` |
+| ChatGPT Custom GPT / GPT Action | Authorization Code as a confidential web client | `scp` contains `api.access`; `azp` or `appid` identifies the GPT Action app registration | User allowlist plus `OIDC_ALLOWED_DELEGATED_CLIENT_IDS` when configured |
+| CI service tests / trusted backend app | Client credentials | `roles` contains `api.test` or `api.service` | `OIDC_ALLOWED_APP_OBJECT_IDS` or `OIDC_ALLOWED_CLIENT_IDS` |
 
 The backend still validates issuer, audience, tenant, and required scope/role for
-all protected routes. Client allowlists are additional checks; they do not
-replace tenant, delegated-scope, app-role, or user allowlist validation.
-Delegated tokens and app-only tokens intentionally use separate client
-allowlists so adding a GPT Action OAuth client does not grant app-only service
-access, and adding a service client does not authorize delegated user flows.
+all protected routes. Service-client allowlists are additional checks; they do
+not replace tenant or role validation.
+
+Delegated OAuth clients and app-only service clients intentionally use separate
+settings. `OIDC_ALLOWED_DELEGATED_CLIENT_IDS` applies to delegated user tokens
+from browser, mobile, or GPT Action OAuth clients. `OIDC_ALLOWED_CLIENT_IDS` and
+`OIDC_ALLOWED_APP_OBJECT_IDS` apply only to app-only client-credentials tokens,
+so adding a GPT Action OAuth client does not grant app-only service access.
 
 ## Recommended Entra setup
 
@@ -34,7 +37,7 @@ Use separate app registrations per environment when practical:
 
 The API app registration should expose:
 
-- delegated scope `api.access` for browser/mobile users and GPT Actions;
+- delegated scope `api.access` for browser/mobile users;
 - application app role `api.test` for test-zone service/e2e clients;
 - application app role `api.service` for production trusted application callers,
   if such callers are later required.
@@ -60,9 +63,9 @@ TEST_SERVICE_AUTH_TENANT_ID=<tenant-id>
 TEST_SERVICE_AUTH_SCOPE=api://<api-app-client-id>/.default
 ```
 
-Keep the existing user variables in place, and add the delegated client
-allowlist when a specific OAuth client such as the GPT Action client should be
-required for delegated tokens:
+Keep the existing user variables in place. Add the delegated client setting
+when a specific OAuth client such as the GPT Action client should be required
+for delegated tokens:
 
 ```text
 OIDC_ALLOWED_OBJECT_IDS=<allowed-user-object-id>
@@ -73,10 +76,7 @@ OIDC_ALLOWED_TENANTS=<allowed-tenant-id>
 
 If production does not need app-only callers, leave production
 `OIDC_ALLOWED_APP_OBJECT_IDS` and `OIDC_ALLOWED_CLIENT_IDS` empty and keep
-`OIDC_REQUIRED_SCOPES=api.access`. If a GPT Action is enabled, keep app-only
-allowlists empty unless a real service caller is also needed, and set
-`OIDC_ALLOWED_DELEGATED_CLIENT_IDS` to the GPT Action app registration's client
-ID after the OAuth flow has been verified.
+`OIDC_REQUIRED_SCOPES=api.access`.
 
 
 ## GPT Actions delegated OAuth client
