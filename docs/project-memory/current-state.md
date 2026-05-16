@@ -1,10 +1,10 @@
 # Current state
 
-## 2026-05-16 Codex auto-merge deployment dispatch follow-up in progress
+## 2026-05-16 Codex auto-merge deployment dispatch follow-up live
 
 - Root cause found after PR #134: GitHub-native auto-merge executed by the Actions `GITHUB_TOKEN` can merge to `main` without triggering the normal `push`-based `CI` workflow, so the subsequent `Deploy Test` and `Promote Production` chain may not run.
-- PR #135 added `Codex Main Delivery` and validation for main commit `8cf55a7` showed the normal CI -> Deploy Test -> Promote Production path succeeds when CI is manually dispatched.
-- Follow-up in progress: PR #136 showed that `Codex Main Delivery` can dispatch `main` CI for commit `248ade2`, but the resulting GitHub-token `workflow_dispatch` did not trigger the downstream `workflow_run` deployment chain. The workflow is being changed to orchestrate the full post-merge chain explicitly: wait for `main` CI, dispatch and wait for `Deploy Test`, then dispatch and wait for `Promote Production`, while still honoring explicit deployment skip markers.
+- PR #135 added `Codex Main Delivery` and validation for main commit `8cf55a7` showed the normal CI -> Deploy Test -> Promote Production path succeeds when CI is manually dispatched. PR #136 then showed that a GitHub-token `workflow_dispatch` of `main` CI did not trigger the downstream `workflow_run` deployment chain for commit `248ade2`.
+- PR #137 changed `Codex Main Delivery` to orchestrate the full post-merge chain explicitly: wait for `main` CI, dispatch and wait for `Deploy Test`, then dispatch and wait for `Promote Production`, while still honoring explicit deployment skip markers. Commit `06d05f3` was manually deployed through `Deploy Test` run `25968770752` and `Promote Production` run `25968813057`; production smoke tests passed.
 
 ## 2026-05-16 Reddit share URL normalization in progress
 
