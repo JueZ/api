@@ -2,6 +2,7 @@ import type { ParsedRedditPostInput, RedditSort } from './types.js';
 
 const VALID_SORTS = new Set<RedditSort>(['confidence', 'top', 'new', 'controversial', 'old', 'qa']);
 const ARTICLE_ID_PATTERN = /^[a-z0-9][a-z0-9_]{1,12}$/i;
+const REDDIT_HOSTNAMES = new Set(['reddit.com', 'www.reddit.com', 'old.reddit.com']);
 
 export function parseRedditPostInput(input: unknown): ParsedRedditPostInput {
   if (typeof input !== 'string' || input.trim().length === 0) {
@@ -51,10 +52,39 @@ export function normalizeMaxMoreChildrenRequests(input: unknown): number {
 }
 
 export class RedditInputError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly code = 'INVALID_REDDIT_INPUT',
+    readonly input?: string,
+  ) {
     super(message);
     this.name = 'RedditInputError';
   }
+}
+
+export function isRedditShareUrl(input: unknown): input is string {
+  if (typeof input !== 'string' || !/^https?:\/\//i.test(input)) {
+    return false;
+  }
+
+  try {
+    const url = new URL(input.trim());
+    if (!REDDIT_HOSTNAMES.has(url.hostname.toLowerCase())) {
+      return false;
+    }
+    const parts = url.pathname.split('/').filter(Boolean);
+    return parts.length === 4 && parts[0]?.toLowerCase() === 'r' && parts[2]?.toLowerCase() === 's';
+  } catch {
+    return false;
+  }
+}
+
+export function unresolvedRedditShareUrlError(input: string): RedditInputError {
+  return new RedditInputError(
+    'Could not resolve Reddit /s/ share URL to canonical /comments/<id>/ URL.',
+    'UNRESOLVED_REDDIT_SHARE_URL',
+    input,
+  );
 }
 
 function extractArticleId(input: string): string {
@@ -80,11 +110,14 @@ function extractArticleId(input: string): string {
       throw new RedditInputError('redd.it URL must include an article ID.');
     }
 
-    if (hostname === 'www.reddit.com' || hostname === 'old.reddit.com') {
+    if (REDDIT_HOSTNAMES.has(hostname)) {
       const parts = url.pathname.split('/').filter(Boolean);
       const commentsIndex = parts.findIndex((part) => part.toLowerCase() === 'comments');
       if (commentsIndex >= 0 && parts[commentsIndex + 1]) {
         return parts[commentsIndex + 1];
+      }
+      if (isRedditShareUrl(input)) {
+        throw unresolvedRedditShareUrlError(input);
       }
       throw new RedditInputError('Reddit comments URL must include an article ID.');
     }

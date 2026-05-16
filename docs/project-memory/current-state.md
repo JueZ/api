@@ -1,5 +1,10 @@
 # Current state
 
+## 2026-05-16 Reddit share URL normalization in progress
+
+- Reddit thread requests using Reddit short share URLs like `/r/<subreddit>/s/<token>` are being updated to follow Reddit's redirect to the canonical `/comments/<post_id>/...` URL before extracting the article ID.
+- If a Reddit share URL cannot be resolved to a canonical comments URL, the endpoint now returns a structured `UNRESOLVED_REDDIT_SHARE_URL` input error rather than proceeding with an empty or ambiguous response path.
+
 ## 2026-05-16 GPT Actions OAuth documentation placement follow-up
 
 - GPT Actions delegated OAuth setup is now documented in both the operational authentication setup guide and the OAuth security guide. The setup guide lists the dedicated GPT Action app registration, repository variable, helper script flow, GPT Builder values, and troubleshooting. The security guide now clarifies that GPT Actions are delegated-user clients controlled by `OIDC_ALLOWED_DELEGATED_CLIENT_IDS`, while app-only service clients remain controlled by `OIDC_ALLOWED_APP_OBJECT_IDS` / `OIDC_ALLOWED_CLIENT_IDS`.

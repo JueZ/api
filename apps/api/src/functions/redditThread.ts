@@ -44,7 +44,7 @@ export async function redditThreadHandler(
     }
     return withCors({
       status: mapped.status,
-      jsonBody: { error: mapped.message },
+      jsonBody: redditErrorBody(mapped),
     });
   }
 }
@@ -71,5 +71,17 @@ function corsHeaders(): Record<string, string> {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  };
+}
+
+function redditErrorBody(error: { message: string; code?: string; input?: string }): Record<string, string> {
+  if (!error.code) {
+    return { error: error.message };
+  }
+
+  return {
+    error: error.code,
+    message: error.message,
+    ...(error.input ? { input: error.input } : {}),
   };
 }

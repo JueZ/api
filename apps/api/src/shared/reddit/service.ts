@@ -1,6 +1,6 @@
 import { RedditConfigError, readRedditConfig } from './config.js';
 import { RedditOAuthClient, RedditUpstreamError, type FetchLike } from './client.js';
-import { normalizeMaxComments, normalizeMaxMoreChildrenRequests, normalizeRedditSort, parseRedditPostInput, RedditInputError } from './input.js';
+import { isRedditShareUrl, normalizeMaxComments, normalizeMaxMoreChildrenRequests, normalizeRedditSort, parseRedditPostInput, RedditInputError, unresolvedRedditShareUrlError } from './input.js';
 import { attachMoreChildren, commentsPath, commentsQuery, createThreadResponse, normalizeInitialThread, RedditContentError, type MorePlaceholder } from './normalize.js';
 import type { RedditRateLimit, RedditThreadRequest, RedditThreadResponse } from './types.js';
 
@@ -23,7 +23,8 @@ export class RedditThreadService {
 
   async fetchThread(request: RedditThreadRequest): Promise<RedditThreadResponse> {
     const originalInput = request.post;
-    const input = parseRedditPostInput(request.post);
+    const normalizedPostInput = await this.normalizePostInput(request.post);
+    const input = parseRedditPostInput(normalizedPostInput);
     const sort = normalizeRedditSort(request.sort);
     const maxComments = normalizeMaxComments(request.maxComments);
     const maxMoreChildrenRequests = normalizeMaxMoreChildrenRequests(request.maxMoreChildrenRequests);
@@ -81,6 +82,26 @@ export class RedditThreadService {
     );
   }
 
+
+  private async normalizePostInput(post: unknown): Promise<unknown> {
+    if (!isRedditShareUrl(post)) {
+      return post;
+    }
+
+    const resolvedUrl = await this.client.resolveRedditUrl(post.trim());
+    if (resolvedUrl === post.trim() || isRedditShareUrl(resolvedUrl)) {
+      throw unresolvedRedditShareUrlError(post.trim());
+    }
+
+    try {
+      parseRedditPostInput(resolvedUrl);
+    } catch {
+      throw unresolvedRedditShareUrlError(post.trim());
+    }
+
+    return resolvedUrl;
+  }
+
   private async fetchMoreChildren(linkId: string, children: string[], sort: string, more: MorePlaceholder) {
     const response = await this.client.getJson<unknown>('/api/morechildren', {
       api_type: 'json',
@@ -94,9 +115,9 @@ export class RedditThreadService {
   }
 }
 
-export function mapRedditError(error: unknown): { status: number; message: string } {
+export function mapRedditError(error: unknown): { status: number; message: string; code?: string; input?: string } {
   if (error instanceof RedditInputError) {
-    return { status: 400, message: error.message };
+    return { status: 400, message: error.message, code: error.code, input: error.input };
   }
   if (error instanceof RedditConfigError) {
     return { status: 502, message: error.message };
