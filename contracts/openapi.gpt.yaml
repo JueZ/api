@@ -55,6 +55,41 @@ paths:
       security:
         - entraOAuth2:
             - api.access
+      x-repairable-error:
+        recVersion: "1.0"
+        analyzer:
+          supportedModes:
+            - llm_assisted
+            - fallback
+          defaultMode: llm_assisted
+          llm:
+            enabledByEnv: REPAIRABLE_ERRORS_LLM_ENABLED
+            input: sanitized_diagnostic_capsule
+            output: RepairableProblem
+            requiresSchemaValidation: true
+            requiresPolicyGate: true
+        aliases:
+          url: post
+          redditUrl: post
+          reddit_url: post
+          threadUrl: post
+          thread_url: post
+        retry:
+          idempotencyRequired: false
+        acceptedInputFormats:
+          post:
+            - raw Reddit article ID
+            - t3 fullname
+            - redd.it URL
+            - reddit.com comments URL
+            - old.reddit.com comments URL
+        security:
+          diagnosticCapsulePolicy: sanitized-only
+          exposeRawRequestBody: false
+          exposeHeaders: false
+          exposeTokens: false
+          exposeStackTrace: false
+          exposeRawUpstreamBody: false
       requestBody:
         required: true
         content:
@@ -71,9 +106,66 @@ paths:
         '400':
           description: Invalid request payload.
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/SimpleErrorResponse'
+                $ref: '#/components/schemas/RepairableProblem'
+              examples:
+                invalidJson:
+                  summary: Invalid JSON body
+                  value:
+                    type: https://api.juez.local/problems/reddit-thread/caller_contract_violation
+                    title: Request contract violation
+                    status: 400
+                    detail: Request body must be valid JSON.
+                    instance: /api/reddit/thread
+                    rec_version: "1.0"
+                    operation_id: postRedditThread
+                    diagnostic_id: diag_example_invalid_json
+                    classification: caller_contract_violation
+                    repairable: true
+                    confidence: 0.82
+                    retry_policy: { can_retry: true, same_request: false }
+                    caller_instruction: Send valid JSON with a post field containing a Reddit article ID, t3 fullname, redd.it URL, or canonical reddit.com /comments/<id> URL.
+                    safe_debug_summary: Sanitized invalid JSON diagnosis.
+                    analysis_mode: fallback
+                aliasUrlInsteadOfPost:
+                  summary: Alias URL supplied instead of post
+                  value:
+                    type: https://api.juez.local/problems/reddit-thread/caller_contract_violation
+                    title: Request contract violation
+                    status: 400
+                    detail: The request used an alias field instead of post.
+                    instance: /api/reddit/thread
+                    rec_version: "1.0"
+                    operation_id: postRedditThread
+                    diagnostic_id: diag_example_alias
+                    classification: caller_contract_violation
+                    repairable: true
+                    confidence: 0.9
+                    retry_policy: { can_retry: true, same_request: false }
+                    repair_patch: [{ op: add, path: /post, value: https://www.reddit.com/r/example/comments/abc123/title/ }, { op: remove, path: /url }]
+                    caller_instruction: Move the Reddit URL into post and retry.
+                    safe_debug_summary: Sanitized alias-field contract diagnosis.
+                    analysis_mode: llm_assisted
+                unresolvedShareUrl:
+                  summary: Unresolved Reddit share URL
+                  value:
+                    type: https://api.juez.local/problems/reddit-thread/caller_contract_violation
+                    title: Request contract violation
+                    status: 400
+                    detail: Reddit /s/ share URLs must resolve to a canonical comments URL before this endpoint can fetch the thread.
+                    instance: /api/reddit/thread
+                    rec_version: "1.0"
+                    operation_id: postRedditThread
+                    diagnostic_id: diag_example_share
+                    classification: caller_contract_violation
+                    repairable: true
+                    confidence: 0.82
+                    retry_policy: { can_retry: true, same_request: false }
+                    repair_plan: [{ action: replace_invalid_value, path: /post, value_hint: canonical /comments/<id> URL, redd.it URL, t3 fullname, or article ID, reason: The /s/ share URL could not be resolved deterministically. }]
+                    caller_instruction: Do not retry the same /s/ share URL. Use a canonical reddit.com /comments/<id> URL, redd.it URL, t3 fullname, or raw article ID instead.
+                    safe_debug_summary: Sanitized unresolved share URL diagnosis.
+                    analysis_mode: fallback
         '401':
           description: Missing or invalid OAuth bearer token.
           content:
@@ -83,21 +175,86 @@ paths:
         '403':
           description: Valid token, but caller, tenant, client, scope, or role is not allowed.
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/AuthErrorResponse'
+                $ref: '#/components/schemas/RepairableProblem'
+        '404':
+          description: Reddit content was not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/RepairableProblem'
+              examples:
+                redditNotFound:
+                  summary: Reddit content not found
+                  value:
+                    type: https://api.juez.local/problems/reddit-thread/resource_not_found
+                    title: Reddit content was not found
+                    status: 404
+                    detail: Reddit content was not found for thread.
+                    instance: /api/reddit/thread
+                    rec_version: "1.0"
+                    operation_id: postRedditThread
+                    diagnostic_id: diag_example_404
+                    classification: resource_not_found
+                    repairable: true
+                    confidence: 0.68
+                    retry_policy: { can_retry: true, same_request: false }
+                    caller_instruction: Check that post references an existing public Reddit thread and retry with the corrected identifier or canonical URL.
+                    safe_debug_summary: Sanitized Reddit 404 diagnosis.
+                    analysis_mode: fallback
         '429':
           description: Reddit rate limit or upstream throttling.
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/SimpleErrorResponse'
+                $ref: '#/components/schemas/RepairableProblem'
+              examples:
+                redditRateLimited:
+                  summary: Reddit rate limited
+                  value:
+                    type: https://api.juez.local/problems/reddit-thread/capacity_or_timeout
+                    title: Reddit rate limit reached
+                    status: 429
+                    detail: Reddit rate-limited the request.
+                    instance: /api/reddit/thread
+                    rec_version: "1.0"
+                    operation_id: postRedditThread
+                    diagnostic_id: diag_example_429
+                    classification: capacity_or_timeout
+                    repairable: false
+                    confidence: 0.68
+                    retry_policy: { can_retry: true, same_request: true, retry_after_ms: 30000 }
+                    repair_plan: [{ action: retry_later, reason: The upstream service asked callers to slow down. }]
+                    caller_instruction: Retry later with the same request. Do not change request parameters solely to bypass rate limiting.
+                    safe_debug_summary: Sanitized Reddit rate-limit diagnosis.
+                    analysis_mode: fallback
         '502':
           description: Reddit upstream request failed.
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: '#/components/schemas/SimpleErrorResponse'
+                $ref: '#/components/schemas/RepairableProblem'
+              examples:
+                upstreamDependencyFailure:
+                  summary: Reddit upstream dependency failure
+                  value:
+                    type: https://api.juez.local/problems/reddit-thread/dependency_failure
+                    title: Reddit dependency failure
+                    status: 502
+                    detail: Reddit upstream request failed.
+                    instance: /api/reddit/thread
+                    rec_version: "1.0"
+                    operation_id: postRedditThread
+                    diagnostic_id: diag_example_502
+                    classification: dependency_failure
+                    repairable: false
+                    confidence: 0.68
+                    retry_policy: { can_retry: true, same_request: true }
+                    repair_plan: [{ action: retry_later, reason: The failure happened while contacting or processing the upstream Reddit dependency. }]
+                    caller_instruction: Retry later with the same request. Do not invent alternative request parameters for this upstream failure.
+                    safe_debug_summary: Sanitized Reddit dependency failure diagnosis.
+                    analysis_mode: fallback
 components:
   securitySchemes:
     entraOAuth2:
@@ -160,7 +317,7 @@ components:
           type: integer
           minimum: 1
           maximum: 10000
-          default: 100
+          default: 10000
       required:
         - post
     RedditThreadResponse:
@@ -192,6 +349,90 @@ components:
         - input
         - post
         - comments
+    RetryPolicy:
+      type: object
+      additionalProperties: false
+      required: [can_retry, same_request]
+      properties:
+        can_retry: { type: boolean }
+        same_request: { type: boolean }
+        retry_after_ms: { type: integer, minimum: 0 }
+        idempotency_required: { type: boolean }
+    InvalidField:
+      type: object
+      additionalProperties: false
+      required: [path, problem]
+      properties:
+        path: { type: string }
+        problem: { type: string }
+        expected: { type: string }
+        received: { type: string }
+        suggestion: { type: string }
+    RepairPlanStep:
+      type: object
+      additionalProperties: false
+      required: [action, reason]
+      properties:
+        action:
+          type: string
+          enum: [provide_missing_value, replace_invalid_value, remove_unknown_field, call_prerequisite_operation, retry_with_modified_request, retry_later, do_not_change_request, report_diagnostic_id]
+        path: { type: string }
+        value_hint: { type: string }
+        operation_id: { type: string }
+        reason: { type: string }
+    JsonPatchOperation:
+      type: object
+      additionalProperties: true
+      required: [op, path]
+      properties:
+        op:
+          type: string
+          enum: [add, remove, replace, move, copy, test]
+        path: { type: string }
+        from: { type: string }
+        value: {}
+    RepairableProblem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail, instance, rec_version, operation_id, diagnostic_id, classification, repairable, confidence, retry_policy, caller_instruction, safe_debug_summary, analysis_mode]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string }
+        instance: { type: string }
+        rec_version: { type: string, enum: ["1.0"] }
+        operation_id: { type: string }
+        diagnostic_id: { type: string }
+        trace_id: { type: string }
+        classification:
+          type: string
+          enum: [caller_contract_violation, semantic_precondition_missing, resource_not_found, authorization_context_mismatch, version_skew, dependency_failure, capacity_or_timeout, service_bug_likely, security_suspicious, diagnostic_uncertain]
+        repairable: { type: boolean }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        retry_policy:
+          $ref: "#/components/schemas/RetryPolicy"
+        invalid_fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvalidField"
+        repair_patch:
+          type: array
+          items:
+            $ref: "#/components/schemas/JsonPatchOperation"
+        repair_plan:
+          type: array
+          items:
+            $ref: "#/components/schemas/RepairPlanStep"
+        correct_request_example: {}
+        caller_instruction: { type: string }
+        llm_instruction:
+          type: string
+          description: Optional alias for GPT Actions compatibility.
+        safe_debug_summary: { type: string }
+        analysis_mode:
+          type: string
+          enum: [deterministic, llm_assisted, hybrid, fallback]
     AuthErrorResponse:
       type: object
       additionalProperties: false
