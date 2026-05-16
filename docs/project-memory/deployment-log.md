@@ -1,5 +1,11 @@
 # Deployment log
 
+## 2026-05-16 full Codex delivery orchestrator deployed
+
+- PR #137 updated `Codex Main Delivery` to explicitly dispatch and wait for `CI`, `Deploy Test`, and `Promote Production` after Codex auto-merge because a GitHub-token `workflow_dispatch` CI run did not trigger downstream `workflow_run` deployment workflows.
+- Validation commit: `06d05f3` on `main`. Manual `Deploy Test` run `25968770752` and `Promote Production` run `25968813057` succeeded after PR #137 merged; production smoke tests passed.
+- The next Codex auto-merge should exercise the full orchestrator directly from `Codex Main Delivery`.
+
 ## 2026-05-16 Codex auto-merge deployment chain validation succeeded
 
 - PR #135 added the `Codex Main Delivery` workflow to bridge GitHub-token Codex auto-merges into explicit `main` CI dispatches.
