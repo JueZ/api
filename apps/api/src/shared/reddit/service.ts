@@ -159,24 +159,39 @@ export class RedditThreadService {
   }
 }
 
-export function mapRedditError(error: unknown): { status: number; message: string; code?: string; input?: string; redditFetchError?: ReturnType<RedditFetchError['toJSON']> } {
+export type MappedRedditErrorKind = 'input' | 'content' | 'upstream' | 'fetch' | 'config' | 'internal';
+
+export function mapRedditError(error: unknown): {
+  status: number;
+  message: string;
+  code?: string;
+  input?: string;
+  redditFetchError?: ReturnType<RedditFetchError['toJSON']>;
+  kind: MappedRedditErrorKind;
+} {
   if (error instanceof RedditInputError) {
-    return { status: 400, message: error.message, code: error.code, input: error.input };
+    return { status: 400, message: error.message, code: error.code, input: error.input, kind: 'input' };
   }
   if (error instanceof RedditConfigError) {
-    return { status: 502, message: error.message };
+    return { status: 502, message: 'The Reddit integration is not configured correctly.', code: 'REDDIT_CONFIG_ERROR', kind: 'config' };
   }
   if (error instanceof RedditContentError) {
-    return { status: error.status, message: error.message };
+    return { status: error.status, message: error.message, kind: 'content' };
   }
   if (error instanceof RedditFetchError) {
     const status = error.status && error.status >= 400 && error.status < 500 ? error.status : 502;
-    return { status, message: error.message, code: 'REDDIT_FETCH_ERROR', redditFetchError: error.toJSON() };
+    return { status, message: safeRedditFetchMessage(error), code: 'REDDIT_FETCH_ERROR', redditFetchError: error.toJSON(), kind: 'fetch' };
   }
   if (error instanceof RedditUpstreamError) {
-    return { status: error.status, message: error.message };
+    return { status: error.status, message: error.message, kind: 'upstream' };
   }
-  return { status: 502, message: 'Unexpected Reddit upstream error.' };
+  return { status: 502, message: 'Unexpected internal service failure.', code: 'INTERNAL_SERVICE_ERROR', kind: 'internal' };
+}
+
+function safeRedditFetchMessage(error: RedditFetchError): string {
+  if (error.status === 429) return 'Reddit rate-limited the request.';
+  if (error.status && error.status >= 500) return 'Reddit upstream request failed with a retryable status.';
+  return 'Reddit fetch failed before a valid JSON response was available.';
 }
 
 function assertRedditStatus(status: number, context = 'thread'): void {
