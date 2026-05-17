@@ -42,6 +42,9 @@ on:
       OPENAI_API_KEY:
         description: Optional OpenAI API key for Repairable Error Contract LLM-assisted diagnostics.
         required: false
+      AUTH_ACCESS_TOKEN:
+        description: Optional short-lived bearer token used by authenticated protected API smoke tests.
+        required: false
     outputs:
       effectiveBaseUrl:
         description: Resolved Function App base URL.
@@ -105,6 +108,10 @@ jobs:
       REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
       REPAIRABLE_ERRORS_LLM_ENABLED: ${{ vars.REPAIRABLE_ERRORS_LLM_ENABLED }}
       REPAIRABLE_ERRORS_LLM_MODEL: ${{ vars.REPAIRABLE_ERRORS_LLM_MODEL }}
+      AUTH_ACCESS_TOKEN: ${{ secrets.AUTH_ACCESS_TOKEN }}
+      DEPLOYED_AT_UTC: ${{ github.event.head_commit.timestamp || '' }}
+      DEPLOYMENT_RUN_ID: ${{ github.run_id }}
+      APPLICATIONINSIGHTS_NAME: ${{ vars.APPLICATIONINSIGHTS_NAME }}
     steps:
       - name: Checkout deployment source
         uses: actions/checkout@v6
@@ -299,6 +306,7 @@ jobs:
             {
               echo "function_app_name=$(jq -r '.functionAppResourceName.value // empty' <<< "$deployment_outputs")"
               echo "storage_account_name=$(jq -r '.storageAccountResourceName.value // empty' <<< "$deployment_outputs")"
+              echo "application_insights_name=$(jq -r '.applicationInsightsResourceName.value // empty' <<< "$deployment_outputs")"
             } >> "$GITHUB_OUTPUT"
           else
             echo "No infra/main.bicep found; skipping infrastructure deployment."
@@ -310,17 +318,25 @@ jobs:
           set -euo pipefail
           effective_functionapp_name="${{ steps.infra.outputs.function_app_name }}"
           effective_storage_account="${{ steps.infra.outputs.storage_account_name }}"
+          effective_app_insights="${{ steps.infra.outputs.application_insights_name }}"
 
           if [ "$ENVIRONMENT_NAME" = "prod" ]; then
             effective_functionapp_name="${effective_functionapp_name:-${AZURE_FUNCTIONAPP_NAME:-}}"
             effective_storage_account="${effective_storage_account:-${AZURE_STATIC_WEB_STORAGE_ACCOUNT:-}}"
             effective_base_url="${PRODUCTION_BASE_URL:-}"
+            effective_app_insights="${effective_app_insights:-${APPLICATIONINSIGHTS_NAME:-}}"
           else
             effective_base_url=""
           fi
 
           : "${effective_functionapp_name:?Function App name could not be resolved}"
           : "${effective_storage_account:?Storage account name could not be resolved}"
+
+          effective_frontend_url=""
+          if [ -n "$effective_storage_account" ]; then
+            effective_frontend_url="$(az storage account show --resource-group "$AZURE_RESOURCE_GROUP" --name "$effective_storage_account" --query primaryEndpoints.web -o tsv 2>/dev/null || true)"
+            effective_frontend_url="${effective_frontend_url%/}"
+          fi
 
           if [ -z "$effective_base_url" ]; then
             default_host_name=$(az functionapp show \
@@ -336,12 +352,16 @@ jobs:
             echo "EFFECTIVE_FUNCTIONAPP_NAME=$effective_functionapp_name"
             echo "EFFECTIVE_STORAGE_ACCOUNT=$effective_storage_account"
             echo "EFFECTIVE_BASE_URL=$effective_base_url"
+            echo "FRONTEND_BASE_URL=$effective_frontend_url"
+            echo "EFFECTIVE_APPLICATIONINSIGHTS_NAME=$effective_app_insights"
           } >> "$GITHUB_ENV"
 
           {
             echo "function_app_name=$effective_functionapp_name"
             echo "storage_account_name=$effective_storage_account"
             echo "effective_base_url=$effective_base_url"
+            echo "frontend_base_url=$effective_frontend_url"
+            echo "application_insights_name=$effective_app_insights"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -351,6 +371,8 @@ jobs:
             echo "- Static web storage account: $effective_storage_account"
             echo "- Resource group: $AZURE_RESOURCE_GROUP"
             echo "- Source ref: ${SOURCE_REF:-${GITHUB_SHA}}"
+            echo "- Application Insights: ${effective_app_insights:-<not resolved>}"
+            echo "- Frontend URL: ${effective_frontend_url:-<not resolved>}"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Package and deploy Azure Functions
         if: ${{ inputs.deployFunctions }}
@@ -392,6 +414,7 @@ jobs:
               -o none
 
             package_url="https://$EFFECTIVE_STORAGE_ACCOUNT.blob.core.windows.net/$release_container/$release_blob"
+            deployed_at_utc="${DEPLOYED_AT_UTC:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
 
             az functionapp config appsettings set \
               --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -399,6 +422,12 @@ jobs:
               --settings \
                 WEBSITE_RUN_FROM_PACKAGE="$package_url" \
                 WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID=SystemAssigned \
+                DEPLOYED_COMMIT_SHA="$(git rev-parse HEAD)" \
+                DEPLOYED_SOURCE_REF="${SOURCE_REF:-${GITHUB_SHA}}" \
+                DEPLOYMENT_RUN_ID="$GITHUB_RUN_ID" \
+                DEPLOYED_ENVIRONMENT_NAME="$ENVIRONMENT_NAME" \
+                DEPLOYED_AT_UTC="$deployed_at_utc" \
+                BUILD_TIMESTAMP_UTC="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
               -o none
             function_app_id="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$EFFECTIVE_FUNCTIONAPP_NAME"
             az rest \
@@ -432,7 +461,9 @@ jobs:
             fi
             export EFFECTIVE_WEB_API_BASE_URL="$effective_web_api_base_url"
             export EFFECTIVE_WEB_REDIRECT_URI="$effective_web_redirect_uri"
-            node --input-type=module --eval "const config={authEnabled:process.env.WEB_AUTH_ENABLED==='true',authClientId:process.env.WEB_AUTH_CLIENT_ID||'',authAuthority:process.env.WEB_AUTH_AUTHORITY||'',authRedirectUri:process.env.EFFECTIVE_WEB_REDIRECT_URI||'',authApiScope:process.env.WEB_AUTH_API_SCOPE||'',apiBaseUrl:process.env.EFFECTIVE_WEB_API_BASE_URL||''}; process.stdout.write('window.API_CATALOGUE_CONFIG = '+JSON.stringify(config)+';\n');" > "$output_dir/assets/config.js"
+            export EFFECTIVE_DEPLOYED_AT_UTC="${DEPLOYED_AT_UTC:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
+            node --input-type=module --eval "const config={authEnabled:process.env.WEB_AUTH_ENABLED==='true',authClientId:process.env.WEB_AUTH_CLIENT_ID||'',authAuthority:process.env.WEB_AUTH_AUTHORITY||'',authRedirectUri:process.env.EFFECTIVE_WEB_REDIRECT_URI||'',authApiScope:process.env.WEB_AUTH_API_SCOPE||'',apiBaseUrl:process.env.EFFECTIVE_WEB_API_BASE_URL||'',deployedCommitSha:(process.env.SOURCE_REF||process.env.GITHUB_SHA||'').toLowerCase(),environmentName:process.env.ENVIRONMENT_NAME||'unknown',deploymentRunId:process.env.GITHUB_RUN_ID||'unknown',deployedAtUtc:process.env.EFFECTIVE_DEPLOYED_AT_UTC||'unknown'}; process.stdout.write('window.API_CATALOGUE_CONFIG = '+JSON.stringify(config)+';\n');" > "$output_dir/assets/config.js"
+            jq -n --arg deployedCommitSha "${SOURCE_REF:-${GITHUB_SHA}}" --arg environmentName "$ENVIRONMENT_NAME" --arg deploymentRunId "$GITHUB_RUN_ID" --arg deployedAtUtc "$EFFECTIVE_DEPLOYED_AT_UTC" '{service:"api-catalogue-web", deployedCommitSha:($deployedCommitSha|ascii_downcase), environmentName:$environmentName, deploymentRunId:$deploymentRunId, deployedAtUtc:$deployedAtUtc}' > "$output_dir/assets/build-info.json"
             az storage blob service-properties update \
               --auth-mode login \
               --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
@@ -448,40 +479,23 @@ jobs:
           else
             echo "No angular.json found; skipping Angular static site deployment."
           fi
-      - name: Run smoke tests
+      - name: Run runtime smoke tests
         shell: bash
         run: |
           set -euo pipefail
           : "${EFFECTIVE_BASE_URL:?EFFECTIVE_BASE_URL is required for smoke tests}"
-          health_ok=false
-          hello_status=""
-          for attempt in {1..18}; do
-            health_status=$(curl --show-error --silent --output /dev/null --write-out '%{http_code}' --max-time 20 "$EFFECTIVE_BASE_URL/health")
-            hello_status=$(curl --show-error --silent --output /dev/null --write-out '%{http_code}' --max-time 20 "$EFFECTIVE_BASE_URL/api/hello")
-            if [ "$health_status" = "200" ]; then
-              if [ "$AUTH_ENABLED" = "true" ] && [ "$hello_status" = "401" ]; then
-                health_ok=true
-                break
-              elif [ "$AUTH_ENABLED" != "true" ] && [ "$hello_status" = "200" ]; then
-                health_ok=true
-                break
-              fi
-            fi
-            echo "Waiting for Function App routes to become healthy (attempt $attempt/18, health $health_status, hello $hello_status)."
-            sleep 5
-          done
-          if [ "$health_ok" != "true" ]; then
-            if [ "$health_status" != "200" ]; then
-              echo "Expected /health to return 200; got $health_status." >&2
-              exit 1
-            fi
-            if [ "$AUTH_ENABLED" = "true" ]; then
-              echo "Expected unauthenticated /api/hello to return 401 when auth is enabled; got $hello_status." >&2
-              exit 1
-            fi
-            echo "Expected /api/hello to return 200 when auth is disabled; got $hello_status." >&2
-            exit 1
-          fi
+          smoke_dir="$RUNNER_TEMP/smoke"
+          mkdir -p "$smoke_dir"
+          smoke_run_id="smoke-${ENVIRONMENT_NAME}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "SMOKE_RUN_ID=$smoke_run_id" >> "$GITHUB_ENV"
+          export API_BASE_URL="$EFFECTIVE_BASE_URL"
+          export EXPECTED_DEPLOYED_COMMIT_SHA="${SOURCE_REF:-${GITHUB_SHA}}"
+          export ENVIRONMENT_NAME
+          export SMOKE_RUN_ID="$smoke_run_id"
+          export AUTH_ENABLED
+          if [ "${DEPLOY_FRONTEND:-false}" = "true" ] && [ -n "${FRONTEND_BASE_URL:-}" ]; then export FRONTEND_BASE_URL; fi
+          npm run --silent ops:smoke | tee "$smoke_dir/runtime-smoke.json"
+          echo "SMOKE_RESULTS_PATH=$smoke_dir/runtime-smoke.json" >> "$GITHUB_ENV"
 
           api_cors_redirect_uri=""
           if [ "$ENVIRONMENT_NAME" = "prod" ]; then
@@ -515,13 +529,68 @@ jobs:
           fi
 
           {
-            echo "### Smoke tests passed"
-            echo "- $EFFECTIVE_BASE_URL/health"
-            echo "- $EFFECTIVE_BASE_URL/api/hello returned $hello_status"
+            echo "### Runtime smoke tests passed"
+            echo "- $EFFECTIVE_BASE_URL/health reported ${SOURCE_REF:-${GITHUB_SHA}}"
+            echo "- Unauthenticated /api/hello auth gate verified"
             if [ -n "$api_cors_origin" ]; then
               echo "- $EFFECTIVE_BASE_URL/api/hello CORS preflight allowed $api_cors_origin"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Run authenticated smoke tests
+        shell: bash
+        continue-on-error: ${{ inputs.environmentName != 'prod' }}
+        run: |
+          set -euo pipefail
+          smoke_dir="$RUNNER_TEMP/smoke"
+          mkdir -p "$smoke_dir"
+          export API_BASE_URL="$EFFECTIVE_BASE_URL"
+          export EXPECTED_DEPLOYED_COMMIT_SHA="${SOURCE_REF:-${GITHUB_SHA}}"
+          export ENVIRONMENT_NAME
+          export SMOKE_RUN_ID
+          export REQUIRE_AUTH_SMOKE=$([ "$ENVIRONMENT_NAME" = "prod" ] && echo true || echo false)
+          npm run --silent ops:smoke:auth | tee "$smoke_dir/auth-smoke.json"
+          echo "AUTH_SMOKE_RESULTS_PATH=$smoke_dir/auth-smoke.json" >> "$GITHUB_ENV"
+      - name: Run telemetry gate
+        shell: bash
+        continue-on-error: ${{ inputs.environmentName != 'prod' }}
+        run: |
+          set -euo pipefail
+          smoke_dir="$RUNNER_TEMP/smoke"
+          mkdir -p "$smoke_dir"
+          export APPLICATIONINSIGHTS_NAME="${EFFECTIVE_APPLICATIONINSIGHTS_NAME:-${APPLICATIONINSIGHTS_NAME:-}}"
+          export AZURE_RESOURCE_GROUP
+          export ENVIRONMENT_NAME
+          export SMOKE_RUN_ID
+          export REQUIRE_TELEMETRY_CHECK=$([ "$ENVIRONMENT_NAME" = "prod" ] && echo true || echo false)
+          export TELEMETRY_RESULTS_PATH="$smoke_dir/telemetry.json"
+          npm run --silent ops:check-telemetry
+          echo "TELEMETRY_RESULTS_PATH=$smoke_dir/telemetry.json" >> "$GITHUB_ENV"
+      - name: Write release ledger
+        shell: bash
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          smoke_dir="${RUNNER_TEMP:-.}/smoke"
+          mkdir -p "$smoke_dir"
+          export API_BASE_URL="${EFFECTIVE_BASE_URL:-}"
+          export FRONTEND_BASE_URL="${FRONTEND_BASE_URL:-}"
+          export EXPECTED_DEPLOYED_COMMIT_SHA="${SOURCE_REF:-${GITHUB_SHA}}"
+          export DEPLOYED_SOURCE_REF="${SOURCE_REF:-${GITHUB_SHA}}"
+          export ENVIRONMENT_NAME
+          export EFFECTIVE_FUNCTIONAPP_NAME="${EFFECTIVE_FUNCTIONAPP_NAME:-}"
+          export SMOKE_RUN_ID="${SMOKE_RUN_ID:-smoke-${ENVIRONMENT_NAME}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
+          export RELEASE_LEDGER_PATH="$smoke_dir/release-ledger-${ENVIRONMENT_NAME}.json"
+          npm run --silent ops:write-release-ledger -- "$RELEASE_LEDGER_PATH"
+          npm run --silent ops:validate-release-ledger -- "$RELEASE_LEDGER_PATH"
+          echo "RELEASE_LEDGER_PATH=$RELEASE_LEDGER_PATH" >> "$GITHUB_ENV"
+      - name: Upload release ledger
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ledger-${{ inputs.environmentName }}-${{ inputs.sourceRef || github.sha }}
+          path: ${{ runner.temp }}/smoke/release-ledger-${{ inputs.environmentName }}.json
+          if-no-files-found: error
+          retention-days: 90
       - name: Record test deployment provenance
         if: ${{ inputs.environmentName == 'test' && success() }}
         shell: bash

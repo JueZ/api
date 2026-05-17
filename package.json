@@ -7,12 +7,21 @@
   "scripts": {
     "lint": "npm run type-check",
     "type-check": "tsc -p apps/api/tsconfig.json --noEmit && ng build --configuration development --no-progress",
-    "test": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs apps/web/test/*.test.mjs'",
+    "test": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs apps/web/test/*.test.mjs scripts/test/*.test.mjs'",
     "test:api": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs'",
     "build": "npm run build:web && npm run build:api",
     "build:web": "ng build --configuration production --no-progress",
     "build:api": "tsc -p apps/api/tsconfig.json",
-    "build:functions": "npm run build:api"
+    "build:functions": "npm run build:api",
+    "test:ops": "node --test scripts/test/*.test.mjs",
+    "ops:smoke": "node scripts/smoke-runtime.mjs",
+    "ops:smoke:auth": "node scripts/smoke-auth.mjs",
+    "ops:runtime-truth": "node scripts/runtime-truth.mjs",
+    "ops:validate-release-ledger": "node scripts/validate-release-ledger.mjs",
+    "ops:check-telemetry": "node scripts/check-telemetry.mjs",
+    "ops:triage-repair-issues": "node scripts/triage-repair-issues.mjs",
+    "ops:policy-guardrails": "node scripts/policy-guardrails.mjs",
+    "ops:write-release-ledger": "node scripts/write-release-ledger.mjs"
   },
   "dependencies": {
     "@angular/common": "21.2.12",

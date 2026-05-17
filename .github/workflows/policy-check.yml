@@ -56,6 +56,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
       - name: Fail closed on forbidden security or automation changes
         shell: bash
         run: |
@@ -64,9 +68,8 @@ jobs:
           if ! git cat-file -e "$base_ref^{commit}" 2>/dev/null; then
             base_ref="HEAD~1"
           fi
+          BASE_REF="$base_ref" npm run ops:policy-guardrails
           diff_file=$(mktemp)
-          # Exclude generated OpenAPI web artifacts from guardrail text scanning.
-          # The canonical contract in contracts/openapi.yaml and all source files remain scanned.
           git diff "$base_ref" HEAD -- . ':!apps/web/src/assets/openapi.yaml' ':!apps/web/src/app/openapi.generated.ts' > "$diff_file" || true
           forbidden_patterns=(
             '^[+-].*(DISABLE[_]AUTH|AUTH[_]DISABLED|skip[A]uth|disable[A]uth).*true'

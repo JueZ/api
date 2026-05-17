@@ -1,4 +1,5 @@
 import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
+import { logSmokeRunId } from '../shared/smokeCorrelation.js';
 import { analyzeRepairableErrorWithLlm } from '../shared/errors/llmDiagnosticAnalyzer.js';
 import { buildRedditDiagnosticCapsule, getTraceIdFromRequestOrContext, type DiagnosticCapsule } from '../shared/errors/diagnosticCapsule.js';
 import {
@@ -25,6 +26,8 @@ export async function redditThreadHandler(
   request: HttpRequest,
   context: InvocationContext,
 ): Promise<HttpResponseInit> {
+  logSmokeRunId(request, context, 'redditThread');
+
   if (request.method === 'OPTIONS') {
     return {
       status: 204,
