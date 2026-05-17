@@ -72,18 +72,6 @@ export interface RepairableProblem {
   caller_instruction: string;
   llm_instruction?: string;
   safe_debug_summary: string;
-  reddit_fetch_error?: {
-    input?: string;
-    normalized_post_id?: string;
-    request_url?: string;
-    final_url?: string;
-    status?: number;
-    reason?: string;
-    content_type?: string | null;
-    response_preview?: string;
-    redirect_chain?: string[];
-    retryable: boolean;
-  };
   analysis_mode: AnalysisMode;
 }
 
@@ -125,6 +113,31 @@ const REPAIR_PLAN_ACTIONS = new Set<RepairPlanStep['action']>([
   'report_diagnostic_id',
 ]);
 const PATCH_OPS = new Set(['add', 'remove', 'replace', 'move', 'copy', 'test']);
+
+const REPAIRABLE_PROBLEM_KEYS = new Set([
+  'type',
+  'title',
+  'status',
+  'detail',
+  'instance',
+  'rec_version',
+  'operation_id',
+  'diagnostic_id',
+  'trace_id',
+  'classification',
+  'repairable',
+  'confidence',
+  'retry_policy',
+  'invalid_fields',
+  'repair_patch',
+  'repair_plan',
+  'correct_request_example',
+  'caller_instruction',
+  'llm_instruction',
+  'safe_debug_summary',
+  'analysis_mode',
+]);
+
 const UNSAFE_RESPONSE_PATTERNS = [
   /Authorization/i,
   /Bearer/i,
@@ -218,23 +231,6 @@ export const repairableProblemJsonSchema = {
     caller_instruction: { type: 'string', maxLength: 700 },
     llm_instruction: { type: 'string', maxLength: 700 },
     safe_debug_summary: { type: 'string', maxLength: 700 },
-    reddit_fetch_error: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['retryable'],
-      properties: {
-        input: { type: 'string', maxLength: 260 },
-        normalized_post_id: { type: 'string', maxLength: 32 },
-        request_url: { type: 'string', maxLength: 500 },
-        final_url: { type: 'string', maxLength: 500 },
-        status: { type: 'integer', minimum: 100, maximum: 599 },
-        reason: { type: 'string', maxLength: 120 },
-        content_type: { type: ['string', 'null'], maxLength: 120 },
-        response_preview: { type: 'string', maxLength: 500 },
-        redirect_chain: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 500 } },
-        retryable: { type: 'boolean' },
-      },
-    },
     analysis_mode: { type: 'string', enum: ANALYSIS_MODES },
   },
 } as const;
@@ -245,6 +241,7 @@ export function createDiagnosticId(): string {
 
 export function validateRepairableProblem(value: unknown, expected: RepairableProblemExpected): RepairableProblem | null {
   if (!isRecord(value)) return null;
+  if (Object.keys(value).some((key) => !REPAIRABLE_PROBLEM_KEYS.has(key))) return null;
   if (value.rec_version !== '1.0') return null;
   if (value.status !== expected.status) return null;
   if (value.operation_id !== expected.operation_id) return null;
@@ -271,6 +268,8 @@ export function validateRepairableProblem(value: unknown, expected: RepairablePr
     if (typeof value[field] !== 'string' || value[field].length === 0 || value[field].length > maxLength) return null;
   }
 
+  if (value.instance !== diagnosticInstance(expected.diagnostic_id)) return null;
+
   if (!isRecord(value.retry_policy)) return null;
   if (typeof value.retry_policy.can_retry !== 'boolean' || typeof value.retry_policy.same_request !== 'boolean') return null;
   if (
@@ -295,21 +294,11 @@ export function validateRepairableProblem(value: unknown, expected: RepairablePr
   if (value.repair_patch !== undefined) {
     if (!Array.isArray(value.repair_patch) || value.repair_patch.length > 6) return null;
     for (const op of value.repair_patch) {
-      if (!isRecord(op) || !PATCH_OPS.has(String(op.op)) || !isAllowedPath(op.path, expected.allowedRequestFields)) return null;
-      if ((op.op === 'move' || op.op === 'copy') && !isAllowedPath(op.from, expected.allowedRequestFields)) return null;
+      if (!isRecord(op) || !PATCH_OPS.has(String(op.op)) || !isAllowedJsonPointerPath(op.path, expected.allowedRequestFields)) return null;
+      if ((op.op === 'move' || op.op === 'copy') && !isAllowedJsonPointerPath(op.from, expected.allowedRequestFields)) return null;
     }
   }
 
-  if (value.reddit_fetch_error !== undefined) {
-    if (!isRecord(value.reddit_fetch_error)) return null;
-    if (typeof value.reddit_fetch_error.retryable !== 'boolean') return null;
-    for (const field of ['input', 'normalized_post_id', 'request_url', 'final_url', 'reason', 'content_type', 'response_preview']) {
-      const fieldValue = value.reddit_fetch_error[field];
-      if (fieldValue !== undefined && fieldValue !== null && typeof fieldValue !== 'string') return null;
-    }
-    if (value.reddit_fetch_error.status !== undefined && (!Number.isInteger(value.reddit_fetch_error.status) || value.reddit_fetch_error.status < 100 || value.reddit_fetch_error.status > 599)) return null;
-    if (value.reddit_fetch_error.redirect_chain !== undefined && (!Array.isArray(value.reddit_fetch_error.redirect_chain) || value.reddit_fetch_error.redirect_chain.some((url: unknown) => typeof url !== 'string' || url.length > 500))) return null;
-  }
 
   if (value.repair_plan !== undefined) {
     if (!Array.isArray(value.repair_plan) || value.repair_plan.length > 8) return null;
@@ -347,7 +336,7 @@ export function buildFallbackRepairableProblem(args: {
   trace_id?: string;
   safe_error?: { code?: string; message?: string; original_status?: number };
   failure_stage?: string;
-  reddit_fetch_error?: RepairableProblem['reddit_fetch_error'];
+  error_kind?: 'input' | 'content' | 'upstream' | 'fetch' | 'config' | 'internal';
 }): RepairableProblem {
   const code = args.safe_error?.code;
   const isShareUrl = code === 'UNRESOLVED_REDDIT_SHARE_URL';
@@ -397,11 +386,20 @@ export function buildFallbackRepairableProblem(args: {
     callerInstruction = 'Retry later with the same request. Do not change request parameters solely to bypass rate limiting.';
     repair_plan = [{ action: 'retry_later', reason: 'The upstream service asked callers to slow down.' }];
   } else if (status >= 500) {
-    classification = 'dependency_failure';
-    retryPolicy = { can_retry: true, same_request: true, idempotency_required: false };
-    title = 'Reddit dependency failure';
-    callerInstruction = 'Retry later with the same request. Do not invent alternative request parameters for this upstream failure.';
-    repair_plan = [{ action: 'retry_later', reason: 'The failure happened while contacting or processing the upstream Reddit dependency.' }];
+    if (args.error_kind === 'internal' || args.error_kind === 'config') {
+      classification = 'service_bug_likely';
+      retryPolicy = { can_retry: true, same_request: true, idempotency_required: false };
+      title = 'Service bug likely';
+      detail = 'The request could not be completed because the service hit an unexpected internal failure.';
+      callerInstruction = 'Retry later with the same request if appropriate. Do not invent request parameters; report the diagnostic_id to the service owner if this persists.';
+      repair_plan = [{ action: 'report_diagnostic_id', reason: 'The failure appears to be inside the service rather than in the caller request or Reddit dependency.' }];
+    } else {
+      classification = 'dependency_failure';
+      retryPolicy = { can_retry: true, same_request: true, idempotency_required: false };
+      title = 'Reddit dependency failure';
+      callerInstruction = 'Retry later with the same request. Do not invent alternative request parameters for this upstream failure.';
+      repair_plan = [{ action: 'retry_later', reason: 'The failure happened while contacting or processing the upstream Reddit dependency.' }];
+    }
   }
 
   return {
@@ -409,7 +407,7 @@ export function buildFallbackRepairableProblem(args: {
     title,
     status,
     detail,
-    instance: args.endpoint,
+    instance: diagnosticInstance(args.diagnostic_id),
     rec_version: '1.0',
     operation_id: args.operation_id,
     diagnostic_id: args.diagnostic_id,
@@ -424,7 +422,6 @@ export function buildFallbackRepairableProblem(args: {
     caller_instruction: callerInstruction,
     llm_instruction: callerInstruction,
     safe_debug_summary: `Fallback repairable error for ${args.operation_id} at stage ${args.failure_stage ?? 'unknown'} with status ${status}${code ? ` and code ${code}` : ''}.`,
-    ...(args.reddit_fetch_error ? { reddit_fetch_error: args.reddit_fetch_error } : {}),
     analysis_mode: 'fallback',
   };
 }
@@ -434,11 +431,37 @@ function boundedOptionalString(value: unknown, maxLength: number, required = fal
   return typeof value === 'string' && value.length > 0 && value.length <= maxLength;
 }
 
+function diagnosticInstance(diagnosticId: string): string {
+  return `urn:diagnostic:${diagnosticId}`;
+}
+
 function isAllowedPath(path: unknown, allowedFields: string[]): boolean {
+  return normalizeDiagnosticPath(path, allowedFields) !== null;
+}
+
+function isAllowedJsonPointerPath(path: unknown, allowedFields: string[]): boolean {
   if (typeof path !== 'string' || path.length === 0 || path.length > 80) return false;
-  const normalized = path.startsWith('/') ? path.slice(1) : path;
-  const field = normalized.split('/')[0];
+  if (!path.startsWith('/')) return false;
+  const field = path.slice(1);
+  if (!isSafeTopLevelFieldPath(field)) return false;
   return allowedFields.includes(field);
+}
+
+function normalizeDiagnosticPath(path: unknown, allowedFields: string[]): string | null {
+  if (typeof path !== 'string' || path.length === 0 || path.length > 80) return null;
+  let field = path;
+  if (path.startsWith('/')) {
+    field = path.slice(1);
+  } else if (path.startsWith('$.')) {
+    field = path.slice(2);
+  }
+  if (!isSafeTopLevelFieldPath(field)) return null;
+  return allowedFields.includes(field) ? field : null;
+}
+
+function isSafeTopLevelFieldPath(field: string): boolean {
+  if (!/^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(field)) return false;
+  return !/(^|[_-])(access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|cookie|set-cookie|client[_-]?secret|secret|password|api[_-]?key|apikey|token)([_-]|$)/i.test(field);
 }
 
 function containsUnsafeString(value: unknown): boolean {

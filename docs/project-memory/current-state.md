@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-05-17 Reddit Repairable Error Contract public diagnostics hardening
+
+- The Reddit thread Repairable Error Contract now uses `urn:diagnostic:<diagnostic_id>` as the public Problem Details `instance`, so callers can correlate a concrete diagnostic occurrence without treating the endpoint path as the instance.
+- Public Reddit REC fallback responses no longer expose deep Reddit fetch diagnostics such as request/final URLs, redirect chains, or response previews; diagnostic capsules keep sanitized shape-only data and mask sensitive request field names.
+- The REC validator accepts JSON Pointer and JSONPath-style top-level request paths for diagnostic fields, keeps JSON Patch paths pointer-only, and classifies unknown internal service exceptions as `service_bug_likely` while preserving safe public detail.
+
 
 ## 2026-05-17 Reddit post input normalization hardening
 

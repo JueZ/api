@@ -43,10 +43,22 @@ export function buildRequestShape(body: unknown): DiagnosticCapsule['request_sha
   }
 
   const shape: DiagnosticCapsule['request_shape'] = {};
+  const sensitiveKeyPlaceholders = new Map<string, string>();
   for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
-    shape[key] = { type: valueType(value), ...lengthBucket(value), value_exposed: false };
+    const shapeKey = sanitizeShapeKey(key, sensitiveKeyPlaceholders);
+    shape[shapeKey] = { type: valueType(value), ...lengthBucket(value), value_exposed: false };
   }
   return shape;
+}
+
+export function sanitizeShapeKey(key: string, placeholders = new Map<string, string>()): string {
+  if (!isSensitiveShapeKey(key)) return key;
+  const normalized = key.toLowerCase();
+  const existing = placeholders.get(normalized);
+  if (existing) return existing;
+  const placeholder = `[redacted_sensitive_field_${placeholders.size + 1}]`;
+  placeholders.set(normalized, placeholder);
+  return placeholder;
 }
 
 export function buildRedditDiagnosticCapsule(args: {
@@ -123,6 +135,25 @@ function redditContractSummary(): DiagnosticCapsule['contract_summary'] {
       thread_url: 'post',
     },
   };
+}
+
+const SENSITIVE_SHAPE_KEY_PATTERNS = [
+  /^access[_-]?token$/i,
+  /^refresh[_-]?token$/i,
+  /^id[_-]?token$/i,
+  /^authorization$/i,
+  /^cookie$/i,
+  /^set-cookie$/i,
+  /^client[_-]?secret$/i,
+  /^secret$/i,
+  /^password$/i,
+  /^api[_-]?key$/i,
+  /^apikey$/i,
+  /^token$/i,
+];
+
+function isSensitiveShapeKey(key: string): boolean {
+  return SENSITIVE_SHAPE_KEY_PATTERNS.some((pattern) => pattern.test(key));
 }
 
 function valueType(value: unknown): DiagnosticCapsule['request_shape'][string]['type'] {
