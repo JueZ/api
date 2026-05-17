@@ -5,7 +5,7 @@ import { normalizeRedditPostInput, parseRedditPostInput, unresolvedRedditShareUr
 import { attachMoreChildren, normalizeInitialThread } from '../dist/shared/reddit/normalize.js';
 import { RedditThreadService } from '../dist/shared/reddit/service.js';
 import { redditThreadHandler, setRedditThreadServiceForTesting, setRepairableErrorAnalyzerForTesting } from '../dist/functions/redditThread.js';
-import { buildFallbackRepairableProblem } from '../dist/shared/errors/repairableProblem.js';
+import { buildFallbackRepairableProblem, validateRepairableProblem } from '../dist/shared/errors/repairableProblem.js';
 import { buildRedditDiagnosticCapsule } from '../dist/shared/errors/diagnosticCapsule.js';
 
 const config = {
@@ -475,7 +475,7 @@ test('redditThreadHandler returns a valid LLM-assisted repairable problem from a
       title: 'Invalid JSON',
       status: 400,
       detail: 'The request body was not valid JSON.',
-      instance: '/api/reddit/thread',
+      instance: `urn:diagnostic:${expected.diagnostic_id}`,
       rec_version: '1.0',
       operation_id: expected.operation_id,
       diagnostic_id: expected.diagnostic_id,
@@ -551,6 +551,7 @@ test('redditThreadHandler invalid JSON response has diagnostic identifiers', asy
     assert.equal(response.jsonBody.rec_version, '1.0');
     assert.equal(response.jsonBody.operation_id, 'postRedditThread');
     assert.match(response.jsonBody.diagnostic_id, /^diag_/);
+    assert.equal(response.jsonBody.instance, `urn:diagnostic:${response.jsonBody.diagnostic_id}`);
     assert.equal(response.jsonBody.classification, 'caller_contract_violation');
   });
 });
@@ -573,8 +574,45 @@ test('redditThreadHandler returns share URL repair guidance for unresolved Reddi
 
 
 
-test('redditThreadHandler includes structured Reddit fetch diagnostics for non-JSON upstream responses', async () => {
-  await withEnv({ AUTH_ENABLED: 'false', REPAIRABLE_ERRORS_LLM_ENABLED: 'false' }, async () => {
+test('redditThreadHandler falls back when analyzer returns public Reddit fetch diagnostics', async () => {
+  await withEnv({ AUTH_ENABLED: 'false', REPAIRABLE_ERRORS_LLM_ENABLED: 'true', ['OPENAI_' + 'API_KEY']: 'test-key', REPAIRABLE_ERRORS_PUBLIC_DEBUG: undefined }, async () => {
+    setRepairableErrorAnalyzerForTesting(async ({ expected }) => ({
+      ...baseRepairableProblem({
+        ...expected,
+        status: 502,
+      }),
+      status: expected.status,
+      classification: 'dependency_failure',
+      repairable: false,
+      retry_policy: { can_retry: true, same_request: true },
+      reddit_fetch_error: {
+        response_preview: '<html>feed</html>',
+        retryable: false,
+      },
+    }));
+    setRedditThreadServiceForTesting({
+      fetchThread: async () => {
+        throw new RedditFetchError('Expected Reddit JSON but received text/html.', {
+          status: 200,
+          content_type: 'text/html',
+          response_preview: '<html>feed</html>',
+          retryable: false,
+        });
+      },
+    });
+
+    const response = await redditThreadHandler(requestWithJson({ post: 'abc123' }), contextStub());
+    const serialized = JSON.stringify(response.jsonBody);
+
+    assert.equal(response.status, 502);
+    assert.equal(response.jsonBody.analysis_mode, 'fallback');
+    assert.equal(response.jsonBody.reddit_fetch_error, undefined);
+    assert.doesNotMatch(serialized, /response_preview|<html>feed<\/html>/);
+  });
+});
+
+test('redditThreadHandler omits deep Reddit fetch diagnostics from public REC responses by default', async () => {
+  await withEnv({ AUTH_ENABLED: 'false', REPAIRABLE_ERRORS_LLM_ENABLED: 'false', REPAIRABLE_ERRORS_PUBLIC_DEBUG: undefined }, async () => {
     setRedditThreadServiceForTesting({
       fetchThread: async () => {
         throw new RedditFetchError('Expected Reddit JSON but received text/html. This often means `.json` was appended before resolving a Reddit share URL or Reddit redirected to a subreddit/feed page.', {
@@ -593,12 +631,12 @@ test('redditThreadHandler includes structured Reddit fetch diagnostics for non-J
     });
 
     const response = await redditThreadHandler(requestWithJson({ post: 'https://www.reddit.com/r/science/s/DQGxxt7XzY' }), contextStub());
+    const serialized = JSON.stringify(response.jsonBody);
 
     assert.equal(response.status, 502);
-    assert.equal(response.jsonBody.reddit_fetch_error.normalized_post_id, '1tflddp');
-    assert.equal(response.jsonBody.reddit_fetch_error.content_type, 'text/html; charset=utf-8');
-    assert.equal(response.jsonBody.reddit_fetch_error.retryable, false);
-    assert.match(response.jsonBody.reddit_fetch_error.response_preview, /feed/);
+    assert.equal(response.jsonBody.instance, `urn:diagnostic:${response.jsonBody.diagnostic_id}`);
+    assert.equal(response.jsonBody.reddit_fetch_error, undefined);
+    assert.doesNotMatch(serialized, /response_preview|<html>feed<\/html>|redirect_chain|request_url|final_url/);
   });
 });
 
@@ -618,17 +656,19 @@ test('redditThreadHandler maps Reddit 429 to retry-later repairable problem', as
   });
 });
 
-test('redditThreadHandler maps Reddit 502/upstream to dependency failure without stack trace', async () => {
+test('redditThreadHandler maps unknown internal exceptions to service bug likely without stack trace', async () => {
   await withEnv({ AUTH_ENABLED: 'false', REPAIRABLE_ERRORS_LLM_ENABLED: 'false' }, async () => {
     setRedditThreadServiceForTesting({ fetchThread: async () => { throw new Error('Unexpected failure\n    at secret.file:1:1'); } });
     const response = await redditThreadHandler(requestWithJson({ post: 'abc123' }), contextStub());
     const serialized = JSON.stringify(response.jsonBody);
 
     assert.equal(response.status, 502);
-    assert.equal(response.jsonBody.classification, 'dependency_failure');
+    assert.equal(response.jsonBody.instance, `urn:diagnostic:${response.jsonBody.diagnostic_id}`);
+    assert.equal(response.jsonBody.classification, 'service_bug_likely');
     assert.equal(response.jsonBody.repairable, false);
     assert.equal(response.jsonBody.retry_policy.same_request, true);
-    assert.doesNotMatch(serialized, /\bat\s+secret\.file/);
+    assert.match(response.jsonBody.caller_instruction, /diagnostic_id|Do not invent request parameters/i);
+    assert.doesNotMatch(serialized, /\bat\s+secret\.file|Unexpected failure/);
   });
 });
 
@@ -655,13 +695,15 @@ test('buildRedditDiagnosticCapsule records request shape without raw token-like 
     failure_stage: 'input_validation',
     http_status: 400,
     safe_error: { message: 'Invalid request.' },
-    body: { post: 'Bearer fake-token', ['access_' + 'token']: 'secret', nested: { ['client_' + 'secret']: 'hidden' } },
+    body: { post: 'abc123', ['access_' + 'token']: 'secret', ['client_' + 'secret']: 'hidden' },
   });
   const serialized = JSON.stringify(capsule);
 
   assert.equal(capsule.request_shape.post.type, 'string');
   assert.equal(capsule.request_shape.post.value_exposed, false);
-  assert.doesNotMatch(serialized, /Bearer fake-token|secret|hidden/);
+  assert.equal(capsule.request_shape['[redacted_sensitive_field_1]'].type, 'string');
+  assert.equal(capsule.request_shape['[redacted_sensitive_field_2]'].type, 'string');
+  assert.doesNotMatch(serialized, /access_token|client_secret|secret|hidden/);
   assert.equal(capsule.security_policy.authorization_headers_included, false);
 });
 
@@ -690,6 +732,75 @@ test('redditThreadHandler returns 401 before reading body when unauthenticated',
   }
 });
 
+
+test('validateRepairableProblem accepts JSONPath diagnostic paths but keeps repair_patch JSON Pointer-only', () => {
+  const expected = repairableProblemExpected();
+
+  assert.ok(validateRepairableProblem({
+    ...baseRepairableProblem(expected),
+    invalid_fields: [{ path: '$.post', problem: 'Missing post.' }],
+  }, expected));
+  assert.ok(validateRepairableProblem({
+    ...baseRepairableProblem(expected),
+    repair_plan: [{ action: 'provide_missing_value', path: '$.post', reason: 'A post identifier is required.' }],
+  }, expected));
+  assert.equal(validateRepairableProblem({
+    ...baseRepairableProblem(expected),
+    repair_patch: [{ op: 'replace', path: '$.post', value: 'abc123' }],
+  }, expected), null);
+  assert.ok(validateRepairableProblem({
+    ...baseRepairableProblem(expected),
+    repair_patch: [{ op: 'replace', path: '/post', value: 'abc123' }],
+  }, expected));
+});
+
+test('validateRepairableProblem rejects unknown, nested sensitive, and weird diagnostic paths', () => {
+  const expected = repairableProblemExpected();
+
+  assert.equal(validateRepairableProblem({
+    ...baseRepairableProblem(expected),
+    invalid_fields: [{ path: '$.unknown', problem: 'Unknown field.' }],
+  }, expected), null);
+  assert.equal(validateRepairableProblem({
+    ...baseRepairableProblem(expected),
+    repair_plan: [{ action: 'provide_missing_value', path: '$.access_token', reason: 'Sensitive path.' }],
+  }, expected), null);
+  assert.equal(validateRepairableProblem({
+    ...baseRepairableProblem(expected),
+    invalid_fields: [{ path: '../post', problem: 'Weird path.' }],
+  }, expected), null);
+});
+
+
+function repairableProblemExpected() {
+  return {
+    operation_id: 'postRedditThread',
+    diagnostic_id: 'diag_test',
+    status: 400,
+    allowedRequestFields: ['post', 'sort', 'maxComments', 'maxMoreChildrenRequests', 'url', 'redditUrl', 'reddit_url', 'threadUrl', 'thread_url'],
+    allowedOperationIds: ['postRedditThread'],
+  };
+}
+
+function baseRepairableProblem(expected) {
+  return {
+    type: 'https://api.juez.local/problems/reddit-thread/caller-contract-violation',
+    title: 'Request contract violation',
+    status: expected.status,
+    detail: 'The request was invalid.',
+    instance: `urn:diagnostic:${expected.diagnostic_id}`,
+    rec_version: '1.0',
+    operation_id: expected.operation_id,
+    diagnostic_id: expected.diagnostic_id,
+    classification: 'caller_contract_violation',
+    repairable: true,
+    confidence: 0.9,
+    retry_policy: { can_retry: true, same_request: false },
+    caller_instruction: 'Send a valid post value.',
+    safe_debug_summary: 'Sanitized diagnostic summary.',
+    analysis_mode: 'llm_assisted',
+  };
+}
 
 async function withEnv(values, fn) {
   const previous = {};

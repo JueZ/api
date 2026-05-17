@@ -155,6 +155,7 @@ paths:
             - Reddit /r/<subreddit>/s/<token> share URL
         security:
           diagnosticCapsulePolicy: sanitized-only
+          publicDebugDetailsDefault: false
           exposeRawRequestBody: false
           exposeHeaders: false
           exposeTokens: false
@@ -234,7 +235,7 @@ paths:
                     title: Request contract violation
                     status: 400
                     detail: Request body must be valid JSON.
-                    instance: /api/reddit/thread
+                    instance: urn:diagnostic:diag_example_invalid_json
                     rec_version: "1.0"
                     operation_id: postRedditThread
                     diagnostic_id: diag_example_invalid_json
@@ -252,7 +253,7 @@ paths:
                     title: Request contract violation
                     status: 400
                     detail: The request used an alias field instead of post.
-                    instance: /api/reddit/thread
+                    instance: urn:diagnostic:diag_example_alias
                     rec_version: "1.0"
                     operation_id: postRedditThread
                     diagnostic_id: diag_example_alias
@@ -271,7 +272,7 @@ paths:
                     title: Request contract violation
                     status: 400
                     detail: Reddit /s/ share URLs must resolve to a canonical comments URL before this endpoint can fetch the thread.
-                    instance: /api/reddit/thread
+                    instance: urn:diagnostic:diag_example_share
                     rec_version: "1.0"
                     operation_id: postRedditThread
                     diagnostic_id: diag_example_share
@@ -315,7 +316,7 @@ paths:
                     title: Reddit content was not found
                     status: 404
                     detail: Reddit content was not found for thread.
-                    instance: /api/reddit/thread
+                    instance: urn:diagnostic:diag_example_404
                     rec_version: "1.0"
                     operation_id: postRedditThread
                     diagnostic_id: diag_example_404
@@ -340,7 +341,7 @@ paths:
                     title: Reddit rate limit reached
                     status: 429
                     detail: Reddit rate-limited the request.
-                    instance: /api/reddit/thread
+                    instance: urn:diagnostic:diag_example_429
                     rec_version: "1.0"
                     operation_id: postRedditThread
                     diagnostic_id: diag_example_429
@@ -367,7 +368,7 @@ paths:
                     title: Reddit dependency failure
                     status: 502
                     detail: Reddit upstream request failed.
-                    instance: /api/reddit/thread
+                    instance: urn:diagnostic:diag_example_502
                     rec_version: "1.0"
                     operation_id: postRedditThread
                     diagnostic_id: diag_example_502
@@ -421,7 +422,9 @@ components:
       additionalProperties: false
       required: [path, problem]
       properties:
-        path: { type: string }
+        path:
+          type: string
+          description: Top-level request field path. JSON Pointer (/post) and JSONPath-style ($.post) forms are accepted in diagnostics.
         problem: { type: string }
         expected: { type: string }
         received: { type: string }
@@ -434,7 +437,9 @@ components:
         action:
           type: string
           enum: [provide_missing_value, replace_invalid_value, remove_unknown_field, call_prerequisite_operation, retry_with_modified_request, retry_later, do_not_change_request, report_diagnostic_id]
-        path: { type: string }
+        path:
+          type: string
+          description: Top-level request field path. JSON Pointer (/post) and JSONPath-style ($.post) forms are accepted in diagnostic repair plans.
         value_hint: { type: string }
         operation_id: { type: string }
         reason: { type: string }
@@ -446,8 +451,12 @@ components:
         op:
           type: string
           enum: [add, remove, replace, move, copy, test]
-        path: { type: string }
-        from: { type: string }
+        path:
+          type: string
+          description: JSON Patch path. Must use JSON Pointer form such as /post, not JSONPath.
+        from:
+          type: string
+          description: JSON Patch source path for move/copy. Must use JSON Pointer form such as /post, not JSONPath.
         value: {}
     RepairableProblem:
       type: object
@@ -458,7 +467,10 @@ components:
         title: { type: string }
         status: { type: integer, minimum: 400, maximum: 599 }
         detail: { type: string }
-        instance: { type: string }
+        instance:
+          type: string
+          description: Concrete diagnostic occurrence URI in the form urn:diagnostic:<diagnostic_id>.
+          example: urn:diagnostic:diag_example_invalid_json
         rec_version: { type: string, enum: ["1.0"] }
         operation_id: { type: string }
         diagnostic_id: { type: string }
