@@ -21,7 +21,7 @@ const ledger = {
   frontendMetadataUrl: process.env.FRONTEND_BASE_URL ? `${process.env.FRONTEND_BASE_URL.replace(/\/$/, '')}/assets/build-info.json` : '',
   smokeRunId,
   smokeResults: await readJson(process.env.SMOKE_RESULTS_PATH, { status: 'blocked', blockedReason: 'SMOKE_RESULTS_PATH was not provided.' }),
-  authenticatedSmokeResults: await readJson(process.env.AUTH_SMOKE_RESULTS_PATH, { status: 'blocked_auth_smoke', blockedReason: 'AUTH_ACCESS_TOKEN or AUTH_SMOKE_RESULTS_PATH was not provided.' }),
+  authenticatedSmokeResults: await readJson(process.env.AUTH_SMOKE_RESULTS_PATH, { status: 'blocked_auth_smoke', blockedReason: 'AUTH_SMOKE_RESULTS_PATH was not provided; token minting or authenticated smoke did not complete.' }),
   telemetryCheckResult: await readJson(process.env.TELEMETRY_RESULTS_PATH, { status: 'blocked_telemetry', blockedReason: 'TELEMETRY_RESULTS_PATH was not provided.' }),
   verifiedAt: new Date().toISOString(),
 };

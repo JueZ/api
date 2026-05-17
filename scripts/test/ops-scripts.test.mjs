@@ -3,6 +3,7 @@ import test from 'node:test';
 import { validateReleaseLedger } from '../validate-release-ledger.mjs';
 import { parseRepairIssueBody, decideRepairIssueAction } from '../triage-repair-issues.mjs';
 import { forbiddenDiffFindings, highRiskPaths } from '../policy-guardrails.mjs';
+import { missingServiceAuthFields, selectServiceAuthConfig } from '../mint-smoke-token.mjs';
 
 test('release ledger validation accepts required runtime truth fields', () => {
   const ledger = {
@@ -40,4 +41,24 @@ test('policy guardrails ignore negated disable warnings while blocking actual di
   assert.ok(!forbiddenDiffFindings('- Do not disable tests, weaken authentication, remove policy checks, or commit secrets.').includes('ci-policy-disabled'));
   assert.ok(!forbiddenDiffFindings('+ Repair must happen without disabling CI or policy checks.').includes('ci-policy-disabled'));
   assert.ok(forbiddenDiffFindings('+ dis' + 'able CI=true').includes('ci-policy-disabled'));
+});
+
+
+test('smoke token mint config selects production service variables', () => {
+  const config = selectServiceAuthConfig({
+    ENVIRONMENT_NAME: 'prod',
+    PROD_SERVICE_AUTH_CLIENT_ID: 'client-id',
+    PROD_SERVICE_AUTH_TENANT_ID: 'tenant-id',
+    PROD_SERVICE_AUTH_SCOPE: 'api://example/.default',
+  });
+
+  assert.equal(config.prefix, 'PROD');
+  assert.deepEqual(missingServiceAuthFields(config), []);
+});
+
+test('smoke token mint config detects missing service variables', () => {
+  const config = selectServiceAuthConfig({ ENVIRONMENT_NAME: 'test', TEST_SERVICE_AUTH_CLIENT_ID: 'client-id' });
+
+  assert.equal(config.prefix, 'TEST');
+  assert.deepEqual(missingServiceAuthFields(config), ['tenantId', 'scope']);
 });

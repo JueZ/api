@@ -50,9 +50,7 @@ permission, then store its client secret only in GPT Builder.
 
 ## GitHub environment variables
 
-Set service-client values at the GitHub **environment** level, especially for the
-`test` environment, so test-only clients do not become production callers by
-accident:
+Set service-client values at the GitHub **environment** level. Use `TEST_SERVICE_AUTH_*` for the `test` environment and `PROD_SERVICE_AUTH_*` for the `production` environment, so test-only clients do not become production callers by accident:
 
 ```text
 OIDC_REQUIRED_SCOPES=api.access,api.test
@@ -61,6 +59,11 @@ OIDC_ALLOWED_CLIENT_IDS=<service-client-application-id>
 TEST_SERVICE_AUTH_CLIENT_ID=<service-client-application-id>
 TEST_SERVICE_AUTH_TENANT_ID=<tenant-id>
 TEST_SERVICE_AUTH_SCOPE=api://<api-app-client-id>/.default
+
+# production environment only, when production authenticated smokes are intentionally enabled
+PROD_SERVICE_AUTH_CLIENT_ID=<production-service-client-application-id>
+PROD_SERVICE_AUTH_TENANT_ID=<tenant-id>
+PROD_SERVICE_AUTH_SCOPE=api://<api-app-client-id>/.default
 ```
 
 Keep the existing user variables in place. Add the delegated client setting
@@ -74,9 +77,7 @@ OIDC_ALLOWED_DELEGATED_CLIENT_IDS=<optional GPT Action or other delegated client
 OIDC_ALLOWED_TENANTS=<allowed-tenant-id>
 ```
 
-If production does not need app-only callers, leave production
-`OIDC_ALLOWED_APP_OBJECT_IDS` and `OIDC_ALLOWED_CLIENT_IDS` empty and keep
-`OIDC_REQUIRED_SCOPES=api.access`.
+If production does not need app-only callers, leave production `OIDC_ALLOWED_APP_OBJECT_IDS` and `OIDC_ALLOWED_CLIENT_IDS` empty and keep `OIDC_REQUIRED_SCOPES=api.access`. Production authenticated smoke tests are an intentional app-only caller; when enabled, configure a dedicated production service app with `api.service`, the production allowlists, and `PROD_SERVICE_AUTH_*` variables.
 
 
 ## GPT Actions delegated OAuth client
@@ -122,10 +123,7 @@ export SET_GITHUB_VARIABLES=true
 ./scripts/configure-entra-service-oauth.sh
 ```
 
-The helper creates or reuses a service-client app registration, adds the API app
-role, assigns that role to the service principal, creates a GitHub Actions
-federated credential, and optionally writes the non-secret GitHub environment
-variables. It creates no client secret.
+The helper creates or reuses a service-client app registration, adds the API app role, assigns that role to the service principal, creates a GitHub Actions federated credential, and optionally writes the non-secret GitHub environment variables. It creates no client secret. For `GITHUB_ENVIRONMENT=production`, it writes `PROD_SERVICE_AUTH_*`; otherwise it writes `TEST_SERVICE_AUTH_*`.
 
 ## Token acquisition for service tests
 

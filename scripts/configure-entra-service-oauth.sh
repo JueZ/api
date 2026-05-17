@@ -140,20 +140,28 @@ fi
 
 if [ "$set_github_variables" = "true" ]; then
   require_command gh
-  gh variable set TEST_SERVICE_AUTH_CLIENT_ID --env "$github_environment" --repo "$repository" --body "$service_app_id"
-  gh variable set TEST_SERVICE_AUTH_TENANT_ID --env "$github_environment" --repo "$repository" --body "$account_tenant_id"
-  gh variable set TEST_SERVICE_AUTH_SCOPE --env "$github_environment" --repo "$repository" --body "$api_identifier_uri/.default"
+  service_var_prefix='TEST'
+  if [ "$github_environment" = "production" ] || [ "$github_environment" = "prod" ]; then
+    service_var_prefix='PROD'
+  fi
+  gh variable set "${service_var_prefix}_SERVICE_AUTH_CLIENT_ID" --env "$github_environment" --repo "$repository" --body "$service_app_id"
+  gh variable set "${service_var_prefix}_SERVICE_AUTH_TENANT_ID" --env "$github_environment" --repo "$repository" --body "$account_tenant_id"
+  gh variable set "${service_var_prefix}_SERVICE_AUTH_SCOPE" --env "$github_environment" --repo "$repository" --body "$api_identifier_uri/.default"
   gh variable set OIDC_ALLOWED_APP_OBJECT_IDS --env "$github_environment" --repo "$repository" --body "$service_sp_object_id"
   gh variable set OIDC_ALLOWED_CLIENT_IDS --env "$github_environment" --repo "$repository" --body "$service_app_id"
   gh variable set OIDC_REQUIRED_SCOPES --env "$github_environment" --repo "$repository" --body "$oidc_required_scopes_value"
   echo "Set GitHub environment variables for $repository/$github_environment."
 else
+  service_var_prefix='TEST'
+  if [ "$github_environment" = "production" ] || [ "$github_environment" = "prod" ]; then
+    service_var_prefix='PROD'
+  fi
   cat <<VALUES
 
 GitHub environment variables to set for $repository environment '$github_environment':
-  TEST_SERVICE_AUTH_CLIENT_ID=$service_app_id
-  TEST_SERVICE_AUTH_TENANT_ID=$account_tenant_id
-  TEST_SERVICE_AUTH_SCOPE=$api_identifier_uri/.default
+  ${service_var_prefix}_SERVICE_AUTH_CLIENT_ID=$service_app_id
+  ${service_var_prefix}_SERVICE_AUTH_TENANT_ID=$account_tenant_id
+  ${service_var_prefix}_SERVICE_AUTH_SCOPE=$api_identifier_uri/.default
   OIDC_ALLOWED_APP_OBJECT_IDS=$service_sp_object_id
   OIDC_ALLOWED_CLIENT_IDS=$service_app_id
   OIDC_REQUIRED_SCOPES=$oidc_required_scopes_value
