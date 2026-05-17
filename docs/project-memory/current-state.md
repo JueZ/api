@@ -1,5 +1,13 @@
 # Current state
 
+
+## 2026-05-17 Repairable Error LLM diagnostics configuration wiring
+
+- GitHub repository secret `OPENAI_API_KEY` and variables `REPAIRABLE_ERRORS_LLM_ENABLED=true` / `REPAIRABLE_ERRORS_LLM_MODEL=gpt-5.5` were configured for deployment automation; secret values are not stored in project memory.
+- Direct Azure Function app-setting mutation from the Codex Azure CLI identity was blocked by missing `Microsoft.Web/sites/config/list/action`, so the deployment workflow is being wired to pass the GitHub secret/variables into Bicep-managed Function App settings for both test and production deployments.
+- Follow-up requirement: after the PR merges, verify `Deploy Test` and `Promote Production` succeed and smoke tests pass with LLM-assisted diagnostics enabled.
+
+
 ## 2026-05-16 Reddit thread input hardening follow-up deployed
 
 - Follow-up analysis found that resolving Reddit `/s/` share URLs by unauthenticated web redirects can still fail when Reddit returns a web 403 instead of a redirect, and a raw ID such as `1tav2fa` may be a comment ID rather than a post ID.

@@ -39,6 +39,9 @@ on:
       REDDIT_CLIENT_SECRET:
         description: Reddit OAuth client secret for app-only API access.
         required: true
+      OPENAI_API_KEY:
+        description: Optional OpenAI API key for Repairable Error Contract LLM-assisted diagnostics.
+        required: false
     outputs:
       effectiveBaseUrl:
         description: Resolved Function App base URL.
@@ -100,6 +103,8 @@ jobs:
       TEST_WEB_API_BASE_URL: ${{ vars.TEST_WEB_API_BASE_URL }}
       REDDIT_CLIENT_ID: ${{ vars.REDDIT_CLIENT_ID }}
       REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
+      REPAIRABLE_ERRORS_LLM_ENABLED: ${{ vars.REPAIRABLE_ERRORS_LLM_ENABLED }}
+      REPAIRABLE_ERRORS_LLM_MODEL: ${{ vars.REPAIRABLE_ERRORS_LLM_MODEL }}
     steps:
       - name: Checkout deployment source
         uses: actions/checkout@v6
@@ -207,6 +212,9 @@ jobs:
           : "${WEB_AUTH_API_SCOPE:?WEB_AUTH_API_SCOPE repository variable is required for $ENVIRONMENT_NAME}"
           : "${REDDIT_CLIENT_ID:?REDDIT_CLIENT_ID environment variable is required for $ENVIRONMENT_NAME}"
           : "${REDDIT_USER_AGENT:?REDDIT_USER_AGENT environment variable is required for $ENVIRONMENT_NAME}"
+          if [ "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" = "true" ]; then
+            : "${REPAIRABLE_ERRORS_LLM_MODEL:?REPAIRABLE_ERRORS_LLM_MODEL repository variable is required when Repairable Error LLM diagnostics are enabled}"
+          fi
       - name: Azure OIDC login
         uses: azure/login@v3
         with:
@@ -238,9 +246,19 @@ jobs:
         shell: bash
         env:
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
           : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
+          openai_secret_name='OPENAI_API_KEY'
+          openai_credential=""
+          if [ "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" = "true" ]; then
+            if [ -z "${!openai_secret_name:-}" ]; then
+              echo "OpenAI repository secret is required when Repairable Error LLM diagnostics are enabled." >&2
+              exit 1
+            fi
+            openai_credential="${!openai_secret_name}"
+          fi
           if [ -f infra/main.bicep ]; then
             api_cors_redirect_uri=""
             if [ "$ENVIRONMENT_NAME" = "prod" ]; then
@@ -271,6 +289,9 @@ jobs:
                 redditClientId="${REDDIT_CLIENT_ID:-}" \
                 redditOAuthSecret="${REDDIT_CLIENT_SECRET:-}" \
                 redditUserAgent="${REDDIT_USER_AGENT:-}" \
+                openAiCredential="$openai_credential" \
+                repairableErrorsLlmEnabled="${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" \
+                repairableErrorsLlmModel="${REPAIRABLE_ERRORS_LLM_MODEL:-}" \
                 apiCorsAllowedOrigins="$api_cors_allowed_origins" \
               --query properties.outputs \
               -o json)

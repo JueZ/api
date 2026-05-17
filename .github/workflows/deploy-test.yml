@@ -43,6 +43,7 @@ jobs:
     uses: ./.github/workflows/deploy-environment.yml
     secrets:
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     with:
       environmentName: test
       azureResourceGroup: rg-api-test
