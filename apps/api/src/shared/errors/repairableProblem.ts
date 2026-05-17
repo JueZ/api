@@ -72,6 +72,18 @@ export interface RepairableProblem {
   caller_instruction: string;
   llm_instruction?: string;
   safe_debug_summary: string;
+  reddit_fetch_error?: {
+    input?: string;
+    normalized_post_id?: string;
+    request_url?: string;
+    final_url?: string;
+    status?: number;
+    reason?: string;
+    content_type?: string | null;
+    response_preview?: string;
+    redirect_chain?: string[];
+    retryable: boolean;
+  };
   analysis_mode: AnalysisMode;
 }
 
@@ -206,6 +218,23 @@ export const repairableProblemJsonSchema = {
     caller_instruction: { type: 'string', maxLength: 700 },
     llm_instruction: { type: 'string', maxLength: 700 },
     safe_debug_summary: { type: 'string', maxLength: 700 },
+    reddit_fetch_error: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['retryable'],
+      properties: {
+        input: { type: 'string', maxLength: 260 },
+        normalized_post_id: { type: 'string', maxLength: 32 },
+        request_url: { type: 'string', maxLength: 500 },
+        final_url: { type: 'string', maxLength: 500 },
+        status: { type: 'integer', minimum: 100, maximum: 599 },
+        reason: { type: 'string', maxLength: 120 },
+        content_type: { type: ['string', 'null'], maxLength: 120 },
+        response_preview: { type: 'string', maxLength: 500 },
+        redirect_chain: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 500 } },
+        retryable: { type: 'boolean' },
+      },
+    },
     analysis_mode: { type: 'string', enum: ANALYSIS_MODES },
   },
 } as const;
@@ -271,6 +300,17 @@ export function validateRepairableProblem(value: unknown, expected: RepairablePr
     }
   }
 
+  if (value.reddit_fetch_error !== undefined) {
+    if (!isRecord(value.reddit_fetch_error)) return null;
+    if (typeof value.reddit_fetch_error.retryable !== 'boolean') return null;
+    for (const field of ['input', 'normalized_post_id', 'request_url', 'final_url', 'reason', 'content_type', 'response_preview']) {
+      const fieldValue = value.reddit_fetch_error[field];
+      if (fieldValue !== undefined && fieldValue !== null && typeof fieldValue !== 'string') return null;
+    }
+    if (value.reddit_fetch_error.status !== undefined && (!Number.isInteger(value.reddit_fetch_error.status) || value.reddit_fetch_error.status < 100 || value.reddit_fetch_error.status > 599)) return null;
+    if (value.reddit_fetch_error.redirect_chain !== undefined && (!Array.isArray(value.reddit_fetch_error.redirect_chain) || value.reddit_fetch_error.redirect_chain.some((url: unknown) => typeof url !== 'string' || url.length > 500))) return null;
+  }
+
   if (value.repair_plan !== undefined) {
     if (!Array.isArray(value.repair_plan) || value.repair_plan.length > 8) return null;
     for (const step of value.repair_plan) {
@@ -307,6 +347,7 @@ export function buildFallbackRepairableProblem(args: {
   trace_id?: string;
   safe_error?: { code?: string; message?: string; original_status?: number };
   failure_stage?: string;
+  reddit_fetch_error?: RepairableProblem['reddit_fetch_error'];
 }): RepairableProblem {
   const code = args.safe_error?.code;
   const isShareUrl = code === 'UNRESOLVED_REDDIT_SHARE_URL';
@@ -383,6 +424,7 @@ export function buildFallbackRepairableProblem(args: {
     caller_instruction: callerInstruction,
     llm_instruction: callerInstruction,
     safe_debug_summary: `Fallback repairable error for ${args.operation_id} at stage ${args.failure_stage ?? 'unknown'} with status ${status}${code ? ` and code ${code}` : ''}.`,
+    ...(args.reddit_fetch_error ? { reddit_fetch_error: args.reddit_fetch_error } : {}),
     analysis_mode: 'fallback',
   };
 }

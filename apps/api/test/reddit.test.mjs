@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { RedditOAuthClient, RedditUpstreamError } from '../dist/shared/reddit/client.js';
-import { parseRedditPostInput, unresolvedRedditShareUrlError } from '../dist/shared/reddit/input.js';
+import { RedditFetchError, RedditOAuthClient, RedditUpstreamError } from '../dist/shared/reddit/client.js';
+import { normalizeRedditPostInput, parseRedditPostInput, unresolvedRedditShareUrlError } from '../dist/shared/reddit/input.js';
 import { attachMoreChildren, normalizeInitialThread } from '../dist/shared/reddit/normalize.js';
 import { RedditThreadService } from '../dist/shared/reddit/service.js';
 import { redditThreadHandler, setRedditThreadServiceForTesting, setRepairableErrorAnalyzerForTesting } from '../dist/functions/redditThread.js';
@@ -26,6 +26,53 @@ test('parseRedditPostInput accepts supported ID and URL formats', () => {
     articleId: 'abc123',
     fullname: 't3_abc123',
   });
+});
+
+
+
+test('normalizeRedditPostInput accepts raw post IDs', async () => {
+  const normalized = await normalizeRedditPostInput('1tflddp');
+
+  assert.equal(normalized.post_id, '1tflddp');
+});
+
+test('normalizeRedditPostInput accepts t3 fullnames', async () => {
+  const normalized = await normalizeRedditPostInput('t3_1tflddp');
+
+  assert.equal(normalized.post_id, '1tflddp');
+});
+
+test('normalizeRedditPostInput accepts canonical comments URLs with subreddit metadata', async () => {
+  const normalized = await normalizeRedditPostInput('https://www.reddit.com/r/science/comments/1tflddp/feeling_empty_after_finishing_a_video_game/');
+
+  assert.equal(normalized.post_id, '1tflddp');
+  assert.equal(normalized.subreddit, 'science');
+});
+
+test('normalizeRedditPostInput accepts comment permalinks with comment IDs', async () => {
+  const normalized = await normalizeRedditPostInput('https://www.reddit.com/r/science/comments/1tflddp/feeling_empty_after_finishing_a_video_game/oma4ybn/');
+
+  assert.equal(normalized.post_id, '1tflddp');
+  assert.equal(normalized.comment_id, 'oma4ybn');
+});
+
+test('normalizeRedditPostInput accepts redd.it short links', async () => {
+  const normalized = await normalizeRedditPostInput('https://redd.it/1tflddp');
+
+  assert.equal(normalized.post_id, '1tflddp');
+});
+
+test('normalizeRedditPostInput resolves Reddit share URLs before extracting post IDs', async () => {
+  const shareUrl = 'https://www.reddit.com/r/science/s/DQGxxt7XzY';
+  const finalUrl = 'https://www.reddit.com/r/science/comments/1tflddp/feeling_empty_after_finishing_a_video_game/?share_id=X';
+  const normalized = await normalizeRedditPostInput(shareUrl, async (url) => {
+    assert.equal(url, shareUrl);
+    return { finalUrl, redirectChain: [shareUrl, finalUrl] };
+  });
+
+  assert.equal(normalized.post_id, '1tflddp');
+  assert.equal(normalized.subreddit, 'science');
+  assert.deepEqual(normalized.redirectChain, [shareUrl, finalUrl]);
 });
 
 test('parseRedditPostInput rejects non-Reddit URLs and invalid IDs', () => {
@@ -153,6 +200,98 @@ test('RedditThreadService falls back to Reddit redirect resolution when api/info
   const redirectCall = calls.find((call) => call.input === shareUrl);
   assert.equal(redirectCall.init.method, 'GET');
   assert.equal(redirectCall.init.redirect, 'manual');
+});
+
+
+
+test('RedditThreadService never appends .json to Reddit share URLs before redirect resolution', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const calls = [];
+  const shareUrl = 'https://www.reddit.com/r/science/s/DQGxxt7XzY';
+  const canonicalUrl = 'https://www.reddit.com/r/science/comments/1tflddp/feeling_empty_after_finishing_a_video_game/?share_id=X';
+  const service = new RedditThreadService({
+    fetchImpl: async (input, init) => {
+      calls.push({ input: String(input), init });
+      assert.notEqual(String(input), `${shareUrl}.json?limit=1&sort=confidence`);
+      assert.doesNotMatch(String(input), /\/s\/DQGxxt7XzY\.json/);
+      if (String(input).includes('/api/v1/access_token')) {
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      }
+      if (String(input).includes('/api/info') && String(input).includes('url=')) {
+        return jsonResponse(infoListing(), 200, rateHeaders(1));
+      }
+      if (String(input) === shareUrl) {
+        return redirectResponse(canonicalUrl);
+      }
+      if (String(input) === canonicalUrl) {
+        return responseWithUrl({}, canonicalUrl);
+      }
+      if (String(input).includes('/comments/1tflddp')) {
+        return jsonResponse(threadFixtureWithoutMore('1tflddp'), 200, rateHeaders(2));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThread({ post: shareUrl, maxComments: 10 });
+
+  assert.equal(response.post.id, '1tflddp');
+  assert.ok(calls.some((call) => call.input === shareUrl));
+  assert.ok(calls.some((call) => call.input.includes('/comments/1tflddp')));
+});
+
+test('RedditOAuthClient raises RedditFetchError with content type and preview for non-JSON bodies', async () => {
+  const client = new RedditOAuthClient(config, async (input) => {
+    if (String(input).includes('/api/v1/access_token')) {
+      return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+    }
+    return new Response('<html><body>feed</body></html>', {
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+    });
+  });
+
+  await assert.rejects(
+    () => client.getJson('/comments/1tflddp', { limit: 1, sort: 'confidence' }, { input: '1tflddp', normalizedPostId: '1tflddp' }),
+    (error) => {
+      assert.ok(error instanceof RedditFetchError);
+      assert.equal(error.normalized_post_id, '1tflddp');
+      assert.equal(error.status, 200);
+      assert.match(error.content_type, /text\/html/);
+      assert.match(error.response_preview, /feed/);
+      assert.match(error.message, /Expected Reddit JSON but received text\/html/);
+      return true;
+    },
+  );
+});
+
+test('RedditOAuthClient retries retryable upstream responses and marks final invalid JSON 429 retryable', async () => {
+  let commentFetches = 0;
+  const client = new RedditOAuthClient(config, async (input) => {
+    if (String(input).includes('/api/v1/access_token')) {
+      return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+    }
+    commentFetches += 1;
+    return new Response('Too Many Requests', {
+      status: 429,
+      statusText: 'Too Many Requests',
+      headers: { 'content-type': 'text/plain' },
+    });
+  });
+
+  await assert.rejects(
+    () => client.getJson('/comments/1tflddp', { limit: 1 }, { input: '1tflddp', normalizedPostId: '1tflddp' }),
+    (error) => {
+      assert.ok(error instanceof RedditFetchError);
+      assert.equal(error.status, 429);
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
+  assert.equal(commentFetches, 3);
 });
 
 test('RedditThreadService treats a raw comment ID as a pointer to its parent post thread', async () => {
@@ -432,6 +571,37 @@ test('redditThreadHandler returns share URL repair guidance for unresolved Reddi
   });
 });
 
+
+
+test('redditThreadHandler includes structured Reddit fetch diagnostics for non-JSON upstream responses', async () => {
+  await withEnv({ AUTH_ENABLED: 'false', REPAIRABLE_ERRORS_LLM_ENABLED: 'false' }, async () => {
+    setRedditThreadServiceForTesting({
+      fetchThread: async () => {
+        throw new RedditFetchError('Expected Reddit JSON but received text/html. This often means `.json` was appended before resolving a Reddit share URL or Reddit redirected to a subreddit/feed page.', {
+          input: 'https://www.reddit.com/r/science/s/DQGxxt7XzY',
+          normalized_post_id: '1tflddp',
+          request_url: 'https://www.reddit.com/comments/1tflddp.json?limit=1&sort=confidence',
+          final_url: 'https://www.reddit.com/r/science/',
+          status: 200,
+          reason: 'OK',
+          content_type: 'text/html; charset=utf-8',
+          response_preview: '<html>feed</html>',
+          redirect_chain: ['https://www.reddit.com/r/science/s/DQGxxt7XzY', 'https://www.reddit.com/r/science/'],
+          retryable: false,
+        });
+      },
+    });
+
+    const response = await redditThreadHandler(requestWithJson({ post: 'https://www.reddit.com/r/science/s/DQGxxt7XzY' }), contextStub());
+
+    assert.equal(response.status, 502);
+    assert.equal(response.jsonBody.reddit_fetch_error.normalized_post_id, '1tflddp');
+    assert.equal(response.jsonBody.reddit_fetch_error.content_type, 'text/html; charset=utf-8');
+    assert.equal(response.jsonBody.reddit_fetch_error.retryable, false);
+    assert.match(response.jsonBody.reddit_fetch_error.response_preview, /feed/);
+  });
+});
+
 test('redditThreadHandler maps Reddit 429 to retry-later repairable problem', async () => {
   await withEnv({ AUTH_ENABLED: 'false', REPAIRABLE_ERRORS_LLM_ENABLED: 'false' }, async () => {
     setRedditThreadServiceForTesting({ fetchThread: async () => {
@@ -684,8 +854,12 @@ function threadFixture() {
 
 
 
-function threadFixtureWithoutMore() {
+function threadFixtureWithoutMore(postId = 'abc123') {
   const fixture = threadFixture();
+  fixture[0].data.children[0].data.id = postId;
+  fixture[0].data.children[0].data.name = `t3_${postId}`;
+  fixture[0].data.children[0].data.permalink = `/r/test/comments/${postId}/example/`;
+  fixture[1].data.children[0].data.parent_id = `t3_${postId}`;
   fixture[1].data.children[0].data.replies.data.children = fixture[1].data.children[0].data.replies.data.children.filter(
     (child) => child.kind !== 'more',
   );

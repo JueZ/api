@@ -1,6 +1,6 @@
 import { RedditConfigError, readRedditConfig } from './config.js';
-import { RedditOAuthClient, RedditUpstreamError, type FetchLike } from './client.js';
-import { isRedditShareUrl, normalizeMaxComments, normalizeMaxMoreChildrenRequests, normalizeRedditSort, parseRedditPostInput, RedditInputError, unresolvedRedditShareUrlError } from './input.js';
+import { RedditFetchError, RedditOAuthClient, RedditUpstreamError, type FetchLike } from './client.js';
+import { isRedditShareUrl, normalizeMaxComments, normalizeMaxMoreChildrenRequests, normalizeRedditPostInput, normalizeRedditSort, parseRedditPostInput, RedditInputError, unresolvedRedditShareUrlError, type NormalizedRedditPost } from './input.js';
 import { attachMoreChildren, commentsPath, commentsQuery, createThreadResponse, normalizeInitialThread, RedditContentError, type MorePlaceholder } from './normalize.js';
 import type { RedditRateLimit, RedditThreadRequest, RedditThreadResponse } from './types.js';
 
@@ -23,19 +23,43 @@ export class RedditThreadService {
 
   async fetchThread(request: RedditThreadRequest): Promise<RedditThreadResponse> {
     const originalInput = normalizeRequestPostInput(request);
-    const normalizedPostInput = await this.normalizePostInput(originalInput);
-    let input = parseRedditPostInput(normalizedPostInput);
+    const normalizedPost = await this.normalizePostInput(originalInput);
+    let input = parseRedditPostInput(normalizedPost.post_id);
     const sort = normalizeRedditSort(request.sort);
     const maxComments = normalizeMaxComments(request.maxComments);
     const maxMoreChildrenRequests = normalizeMaxMoreChildrenRequests(request.maxMoreChildrenRequests);
     const startedAt = this.now();
 
-    let initial = await this.client.getJson<unknown>(commentsPath(input.articleId), commentsQuery(sort, maxComments));
+    let initial = await this.client.getJson<unknown>(commentsPath(input.articleId), commentsQuery(sort, maxComments), { input: originalInput, normalizedPostId: input.articleId });
+    logRedditFetch({
+      originalInput,
+      normalizedPostId: input.articleId,
+      normalizedCommentId: normalizedPost.comment_id,
+      requestUrl: initial.requestUrl,
+      finalUrl: initial.finalUrl,
+      status: initial.status,
+      contentType: initial.contentType,
+      redirectCount: 0,
+      retryCount: initial.retryCount,
+      startedAt,
+    });
     if (initial.status === 404) {
       const fallbackArticleId = await this.resolveRawCommentIdToArticleId(input.articleId);
       if (fallbackArticleId) {
         input = parseRedditPostInput(fallbackArticleId);
-        initial = await this.client.getJson<unknown>(commentsPath(input.articleId), commentsQuery(sort, maxComments));
+        initial = await this.client.getJson<unknown>(commentsPath(input.articleId), commentsQuery(sort, maxComments), { input: originalInput, normalizedPostId: input.articleId });
+        logRedditFetch({
+          originalInput,
+          normalizedPostId: input.articleId,
+          normalizedCommentId: normalizedPost.comment_id,
+          requestUrl: initial.requestUrl,
+          finalUrl: initial.finalUrl,
+          status: initial.status,
+          contentType: initial.contentType,
+          redirectCount: 0,
+          retryCount: initial.retryCount,
+          startedAt,
+        });
       }
     }
     assertRedditStatus(initial.status);
@@ -90,28 +114,18 @@ export class RedditThreadService {
   }
 
 
-  private async normalizePostInput(post: string): Promise<string> {
-    if (!isRedditShareUrl(post)) {
-      return post;
+  private async normalizePostInput(post: string): Promise<NormalizedRedditPost> {
+    if (isRedditShareUrl(post)) {
+      const articleId = await this.resolveRedditUrlToArticleId(post.trim());
+      if (articleId) {
+        return normalizeRedditPostInput(articleId);
+      }
     }
 
-    const articleId = await this.resolveRedditUrlToArticleId(post.trim());
-    if (articleId) {
-      return articleId;
-    }
-
-    const resolvedUrl = await this.client.resolveRedditUrl(post.trim());
-    if (resolvedUrl === post.trim() || isRedditShareUrl(resolvedUrl)) {
-      throw unresolvedRedditShareUrlError(post.trim());
-    }
-
-    try {
-      parseRedditPostInput(resolvedUrl);
-    } catch {
-      throw unresolvedRedditShareUrlError(post.trim());
-    }
-
-    return resolvedUrl;
+    return normalizeRedditPostInput(post, async (url) => {
+      const resolved = await this.client.resolveRedditUrl(url);
+      return { finalUrl: resolved.finalUrl, redirectChain: resolved.redirectChain };
+    });
   }
 
   private async resolveRedditUrlToArticleId(url: string): Promise<string | null> {
@@ -145,7 +159,7 @@ export class RedditThreadService {
   }
 }
 
-export function mapRedditError(error: unknown): { status: number; message: string; code?: string; input?: string } {
+export function mapRedditError(error: unknown): { status: number; message: string; code?: string; input?: string; redditFetchError?: ReturnType<RedditFetchError['toJSON']> } {
   if (error instanceof RedditInputError) {
     return { status: 400, message: error.message, code: error.code, input: error.input };
   }
@@ -154,6 +168,10 @@ export function mapRedditError(error: unknown): { status: number; message: strin
   }
   if (error instanceof RedditContentError) {
     return { status: error.status, message: error.message };
+  }
+  if (error instanceof RedditFetchError) {
+    const status = error.status && error.status >= 400 && error.status < 500 ? error.status : 502;
+    return { status, message: error.message, code: 'REDDIT_FETCH_ERROR', redditFetchError: error.toJSON() };
   }
   if (error instanceof RedditUpstreamError) {
     return { status: error.status, message: error.message };
@@ -173,6 +191,9 @@ function assertRedditStatus(status: number, context = 'thread'): void {
   }
   if (status === 429) {
     throw new RedditUpstreamError('Reddit rate-limited the request.', 429, status);
+  }
+  if (status === 500 || status === 502 || status === 503 || status === 504) {
+    throw new RedditUpstreamError('Reddit upstream request failed with a retryable status.', 502, status);
   }
   throw new RedditUpstreamError('Reddit upstream request failed.', 502, status);
 }
@@ -195,6 +216,36 @@ function normalizeRequestPostInput(request: RedditThreadRequest): string {
     throw new RedditInputError('post must be a non-empty string.');
   }
   return post;
+}
+
+
+function logRedditFetch(args: {
+  originalInput: string;
+  normalizedPostId: string;
+  normalizedCommentId?: string;
+  requestUrl: string;
+  finalUrl: string;
+  status: number;
+  contentType: string | null;
+  redirectCount: number;
+  retryCount: number;
+  startedAt: number;
+  errorClass?: string;
+}): void {
+  console.info('reddit_thread_fetch', {
+    request_id: undefined,
+    original_input: args.originalInput,
+    normalized_post_id: args.normalizedPostId,
+    normalized_comment_id: args.normalizedCommentId,
+    request_url: args.requestUrl,
+    final_url: args.finalUrl,
+    status: args.status,
+    content_type: args.contentType,
+    redirect_count: args.redirectCount,
+    elapsed_ms: Date.now() - args.startedAt,
+    retry_count: args.retryCount,
+    error_class: args.errorClass,
+  });
 }
 
 function articleIdFromInfoListing(value: unknown): string | null {
