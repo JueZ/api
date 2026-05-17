@@ -83,6 +83,15 @@
 
 Entries are reverse chronological.
 
+## 2026-05-17 — Protected browser calls still time out before reaching API
+
+- Symptom: after PR #147 deployed, browser calls to protected endpoints still reported MSAL `timed_out`, while `/health` remained healthy.
+- Evidence: production `/health` returned `200`, unauthenticated `/api/hello` returned the expected `401`, Function App state was `Running`, and Application Insights had only low-latency health/unauthenticated hello requests with no recent auth exceptions or timeout traces. This indicates the failing browser flow times out during MSAL token acquisition before calling the API.
+- Root cause update: PR #147 only skipped bootstrapping after an embedded iframe already had an MSAL auth response. The SPA can still bootstrap inside the initial silent-renew iframe load at the redirect URI before Entra returns, which keeps Angular/MSAL running in a child frame during the silent flow.
+- Follow-up fix: make every embedded iframe inert so only the top-level window initializes MSAL and Angular.
+- Status: Follow-up PR pending.
+
+
 ## 2026-05-14 — Production promotion falsely failed after smoke success
 
 - Symptom: `Promote Production` run `25852035606` concluded `failure` even though production deployment and smoke tests passed.
