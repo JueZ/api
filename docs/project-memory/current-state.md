@@ -4,8 +4,8 @@
 ## 2026-05-17 Repairable Error LLM diagnostics configuration wiring
 
 - GitHub repository secret `OPENAI_API_KEY` and variables `REPAIRABLE_ERRORS_LLM_ENABLED=true` / `REPAIRABLE_ERRORS_LLM_MODEL=gpt-5.5` were configured for deployment automation; secret values are not stored in project memory.
-- Direct Azure Function app-setting mutation from the Codex Azure CLI identity was blocked by missing `Microsoft.Web/sites/config/list/action`, so the deployment workflow is being wired to pass the GitHub secret/variables into Bicep-managed Function App settings for both test and production deployments.
-- Follow-up requirement: after the PR merges, verify `Deploy Test` and `Promote Production` succeed and smoke tests pass with LLM-assisted diagnostics enabled.
+- Direct Azure Function app-setting mutation from the Codex Azure CLI identity was blocked by missing `Microsoft.Web/sites/config/list/action`, so PR #152 wired the deployment workflow to pass the GitHub secret/variables into Bicep-managed Function App settings for both test and production deployments.
+- PR #152 merged at `c9e5751`; PR CI and Policy Check passed, `Deploy Test` runs `25986717911` and `25986766513` passed smoke tests, and `Promote Production` run `25986757289` passed production smoke tests.
 
 
 ## 2026-05-16 Reddit thread input hardening follow-up deployed
