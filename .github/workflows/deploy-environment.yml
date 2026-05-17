@@ -571,6 +571,8 @@ jobs:
           export ENVIRONMENT_NAME
           export SMOKE_RUN_ID
           export REQUIRE_TELEMETRY_CHECK=$([ "$ENVIRONMENT_NAME" = "prod" ] && echo true || echo false)
+          export TELEMETRY_REQUIRE_SMOKE_CORRELATION=$([ "$ENVIRONMENT_NAME" = "prod" ] && echo true || echo false)
+          export TELEMETRY_TIMESPAN_MINUTES=45
           export TELEMETRY_RESULTS_PATH="$smoke_dir/telemetry.json"
           npm run --silent ops:check-telemetry
           echo "TELEMETRY_RESULTS_PATH=$smoke_dir/telemetry.json" >> "$GITHUB_ENV"
