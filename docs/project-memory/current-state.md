@@ -1,6 +1,13 @@
 # Current state
 
 
+## 2026-05-17 Reddit post input normalization hardening
+
+- The Reddit thread ingestion path now normalizes raw post IDs, `t3_` fullnames, canonical comments URLs, comment permalinks, `redd.it` links, and Reddit `/r/<subreddit>/s/<token>` share URLs before constructing OAuth comments API requests.
+- Share URLs are treated as opaque redirect URLs and are never fetched by appending `.json` directly; unresolved or non-canonical share redirects remain structured caller-contract errors.
+- Reddit upstream JSON parsing failures now use structured `RedditFetchError` diagnostics with request/final URL, status, content type, redacted response preview, redirect chain, and retryability metadata for API problem responses.
+
+
 ## 2026-05-17 Repairable Error LLM diagnostics configuration wiring
 
 - GitHub repository secret `OPENAI_API_KEY` and variables `REPAIRABLE_ERRORS_LLM_ENABLED=true` / `REPAIRABLE_ERRORS_LLM_MODEL=gpt-5.5` were configured for deployment automation; secret values are not stored in project memory.
