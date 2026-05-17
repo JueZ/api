@@ -111,7 +111,7 @@ Complete these steps before relying on automatic staged deployment:
 1. In GitHub repository settings, enable auto-merge and require squash merge or linear history.
 2. Protect `main`: require pull requests, disable direct pushes, disable force pushes, disable branch deletion, and require status checks before merge.
 3. Add required status checks for `install`, `lint`, `type-check`, `unit tests`, `API tests`, `Angular build`, `Azure Functions build`, `OpenAPI validation`, `Bicep validation`, `security scan`, `secret scan`, `dependency audit`, `cost-policy check`, `guardrail policy check`, `CI complete`, and `Policy complete`.
-4. Create labels used by automation if they do not already exist: `codex-automerge`, `codex-repair`, and `production-failure`.
+4. Create labels used by automation if they do not already exist: `codex-automerge`, `codex-repair`, and `production-failure`. The `codex-repair` label is reserved for production failure repair tracking, not routine PR CI failures.
 5. Create the GitHub `production` environment if you want environment-scoped variables or environment-level deployment history. Do not add a required human approval gate if routine autonomous production deploys are desired after all checks pass.
 6. Create an Entra application or user-assigned managed identity and configure GitHub OIDC federated credentials for this repository.
 7. Grant the Azure identity only the minimum RBAC required at the production resource-group scope. Avoid subscription-wide Owner permissions. The deployed Function App receives its own system-assigned identity and a storage-account-scoped `Storage Blob Data Reader` role assignment only for package retrieval.
@@ -204,4 +204,6 @@ Meaningful deployment incidents, root causes, operational decisions, and follow-
 
 ## Bounded repair
 
-`Codex Autofix` is bounded to two attempts per pull request. It creates a repair task instead of weakening checks. If the same failure repeats after two attempts, automation stops and the failure must be summarized.
+Routine PR check failures are repaired in the active Codex delivery loop, not by opening GitHub issues. Codex may inspect failed CI or Policy Check logs and push the smallest safe fix to the same PR branch, with the repair loop bounded to two attempts and without disabling tests, weakening authentication, removing policy checks, or committing secrets. If the same PR failure repeats after two attempts, Codex must stop and summarize the failure in the task/PR context instead of creating routine issue noise.
+
+Production deployment and production smoke-test failures are different: after merge there may be no open PR to hold the failure context, so production workflows fail closed and create a visible `production-failure` repair issue containing the failed workflow run and commit.

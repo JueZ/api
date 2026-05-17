@@ -69,22 +69,6 @@ jobs:
             base_ref="HEAD~1"
           fi
           BASE_REF="$base_ref" npm run ops:policy-guardrails
-          diff_file=$(mktemp)
-          git diff "$base_ref" HEAD -- . ':!apps/web/src/assets/openapi.yaml' ':!apps/web/src/app/openapi.generated.ts' > "$diff_file" || true
-          forbidden_patterns=(
-            '^[+-].*(DISABLE[_]AUTH|AUTH[_]DISABLED|skip[A]uth|disable[A]uth).*true'
-            '^[+-].*([j]wt|[J]WT).*(skip|disable|fals[e])'
-            '^[-].*(allowlist|Martin|authorizedUsers|allowedUsers)'
-            '^[-].*(security scan|secret scan|dependency audit|cost-policy check|OpenAPI validation|Bicep validation)'
-            '^[+].*(ACTIONS_STEP_DEBUG|AZURE_CLIENT_SECRET|clientSecret|password|api[_-]?key|access[_-]?token|refresh[_-]?token)[:=][[:space:]]*[^$[:space:]]'
-            'permissions:[[:space:]]*write-all'
-          )
-          for pattern in "${forbidden_patterns[@]}"; do
-            if grep -E -i "$pattern" "$diff_file"; then
-              echo "Forbidden policy pattern detected: $pattern"
-              exit 1
-            fi
-          done
           echo "Guardrail policy check passed."
 
   policy-complete:

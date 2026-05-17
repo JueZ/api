@@ -1,5 +1,11 @@
 # Decision log
 
+## 2026-05-17 — Stop creating repair issues for routine PR check failures
+
+- Decision: Remove the PR-level `Codex Autofix` issue-creation workflow and keep repair issue creation only for production deployment or production smoke-test failures.
+- Rationale: The workflow did not run Codex or push fixes; it only created `codex-repair` issues for failed PR checks. Active Codex tasks are already required to inspect CI/policy failures, repair up to two attempts, and report unresolved failures, while the PR and workflow run already preserve PR-level failure context.
+- Consequence: Routine PR failures should be handled in the PR/Codex delivery loop; production failures remain visible as issues because they happen after merge and may not have an active PR.
+
 ## 2026-05-14 — Use a locked, script-free Functions production package install
 
 - Decision: Azure Functions deployment packages must copy `apps/api/package-lock.json` with the Functions package manifest and install production dependencies with `npm ci --omit=dev --ignore-scripts`.
