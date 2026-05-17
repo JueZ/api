@@ -52,13 +52,17 @@ jobs:
             local url=""
 
             for attempt in {1..120}; do
+              # A workflow_dispatch can have duplicate runs for the same commit when another
+              # main-delivery attempt overlaps or is cancelled. Prefer any completed success
+              # for the requested commit before treating a later cancelled/failed duplicate
+              # as terminal.
               run_json="$(gh run list \
                 --repo "$REPOSITORY" \
                 --workflow "$workflow_file" \
                 --branch main \
                 --limit 30 \
                 --json databaseId,status,conclusion,headSha,event,createdAt,url \
-                --jq "map(select(.headSha == \"$head_sha\" and .event == \"$event_name\" and ((.createdAt | fromdateiso8601) >= $started_at))) | sort_by(.createdAt) | last // {}")"
+                --jq "map(select(.headSha == \"$head_sha\" and .event == \"$event_name\" and ((.createdAt | fromdateiso8601) >= $started_at))) as \$runs | ((\$runs | map(select(.status == \"completed\" and .conclusion == \"success\")) | sort_by(.createdAt) | last) // (\$runs | map(select(.status != \"completed\")) | sort_by(.createdAt) | last) // (\$runs | sort_by(.createdAt) | last) // {})")"
               run_id="$(jq -r '.databaseId // ""' <<<"$run_json")"
               status="$(jq -r '.status // ""' <<<"$run_json")"
               conclusion="$(jq -r '.conclusion // ""' <<<"$run_json")"
