@@ -120,7 +120,7 @@ export async function authorizeRequest(
   }
 
   const clientId = getClientId(payload);
-  if (isServiceToken(payload)) {
+  if (isServiceToken(payload, config, tokenAccess, objectId, clientId)) {
     if (!isAllowedServiceClient(objectId, clientId, config)) {
       return forbidden('Service client is not allowed.');
     }
@@ -230,8 +230,32 @@ function getTokenAccess(payload: JWTPayload, requiredScopes: string[]): TokenAcc
   };
 }
 
-function isServiceToken(payload: JWTPayload): boolean {
-  return payload['idtyp'] === 'app';
+function isServiceToken(
+  payload: JWTPayload,
+  config: AuthConfig,
+  tokenAccess: TokenAccess,
+  objectId: string | undefined,
+  clientId: string | undefined,
+): boolean {
+  if (payload['idtyp'] === 'app') {
+    return true;
+  }
+
+  // Microsoft Entra app-only access tokens are documented to carry application
+  // permissions in the `roles` claim, but not all token versions include the
+  // optional `idtyp: app` marker. Treat a roles-only token as service auth only
+  // when it also matches the explicit service-client allowlists. Delegated user
+  // tokens with `scp` keep the user path and still require the user allowlist.
+  return (
+    tokenAccess.scopes.length === 0 &&
+    tokenAccess.roles.length > 0 &&
+    hasClientCredentialAuthMethod(payload) &&
+    isAllowedServiceClient(objectId, clientId, config)
+  );
+}
+
+function hasClientCredentialAuthMethod(payload: JWTPayload): boolean {
+  return typeof payload['azpacr'] === 'string' || typeof payload['appidacr'] === 'string';
 }
 
 function getClientId(payload: JWTPayload): string | undefined {

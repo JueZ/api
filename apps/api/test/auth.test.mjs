@@ -145,6 +145,7 @@ test('app-only service token with allowed app object ID returns service authoriz
     tid: 'tenant-id',
     idtyp: 'app',
     azp: 'service-client-id',
+    azpacr: '2',
     roles: ['api.access'],
   });
 
@@ -167,6 +168,47 @@ test('app-only service token can be allowed by client ID', async () => {
       tid: 'tenant-id',
       idtyp: 'app',
       azp: 'allowed-client-id',
+      azpacr: '2',
+      roles: ['api.access'],
+    },
+    { allowedAppObjectIds: [] },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.user.tokenType, 'service');
+  assert.equal(result.user.clientId, 'allowed-client-id');
+});
+
+
+test('roles-only service token without idtyp but with client-credential marker can be allowed by app object ID', async () => {
+  const result = await authorize('Bearer valid-token', {
+    sub: 'service-subject',
+    oid: 'allowed-app-oid',
+    tid: 'tenant-id',
+    azp: 'service-client-id',
+    azpacr: '2',
+    roles: ['api.access'],
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.user, {
+    subject: 'service-subject',
+    objectId: 'allowed-app-oid',
+    tenantId: 'tenant-id',
+    clientId: 'service-client-id',
+    tokenType: 'service',
+  });
+});
+
+test('roles-only service token without idtyp but with client-credential marker can be allowed by client ID', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'service-subject',
+      oid: 'unlisted-app-oid',
+      tid: 'tenant-id',
+      azp: 'allowed-client-id',
+      azpacr: '2',
       roles: ['api.access'],
     },
     { allowedAppObjectIds: [] },
