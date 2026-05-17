@@ -1,10 +1,16 @@
 # Current state
 
+## 2026-05-17 Production authenticated smoke 403 follow-up
+
+- After the user added the service OAuth variables, `Deploy Test` run `25995539881` passed for main commit `2c2584e2f89b5d80404b589d058dfa4ad88276e7`, but `Promote Production` run `25995591995` failed in `ops:smoke:auth` because authenticated `GET /api/hello` returned `403`.
+- Evidence from the failed run showed the production service auth variables were present and a short-lived production smoke token was minted through GitHub OIDC; the runtime health check reported the expected deployed commit before the authenticated API call failed.
+- Follow-up code treats Microsoft Entra roles-only app tokens as service tokens when they lack the optional `idtyp: app` marker but include a client-credential auth-method marker (`azpacr` or `appidacr`) and still match the explicit service-client allowlists. Delegated tokens with `scp` remain on the user allowlist path.
+- Production promotion remains blocked until this fix merges and the staged delivery workflow re-runs successfully.
+
 ## 2026-05-17 Main delivery duplicate-run selection hardening
 
 - After PR #164, `Codex Main Delivery` run `25995336424` observed the intended `Deploy Test` workflow_dispatch run `25995380284` succeed for main commit `9f231ce`, but then selected a later duplicate cancelled deploy-test run `25995395316` for the same commit and failed the delivery chain.
 - Follow-up hardening changes the main-delivery run selector to prefer any completed successful run for the requested workflow/commit/event before treating a later failed or cancelled duplicate as terminal.
-
 
 ## 2026-05-17 Deploy Test reusable-workflow permission repair
 

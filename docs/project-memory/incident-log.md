@@ -1,5 +1,13 @@
 # Incident log
 
+## 2026-05-17 — Production authenticated smoke rejected service token after variables were added
+
+- Symptom: `Promote Production` run `25995591995` deployed main commit `2c2584e2f89b5d80404b589d058dfa4ad88276e7`, runtime `/health` passed, and GitHub OIDC minted a production service smoke token, but authenticated `GET /api/hello` returned `403`.
+- Impact: Production promotion failed closed after deployment verification; unauthenticated runtime smoke and test deployment were healthy, but the production authenticated smoke gate remained blocked.
+- Root cause: The API only classified app-only service tokens as service auth when the token carried `idtyp: app`. Microsoft Entra app-only tokens can instead be roles-only tokens with client-credential auth-method claims, so they were routed through the user allowlist path and rejected.
+- Fix: Classify roles-only Microsoft Entra tokens with `azpacr` or `appidacr` as service auth only when they also match the explicit service-client allowlists; delegated tokens with `scp` still require the user and delegated-client allowlists.
+- Status: Code fix proposed; staged CI, Deploy Test, Promote Production, and production authenticated smoke are pending.
+
 ## 2026-05-16 — Test deployment smoke failed after Reddit repairable error contract merge
 
 - Symptom: After PR #140 merged, `Deploy Test` run `25972007955` deployed commit `2898d1a` but smoke tests saw `/health` and `/api/hello` return `404` for all 18 readiness attempts.
