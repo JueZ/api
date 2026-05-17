@@ -1,5 +1,12 @@
 # Current state
 
+## 2026-05-17 PR repair issue creation removed
+
+- Routine PR `CI` and `Policy Check` failures now stay in the active Codex delivery loop instead of creating `codex-repair` GitHub issues.
+- The former `.github/workflows/codex-autofix.yml` workflow only opened/commented repair tickets and did not actually invoke Codex or push fixes, which created stale issues after PRs recovered, merged, or closed.
+- Production deployment and production smoke-test failures still create visible repair issues because post-merge failures may not have an active PR to hold failure context.
+
+
 ## 2026-05-17 Reddit Repairable Error Contract public diagnostics hardening
 
 - The Reddit thread Repairable Error Contract now uses `urn:diagnostic:<diagnostic_id>` as the public Problem Details `instance`, so callers can correlate a concrete diagnostic occurrence without treating the endpoint path as the instance.

@@ -203,8 +203,7 @@ This repository includes GitHub Actions workflows for autonomous delivery:
 
 - `.github/workflows/ci.yml` runs install, lint, type-check, unit tests, API tests, Angular build, Azure Functions build, OpenAPI validation, Bicep validation, security scan, secret scan, and dependency audit checks.
 - `.github/workflows/policy-check.yml` runs cost and guardrail policy checks that fail closed for forbidden automation, security, and cost changes.
-- `.github/workflows/deploy-production.yml` deploys only after `main` updates or manual dispatch, uses Azure OIDC, runs smoke tests, and creates a GitHub issue on failure.
-- `.github/workflows/codex-autofix.yml` creates bounded repair tasks for failed PR checks and stops after two attempts.
+- `.github/workflows/deploy-production.yml` deploys only after `main` updates or manual dispatch, uses Azure OIDC, runs smoke tests, and creates a GitHub issue only for production deployment or smoke-test failures.
 - `.github/workflows/codex-automerge.yml` enables GitHub-native squash auto-merge for Codex branches or PRs labeled `codex-automerge`; branch protection remains the merge gate.
 
 See `docs/autonomous-delivery.md` and `docs/security/autonomous-guardrails.md` before changing delivery, deployment, or guardrail logic.
