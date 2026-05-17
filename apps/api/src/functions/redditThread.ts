@@ -71,6 +71,7 @@ export async function redditThreadHandler(
       status: mapped.status,
       failureStage: failureStageForStatus(mapped.status),
       safeError: { code: mapped.code, message: mapped.message },
+      redditFetchError: mapped.redditFetchError,
       body,
     });
 
@@ -112,6 +113,7 @@ async function problemForRedditError(args: {
   failureStage: DiagnosticCapsule['failure_stage'];
   safeError: DiagnosticCapsule['safe_error'];
   body?: unknown;
+  redditFetchError?: RepairableProblem['reddit_fetch_error'];
 }): Promise<RepairableProblem> {
   const capsule = buildRedditDiagnosticCapsule({
     diagnostic_id: args.diagnosticId,
@@ -147,6 +149,7 @@ async function problemForRedditError(args: {
     trace_id: args.traceId,
     safe_error: args.safeError,
     failure_stage: args.failureStage,
+    reddit_fetch_error: args.redditFetchError,
   });
 }
 
