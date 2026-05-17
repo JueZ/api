@@ -854,8 +854,22 @@ function formatBody(body: unknown, pretty = false): string {
   return typeof body === 'string' ? body : JSON.stringify(body, null, pretty ? 2 : undefined);
 }
 
-initializeMsal()
-  .then(() => bootstrapApplication(AppComponent))
-  .catch((error: unknown) => {
-    console.error('Failed to bootstrap Angular application.', error);
-  });
+// Hidden iframe responses belong to the top-level MSAL silent-token monitor.
+// Do not bootstrap Angular or call MSAL redirect handling there, or the auth hash can be
+// consumed before the parent sees it.
+if (!isHiddenMsalRedirectResponse()) {
+  initializeMsal()
+    .then(() => bootstrapApplication(AppComponent))
+    .catch((error: unknown) => {
+      console.error('Failed to bootstrap Angular application.', error);
+    });
+}
+
+function isHiddenMsalRedirectResponse(): boolean {
+  if (window.self === window.top) {
+    return false;
+  }
+
+  const authResponse = `${window.location.hash}&${window.location.search}`;
+  return /(?:^|[&#?])(code|error|state|client_info)=/.test(authResponse);
+}
