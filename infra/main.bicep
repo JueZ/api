@@ -66,6 +66,16 @@ param redditUserAgent string = ''
 @description('Comma-separated browser origins allowed to call the Function App API. Needed because Azure Functions handles CORS preflight before app code.')
 param apiCorsAllowedOrigins string = ''
 
+@secure()
+@description('Optional OpenAI API key used only when Repairable Error Contract LLM-assisted diagnostics are enabled.')
+param openAiCredential string = ''
+
+@description('Enable optional Repairable Error Contract LLM-assisted diagnostics. Keep false unless OPENAI_API_KEY is configured.')
+param repairableErrorsLlmEnabled string = 'false'
+
+@description('OpenAI model used for optional Repairable Error Contract LLM-assisted diagnostics.')
+param repairableErrorsLlmModel string = ''
+
 var nameSuffix = uniqueString(resourceGroup().id, workloadName, environmentName)
 var normalizedWorkload = replace(workloadName, '-', '')
 var storageAccountName = take('st${normalizedWorkload}${environmentName}${nameSuffix}', 24)
@@ -216,6 +226,19 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'REDDIT_USER_AGENT'
           value: redditUserAgent
+        }
+
+        {
+          name: 'OPENAI_API_KEY'
+          value: openAiCredential
+        }
+        {
+          name: 'REPAIRABLE_ERRORS_LLM_ENABLED'
+          value: repairableErrorsLlmEnabled
+        }
+        {
+          name: 'REPAIRABLE_ERRORS_LLM_MODEL'
+          value: repairableErrorsLlmModel
         }
       ]
     }
