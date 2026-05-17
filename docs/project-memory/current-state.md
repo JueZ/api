@@ -1,5 +1,12 @@
 # Current state
 
+## 2026-05-17 Deploy Test reusable-workflow permission repair
+
+- PR #160 removed PR-level repair issue creation and merged, but post-merge `Codex Main Delivery` run `25995173110` failed when the dispatched `Deploy Test` run `25995214818` ended in `startup_failure`.
+- Root cause: `deploy-test.yml` calls the reusable `deploy-environment.yml`, whose declared permissions include `issues: write` for the shared production-failure issue step. Even though the test path does not create production issues, the caller must still grant the reusable workflow's requested permission set at startup.
+- Follow-up repair restores `issues: write` on `Deploy Test`; production issue creation remains limited by the `inputs.environmentName == 'prod'` condition in the reusable workflow.
+
+
 ## 2026-05-17 PR repair issue creation removed
 
 - Routine PR `CI` and `Policy Check` failures now stay in the active Codex delivery loop instead of creating `codex-repair` GitHub issues.
