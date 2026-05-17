@@ -21,7 +21,8 @@
     "ops:check-telemetry": "node scripts/check-telemetry.mjs",
     "ops:triage-repair-issues": "node scripts/triage-repair-issues.mjs",
     "ops:policy-guardrails": "node scripts/policy-guardrails.mjs",
-    "ops:write-release-ledger": "node scripts/write-release-ledger.mjs"
+    "ops:write-release-ledger": "node scripts/write-release-ledger.mjs",
+    "ops:mint-smoke-token": "node scripts/mint-smoke-token.mjs"
   },
   "dependencies": {
     "@angular/common": "21.2.12",

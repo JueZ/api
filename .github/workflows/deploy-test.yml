@@ -44,7 +44,6 @@ jobs:
     secrets:
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      AUTH_ACCESS_TOKEN: ${{ secrets.AUTH_ACCESS_TOKEN }}
     with:
       environmentName: test
       azureResourceGroup: rg-api-test
