@@ -42,9 +42,6 @@ on:
       OPENAI_API_KEY:
         description: Optional OpenAI API key for Repairable Error Contract LLM-assisted diagnostics.
         required: false
-      AUTH_ACCESS_TOKEN:
-        description: Optional short-lived bearer token used by authenticated protected API smoke tests.
-        required: false
     outputs:
       effectiveBaseUrl:
         description: Resolved Function App base URL.
@@ -108,10 +105,15 @@ jobs:
       REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
       REPAIRABLE_ERRORS_LLM_ENABLED: ${{ vars.REPAIRABLE_ERRORS_LLM_ENABLED }}
       REPAIRABLE_ERRORS_LLM_MODEL: ${{ vars.REPAIRABLE_ERRORS_LLM_MODEL }}
-      AUTH_ACCESS_TOKEN: ${{ secrets.AUTH_ACCESS_TOKEN }}
       DEPLOYED_AT_UTC: ${{ github.event.head_commit.timestamp || '' }}
       DEPLOYMENT_RUN_ID: ${{ github.run_id }}
       APPLICATIONINSIGHTS_NAME: ${{ vars.APPLICATIONINSIGHTS_NAME }}
+      TEST_SERVICE_AUTH_CLIENT_ID: ${{ vars.TEST_SERVICE_AUTH_CLIENT_ID }}
+      TEST_SERVICE_AUTH_TENANT_ID: ${{ vars.TEST_SERVICE_AUTH_TENANT_ID }}
+      TEST_SERVICE_AUTH_SCOPE: ${{ vars.TEST_SERVICE_AUTH_SCOPE }}
+      PROD_SERVICE_AUTH_CLIENT_ID: ${{ vars.PROD_SERVICE_AUTH_CLIENT_ID }}
+      PROD_SERVICE_AUTH_TENANT_ID: ${{ vars.PROD_SERVICE_AUTH_TENANT_ID }}
+      PROD_SERVICE_AUTH_SCOPE: ${{ vars.PROD_SERVICE_AUTH_SCOPE }}
     steps:
       - name: Checkout deployment source
         uses: actions/checkout@v6
@@ -536,6 +538,13 @@ jobs:
               echo "- $EFFECTIVE_BASE_URL/api/hello CORS preflight allowed $api_cors_origin"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Mint authenticated smoke token with GitHub OIDC
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ENVIRONMENT_NAME
+          export REQUIRE_AUTH_SMOKE=$([ "$ENVIRONMENT_NAME" = "prod" ] && echo true || echo false)
+          npm run --silent ops:mint-smoke-token
       - name: Run authenticated smoke tests
         shell: bash
         continue-on-error: ${{ inputs.environmentName != 'prod' }}

@@ -14,7 +14,7 @@ function record(name, status, details = {}) { results.checks.push({ name, status
 
 if (!token) {
   results.status = requireAuthSmoke ? 'blocked_auth_smoke' : 'skipped_auth_smoke';
-  results.blockedReason = 'AUTH_ACCESS_TOKEN is not configured; configure a short-lived smoke token secret for protected API verification.';
+  results.blockedReason = 'AUTH_ACCESS_TOKEN was not minted for authenticated smoke; configure service OAuth variables and GitHub OIDC federation.';
   console.log(safeSummary(results));
   process.exit(requireAuthSmoke ? 2 : 0);
 }
