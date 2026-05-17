@@ -9,7 +9,7 @@ Last updated: 2026-05-17
 - Likely root cause: MSAL silent token renewal returns to the Angular app inside a hidden iframe; bootstrapping the SPA and running MSAL redirect handling inside that iframe can consume or alter the auth response before the top-level MSAL instance processes it.
 - Initial fix: PR #147 skipped Angular bootstrap only after an iframe already contained an MSAL auth-code/error response. Production reports showed the API was healthy and `/api/hello` was not receiving authenticated browser requests, so the remaining timeout was still client-side before the API call.
 - Follow-up fix proposed: keep every embedded iframe inert, including the initial silent-renew redirect URI load before Entra returns the auth response, so Angular and MSAL redirect handling never run in the child frame.
-- Status: PR pending; after deployment, retry a protected browser operation with a fresh tab or sign out/sign in once if MSAL has stale cached interaction state.
+- Status: Follow-up PR #149 deployed to production by Promote Production run `25985918836`; smoke tests passed. Retry a protected browser operation with a fresh tab or sign out/sign in once if MSAL has stale cached interaction state.
 
 ## 2026-05-14 Reddit huge-thread truncation v1 limitation
 

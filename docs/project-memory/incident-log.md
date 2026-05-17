@@ -89,7 +89,7 @@ Entries are reverse chronological.
 - Evidence: production `/health` returned `200`, unauthenticated `/api/hello` returned the expected `401`, Function App state was `Running`, and Application Insights had only low-latency health/unauthenticated hello requests with no recent auth exceptions or timeout traces. This indicates the failing browser flow times out during MSAL token acquisition before calling the API.
 - Root cause update: PR #147 only skipped bootstrapping after an embedded iframe already had an MSAL auth response. The SPA can still bootstrap inside the initial silent-renew iframe load at the redirect URI before Entra returns, which keeps Angular/MSAL running in a child frame during the silent flow.
 - Follow-up fix: make every embedded iframe inert so only the top-level window initializes MSAL and Angular.
-- Status: Follow-up PR pending.
+- Status: Follow-up PR #149 deployed to production by Promote Production run `25985918836`; smoke tests passed. Manual browser retry remains the final verification step.
 
 
 ## 2026-05-14 — Production promotion falsely failed after smoke success
