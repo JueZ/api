@@ -223,4 +223,7 @@ For every repository-changing autonomous task, delivery is not complete until th
 - Azure Monitor/Application Insights telemetry checks are clean, or are explicitly blocked with the missing resource/permission/configuration recorded; production telemetry gates should fail closed once configured;
 - a machine-readable release/runtime truth ledger artifact exists for deployment workflows;
 - stale `codex-repair` issues are closed, linked to the resolving PR/run, or left open with current accurate status; and
+- telemetry smoke-correlation verification must prove observed runtime telemetry for the smoke run ID, not merely pass through an input variable;
+- production repair issues must not be closed merely because a PR merged, and require CI/deploy/runtime or release-ledger evidence as applicable;
+- runtime-truth checks should combine live `/health` and release-ledger artifacts when available; and
 - project memory is updated for meaningful architecture, deployment, auth/security, CI/CD, production, incident, or operational-state changes without secrets.

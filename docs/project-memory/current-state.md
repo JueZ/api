@@ -1,5 +1,14 @@
 # Current state
 
+## 2026-05-17 Runtime truth follow-up hardening
+
+- Latest `main` SHA discovered with GitHub CLI: `96a81a1afa43ad0fa8f1b6467b6da2573152195c`. This is the post-PR #169 main commit currently reported by production `/health`.
+- CI run `25996282474`, Deploy Test run `25996305604`, and Promote Production run `25996361203` all completed successfully for that SHA.
+- Production `/health` returned `environmentName=prod`, `deployedCommitSha=96a81a1afa43ad0fa8f1b6467b6da2573152195c`, and `deploymentRunId=25996361203`, so PR #169 has been promoted to the production Function App.
+- Release-ledger artifact `release-ledger-prod-96a81a1afa43ad0fa8f1b6467b6da2573152195c` from Promote Production run `25996361203` validated successfully; it records runtime smoke `passed`, authenticated smoke `passed`, and telemetry `passed`.
+- Remaining verification blocker: the pre-hardening ledger's telemetry result did not contain real smoke-correlation evidence (`smokeCorrelationTraces=0` only), and the Codex host's Azure CLI lacks the `az monitor app-insights query` command needed for an independent historical smoke-correlation query. The hardening PR makes future production telemetry fail closed unless smoke correlation evidence is actually observed.
+- `DRY_RUN=true` repair issue triage found no open `codex-repair` issues to close or comment on in this verification pass.
+
 ## 2026-05-17 Production authenticated smoke 403 follow-up
 
 - After the user added the service OAuth variables, `Deploy Test` run `25995539881` passed for main commit `2c2584e2f89b5d80404b589d058dfa4ad88276e7`, but `Promote Production` run `25995591995` failed in `ops:smoke:auth` because authenticated `GET /api/hello` returned `403`.

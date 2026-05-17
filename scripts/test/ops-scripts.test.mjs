@@ -28,8 +28,8 @@ test('repair issue parser finds PRs and workflow runs', () => {
   assert.deepEqual(parsed.workflowRunIds, ['456']);
 });
 
-test('repair issue decision closes merged repairs', () => {
-  assert.equal(decideRepairIssueAction({}, [{ number: 1, merged: true }]).action, 'close');
+test('repair issue decision closes PR-check issues only with merged PR and check evidence', () => {
+  assert.equal(decideRepairIssueAction({ title: 'CI check failed', body: 'PR #1' }, { prStates: [{ number: 1, merged: true, checksPassed: true }] }).action, 'close');
 });
 
 test('policy guardrails detect high-risk paths and removed telemetry', () => {
