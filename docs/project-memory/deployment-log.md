@@ -1,5 +1,13 @@
 # Deployment log
 
+## 2026-05-17 Repairable Error LLM diagnostics config deployed
+
+- PR #152 (`Wire repairable OpenAI diagnostics deployment config`) merged at main commit `c9e57514468c312b6a694eacf8040111677da71b` after PR CI and Policy Check passed.
+- GitHub repository secret `OPENAI_API_KEY` and variables `REPAIRABLE_ERRORS_LLM_ENABLED=true` / `REPAIRABLE_ERRORS_LLM_MODEL=gpt-5.5` are now consumed by the deployment workflow and applied as Bicep-managed Function App settings; secret values are not recorded.
+- Main delivery completed successfully: `CI` run `25986696951`, `Deploy Test` run `25986717911`, and `Promote Production` run `25986757289`. A duplicate manual `Deploy Test` run `25986766513` also passed.
+- Production workflow smoke tests passed for Function App `func-api-catalogue-prod-bfjstshehpbfk` and storage account `stapicatalogueprodbfjsts`.
+
+
 ## 2026-05-16 Reddit thread input hardening deployed to production
 
 - PR #144 (`Harden Reddit thread input resolution`) merged at main commit `659b674daa8b26f801aec0672696d20f1b178985` after PR CI and Policy Check passed.
