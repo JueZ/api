@@ -42,4 +42,4 @@ GitHub Actions events created by the default `GITHUB_TOKEN` usually do not trigg
 
 ## Failure handling
 
-Production deployment and smoke-test failures must remain visible. The deployment workflow creates an issue containing the failed workflow run and commit. Repair automation is bounded to two attempts and must stop rather than looping forever.
+Production deployment and smoke-test failures must remain visible. The deployment workflow creates an issue containing the failed workflow run and commit because post-merge production failures may not have an active PR to hold repair context. Routine PR CI and Policy Check failures should stay in the PR/Codex delivery loop rather than creating GitHub issues. Repair automation is bounded to two attempts and must stop rather than looping forever.

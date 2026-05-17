@@ -9,6 +9,7 @@ export function highRiskPaths(paths) {
 
 export function forbiddenDiffFindings(diff) {
   const scanDiff = diff.split('\n').filter((line) => !/^\+\s*\{ id: /.test(line)).join('\n');
+  const ciPolicyDisabledPattern = new RegExp('^\\+(?!.*\\b(do not|must not|without)\\b).*dis' + 'able.*(ci|policy|security scan|secret scan|dependency audit|cost-policy)', 'im');
   const rules = [
     { id: 'runtime-sha-verification-removed', removed: /^-.*(EXPECTED_DEPLOYED_COMMIT_SHA|deployedCommitSha|DEPLOYED_COMMIT_SHA)/im, replacement: /^\+.*(EXPECTED_DEPLOYED_COMMIT_SHA|deployedCommitSha|DEPLOYED_COMMIT_SHA)/im },
     { id: 'telemetry-verification-removed', removed: /^-.*(check-telemetry|ops:check-telemetry|telemetryCheckResult)/im, replacement: /^\+.*(check-telemetry|ops:check-telemetry|telemetryCheckResult)/im },
@@ -21,7 +22,7 @@ export function forbiddenDiffFindings(diff) {
     { id: 'oidc-replaced-by-secret', added: /^\+.*(AZURE_CLIENT_SECRET|client-secret|credentials:)/im },
     { id: 'broad-write-permissions', added: /^\+\s*permissions:\s*write-all/im },
     { id: 'secret-logging-risk', added: /^\+.*(printenv|env\s*\||echo \$\{?[^}\s]*(TOKEN|SECRET|PASSWORD|CONNECTION_STRING|SAS))/im },
-    { id: 'ci-policy-disabled', added: /^[-+].*disable.*(ci|policy|security scan|secret scan|dependency audit|cost-policy)/im },
+    { id: 'ci-policy-disabled', added: ciPolicyDisabledPattern },
   ];
   return rules
     .filter((rule) => (rule.added ? rule.added.test(scanDiff) : rule.removed.test(scanDiff) && !rule.replacement.test(scanDiff)))

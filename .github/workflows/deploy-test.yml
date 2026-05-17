@@ -26,7 +26,6 @@ permissions:
   contents: read
   id-token: write
   actions: read
-  issues: write
 
 concurrency:
   group: deploy-test

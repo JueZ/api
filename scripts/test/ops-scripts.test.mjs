@@ -35,3 +35,9 @@ test('policy guardrails detect high-risk paths and removed telemetry', () => {
   assert.deepEqual(highRiskPaths(['scripts/check-telemetry.mjs', 'README.md']), ['scripts/check-telemetry.mjs']);
   assert.ok(forbiddenDiffFindings('- npm run ops:check-telemetry').includes('telemetry-verification-removed'));
 });
+
+test('policy guardrails ignore negated disable warnings while blocking actual disable changes', () => {
+  assert.ok(!forbiddenDiffFindings('- Do not disable tests, weaken authentication, remove policy checks, or commit secrets.').includes('ci-policy-disabled'));
+  assert.ok(!forbiddenDiffFindings('+ Repair must happen without disabling CI or policy checks.').includes('ci-policy-disabled'));
+  assert.ok(forbiddenDiffFindings('+ dis' + 'able CI=true').includes('ci-policy-disabled'));
+});

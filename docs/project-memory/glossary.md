@@ -13,5 +13,5 @@
 - Azure Functions `routePrefix`: Host-level route prefix setting. This project uses `routePrefix: ""`, so function routes are defined explicitly in code.
 - CI complete: Aggregate GitHub Actions check indicating the CI workflow required jobs completed successfully.
 - Policy complete: Aggregate GitHub Actions check indicating cost and guardrail policy checks completed successfully.
-- Codex Autofix: Bounded GitHub Actions workflow that can create repair tasks for failed PR checks, limited to two attempts.
+- Production failure repair issue: GitHub issue created only when production deployment or production smoke tests fail after merge, so the failure remains visible outside any completed PR.
 - Codex Auto-Merge: GitHub-native auto-merge workflow for eligible Codex branches or PRs labeled `codex-automerge` after required checks pass.
