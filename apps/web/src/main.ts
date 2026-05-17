@@ -854,10 +854,10 @@ function formatBody(body: unknown, pretty = false): string {
   return typeof body === 'string' ? body : JSON.stringify(body, null, pretty ? 2 : undefined);
 }
 
-// Hidden iframe responses belong to the top-level MSAL silent-token monitor.
-// Do not bootstrap Angular or call MSAL redirect handling there, or the auth hash can be
-// consumed before the parent sees it.
-if (!isHiddenMsalRedirectResponse()) {
+// MSAL silent-token renewal uses a hidden iframe pointed at the SPA redirect URI.
+// Keep every embedded iframe inert so Angular and MSAL redirect handling cannot start in
+// the child frame before or after Microsoft Entra returns the auth response.
+if (!isEmbeddedFrame()) {
   initializeMsal()
     .then(() => bootstrapApplication(AppComponent))
     .catch((error: unknown) => {
@@ -865,11 +865,6 @@ if (!isHiddenMsalRedirectResponse()) {
     });
 }
 
-function isHiddenMsalRedirectResponse(): boolean {
-  if (window.self === window.top) {
-    return false;
-  }
-
-  const authResponse = `${window.location.hash}&${window.location.search}`;
-  return /(?:^|[&#?])(code|error|state|client_info)=/.test(authResponse);
+function isEmbeddedFrame(): boolean {
+  return window.self !== window.top;
 }

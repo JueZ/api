@@ -56,9 +56,9 @@ test('MSAL does not navigate back to the login request URL after processing auth
   assert.match(mainSource, /navigateToLoginRequestUrl: false/);
 });
 
-test('hidden MSAL iframe responses do not bootstrap Angular or consume the auth hash', () => {
-  assert.match(mainSource, /isHiddenMsalRedirectResponse\(\)/);
-  assert.match(mainSource, /window\.self === window\.top/);
-  assert.match(mainSource, /code\|error\|state\|client_info/);
-  assert.match(mainSource, /!isHiddenMsalRedirectResponse\(\)/);
+test('MSAL hidden iframes never bootstrap Angular or run redirect handling', () => {
+  assert.match(mainSource, /isEmbeddedFrame\(\)/);
+  assert.match(mainSource, /window\.self !== window\.top/);
+  assert.match(mainSource, /!isEmbeddedFrame\(\)/);
+  assert.doesNotMatch(mainSource, /code\|error\|state\|client_info/);
 });
