@@ -55,3 +55,10 @@ test('only the canonical OpenAPI YAML is committed while Angular copies it as an
 test('MSAL does not navigate back to the login request URL after processing auth code redirects', () => {
   assert.match(mainSource, /navigateToLoginRequestUrl: false/);
 });
+
+test('hidden MSAL iframe responses do not bootstrap Angular or consume the auth hash', () => {
+  assert.match(mainSource, /isHiddenMsalRedirectResponse\(\)/);
+  assert.match(mainSource, /window\.self === window\.top/);
+  assert.match(mainSource, /code\|error\|state\|client_info/);
+  assert.match(mainSource, /!isHiddenMsalRedirectResponse\(\)/);
+});

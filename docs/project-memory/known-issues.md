@@ -1,6 +1,14 @@
 # Known issues and unresolved risks
 
-Last updated: 2026-05-14
+Last updated: 2026-05-17
+
+
+## 2026-05-17 protected browser API calls can hit MSAL hidden-iframe timeout
+
+- Symptom: `/health` continues to work, but browser calls to protected OpenAPI operations can fail during token acquisition with MSAL `timed_out`.
+- Likely root cause: MSAL silent token renewal returns to the Angular app inside a hidden iframe; bootstrapping the SPA and running MSAL redirect handling inside that iframe can consume or alter the auth response before the top-level MSAL instance processes it.
+- Fix proposed: the Angular bootstrap now detects MSAL auth-code/error responses in hidden iframes and leaves the frame unbootstrapped so the parent MSAL monitor can process the response hash.
+- Status: PR pending; after deployment, retry a protected browser operation with an existing signed-in session and, if needed, sign out/sign in to refresh MSAL session state.
 
 ## 2026-05-14 Reddit huge-thread truncation v1 limitation
 
