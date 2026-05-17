@@ -2,6 +2,17 @@ name: Repair Issue Triage
 
 on:
   workflow_dispatch:
+    inputs:
+      close_resolved:
+        description: Close codex-repair issues only when evidence proves they are resolved.
+        required: false
+        default: false
+        type: boolean
+      api_base_url:
+        description: Optional API base URL for live /health verification.
+        required: false
+        default: ''
+        type: string
   schedule:
     - cron: '17 5 * * *'
 
@@ -25,4 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && 'false' || 'true' }}
+          REPAIR_TRIAGE_CLOSE_RESOLVED: ${{ github.event_name == 'workflow_dispatch' && inputs.close_resolved || 'false' }}
+          REPAIR_TRIAGE_REQUIRE_LEDGER_FOR_PROD: 'true'
+          API_BASE_URL: ${{ inputs.api_base_url || '' }}
         run: npm run ops:triage-repair-issues
