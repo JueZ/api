@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-05-17 Main delivery duplicate-run selection hardening
+
+- After PR #164, `Codex Main Delivery` run `25995336424` observed the intended `Deploy Test` workflow_dispatch run `25995380284` succeed for main commit `9f231ce`, but then selected a later duplicate cancelled deploy-test run `25995395316` for the same commit and failed the delivery chain.
+- Follow-up hardening changes the main-delivery run selector to prefer any completed successful run for the requested workflow/commit/event before treating a later failed or cancelled duplicate as terminal.
+
+
 ## 2026-05-17 Deploy Test reusable-workflow permission repair
 
 - PR #160 removed PR-level repair issue creation and merged, but post-merge `Codex Main Delivery` run `25995173110` failed when the dispatched `Deploy Test` run `25995214818` ended in `startup_failure`.
