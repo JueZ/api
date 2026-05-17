@@ -281,10 +281,29 @@ components:
         timestamp:
           type: string
           format: date-time
+        environmentName:
+          type: string
+          enum: [test, prod, local, unknown]
+        deployedCommitSha:
+          type: string
+        deployedSourceRef:
+          type: string
+        deploymentRunId:
+          type: string
+        deployedAtUtc:
+          type: string
+        buildTimestampUtc:
+          type: string
       required:
         - status
         - service
         - timestamp
+        - environmentName
+        - deployedCommitSha
+        - deployedSourceRef
+        - deploymentRunId
+        - deployedAtUtc
+        - buildTimestampUtc
     HelloResponse:
       type: object
       additionalProperties: true
