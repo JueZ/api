@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/JueZ/api/ops/release-ledger/schema.json",
+  "title": "JueZ API release runtime truth ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "environment",
+    "deployedCommit",
+    "sourceRef",
+    "workflowRunId",
+    "functionAppName",
+    "apiBaseUrl",
+    "smokeRunId",
+    "smokeResults",
+    "authenticatedSmokeResults",
+    "telemetryCheckResult",
+    "verifiedAt"
+  ],
+  "properties": {
+    "environment": { "type": "string", "enum": ["test", "prod"] },
+    "deployedCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sourceRef": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "workflowRunId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "functionAppName": { "type": "string", "minLength": 1 },
+    "frontendUrl": { "type": "string" },
+    "apiBaseUrl": { "type": "string", "format": "uri" },
+    "frontendMetadataUrl": { "type": "string" },
+    "smokeRunId": { "type": "string", "minLength": 1, "maxLength": 96 },
+    "smokeResults": { "$ref": "#/$defs/checkResult" },
+    "authenticatedSmokeResults": { "$ref": "#/$defs/checkResult" },
+    "telemetryCheckResult": { "$ref": "#/$defs/checkResult" },
+    "verifiedAt": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "checkResult": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "blocked", "blocked_auth_smoke", "blocked_telemetry", "skipped_auth_smoke", "dependency_blocked"]
+        },
+        "blockedReason": { "type": "string" }
+      }
+    }
+  }
+}

@@ -232,3 +232,15 @@ Last updated: 2026-05-16
 
 - Added `DELETE_EXISTING_CLIENT_SECRETS` and `DELETE_CLIENT_SECRET_DISPLAY_NAME` to `scripts/configure-entra-gpt-action-oauth.sh` so a leaked or misplaced GPT Action client secret created by the helper can be rotated without printing existing secrets. The helper deletes matching credential metadata by key ID and can then create one replacement secret for GPT Builder.
 - Documentation now explicitly says to treat any GPT Action client secret copied into chat, logs, shell history, or non-GPT Builder locations as exposed and to rotate it.
+
+## 2026-05-17 runtime truth and autonomous operations hardening
+
+- `/health` now includes safe runtime provenance fields: environment name, deployed commit SHA, deployed source ref, deployment workflow run ID, deployed timestamp, and build timestamp. Missing local metadata falls back to `local`/`unknown` values and does not expose secrets.
+- Reusable deployment now writes immutable runtime app settings (`DEPLOYED_COMMIT_SHA`, `DEPLOYED_SOURCE_REF`, `DEPLOYMENT_RUN_ID`, `DEPLOYED_ENVIRONMENT_NAME`, `DEPLOYED_AT_UTC`) and publishes frontend `assets/build-info.json` plus matching config metadata.
+- Runtime smoke verification is script-based through `npm run ops:smoke` and fails closed when `/health` does not report the expected deployed SHA. `npm run ops:runtime-truth` reads the latest live runtime truth for a supplied `API_BASE_URL`.
+- Authenticated protected API smoke verification is available through `npm run ops:smoke:auth` for `GET /api/hello` and `POST /api/reddit/thread`. It requires a short-lived `AUTH_ACCESS_TOKEN`; production records `blocked_auth_smoke` and fails closed when the token is required but unavailable.
+- Smoke scripts generate or accept `SMOKE_RUN_ID`, send it as `X-Smoke-Run-Id`, and API handlers log only the sanitized correlation value as evidence, never as instructions.
+- Deployment workflows upload release ledger artifacts validated by `ops/release-ledger/schema.json`. Ledgers connect source ref, runtime SHA, URLs, smoke results, authenticated smoke status, telemetry status, and verification time; generated ledgers are not committed to `main`.
+- `npm run ops:check-telemetry` queries Application Insights/Azure Monitor for recent unhandled exceptions, HTTP 5xx responses, and failed requests after smoke tests. If Application Insights identifiers or permissions are missing, the result is `blocked_telemetry`; production is intended to fail closed once telemetry configuration is available.
+- `npm run ops:triage-repair-issues` supports dry-run repair issue lifecycle triage for open `codex-repair` issues and `.github/workflows/repair-triage.yml` can run it manually or on a daily dry-run schedule.
+- Policy guardrails now summarize high-risk operational path changes and fail closed on diffs that remove runtime SHA verification, telemetry checks, smoke/auth smoke coverage, release ledger generation, JWT validation, production fail-closed behavior, or safe OIDC deployment posture.

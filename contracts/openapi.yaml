@@ -34,6 +34,12 @@ paths:
                     status: ok
                     service: api-catalogue
                     timestamp: 2026-05-13T00:00:00.000Z
+                    environmentName: prod
+                    deployedCommitSha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                    deployedSourceRef: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                    deploymentRunId: "123456789"
+                    deployedAtUtc: 2026-05-13T00:00:00.000Z
+                    buildTimestampUtc: 2026-05-13T00:00:00.000Z
         "404":
           description: Endpoint was not found on the current host.
           content:
@@ -537,6 +543,12 @@ components:
         - status
         - service
         - timestamp
+        - environmentName
+        - deployedCommitSha
+        - deployedSourceRef
+        - deploymentRunId
+        - deployedAtUtc
+        - buildTimestampUtc
       properties:
         status:
           type: string
@@ -556,6 +568,25 @@ components:
           description: Server-generated UTC timestamp.
           examples:
             - 2026-05-13T00:00:00.000Z
+        environmentName:
+          type: string
+          enum: [test, prod, local, unknown]
+          description: Safe runtime environment name.
+        deployedCommitSha:
+          type: string
+          description: Commit SHA reported by the deployed runtime, or unknown when not deployed.
+        deployedSourceRef:
+          type: string
+          description: Immutable source commit selected by deployment, or unknown when unavailable.
+        deploymentRunId:
+          type: string
+          description: GitHub Actions deployment workflow run ID, or unknown when unavailable.
+        deployedAtUtc:
+          type: string
+          description: Deployment timestamp, or unknown when unavailable.
+        buildTimestampUtc:
+          type: string
+          description: Build timestamp used by runtime provenance.
     RedditThreadRequest:
       type: object
       additionalProperties: false

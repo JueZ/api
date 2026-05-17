@@ -208,3 +208,20 @@ This repository includes GitHub Actions workflows for autonomous delivery:
 - `.github/workflows/codex-automerge.yml` enables GitHub-native squash auto-merge for Codex branches or PRs labeled `codex-automerge`; branch protection remains the merge gate.
 
 See `docs/autonomous-delivery.md` and `docs/security/autonomous-guardrails.md` before changing delivery, deployment, or guardrail logic.
+
+## Strong operational Definition of Done
+
+For every repository-changing autonomous task, delivery is not complete until the final report can account for all applicable runtime-truth gates:
+
+- changes are committed on a non-`main` branch;
+- a pull request exists or the existing branch PR has been updated;
+- CI and policy checks are green, or blockers are reported with exact failed commands/checks;
+- test deployment and smoke tests are verified when the change affects deployable code, infrastructure, auth, runtime configuration, or workflows;
+- production deployment and smoke tests are verified when the task requires or triggers production promotion;
+- the live runtime `/health` response reports the expected deployed commit SHA/source ref before production is considered verified;
+- smoke tests compare runtime-reported SHA with the exact deployed source ref and send a safe `X-Smoke-Run-Id` correlation header;
+- authenticated protected API smokes are run when `AUTH_ACCESS_TOKEN` is available, including `GET /api/hello` and `POST /api/reddit/thread`; if the token is unavailable, the result must be recorded as blocked rather than successful;
+- Azure Monitor/Application Insights telemetry checks are clean, or are explicitly blocked with the missing resource/permission/configuration recorded; production telemetry gates should fail closed once configured;
+- a machine-readable release/runtime truth ledger artifact exists for deployment workflows;
+- stale `codex-repair` issues are closed, linked to the resolving PR/run, or left open with current accurate status; and
+- project memory is updated for meaningful architecture, deployment, auth/security, CI/CD, production, incident, or operational-state changes without secrets.

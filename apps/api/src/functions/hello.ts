@@ -1,4 +1,5 @@
 import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
+import { logSmokeRunId } from '../shared/smokeCorrelation.js';
 import { createHelloResponse } from '../shared/responses.js';
 import { authorizeRequest } from '../shared/security/auth.js';
 
@@ -6,6 +7,8 @@ export async function helloHandler(
   request: HttpRequest,
   context: InvocationContext,
 ): Promise<HttpResponseInit> {
+  logSmokeRunId(request, context, 'hello');
+
   if (request.method === 'OPTIONS') {
     return {
       status: 204,
