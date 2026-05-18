@@ -1,6 +1,12 @@
 # Known issues and unresolved risks
 
-Last updated: 2026-05-17
+## 2026-05-18 Reddit web may block server-side `/s/` redirect resolution
+
+- Reddit `/s/` share tokens are not treated as an official OAuth API mapping. The expected server-side path is Reddit web redirect resolution followed by OAuth `/comments/<id>` fetch after a canonical comments URL or `redd.it` target is observed.
+- If Reddit blocks this server's egress with HTTP 403, rate limiting, or an HTML challenge/feed that does not expose a canonical `/comments/<id>` redirect, the API returns a caller-repairable 400 with guidance to provide a canonical `/comments/<id>` URL, `redd.it` URL, `t3` fullname, or raw post ID.
+- In blocked environments, callers may need to pre-resolve the share URL client-side or provide a canonical Reddit URL/post ID directly; the service does not implement CAPTCHA, cookie injection, fake cookies, or anti-bot bypass.
+
+Last updated: 2026-05-18
 
 
 ## 2026-05-17 protected browser API calls can hit MSAL hidden-iframe timeout

@@ -22,7 +22,8 @@
     "ops:triage-repair-issues": "node scripts/triage-repair-issues.mjs",
     "ops:policy-guardrails": "node scripts/policy-guardrails.mjs",
     "ops:write-release-ledger": "node scripts/write-release-ledger.mjs",
-    "ops:mint-smoke-token": "node scripts/mint-smoke-token.mjs"
+    "ops:mint-smoke-token": "node scripts/mint-smoke-token.mjs",
+    "ops:resolve-reddit-share": "npm run build:api --silent && node scripts/resolve-reddit-share-url.mjs"
   },
   "dependencies": {
     "@angular/common": "21.2.12",

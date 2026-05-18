@@ -1,5 +1,12 @@
 # Current state
 
+## 2026-05-18 Reddit /s/ share URL resolution
+
+- Reddit `/r/<subreddit>/s/<token>` inputs are handled as opaque Reddit web redirect links, not as an official OAuth `/api/info?url=` token mapping. The service resolves them by bounded HTTPS GET redirect handling on allowed Reddit web hosts, extracts the post ID only from a canonical `/comments/<id>` or `redd.it/<id>` target, strips query strings from canonical URLs used for diagnostics, and then fetches the thread through the existing OAuth `/comments/<id>` API path.
+- `/api/info?url=<share-url>` is no longer the primary share-token resolver because it is not documented as reliable for `/s/` tokens and can return an empty Listing. Unit tests now prove redirect resolution still works when `/api/info` is empty or unused.
+- Authenticated production smoke can optionally exercise a configured share URL with `REDDIT_SHARE_URL_SMOKE_ENABLED=true`; dependency blocks from Reddit web 403/challenge responses are recorded as `dependency_blocked` unless `REDDIT_SHARE_URL_SMOKE_REQUIRED=true`.
+- Operators can compare local, CI runner, and hosted egress behavior with `npm run ops:resolve-reddit-share -- "https://www.reddit.com/r/<subreddit>/s/<token>"`, which emits safe JSON without HTML bodies, cookies, or auth headers.
+
 ## 2026-05-17 Runtime truth follow-up hardening
 
 - Latest `main` SHA discovered with GitHub CLI: `96a81a1afa43ad0fa8f1b6467b6da2573152195c`. This is the post-PR #169 main commit currently reported by production `/health`.
