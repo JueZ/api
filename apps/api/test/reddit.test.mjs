@@ -256,6 +256,31 @@ test('RedditThreadService resolves 403 HTML when canonical metadata is still pre
   assertShareHtmlResolvedWithoutFallbacks(calls);
 });
 
+
+test('RedditThreadService resolves share URL when redirect status has no Location but HTML anchor contains canonical comments URL', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const shareUrl = 'https://www.reddit.com/r/AskReddit/s/LSdyZdjqm1';
+  const html = '<a href="https://www.reddit.com/r/AskReddit/comments/1tgnlig/whats_a_small_red_flag_that_instantly_tells_you/?share_id=GWB328Hw_zjYV_QSnHpx3&amp;utm_content=2&amp;utm_medium=ios_app&amp;utm_name=ioscss&amp;utm_source=share&amp;utm_term=1">Moved Permanently</a>.';
+  const calls = [];
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      calls.push(String(input));
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (String(input) === shareUrl) return textResponseWithUrl(html, shareUrl, 301, { 'content-type': 'text/html; charset=utf-8' });
+      if (String(input).includes('/comments/1tgnlig')) return jsonResponse(threadFixtureWithoutMore('1tgnlig'), 200, rateHeaders(2));
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThread({ post: shareUrl, maxComments: 10 });
+
+  assert.equal(response.post.id, '1tgnlig');
+  assert.equal(calls.some((url) => /\/s\/LSdyZdjqm1\.json/.test(url)), false);
+  assert.equal(calls.some((url) => url.includes('/comments/1tgnlig')), true);
+});
+
 test('RedditThreadService maps Reddit web 403 share resolution to structured caller-actionable input error', async () => {
   process.env.REDDIT_CLIENT_ID = config.clientId;
   process.env.REDDIT_CLIENT_SECRET = config.secret;

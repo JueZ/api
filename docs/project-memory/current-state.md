@@ -1,5 +1,12 @@
 # Current state
 
+## 2026-05-18 Reddit /s/ redirect-without-location follow-up
+
+- User-provided live shell evidence (`curl https://www.reddit.com/r/AskReddit/s/LSdyZdjqm1`) showed a redirect-style HTML body containing an anchor to a canonical `/comments/<id>` URL (`1tgnlig`) while not relying on `Location` header processing.
+- Root cause in resolver path: redirect HTTP statuses without `Location` were returned early without reading `text/html` body, so canonical extraction could be skipped even when a safe anchor URL was present.
+- Fix: `resolveRedditUrl` now reads bounded body text for redirect responses missing `Location` and passes it to share HTML canonical extraction; tests now prove one-call resolution for `https://www.reddit.com/r/AskReddit/s/LSdyZdjqm1` -> `1tgnlig` via embedded-anchor extraction.
+- Azure production diagnostics (read-only) confirmed Function App `func-api-catalogue-prod-bfjstshehpbfk` is `Running` on `NODE|22`; App Insights CLI query command is currently unavailable in this Codex environment (`az monitor app-insights query` command group missing), so detailed request/exception KQL from CLI is blocked here.
+
 ## 2026-05-18 Reddit /s/ share URL HTML-canonical follow-up
 
 - Live Codex egress probes for `https://www.reddit.com/r/AskReddit/s/JYIXy2cjSJ` observed Reddit returning `403 Forbidden`, `content-type: text/html`, `redirects=0`, and an effective URL still equal to the `/s/` share URL. The first 256 KB body looked like a Reddit web challenge/shell page; probes found no `canonical`, `og:url`, `twitter:url`, `comments/`, `1tgoo04`, JSON-LD, `shreddit`, or `permalink` marker in this egress environment.
