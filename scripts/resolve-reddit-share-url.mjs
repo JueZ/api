@@ -3,9 +3,11 @@ import { RedditOAuthClient } from '../apps/api/dist/shared/reddit/client.js';
 import { readRedditConfig } from '../apps/api/dist/shared/reddit/config.js';
 import { resolveRedditShareUrl } from '../apps/api/dist/shared/reddit/shareResolver.js';
 
-const inputUrl = process.argv[2];
+const args = process.argv.slice(2);
+const debug = args.includes('--debug');
+const inputUrl = args.find((arg) => arg !== '--debug');
 if (!inputUrl) {
-  console.error('Usage: npm run ops:resolve-reddit-share -- "https://www.reddit.com/r/<subreddit>/s/<token>"');
+  console.error('Usage: npm run ops:resolve-reddit-share -- [--debug] "https://www.reddit.com/r/<subreddit>/s/<token>"');
   process.exit(2);
 }
 
@@ -19,7 +21,7 @@ try {
   const resolution = await resolveRedditShareUrl(inputUrl, {
     resolveRedirect: (url) => client.resolveRedditUrl(url),
   });
-  console.log(JSON.stringify(safeOutput(resolution), null, 2));
+  console.log(JSON.stringify(safeOutput(resolution, debug), null, 2));
   process.exit(resolution.status === 'resolved' ? 0 : 1);
 } catch (error) {
   console.log(JSON.stringify({
@@ -30,15 +32,27 @@ try {
   process.exit(1);
 }
 
-function safeOutput(resolution) {
-  return {
+function safeOutput(resolution, debug) {
+  const output = {
     status: resolution.status,
+    source: resolution.source,
     originalUrl: resolution.originalUrl,
     finalUrl: resolution.finalUrl,
     cleanCanonicalUrl: resolution.cleanCanonicalUrl,
     postId: resolution.postId,
-    redirectChain: resolution.redirectChain,
+    subreddit: resolution.subreddit,
+    commentId: resolution.commentId,
     httpStatus: resolution.httpStatus,
     contentType: resolution.contentType,
+    redirectChain: resolution.redirectChain,
+    safeReason: resolution.safeReason,
+    retryable: resolution.retryable,
   };
+  if (debug) {
+    output.debug = {
+      extractorMatched: resolution.source?.startsWith('html_') ? resolution.source : undefined,
+      redirectCount: Math.max(0, (resolution.redirectChain?.length ?? 1) - 1),
+    };
+  }
+  return Object.fromEntries(Object.entries(output).filter(([, value]) => value !== undefined));
 }

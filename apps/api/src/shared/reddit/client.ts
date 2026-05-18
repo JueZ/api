@@ -29,6 +29,7 @@ export interface RedditRedirectResult {
   contentType: string | null;
   safeReason: string;
   retryable: boolean;
+  bodyText?: string;
 }
 
 export interface RedditFetchErrorDetails {
@@ -50,6 +51,8 @@ const API_BASE_URL = 'https://oauth.reddit.com';
 const TOKEN_EXPIRY_SKEW_MS = 60_000;
 const MAX_REDIRECTS = 5;
 const REQUEST_TIMEOUT_MS = 15_000;
+const MAX_REDIRECT_BODY_BYTES = 256 * 1024;
+const REDIRECT_BODY_CONTENT_TYPES = ['text/html', 'text/plain'];
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 export class RedditUpstreamError extends Error {
@@ -167,15 +170,18 @@ export class RedditOAuthClient {
       if (!isRedirectStatus(response.status)) {
         const finalUrl = response.url || url.toString();
         const finalValidation = safeValidateRedirectUrl(finalUrl);
+        const contentType = response.headers.get('content-type');
+        const bodyText = shouldReadRedirectBody(contentType) ? await readBoundedText(response, MAX_REDIRECT_BODY_BYTES) : undefined;
         if (!finalValidation.ok) {
           return {
             status: finalValidation.status,
             finalUrl,
             redirectChain,
             httpStatus: response.status,
-            contentType: response.headers.get('content-type'),
+            contentType,
             safeReason: finalValidation.safeReason,
             retryable: false,
+            bodyText,
           };
         }
         if (redirectChain[redirectChain.length - 1] !== finalUrl) {
@@ -186,9 +192,10 @@ export class RedditOAuthClient {
           finalUrl,
           redirectChain,
           httpStatus: response.status,
-          contentType: response.headers.get('content-type'),
+          contentType,
           safeReason: response.status >= 400 ? `Reddit web returned HTTP ${response.status}.` : 'Reddit web redirect resolution completed.',
           retryable: response.status === 429 || response.status >= 500,
+          bodyText,
         };
       }
 
@@ -293,6 +300,43 @@ export class RedditOAuthClient {
       clearTimeout(timeout);
     }
   }
+}
+
+
+function shouldReadRedirectBody(contentType: string | null): boolean {
+  const normalized = contentType?.toLowerCase() ?? '';
+  return REDIRECT_BODY_CONTENT_TYPES.some((allowed) => normalized.includes(allowed));
+}
+
+async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) {
+    return (await response.text()).slice(0, maxBytes);
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  while (totalBytes < maxBytes) {
+    const { done, value } = await reader.read();
+    if (done || !value) break;
+    const remaining = maxBytes - totalBytes;
+    const chunk = value.byteLength > remaining ? value.slice(0, remaining) : value;
+    chunks.push(chunk);
+    totalBytes += chunk.byteLength;
+    if (value.byteLength > remaining) break;
+  }
+  await reader.cancel().catch(() => undefined);
+  return new TextDecoder('utf-8', { fatal: false }).decode(concatChunks(chunks, totalBytes));
+}
+
+function concatChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array {
+  const output = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
 }
 
 function rateLimitFromHeaders(headers: Headers): RedditRateLimit {
