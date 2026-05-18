@@ -201,14 +201,17 @@ export class RedditOAuthClient {
 
       const location = response.headers.get('location');
       if (!location) {
+        const contentType = response.headers.get('content-type');
+        const bodyText = shouldReadRedirectBody(contentType) ? await readBoundedText(response, MAX_REDIRECT_BODY_BYTES) : undefined;
         return {
           status: 'completed',
           finalUrl: url.toString(),
           redirectChain,
           httpStatus: response.status,
-          contentType: response.headers.get('content-type'),
+          contentType,
           safeReason: `Reddit web returned redirect HTTP ${response.status} without a Location header.`,
           retryable: false,
+          bodyText,
         };
       }
       const nextUrl = new URL(location, url).toString();
