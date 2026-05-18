@@ -19,11 +19,16 @@ export interface RedditHttpResult<T> {
   retryCount: number;
 }
 
+export type RedditRedirectStatus = 'completed' | 'invalid_redirect' | 'unsafe_redirect' | 'max_redirects_exceeded';
+
 export interface RedditRedirectResult {
+  status: RedditRedirectStatus;
   finalUrl: string;
   redirectChain: string[];
-  status: number;
+  httpStatus?: number;
   contentType: string | null;
+  safeReason: string;
+  retryable: boolean;
 }
 
 export interface RedditFetchErrorDetails {
@@ -143,8 +148,6 @@ export class RedditOAuthClient {
   }
 
   async resolveRedditUrl(inputUrl: string): Promise<RedditRedirectResult> {
-    validateRedditConfig(this.config);
-
     let url = validateRedirectUrl(inputUrl);
     const redirectChain = [url.toString()];
     let lastResponse: Response | null = null;
@@ -154,6 +157,8 @@ export class RedditOAuthClient {
         method: 'GET',
         redirect: 'manual',
         headers: {
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
           'User-Agent': this.config.userAgent,
         },
       });
@@ -161,40 +166,70 @@ export class RedditOAuthClient {
 
       if (!isRedirectStatus(response.status)) {
         const finalUrl = response.url || url.toString();
-        validateRedirectUrl(finalUrl);
+        const finalValidation = safeValidateRedirectUrl(finalUrl);
+        if (!finalValidation.ok) {
+          return {
+            status: finalValidation.status,
+            finalUrl,
+            redirectChain,
+            httpStatus: response.status,
+            contentType: response.headers.get('content-type'),
+            safeReason: finalValidation.safeReason,
+            retryable: false,
+          };
+        }
         if (redirectChain[redirectChain.length - 1] !== finalUrl) {
           redirectChain.push(finalUrl);
         }
         return {
+          status: 'completed',
           finalUrl,
           redirectChain,
-          status: response.status,
+          httpStatus: response.status,
           contentType: response.headers.get('content-type'),
+          safeReason: response.status >= 400 ? `Reddit web returned HTTP ${response.status}.` : 'Reddit web redirect resolution completed.',
+          retryable: response.status === 429 || response.status >= 500,
         };
       }
 
       const location = response.headers.get('location');
       if (!location) {
         return {
+          status: 'completed',
           finalUrl: url.toString(),
           redirectChain,
-          status: response.status,
+          httpStatus: response.status,
           contentType: response.headers.get('content-type'),
+          safeReason: `Reddit web returned redirect HTTP ${response.status} without a Location header.`,
+          retryable: false,
         };
       }
-      url = validateRedirectUrl(new URL(location, url).toString());
+      const nextUrl = new URL(location, url).toString();
+      const nextValidation = safeValidateRedirectUrl(nextUrl);
+      if (!nextValidation.ok) {
+        return {
+          status: nextValidation.status,
+          finalUrl: nextUrl,
+          redirectChain: [...redirectChain, nextUrl],
+          httpStatus: response.status,
+          contentType: response.headers.get('content-type'),
+          safeReason: nextValidation.safeReason,
+          retryable: false,
+        };
+      }
+      url = nextValidation.url;
       redirectChain.push(url.toString());
     }
 
-    throw new RedditFetchError('Reddit redirect resolution exceeded the maximum redirect count.', {
-      request_url: inputUrl,
-      final_url: url.toString(),
-      status: lastResponse?.status,
-      reason: lastResponse?.statusText,
-      content_type: lastResponse?.headers.get('content-type'),
-      redirect_chain: redirectChain,
+    return {
+      status: 'max_redirects_exceeded',
+      finalUrl: url.toString(),
+      redirectChain,
+      httpStatus: lastResponse?.status,
+      contentType: lastResponse?.headers.get('content-type') ?? null,
+      safeReason: 'Reddit web redirect resolution exceeded the maximum redirect count.',
       retryable: false,
-    });
+    };
   }
 
   async getJson<T>(path: string, query: Record<string, string | number | undefined> = {}, context: { input?: string; normalizedPostId?: string } = {}): Promise<RedditHttpResult<T>> {
@@ -331,6 +366,23 @@ function validateRedirectUrl(value: string): URL {
     });
   }
   return url;
+}
+
+
+function safeValidateRedirectUrl(value: string): { ok: true; url: URL } | { ok: false; status: 'invalid_redirect' | 'unsafe_redirect'; safeReason: string } {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return { ok: false, status: 'invalid_redirect', safeReason: 'Reddit redirect target is not a valid URL.' };
+  }
+  if (url.protocol !== 'https:') {
+    return { ok: false, status: 'unsafe_redirect', safeReason: 'Reddit redirect target must use HTTPS.' };
+  }
+  if (!isSupportedRedditHost(url.hostname)) {
+    return { ok: false, status: 'unsafe_redirect', safeReason: 'Reddit redirect target host is not an allowed Reddit host.' };
+  }
+  return { ok: true, url };
 }
 
 function redactPreview(text: string): string {
