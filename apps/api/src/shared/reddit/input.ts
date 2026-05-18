@@ -148,13 +148,13 @@ export function isSupportedRedditHost(hostname: string): boolean {
 
 export function unresolvedRedditShareUrlError(input: string): RedditInputError {
   return new RedditInputError(
-    'Could not resolve Reddit /s/ share URL to canonical /comments/<id>/ URL.',
+    'Could not resolve Reddit /s/ share URL server-side because Reddit did not expose a canonical /comments/<id> redirect to this server. Use canonical /comments/<id> URL, redd.it URL, t3 fullname, or raw post ID.',
     'UNRESOLVED_REDDIT_SHARE_URL',
     input,
   );
 }
 
-function parseDirectRedditPostInput(input: string): NormalizedRedditPost | null {
+export function parseDirectRedditPostInput(input: string): NormalizedRedditPost | null {
   const fullnameMatch = /^t3_([a-z0-9][a-z0-9_]{1,12})$/i.exec(input);
   if (fullnameMatch) {
     return normalizedFromIds(fullnameMatch[1]);

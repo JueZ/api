@@ -339,7 +339,7 @@ export function buildFallbackRepairableProblem(args: {
   error_kind?: 'input' | 'content' | 'upstream' | 'fetch' | 'config' | 'internal';
 }): RepairableProblem {
   const code = args.safe_error?.code;
-  const isShareUrl = code === 'UNRESOLVED_REDDIT_SHARE_URL';
+  const isShareUrl = code === 'UNRESOLVED_REDDIT_SHARE_URL' || code === 'REDDIT_SHARE_RESOLUTION_BLOCKED';
   const status = args.status;
   let classification: RepairableErrorClassification = 'diagnostic_uncertain';
   let repairable = false;
@@ -364,9 +364,9 @@ export function buildFallbackRepairableProblem(args: {
     ];
     if (isShareUrl) {
       detail = 'Reddit /s/ share URLs must resolve to a canonical comments URL before this endpoint can fetch the thread.';
-      callerInstruction = 'Do not retry the same /s/ share URL. Use a canonical reddit.com /comments/<id> URL, redd.it URL, t3 fullname, or raw article ID instead.';
+      callerInstruction = 'Do not retry the same /s/ share URL. Use a canonical reddit.com /comments/<id> URL, redd.it URL, t3 fullname, or raw post ID instead.';
       repair_plan = [
-        { action: 'replace_invalid_value', path: '/post', value_hint: 'canonical /comments/<id> URL, redd.it URL, t3 fullname, or article ID', reason: 'The /s/ share URL could not be resolved deterministically.' },
+        { action: 'replace_invalid_value', path: '/post', value_hint: 'canonical /comments/<id> URL, redd.it URL, t3 fullname, or raw post ID', reason: 'The /s/ share URL could not be resolved deterministically.' },
       ];
     }
   } else if (status === 403) {

@@ -133,23 +133,31 @@ test('attachMoreChildren appends expanded comments to the matching parent', () =
 
 
 
-test('RedditThreadService resolves Reddit share URLs through OAuth api/info before fetching comments', async () => {
+test('RedditThreadService resolves Reddit share URLs through web redirect before fetching comments', async () => {
   process.env.REDDIT_CLIENT_ID = config.clientId;
   process.env.REDDIT_CLIENT_SECRET = config.secret;
   process.env.REDDIT_USER_AGENT = config.userAgent;
   const calls = [];
-  const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
+  const shareUrl = 'https://www.reddit.com/r/AskReddit/s/JYIXy2cjSJ';
+  const canonicalUrl = 'https://www.reddit.com/r/AskReddit/comments/1tgoo04/ai_takes_half_the_jobs_all_those_people_pay/?share_id=x&utm_source=share';
   const service = new RedditThreadService({
     fetchImpl: async (input, init) => {
       calls.push({ input: String(input), init });
+      assert.doesNotMatch(String(input), /\/s\/JYIXy2cjSJ\.json/);
       if (String(input).includes('/api/v1/access_token')) {
         return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
       }
       if (String(input).includes('/api/info') && String(input).includes('url=')) {
-        return jsonResponse(infoListing({ kind: 't3', data: { id: 'abc123' } }), 200, rateHeaders(1));
+        return jsonResponse(infoListing(), 200, rateHeaders(1));
       }
-      if (String(input).includes('/comments/abc123')) {
-        return jsonResponse(threadFixtureWithoutMore(), 200, rateHeaders(2));
+      if (String(input) === shareUrl) {
+        return redirectResponse(canonicalUrl);
+      }
+      if (String(input) === canonicalUrl) {
+        return responseWithUrl({}, canonicalUrl);
+      }
+      if (String(input).includes('/comments/1tgoo04')) {
+        return jsonResponse(threadFixtureWithoutMore('1tgoo04'), 200, rateHeaders(2));
       }
       throw new Error(`unexpected URL ${String(input)}`);
     },
@@ -158,14 +166,40 @@ test('RedditThreadService resolves Reddit share URLs through OAuth api/info befo
   const response = await service.fetchThread({ post: shareUrl, maxComments: 10 });
 
   assert.equal(response.input, shareUrl);
-  assert.equal(response.post.id, 'abc123');
-  assert.equal(response.stats.commentsReturned, 2);
-  assert.ok(calls.some((call) => call.input.includes('/api/info') && call.input.includes('url=')));
-  assert.ok(calls.some((call) => call.input.includes('/comments/abc123')));
-  assert.equal(calls.some((call) => call.input === shareUrl), false);
+  assert.equal(response.post.id, '1tgoo04');
+  assert.ok(calls.some((call) => call.input === shareUrl));
+  assert.ok(calls.some((call) => call.input.includes('/comments/1tgoo04')));
+  assert.equal(calls.some((call) => call.input.includes('/api/info') && call.input.includes('url=')), false);
+  assert.equal(calls.some((call) => /\/s\/JYIXy2cjSJ\.json/.test(call.input)), false);
 });
 
-test('RedditThreadService falls back to Reddit redirect resolution when api/info has no share URL match', async () => {
+test('RedditThreadService resolves multi-hop Reddit share redirects', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const calls = [];
+  const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
+  const intermediateUrl = 'https://www.reddit.com/r/OpenAI/comments/';
+  const canonicalUrl = 'https://www.reddit.com/r/OpenAI/comments/abc123/example/';
+  const service = new RedditThreadService({
+    fetchImpl: async (input, init) => {
+      calls.push({ input: String(input), init });
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (String(input) === shareUrl) return redirectResponse(intermediateUrl);
+      if (String(input) === intermediateUrl) return redirectResponse(canonicalUrl);
+      if (String(input) === canonicalUrl) return responseWithUrl({}, canonicalUrl);
+      if (String(input).includes('/comments/abc123')) return jsonResponse(threadFixtureWithoutMore(), 200, rateHeaders(2));
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThread({ post: shareUrl, maxComments: 10 });
+
+  assert.equal(response.post.id, 'abc123');
+  assert.deepEqual(calls.filter((call) => call.input === shareUrl || call.input === intermediateUrl).map((call) => call.init.method), ['GET', 'GET']);
+});
+
+test('RedditThreadService does not require api/info to resolve Reddit share URLs', async () => {
   process.env.REDDIT_CLIENT_ID = config.clientId;
   process.env.REDDIT_CLIENT_SECRET = config.secret;
   process.env.REDDIT_USER_AGENT = config.userAgent;
@@ -173,23 +207,13 @@ test('RedditThreadService falls back to Reddit redirect resolution when api/info
   const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
   const canonicalUrl = 'https://www.reddit.com/r/OpenAI/comments/abc123/example/';
   const service = new RedditThreadService({
-    fetchImpl: async (input, init) => {
-      calls.push({ input: String(input), init });
-      if (String(input).includes('/api/v1/access_token')) {
-        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
-      }
-      if (String(input).includes('/api/info') && String(input).includes('url=')) {
-        return jsonResponse(infoListing(), 200, rateHeaders(1));
-      }
-      if (String(input) === shareUrl) {
-        return redirectResponse(canonicalUrl);
-      }
-      if (String(input) === canonicalUrl) {
-        return responseWithUrl({}, canonicalUrl);
-      }
-      if (String(input).includes('/comments/abc123')) {
-        return jsonResponse(threadFixtureWithoutMore(), 200, rateHeaders(2));
-      }
+    fetchImpl: async (input) => {
+      calls.push(String(input));
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (String(input).includes('/api/info') && String(input).includes('url=')) return jsonResponse(infoListing(), 200, rateHeaders(1));
+      if (String(input) === shareUrl) return redirectResponse(canonicalUrl);
+      if (String(input) === canonicalUrl) return responseWithUrl({}, canonicalUrl);
+      if (String(input).includes('/comments/abc123')) return jsonResponse(threadFixtureWithoutMore(), 200, rateHeaders(2));
       throw new Error(`unexpected URL ${String(input)}`);
     },
   });
@@ -197,40 +221,127 @@ test('RedditThreadService falls back to Reddit redirect resolution when api/info
   const response = await service.fetchThread({ post: shareUrl, maxComments: 10 });
 
   assert.equal(response.post.id, 'abc123');
-  const redirectCall = calls.find((call) => call.input === shareUrl);
-  assert.equal(redirectCall.init.method, 'GET');
-  assert.equal(redirectCall.init.redirect, 'manual');
+  assert.equal(calls.some((url) => url.includes('/api/info') && url.includes('url=')), false);
 });
 
+test('RedditThreadService maps Reddit web 403 share resolution to structured caller-actionable input error', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      if (String(input) === shareUrl) return textResponseWithUrl('<html>blocked</html>', shareUrl, 403, { 'content-type': 'text/html; charset=utf-8' });
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
 
+  await assert.rejects(
+    () => service.fetchThread({ post: shareUrl }),
+    (error) => {
+      assert.equal(error.name, 'RedditShareResolutionError');
+      assert.equal(error.code, 'REDDIT_SHARE_RESOLUTION_BLOCKED');
+      assert.match(error.message, /Use canonical \/comments\/<id> URL, redd\.it URL, t3 fullname, or raw post ID/);
+      assert.equal(error.resolution.httpStatus, 403);
+      assert.equal(error.resolution.contentType, 'text/html; charset=utf-8');
+      return true;
+    },
+  );
+});
 
-test('RedditThreadService never appends .json to Reddit share URLs before redirect resolution', async () => {
+test('redditThreadHandler maps blocked Reddit share resolution to safe application/problem+json guidance', async () => {
+  await withEnv({ AUTH_ENABLED: 'false', REPAIRABLE_ERRORS_LLM_ENABLED: 'false' }, async () => {
+    const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
+    setRedditThreadServiceForTesting({ fetchThread: async () => {
+      const { RedditShareResolutionError } = await import('../dist/shared/reddit/service.js');
+      throw new RedditShareResolutionError({
+        status: 'blocked_by_reddit_web',
+        originalUrl: shareUrl,
+        finalUrl: shareUrl,
+        redirectChain: [shareUrl],
+        httpStatus: 403,
+        contentType: 'text/html; charset=utf-8',
+        safeReason: 'Reddit web redirect blocked from server egress.',
+        retryable: false,
+      });
+    } });
+
+    const response = await redditThreadHandler(requestWithJson({ post: shareUrl }), contextStub());
+    const serialized = JSON.stringify(response.jsonBody);
+
+    assert.equal(response.status, 400);
+    assert.equal(response.headers['Content-Type'], 'application/problem+json');
+    assert.match(response.jsonBody.caller_instruction, /canonical reddit\.com \/comments\/<id> URL, redd\.it URL, t3 fullname, or raw (article ID|post ID)/i);
+    assert.doesNotMatch(serialized, /<html>|cookie|authorization|response_preview/i);
+  });
+});
+
+test('RedditThreadService treats HTML 200 feed or challenge as unresolved share URL input error', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const shareUrl = 'https://www.reddit.com/r/science/s/DQGxxt7XzY';
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      if (String(input) === shareUrl) return textResponseWithUrl('<html>challenge</html>', shareUrl, 200, { 'content-type': 'text/html; charset=utf-8' });
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  await assert.rejects(
+    () => service.fetchThread({ post: shareUrl }),
+    (error) => error.name === 'RedditShareResolutionError' && error.code === 'UNRESOLVED_REDDIT_SHARE_URL' && error.resolution.status === 'unresolved',
+  );
+});
+
+test('RedditThreadService blocks unsafe Reddit share redirects without fetching the unsafe URL', async () => {
   process.env.REDDIT_CLIENT_ID = config.clientId;
   process.env.REDDIT_CLIENT_SECRET = config.secret;
   process.env.REDDIT_USER_AGENT = config.userAgent;
   const calls = [];
-  const shareUrl = 'https://www.reddit.com/r/science/s/DQGxxt7XzY';
-  const canonicalUrl = 'https://www.reddit.com/r/science/comments/1tflddp/feeling_empty_after_finishing_a_video_game/?share_id=X';
+  const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
   const service = new RedditThreadService({
-    fetchImpl: async (input, init) => {
-      calls.push({ input: String(input), init });
-      assert.notEqual(String(input), `${shareUrl}.json?limit=1&sort=confidence`);
-      assert.doesNotMatch(String(input), /\/s\/DQGxxt7XzY\.json/);
-      if (String(input).includes('/api/v1/access_token')) {
-        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
-      }
-      if (String(input).includes('/api/info') && String(input).includes('url=')) {
-        return jsonResponse(infoListing(), 200, rateHeaders(1));
-      }
-      if (String(input) === shareUrl) {
-        return redirectResponse(canonicalUrl);
-      }
-      if (String(input) === canonicalUrl) {
-        return responseWithUrl({}, canonicalUrl);
-      }
-      if (String(input).includes('/comments/1tflddp')) {
-        return jsonResponse(threadFixtureWithoutMore('1tflddp'), 200, rateHeaders(2));
-      }
+    fetchImpl: async (input) => {
+      calls.push(String(input));
+      if (String(input) === shareUrl) return redirectResponse('https://evil.example/phish');
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  await assert.rejects(
+    () => service.fetchThread({ post: shareUrl }),
+    (error) => error.name === 'RedditShareResolutionError' && error.resolution.status === 'unsafe_redirect',
+  );
+  assert.deepEqual(calls, [shareUrl]);
+});
+
+test('RedditThreadService returns max_redirects_exceeded for excessive share redirect chains', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => redirectResponse(`${String(input).replace(/\/$/, '')}/next`),
+  });
+
+  await assert.rejects(
+    () => service.fetchThread({ post: shareUrl }),
+    (error) => error.name === 'RedditShareResolutionError' && error.resolution.status === 'max_redirects_exceeded',
+  );
+});
+
+test('RedditThreadService preserves comment permalink metadata after share redirect', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const shareUrl = 'https://www.reddit.com/r/science/s/DQGxxt7XzY';
+  const canonicalUrl = 'https://www.reddit.com/r/science/comments/1tflddp/feeling_empty_after_finishing_a_video_game/oma4ybn/?utm_source=share';
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (String(input) === shareUrl) return redirectResponse(canonicalUrl);
+      if (String(input) === canonicalUrl) return responseWithUrl({}, canonicalUrl);
+      if (String(input).includes('/comments/1tflddp')) return jsonResponse(threadFixtureWithoutMore('1tflddp'), 200, rateHeaders(2));
       throw new Error(`unexpected URL ${String(input)}`);
     },
   });
@@ -238,8 +349,6 @@ test('RedditThreadService never appends .json to Reddit share URLs before redire
   const response = await service.fetchThread({ post: shareUrl, maxComments: 10 });
 
   assert.equal(response.post.id, '1tflddp');
-  assert.ok(calls.some((call) => call.input === shareUrl));
-  assert.ok(calls.some((call) => call.input.includes('/comments/1tflddp')));
 });
 
 test('RedditOAuthClient raises RedditFetchError with content type and preview for non-JSON bodies', async () => {
@@ -334,13 +443,10 @@ test('RedditThreadService returns a structured input error when share URL resolu
   const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
   const service = new RedditThreadService({
     fetchImpl: async (input) => {
-      if (String(input).includes('/api/v1/access_token')) {
-        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (String(input) === shareUrl) {
+        return responseWithUrl({}, shareUrl);
       }
-      if (String(input).includes('/api/info') && String(input).includes('url=')) {
-        return jsonResponse(infoListing(), 200, rateHeaders(1));
-      }
-      return responseWithUrl({}, shareUrl);
+      throw new Error(`unexpected URL ${String(input)}`);
     },
   });
 
@@ -348,8 +454,9 @@ test('RedditThreadService returns a structured input error when share URL resolu
     () => service.fetchThread({ post: shareUrl }),
     (error) =>
       error.code === 'UNRESOLVED_REDDIT_SHARE_URL' &&
-      error.message === 'Could not resolve Reddit /s/ share URL to canonical /comments/<id>/ URL.' &&
-      error.input === shareUrl,
+      /Could not resolve Reddit \/s\/ share URL server-side/.test(error.message) &&
+      error.input === shareUrl &&
+      error.resolution.status === 'unresolved',
   );
 });
 
@@ -873,6 +980,12 @@ function redirectResponse(location, status = 302) {
 
 function responseWithUrl(body, url, status = 200, headers = {}) {
   const response = jsonResponse(body, status, headers);
+  Object.defineProperty(response, 'url', { value: url });
+  return response;
+}
+
+function textResponseWithUrl(body, url, status = 200, headers = {}) {
+  const response = new Response(body, { status, headers });
   Object.defineProperty(response, 'url', { value: url });
   return response;
 }

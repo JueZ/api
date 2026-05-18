@@ -1,6 +1,7 @@
 import { RedditConfigError, readRedditConfig } from './config.js';
 import { RedditFetchError, RedditOAuthClient, RedditUpstreamError, type FetchLike } from './client.js';
-import { isRedditShareUrl, normalizeMaxComments, normalizeMaxMoreChildrenRequests, normalizeRedditPostInput, normalizeRedditSort, parseRedditPostInput, RedditInputError, unresolvedRedditShareUrlError, type NormalizedRedditPost } from './input.js';
+import { isRedditShareUrl, normalizeMaxComments, normalizeMaxMoreChildrenRequests, normalizeRedditPostInput, normalizeRedditSort, parseRedditPostInput, RedditInputError, type NormalizedRedditPost } from './input.js';
+import { resolveRedditShareUrl, type RedditShareResolution } from './shareResolver.js';
 import { attachMoreChildren, commentsPath, commentsQuery, createThreadResponse, normalizeInitialThread, RedditContentError, type MorePlaceholder } from './normalize.js';
 import type { RedditRateLimit, RedditThreadRequest, RedditThreadResponse } from './types.js';
 
@@ -116,25 +117,17 @@ export class RedditThreadService {
 
   private async normalizePostInput(post: string): Promise<NormalizedRedditPost> {
     if (isRedditShareUrl(post)) {
-      const articleId = await this.resolveRedditUrlToArticleId(post.trim());
-      if (articleId) {
-        return normalizeRedditPostInput(articleId);
+      const resolution = await resolveRedditShareUrl(post, {
+        resolveRedirect: (url) => this.client.resolveRedditUrl(url),
+      });
+      logShareResolution(resolution);
+      if (resolution.status === 'resolved') {
+        return normalizeRedditPostInput(resolution.cleanCanonicalUrl);
       }
+      throw new RedditShareResolutionError(resolution);
     }
 
-    return normalizeRedditPostInput(post, async (url) => {
-      const resolved = await this.client.resolveRedditUrl(url);
-      return { finalUrl: resolved.finalUrl, redirectChain: resolved.redirectChain };
-    });
-  }
-
-  private async resolveRedditUrlToArticleId(url: string): Promise<string | null> {
-    const response = await this.client.getJson<unknown>('/api/info', { url, raw_json: 1 });
-    if (response.status === 403 || response.status === 404) {
-      return null;
-    }
-    assertRedditStatus(response.status, 'url info');
-    return articleIdFromInfoListing(response.body);
+    return normalizeRedditPostInput(post);
   }
 
   private async resolveRawCommentIdToArticleId(id: string): Promise<string | null> {
@@ -156,6 +149,22 @@ export class RedditThreadService {
     });
     assertRedditStatus(response.status, more.parentId);
     return response;
+  }
+}
+
+
+export class RedditShareResolutionError extends RedditInputError {
+  readonly resolution: Exclude<RedditShareResolution, { status: 'resolved' }>;
+
+  constructor(resolution: Exclude<RedditShareResolution, { status: 'resolved' }>) {
+    const code = resolution.status === 'blocked_by_reddit_web' ? 'REDDIT_SHARE_RESOLUTION_BLOCKED' : 'UNRESOLVED_REDDIT_SHARE_URL';
+    super(
+      'Could not resolve Reddit /s/ share URL server-side because Reddit did not expose a canonical /comments/<id> redirect to this server. Use canonical /comments/<id> URL, redd.it URL, t3 fullname, or raw post ID.',
+      code,
+      resolution.originalUrl,
+    );
+    this.name = 'RedditShareResolutionError';
+    this.resolution = resolution;
   }
 }
 
@@ -261,6 +270,30 @@ function logRedditFetch(args: {
     retry_count: args.retryCount,
     error_class: args.errorClass,
   });
+}
+
+
+function logShareResolution(resolution: RedditShareResolution): void {
+  const originalHost = hostFromUrl(resolution.originalUrl);
+  const finalHost = resolution.status === 'resolved' ? hostFromUrl(resolution.finalUrl) : hostFromUrl(resolution.finalUrl);
+  console.info('reddit_share_resolution', {
+    share_resolution_status: resolution.status,
+    original_host: originalHost,
+    final_host: finalHost,
+    http_status: resolution.status === 'resolved' ? undefined : resolution.httpStatus,
+    content_type: resolution.status === 'resolved' ? undefined : resolution.contentType,
+    redirect_count: Math.max(0, resolution.redirectChain.length - 1),
+    redirect_chain: resolution.redirectChain,
+  });
+}
+
+function hostFromUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    return new URL(value).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
 }
 
 function articleIdFromInfoListing(value: unknown): string | null {

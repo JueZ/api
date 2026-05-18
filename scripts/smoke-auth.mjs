@@ -7,6 +7,9 @@ const environmentName = process.env.ENVIRONMENT_NAME || '';
 const expectedSha = process.env.EXPECTED_DEPLOYED_COMMIT_SHA || '';
 const smokeRunId = getSmokeRunId();
 const requireAuthSmoke = process.env.REQUIRE_AUTH_SMOKE === 'true' || environmentName === 'prod';
+const shareSmokeEnabled = process.env.REDDIT_SHARE_URL_SMOKE_ENABLED === 'true';
+const shareSmokeRequired = process.env.REDDIT_SHARE_URL_SMOKE_REQUIRED === 'true';
+const shareSmokeUrl = process.env.REDDIT_SHARE_URL_SMOKE || '';
 const results = { status: 'passed', smokeRunId, apiBaseUrl, checks: [] };
 const headers = { 'X-Smoke-Run-Id': smokeRunId, Authorization: `Bearer ${token}` };
 
@@ -45,6 +48,39 @@ try {
   }
   assertEqual('authenticated /api/reddit/thread status', reddit.response.status, 200);
   record('authenticated-reddit-thread', 'passed');
+
+  if (shareSmokeEnabled) {
+    if (!shareSmokeUrl) {
+      record('reddit-share-url-resolution', 'skipped', { safeReason: 'REDDIT_SHARE_URL_SMOKE was not configured.' });
+    } else {
+      const shareReddit = await fetchJson(`${apiBaseUrl}/api/reddit/thread`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post: shareSmokeUrl, sort: 'top', maxComments: 1, maxMoreChildrenRequests: 0 }),
+      });
+      const shareBody = JSON.stringify(shareReddit.json ?? {});
+      if (shareReddit.response.status === 400 && /Reddit \/s\/ share URL|\/s\/ share URL|comments<\/id>|comments\/<id>/i.test(shareBody)) {
+        results.status = 'dependency_blocked';
+        results.blockedReason = 'reddit web redirect blocked from server egress';
+        record('reddit-share-url-resolution', 'dependency_blocked', {
+          statusCode: shareReddit.response.status,
+          safeReason: 'reddit web redirect blocked from server egress',
+        });
+        console.log(safeSummary(results));
+        process.exit(shareSmokeRequired ? 3 : 0);
+      }
+      if (shareReddit.response.status >= 500 || shareReddit.response.status === 429) {
+        results.status = 'dependency_blocked';
+        results.blockedReason = `Reddit share URL smoke dependency returned ${shareReddit.response.status}`;
+        record('reddit-share-url-resolution', 'dependency_blocked', { statusCode: shareReddit.response.status });
+        console.log(safeSummary(results));
+        process.exit(shareSmokeRequired ? 3 : 0);
+      }
+      assertEqual('authenticated Reddit share URL smoke status', shareReddit.response.status, 200);
+      record('reddit-share-url-resolution', 'passed');
+    }
+  }
+
   console.log(safeSummary(results));
 } catch (error) {
   results.status = 'failed';
