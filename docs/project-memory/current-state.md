@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-05-18 Reddit /s/ share URL HTML-canonical follow-up
+
+- Live Codex egress probes for `https://www.reddit.com/r/AskReddit/s/JYIXy2cjSJ` observed Reddit returning `403 Forbidden`, `content-type: text/html`, `redirects=0`, and an effective URL still equal to the `/s/` share URL. The first 256 KB body looked like a Reddit web challenge/shell page; probes found no `canonical`, `og:url`, `twitter:url`, `comments/`, `1tgoo04`, JSON-LD, `shreddit`, or `permalink` marker in this egress environment.
+- Node `fetch` with `NODE_USE_ENV_PROXY=1` matched production-style behavior for both `redirect: 'manual'` and `redirect: 'follow'`: status `403`, no `Location`, content type `text/html`, body did not contain `/comments/` or `1tgoo04`, and no canonical/OG URL was found. Plain Node fetch without proxy failed with `ENETUNREACH`, so proxy-enabled Node fetch is the usable live diagnostic from Codex.
+- Design conclusion: keep bounded manual GET redirects for true Reddit `Location` redirects, but also read bounded public `text/html`/`text/plain` bodies and extract safe Reddit `/comments/<id>` canonical URLs from link/meta/JSON-LD/embedded URL metadata when present. If Reddit returns `403`/`429` or a challenge without a usable canonical URL, continue returning a structured blocked/unresolved error without leaking raw HTML.
+
 ## 2026-05-18 Reddit /s/ share URL resolution
 
 - Reddit `/r/<subreddit>/s/<token>` inputs are handled as opaque Reddit web redirect links, not as an official OAuth `/api/info?url=` token mapping. The service resolves them by bounded HTTPS GET redirect handling on allowed Reddit web hosts, extracts the post ID only from a canonical `/comments/<id>` or `redd.it/<id>` target, strips query strings from canonical URLs used for diagnostics, and then fetches the thread through the existing OAuth `/comments/<id>` API path.

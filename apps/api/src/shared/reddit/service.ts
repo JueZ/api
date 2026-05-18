@@ -275,16 +275,31 @@ function logRedditFetch(args: {
 
 function logShareResolution(resolution: RedditShareResolution): void {
   const originalHost = hostFromUrl(resolution.originalUrl);
-  const finalHost = resolution.status === 'resolved' ? hostFromUrl(resolution.finalUrl) : hostFromUrl(resolution.finalUrl);
+  const finalUrl = stripLogUrl(resolution.finalUrl);
   console.info('reddit_share_resolution', {
     share_resolution_status: resolution.status,
+    share_resolution_source: resolution.status === 'resolved' ? resolution.source : undefined,
     original_host: originalHost,
-    final_host: finalHost,
-    http_status: resolution.status === 'resolved' ? undefined : resolution.httpStatus,
-    content_type: resolution.status === 'resolved' ? undefined : resolution.contentType,
+    final_host: hostFromUrl(resolution.finalUrl),
+    http_status: resolution.httpStatus,
+    content_type: resolution.contentType,
     redirect_count: Math.max(0, resolution.redirectChain.length - 1),
-    redirect_chain: resolution.redirectChain,
+    final_url: finalUrl,
+    extracted_post_id: resolution.status === 'resolved' ? resolution.postId : undefined,
+    redirect_chain: resolution.redirectChain.map((url) => stripLogUrl(url) ?? url),
   });
+}
+
+function stripLogUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return value.split('?')[0]?.split('#')[0] ?? value;
+  }
 }
 
 function hostFromUrl(value: string | undefined): string | undefined {

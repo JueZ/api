@@ -224,6 +224,38 @@ test('RedditThreadService does not require api/info to resolve Reddit share URLs
   assert.equal(calls.some((url) => url.includes('/api/info') && url.includes('url=')), false);
 });
 
+test('RedditThreadService resolves 200 HTML canonical link for exact AskReddit share URL', async () => {
+  const html = '<html><head><link rel="canonical" href="https://www.reddit.com/r/AskReddit/comments/1tgoo04/ai_takes_half_the_jobs_all_those_people_pay/?share_id=x&amp;utm_source=share"></head></html>';
+  const { response, calls } = await fetchThreadFromShareHtml({ html });
+
+  assert.equal(response.post.id, '1tgoo04');
+  assertShareHtmlResolvedWithoutFallbacks(calls);
+});
+
+test('RedditThreadService resolves 200 HTML og:url metadata for exact AskReddit share URL', async () => {
+  const html = '<html><head><meta property="og:url" content="https://www.reddit.com/r/AskReddit/comments/1tgoo04/ai_takes_half_the_jobs_all_those_people_pay/"></head></html>';
+  const { response, calls } = await fetchThreadFromShareHtml({ html });
+
+  assert.equal(response.post.id, '1tgoo04');
+  assertShareHtmlResolvedWithoutFallbacks(calls);
+});
+
+test('RedditThreadService resolves 200 HTML embedded escaped Reddit comments URL for exact AskReddit share URL', async () => {
+  const html = String.raw`<html><body>https:\/\/www.reddit.com\/r\/AskReddit\/comments\/1tgoo04\/ai_takes_half_the_jobs_all_those_people_pay\/</body></html>`;
+  const { response, calls } = await fetchThreadFromShareHtml({ html });
+
+  assert.equal(response.post.id, '1tgoo04');
+  assertShareHtmlResolvedWithoutFallbacks(calls);
+});
+
+test('RedditThreadService resolves 403 HTML when canonical metadata is still present', async () => {
+  const html = '<html><head><link rel="canonical" href="https://www.reddit.com/r/AskReddit/comments/1tgoo04/ai_takes_half_the_jobs_all_those_people_pay/"></head><body>blocked</body></html>';
+  const { response, calls } = await fetchThreadFromShareHtml({ html, status: 403 });
+
+  assert.equal(response.post.id, '1tgoo04');
+  assertShareHtmlResolvedWithoutFallbacks(calls);
+});
+
 test('RedditThreadService maps Reddit web 403 share resolution to structured caller-actionable input error', async () => {
   process.env.REDDIT_CLIENT_ID = config.clientId;
   process.env.REDDIT_CLIENT_SECRET = config.secret;
@@ -952,6 +984,34 @@ function requestWithJson(body, authorization = null) {
 
 function contextStub() {
   return { invocationId: 'invocation-test', warn: () => undefined };
+}
+
+
+async function fetchThreadFromShareHtml({ html, status = 200 }) {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const calls = [];
+  const shareUrl = 'https://www.reddit.com/r/AskReddit/s/JYIXy2cjSJ';
+  const service = new RedditThreadService({
+    fetchImpl: async (input, init) => {
+      calls.push({ input: String(input), init });
+      assert.doesNotMatch(String(input), /\/s\/JYIXy2cjSJ\.json/);
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (String(input) === shareUrl) return textResponseWithUrl(html, shareUrl, status, { 'content-type': 'text/html; charset=utf-8' });
+      if (String(input).includes('/comments/1tgoo04')) return jsonResponse(threadFixtureWithoutMore('1tgoo04'), 200, rateHeaders(2));
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  return { response: await service.fetchThread({ post: shareUrl, maxComments: 10, maxMoreChildrenRequests: 0 }), calls };
+}
+
+function assertShareHtmlResolvedWithoutFallbacks(calls) {
+  assert.ok(calls.some((call) => call.input === 'https://www.reddit.com/r/AskReddit/s/JYIXy2cjSJ'));
+  assert.ok(calls.some((call) => call.input.includes('/comments/1tgoo04')));
+  assert.equal(calls.some((call) => call.input.includes('/api/info') && call.input.includes('url=')), false);
+  assert.equal(calls.some((call) => /\/s\/JYIXy2cjSJ\.json/.test(call.input)), false);
 }
 
 function jsonResponse(body, status = 200, headers = {}) {
