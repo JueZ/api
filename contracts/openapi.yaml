@@ -386,6 +386,51 @@ paths:
                     caller_instruction: Retry later with the same request. Do not invent alternative request parameters for this upstream failure.
                     safe_debug_summary: Sanitized Reddit dependency failure diagnosis.
                     analysis_mode: fallback
+  /api/marketplaces/willhaben/categories:
+    get:
+      operationId: listWillhabenCategories
+      summary: List supported willhaben categories
+      security:
+        - bearerJwt: []
+      responses:
+        "200": { description: OK }
+  /api/marketplaces/willhaben/filter-schema:
+    get:
+      operationId: getWillhabenFilterSchema
+      summary: Get willhaben filter schema
+      security:
+        - bearerJwt: []
+      parameters:
+        - in: query
+          name: categorySlug
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK }
+  /api/marketplaces/willhaben/listings/search:
+    post:
+      operationId: searchWillhabenListings
+      summary: Structured willhaben search (no natural-language input)
+      description: keywords is the only free-text product field; do not send naturalLanguageQuery.
+      security:
+        - bearerJwt: []
+      responses:
+        "200": { description: OK }
+  /api/marketplaces/willhaben/listings/{listingId}:
+    get:
+      operationId: getWillhabenListing
+      summary: Get one selected willhaben listing
+      description: Use only for selected candidates; show canonicalUrl to the user.
+      security:
+        - bearerJwt: []
+      parameters:
+        - in: path
+          name: listingId
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK }
+
 components:
   securitySchemes:
     bearerJwt:

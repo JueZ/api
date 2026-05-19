@@ -1,0 +1,3 @@
+import test from 'node:test'; import assert from 'node:assert/strict';
+import { normalizeSearchInput } from '../dist/shared/willhaben/input.js';
+test('defaults and validation',()=>{const x=normalizeSearchInput({categorySlug:'games-consoles',keywords:['Nintendo']}); assert.equal(x.price.currency,'EUR'); assert.equal(x.pagination.page,1); assert.equal(x.pagination.limit,30); assert.throws(()=>normalizeSearchInput({keywords:['x']})); assert.throws(()=>normalizeSearchInput({categorySlug:'x',keywords:[]})); assert.throws(()=>normalizeSearchInput({categorySlug:'x',keywords:['a'],naturalLanguageQuery:'foo'}));});
