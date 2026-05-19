@@ -24,7 +24,7 @@ export function normalizeSearchInput(input: unknown): WillhabenSearchRequest {
   const body = input as WillhabenSearchRequest;
 
   if ('naturalLanguageQuery' in body) throw new WillhabenInputError('naturalLanguageQuery is not supported');
-  if (!body.categorySlug) throw new WillhabenInputError('categorySlug is required');
+  if ((!body.categoryPath || !Array.isArray(body.categoryPath) || body.categoryPath.length===0) && !body.categorySlug) throw new WillhabenInputError('categoryPath is required');
 
   if (!Array.isArray(body.keywords) || body.keywords.length === 0) {
     throw new WillhabenInputError('keywords must be a non-empty array');

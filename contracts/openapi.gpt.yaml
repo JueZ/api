@@ -266,6 +266,20 @@ paths:
         - bearerJwt: []
       responses:
         "200": { description: OK }
+
+  /api/marketplaces/willhaben/categories/{codePath}:
+    get:
+      operationId: getWillhabenCategory
+      summary: Get one willhaben category by code path
+      parameters:
+        - in: path
+          name: codePath
+          required: true
+          schema: { type: string }
+      security:
+        - bearerJwt: []
+      responses:
+        "200": { description: OK }
   /api/marketplaces/willhaben/filter-schema:
     get:
       operationId: getWillhabenFilterSchema
@@ -274,7 +288,7 @@ paths:
         - bearerJwt: []
       parameters:
         - in: query
-          name: categorySlug
+          name: categoryPath
           required: true
           schema: { type: string }
       responses:

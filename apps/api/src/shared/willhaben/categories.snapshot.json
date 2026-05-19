@@ -1,0 +1,41 @@
+{
+  "fetchedAt": "2026-05-19T00:00:00.000Z",
+  "source": "snapshot",
+  "provider": "snapshot",
+  "adTypeId": 67,
+  "categoryNode": {
+    "treeId": 1,
+    "code": "MARKETPLACE",
+    "label": "Marketplace",
+    "systemTags": [],
+    "attributeReferences": [],
+    "children": [
+      {
+        "treeId": 10,
+        "code": "GAMES_CONSOLES",
+        "label": "Games / Konsolen",
+        "systemTags": [],
+        "attributeReferences": [],
+        "children": [
+          {
+            "treeId": 11,
+            "code": "GAMES",
+            "label": "Spiele",
+            "systemTags": [],
+            "attributeReferences": [],
+            "children": [
+              {
+                "treeId": 12,
+                "code": "NINTENDO_GAMES",
+                "label": "Nintendo Spiele",
+                "systemTags": [],
+                "attributeReferences": [{"required": false, "treeAttributeId": 123, "code": "Zustand", "selectionType": "SINGLE_SELECT"}],
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
