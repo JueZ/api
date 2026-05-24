@@ -30,6 +30,8 @@ Package the repeated manual PR-delivery workflow into one consistent checklist s
     git status --short
     git log -1 --oneline
 
+   Stop if the current branch is `main`; create a non-`main` working branch first.
+
 2. Run mandatory PR preflight and repair (safe, local, idempotent):
 
     git remote -v
@@ -51,10 +53,14 @@ Package the repeated manual PR-delivery workflow into one consistent checklist s
 
 5. Collect autonomous-delivery status evidence:
 
-    gh pr checks --repo JueZ/api
-    gh pr view --repo JueZ/api --json url,state,isDraft,mergeStateStatus,autoMergeRequest
+    PR_NUMBER="$(gh pr view --repo JueZ/api --json number --jq .number)"
+    gh pr checks "$PR_NUMBER" --repo JueZ/api
+    gh pr view "$PR_NUMBER" --repo JueZ/api --json url,state,isDraft,mergeStateStatus,autoMergeRequest
 
-6. If checks fail, apply the smallest safe fix and repeat at most 2 repair attempts.
+6. If checks fail, inspect failed job logs first, then apply the smallest safe fix and repeat at most 2 repair attempts:
+
+    gh run list --repo JueZ/api --limit 10
+    gh run view <run-id> --repo JueZ/api --log-failed
 
 ## Required Output
 

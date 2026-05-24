@@ -4,11 +4,11 @@
 
 Review window: last 30 days of available repository evidence (May 2026).
 
-Evidence sources used:
-- Repo-based project memory (`docs/project-memory/*`)
-- Existing skill inventory under `.agents/skills/*`
-- Autonomous-delivery and guardrail docs
-- Existing workflow files under `.github/workflows/*`
+Evidence sources used (in priority order from task request):
+- Recent Codex session evidence available in-repo via project-memory and rollout-oriented logs (`docs/project-memory/*`)
+- Existing skills/custom workflow assets under `.agents/skills/*` and `.github/workflows/*`
+- Autonomous-delivery and guardrail documentation (`docs/autonomous-delivery.md`, `docs/security/autonomous-guardrails.md`)
+- Chronicle: not available in this checkout/session, so no Chronicle-derived candidates were promoted
 
 ## Compact shortlist
 
@@ -36,3 +36,9 @@ Evidence sources used:
 ## Needs more evidence before packaging
 
 - Personal admin/communication/research workflows outside repo history (Chronicle or external systems not available in this checkout) need corroborated multi-occurrence evidence before creating additional skills/subagents/automations.
+
+
+## Follow-up refinement (2026-05-24)
+
+- Clarified that the packaged delivery workflow must halt on `main` and always resolve/check a concrete PR number before check queries.
+- Added explicit failed-run inspection commands to keep the bounded repair loop evidence-first and consistent with existing GitHub CLI practices.
