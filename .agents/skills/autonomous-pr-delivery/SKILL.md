@@ -70,7 +70,7 @@ Final task report must include:
 
 Never:
 - bypass branch protection
-- disable tests/policy/security checks to force green
+- keep tests, policy checks, and security scans enabled
 - weaken auth/JWT/allowlist protections
 - commit or print secrets/tokens
 - claim completion if PR creation/update failed
