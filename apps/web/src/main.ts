@@ -622,7 +622,6 @@ function buildApiOperations(document: OpenApiDocument): ApiOperationDoc[] {
     )
     .sort((left, right) => left.path.localeCompare(right.path) || left.method.localeCompare(right.method));
 }
-}
 
 function relatedSchemas(schemaRefs: (OpenApiSchema | string | undefined)[]): SchemaDoc[] {
   const seen = new Set<string>();
