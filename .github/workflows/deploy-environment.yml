@@ -450,6 +450,22 @@ jobs:
               --url "https://management.azure.com${function_app_id}/restart?api-version=2023-12-01" \
               --body '{}' \
               -o none
+            for attempt in {1..12}; do
+              if az rest \
+                --method post \
+                --url "https://management.azure.com${function_app_id}/syncfunctiontriggers?api-version=2023-12-01" \
+                --body '{}' \
+                -o none; then
+                echo "Function trigger sync succeeded on attempt $attempt."
+                break
+              fi
+              if [ "$attempt" -eq 12 ]; then
+                echo "Function trigger sync failed after 12 attempts." >&2
+                exit 1
+              fi
+              echo "Function trigger sync not ready yet (attempt $attempt/12). Retrying in 10s..."
+              sleep 10
+            done
           else
             echo "No Azure Functions host.json found; skipping Functions deployment."
           fi
@@ -506,7 +522,7 @@ jobs:
           export API_BASE_URL="$EFFECTIVE_BASE_URL"
           export EXPECTED_DEPLOYED_COMMIT_SHA="${SOURCE_REF:-${GITHUB_SHA}}"
           export ENVIRONMENT_NAME
-          export RUNTIME_HEALTH_RETRY_ATTEMPTS="${RUNTIME_HEALTH_RETRY_ATTEMPTS:-20}"
+          export RUNTIME_HEALTH_RETRY_ATTEMPTS="${RUNTIME_HEALTH_RETRY_ATTEMPTS:-60}"
           export RUNTIME_HEALTH_RETRY_DELAY_MS="${RUNTIME_HEALTH_RETRY_DELAY_MS:-5000}"
           export SMOKE_RUN_ID="$smoke_run_id"
           export AUTH_ENABLED
