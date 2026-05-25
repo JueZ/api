@@ -258,6 +258,60 @@ paths:
                     caller_instruction: Retry later with the same request. Do not invent alternative request parameters for this upstream failure.
                     safe_debug_summary: Sanitized Reddit dependency failure diagnosis.
                     analysis_mode: fallback
+  /api/wlh/categories/top:
+    get:
+      operationId: getWlhCategoriesTop
+      summary: List top wlh categories
+      security:
+        - entraOAuth2:
+            - api.access
+      responses: { "200": { description: OK }, "401": { description: Unauthorized } }
+  /api/wlh/categories/{categoryId}:
+    get:
+      operationId: getWlhCategory
+      summary: Get one wlh category
+      security:
+        - entraOAuth2:
+            - api.access
+      parameters: [{ name: categoryId, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: OK }, "404": { description: Not found } }
+  /api/wlh/categories/{categoryId}/children:
+    get:
+      operationId: getWlhCategoryChildren
+      summary: List child wlh categories
+      security:
+        - entraOAuth2:
+            - api.access
+      parameters: [{ name: categoryId, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: OK }, "404": { description: Not found } }
+  /api/wlh/search:
+    post:
+      operationId: postWlhSearch
+      summary: Search wlh offers
+      security:
+        - entraOAuth2:
+            - api.access
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK }, "400": { description: Bad request }, "404": { description: Not found }, "429": { description: Rate limited }, "502": { description: Upstream failure } }
+  /api/wlh/offers/{adId}:
+    get:
+      operationId: getWlhOffer
+      summary: Get wlh offer detail
+      security:
+        - entraOAuth2:
+            - api.access
+      parameters: [{ name: adId, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: OK }, "429": { description: Rate limited }, "502": { description: Upstream failure } }
+  /api/wlh/offers/{adId}/images:
+    get:
+      operationId: getWlhOfferImages
+      summary: Get wlh offer images
+      security:
+        - entraOAuth2:
+            - api.access
+      parameters: [{ name: adId, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: OK }, "429": { description: Rate limited }, "502": { description: Upstream failure } }
+
 components:
   securitySchemes:
     entraOAuth2:
@@ -495,3 +549,4 @@ components:
           type: string
       required:
         - error
+

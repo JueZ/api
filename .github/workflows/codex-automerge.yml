@@ -3,7 +3,7 @@ name: Codex Auto-Merge
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -31,6 +31,7 @@ jobs:
           (
             startsWith(github.event.pull_request.head.ref, 'codex/') ||
             startsWith(github.event.pull_request.head.ref, 'codex-') ||
+            github.event.pull_request.head.ref == 'work' ||
             contains(github.event.pull_request.labels.*.name, 'codex-automerge')
           )
         )
