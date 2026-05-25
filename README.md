@@ -9,7 +9,8 @@ v0 serverless foundation for a personal API catalogue platform.
 - OpenAPI contract in `contracts/openapi.yaml`.
 - GPT Actions OpenAPI contracts:
   - Combined: `contracts/openapi.gpt.yaml`
-  - Domain split: `contracts/openapi.gpt.reddit.yaml` and `contracts/openapi.gpt.wlh.yaml`
+
+
 - Low-cost Bicep infrastructure skeleton in `infra/main.bicep`.
 - Setup documentation in `docs/setup/v0-hello-world.md`, authentication and GPT Actions OAuth setup in `docs/setup/authentication.md`, OAuth security guidance in `docs/security/service-oauth-authentication.md`, and staged deployment setup commands in `docs/setup/staged-deployment.md`.
 
