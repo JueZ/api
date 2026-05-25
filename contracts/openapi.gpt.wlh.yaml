@@ -43,6 +43,9 @@ paths:
     get:
       operationId: getWlhTopCategories
       summary: Get top categories
+      security:
+        - entraOAuth2:
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
       responses:
         "200":
           description: OK
@@ -65,6 +68,9 @@ paths:
     get:
       operationId: getWlhCategory
       summary: Get category by id
+      security:
+        - entraOAuth2:
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
       parameters:
         - name: categoryId
           in: path
@@ -95,6 +101,9 @@ paths:
     get:
       operationId: getWlhCategoryChildren
       summary: Get category children
+      security:
+        - entraOAuth2:
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
       parameters:
         - name: categoryId
           in: path
@@ -127,6 +136,9 @@ paths:
     post:
       operationId: searchWlh
       summary: Search listings
+      security:
+        - entraOAuth2:
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
       requestBody:
         required: true
         content:
@@ -172,6 +184,9 @@ paths:
     get:
       operationId: getWlhOffer
       summary: Get offer detail
+      security:
+        - entraOAuth2:
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
       parameters:
         - name: adId
           in: path
@@ -207,6 +222,9 @@ paths:
     get:
       operationId: getWlhOfferImages
       summary: Get offer images
+      security:
+        - entraOAuth2:
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
       parameters:
         - name: adId
           in: path
