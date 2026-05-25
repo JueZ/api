@@ -506,6 +506,8 @@ jobs:
           export API_BASE_URL="$EFFECTIVE_BASE_URL"
           export EXPECTED_DEPLOYED_COMMIT_SHA="${SOURCE_REF:-${GITHUB_SHA}}"
           export ENVIRONMENT_NAME
+          export RUNTIME_HEALTH_RETRY_ATTEMPTS="${RUNTIME_HEALTH_RETRY_ATTEMPTS:-20}"
+          export RUNTIME_HEALTH_RETRY_DELAY_MS="${RUNTIME_HEALTH_RETRY_DELAY_MS:-5000}"
           export SMOKE_RUN_ID="$smoke_run_id"
           export AUTH_ENABLED
           if [ "${DEPLOY_FRONTEND:-false}" = "true" ] && [ -n "${FRONTEND_BASE_URL:-}" ]; then export FRONTEND_BASE_URL; fi
