@@ -3,7 +3,7 @@ info:
   title: JueZ API Catalogue (GPT WLH)
   version: 0.1.0
 servers:
-  - url: https://juez-api-prod.azurewebsites.net
+  - url: https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net
 security:
   - entraOAuth2:
       - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
@@ -18,28 +18,31 @@ paths:
           description: OK
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/HealthResponse"
+              schema: { $ref: "#/components/schemas/HealthResponse" }
   /api/hello:
     get:
       operationId: hello
       summary: Hello
-      security:
-        - entraOAuth2:
-            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
       responses:
         "200":
           description: OK
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/HelloResponse"
+              schema: { $ref: "#/components/schemas/HelloResponse" }
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "403":
+          description: Token valid but caller not allowlisted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
   /api/wlh/categories/top:
     get:
       operationId: getWlhTopCategories
       summary: Get top categories
-      security:
-        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access]
       responses:
         "200":
           description: OK
@@ -48,64 +51,162 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/WlhCategory" }
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "403":
+          description: Token valid but caller not allowlisted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
   /api/wlh/categories/{categoryId}:
     get:
       operationId: getWlhCategory
       summary: Get category by id
-      security:
-        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access]
       parameters:
         - name: categoryId
           in: path
           required: true
           schema: { type: string }
       responses:
-        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/WlhCategory" } } } }
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WlhCategory" }
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "403":
+          description: Token valid but caller not allowlisted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "404":
+          description: Category not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /api/wlh/categories/{categoryId}/children:
     get:
       operationId: getWlhCategoryChildren
       summary: Get category children
-      security:
-        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access]
       parameters:
         - name: categoryId
           in: path
           required: true
           schema: { type: string }
       responses:
-        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/WlhCategory" } } } } }
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/WlhCategory" }
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "403":
+          description: Token valid but caller not allowlisted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "404":
+          description: Category not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /api/wlh/search:
     post:
       operationId: searchWlh
       summary: Search listings
-      security:
-        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access]
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/WlhSearchRequest" }
       responses:
-        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/WlhSearchResponse" } } } }
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WlhSearchResponse" }
+        "400":
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "403":
+          description: Token valid but caller not allowlisted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "404":
+          description: Category not found.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429":
+          description: Upstream rate limited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: Upstream/content parsing failure.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /api/wlh/offers/{adId}:
     get:
       operationId: getWlhOffer
       summary: Get offer detail
-      security:
-        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access]
       parameters:
         - name: adId
           in: path
           required: true
           schema: { type: string }
       responses:
-        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/WlhOfferDetail" } } } }
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WlhOfferDetail" }
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "403":
+          description: Token valid but caller not allowlisted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "429":
+          description: Upstream rate limited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: Upstream/content parsing failure.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /api/wlh/offers/{adId}/images:
     get:
       operationId: getWlhOfferImages
       summary: Get offer images
-      security:
-        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access]
       parameters:
         - name: adId
           in: path
@@ -126,6 +227,26 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/WlhImage" }
                 required: [source, adId, images]
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "403":
+          description: Token valid but caller not allowlisted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "429":
+          description: Upstream rate limited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: Upstream/content parsing failure.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 components:
   securitySchemes:
     entraOAuth2:
@@ -138,6 +259,19 @@ components:
           scopes:
             api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access: Access protected JueZ API endpoints.
   schemas:
+    ErrorResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        error: { type: string }
+        message: { type: string }
+    AuthErrorResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        code: { type: string }
+        message: { type: string }
+      required: [code, message]
     HealthResponse:
       type: object
       additionalProperties: false
@@ -254,11 +388,11 @@ components:
             properties:
               carrier: { type: string }
               parcelSize: { type: string }
-              price: {}
-              originalPrice: {}
+              price: { type: [number, string, "null"] }
+              originalPrice: { type: [number, string, "null"] }
               description: { type: string }
-              deliveryDays: {}
-              parcelInsurance: {}
+              deliveryDays: { type: [number, string, "null"] }
+              parcelInsurance: { type: [number, string, "null"] }
         images:
           type: array
           items: { $ref: "#/components/schemas/WlhImage" }
