@@ -12,3 +12,8 @@ infra/*.json
 # Generated locally from contracts/openapi.yaml for the Angular app.
 apps/web/src/assets/openapi.yaml
 apps/web/src/app/openapi.generated.ts
+
+local.settings.json
+local-data/
+categories-marketplace*.json
+categories-marketplace*.json.gz

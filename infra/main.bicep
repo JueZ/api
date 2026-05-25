@@ -66,6 +66,17 @@ param redditUserAgent string = ''
 @description('Comma-separated browser origins allowed to call the Function App API. Needed because Azure Functions handles CORS preflight before app code.')
 param apiCorsAllowedOrigins string = ''
 
+
+@secure()
+@description('WLH upstream base URL.')
+param wlhBaseUrl string = ''
+
+@description('Private blob container for WLH reference data.')
+param wlhCategoryBlobContainer string = 'wlh-reference'
+
+@description('Private blob name for WLH category data.')
+param wlhCategoryBlobName string = 'categories-marketplace.v1.json.gz'
+
 @secure()
 @description('Optional OpenAI API key used only when Repairable Error Contract LLM-assisted diagnostics are enabled.')
 param openAiCredential string = ''
@@ -226,6 +237,23 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'REDDIT_USER_AGENT'
           value: redditUserAgent
+        }
+
+        {
+          name: 'WLH_BASE_URL'
+          value: wlhBaseUrl
+        }
+        {
+          name: 'WLH_STORAGE_ACCOUNT_NAME'
+          value: storageAccount.name
+        }
+        {
+          name: 'WLH_CATEGORY_BLOB_CONTAINER'
+          value: wlhCategoryBlobContainer
+        }
+        {
+          name: 'WLH_CATEGORY_BLOB_NAME'
+          value: wlhCategoryBlobName
         }
 
         {
