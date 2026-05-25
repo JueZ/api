@@ -6,6 +6,7 @@ const mainSource = await readFile(new URL('../src/main.ts', import.meta.url), 'u
 const gitignoreSource = await readFile(new URL('../../../.gitignore', import.meta.url), 'utf8');
 const angularConfigSource = await readFile(new URL('../../../angular.json', import.meta.url), 'utf8');
 const packageSource = await readFile(new URL('../../../package.json', import.meta.url), 'utf8');
+const openApiContractSource = await readFile(new URL('../../../contracts/openapi.yaml', import.meta.url), 'utf8');
 
 test('logged-out state is visible in the Angular auth UI', () => {
   assert.match(mainSource, /Signed out\./);
@@ -61,4 +62,11 @@ test('MSAL hidden iframes never bootstrap Angular or run redirect handling', () 
   assert.match(mainSource, /window\.self !== window\.top/);
   assert.match(mainSource, /!isEmbeddedFrame\(\)/);
   assert.doesNotMatch(mainSource, /code\|error\|state\|client_info/);
+});
+
+
+test('OpenAPI contract includes wlh endpoints used by Angular catalogue', () => {
+  assert.match(openApiContractSource, /\/api\/wlh\/categories\/top:/);
+  assert.match(openApiContractSource, /\/api\/wlh\/search:/);
+  assert.match(openApiContractSource, /\/api\/wlh\/offers\/\{adId\}:/);
 });

@@ -572,14 +572,20 @@ async function acquireAccessToken(account: AccountInfo): Promise<string> {
   }
 }
 
+const httpMethods: HttpMethod[] = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
+
 function buildApiOperations(document: OpenApiDocument): ApiOperationDoc[] {
-  return Object.entries(document.paths).flatMap(([path, pathItem]) =>
-    (Object.entries(pathItem) as [HttpMethod, OpenApiOperation][]).map(([method, operation]) => {
-      const id = operation.operationId ?? `${method}-${path.replace(/[^a-z0-9]+/gi, '-')}`;
-      const requestMedia = operation.requestBody?.content?.['application/json'];
-      const requestSchema = resolveSchema(requestMedia?.schema);
-      const requestExample = firstExample(requestMedia?.examples) ?? exampleFromSchema(requestSchema);
-      const responses = Object.entries(operation.responses ?? {}).map(([status, response]) => {
+  return Object.entries(document.paths)
+    .flatMap(([path, pathItem]) =>
+      Object.entries(pathItem)
+        .filter(([method]) => httpMethods.includes(method as HttpMethod))
+        .map(([method, operation]) => {
+          const typedOperation = operation as OpenApiOperation;
+          const id = typedOperation.operationId ?? `${method}-${path.replace(/[^a-z0-9]+/gi, '-')}`;
+          const requestMedia = typedOperation.requestBody?.content?.['application/json'];
+          const requestSchema = resolveSchema(requestMedia?.schema);
+          const requestExample = firstExample(requestMedia?.examples) ?? exampleFromSchema(requestSchema);
+          const responses = Object.entries(typedOperation.responses ?? {}).map(([status, response]) => {
         const responseMedia = response.content?.['application/json'];
         const responseSchema = resolveSchema(responseMedia?.schema);
         return {
@@ -591,25 +597,27 @@ function buildApiOperations(document: OpenApiDocument): ApiOperationDoc[] {
         };
       });
 
-      return {
-        id,
-        method,
-        path,
-        tag: operation.tags?.[0] ?? 'API',
-        summary: operation.summary ?? `${method.toUpperCase()} ${path}`,
-        description: normalizeDescription(operation.description),
-        requiresAuth: Boolean(operation.security?.length),
-        requestRequired: operation.requestBody?.required === true,
+          return {
+            id,
+            method: method as HttpMethod,
+            path,
+            tag: typedOperation.tags?.[0] ?? 'API',
+            summary: typedOperation.summary ?? `${method.toUpperCase()} ${path}`,
+            description: normalizeDescription(typedOperation.description),
+            requiresAuth: Boolean(typedOperation.security?.length),
+            requestRequired: typedOperation.requestBody?.required === true,
         requestContentType: requestMedia ? 'application/json' : '',
         requestSchemaName: schemaName(requestMedia?.schema),
         requestFields: schemaFields(requestSchema),
         requestExample: stringifyExample(requestExample),
         responses,
         schemas: relatedSchemas([requestMedia?.schema, ...responses.map((response) => response.schemaName ? { $ref: `#/components/schemas/${response.schemaName}` } : undefined)]),
-      };
-    }),
-  );
+          };
+        }),
+    )
+    .sort((left, right) => left.path.localeCompare(right.path) || left.method.localeCompare(right.method));
 }
+
 
 function relatedSchemas(schemaRefs: (OpenApiSchema | string | undefined)[]): SchemaDoc[] {
   const seen = new Set<string>();
