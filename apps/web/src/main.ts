@@ -20,6 +20,7 @@ interface RuntimeConfig {
 
 type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
 type JsonObject = Record<string, unknown>;
+const httpMethods: HttpMethod[] = ['get', 'post', 'put', 'patch', 'delete'];
 
 interface OpenApiSchema {
   $ref?: string;
