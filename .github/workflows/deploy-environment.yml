@@ -42,6 +42,9 @@ on:
       OPENAI_API_KEY:
         description: Optional OpenAI API key for Repairable Error Contract LLM-assisted diagnostics.
         required: false
+      WLH_BASE_URL:
+        description: WLH upstream base URL.
+        required: true
     outputs:
       effectiveBaseUrl:
         description: Resolved Function App base URL.
