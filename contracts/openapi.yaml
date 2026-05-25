@@ -393,14 +393,7 @@ paths:
       security:
         - entraOAuth2:
             - api.access
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/WlhCategory" }
+      responses: { "200": { description: OK }, "401": { description: Unauthorized } }
   /api/wlh/categories/{categoryId}:
     get:
       operationId: getWlhCategory
@@ -408,14 +401,8 @@ paths:
       security:
         - entraOAuth2:
             - api.access
-      parameters:
-        - name: categoryId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/WlhCategory" } } } }
-        "404": { description: Not found }
+      parameters: [{ name: categoryId, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: OK }, "404": { description: Not found } }
   /api/wlh/categories/{categoryId}/children:
     get:
       operationId: getWlhCategoryChildren
@@ -423,13 +410,8 @@ paths:
       security:
         - entraOAuth2:
             - api.access
-      parameters:
-        - name: categoryId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/WlhCategory" } } } } }
+      parameters: [{ name: categoryId, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: OK }, "404": { description: Not found } }
   /api/wlh/search:
     post:
       operationId: postWlhSearch
@@ -437,17 +419,8 @@ paths:
       security:
         - entraOAuth2:
             - api.access
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/WlhSearchRequest" }
-      responses:
-        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/WlhSearchResponse" } } } }
-        "400": { description: Bad request }
-        "404": { description: Not found }
-        "429": { description: Rate limited }
-        "502": { description: Upstream failure }
+      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK }, "400": { description: Bad request }, "404": { description: Not found }, "429": { description: Rate limited }, "502": { description: Upstream failure } }
   /api/wlh/offers/{adId}:
     get:
       operationId: getWlhOffer
@@ -455,13 +428,8 @@ paths:
       security:
         - entraOAuth2:
             - api.access
-      parameters:
-        - name: adId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/WlhOfferDetail" } } } }
+      parameters: [{ name: adId, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: OK }, "429": { description: Rate limited }, "502": { description: Upstream failure } }
   /api/wlh/offers/{adId}/images:
     get:
       operationId: getWlhOfferImages
@@ -469,13 +437,8 @@ paths:
       security:
         - entraOAuth2:
             - api.access
-      parameters:
-        - name: adId
-          in: path
-          required: true
-          schema: { type: string }
-      responses:
-        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { source: {type: string}, adId: {type: string}, images: {type: array, items: {$ref: "#/components/schemas/WlhImage"}} } } } } }
+      parameters: [{ name: adId, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: OK }, "429": { description: Rate limited }, "502": { description: Upstream failure } }
 
 components:
   securitySchemes:
@@ -494,47 +457,6 @@ components:
           scopes:
             api.access: Access the v0 API catalogue.
   schemas:
-    WlhCategory:
-      type: object
-      additionalProperties: false
-      properties: { id: {type: string}, label: {type: string}, path: {type: string}, depth: {type: number}, parentId: {type: string}, hitCount: {type: number}, hasChildren: {type: boolean}, url: {type: string} }
-      required: [id,label,path,depth,hasChildren]
-    WlhSearchRequest:
-      type: object
-      additionalProperties: false
-      properties:
-        categoryId: { type: string }
-        keyword: { type: string }
-        priceFrom: { type: number }
-        priceTo: { type: number }
-        areaId: { type: string }
-        paylivery: { type: boolean }
-        rows: { type: integer, minimum: 1, maximum: 100 }
-        page: { type: integer, minimum: 1 }
-        condition: { type: string, enum: [new, like_new, used, defect] }
-        delivery: { type: array, items: { type: string, enum: [pickup, shipping] } }
-        requiredTerms: { type: array, items: { type: string } }
-      required: [categoryId]
-    WlhImage:
-      type: object
-      additionalProperties: false
-      properties: { id: {type: string}, url: {type: string} }
-      required: [id,url]
-    WlhSearchResult:
-      type: object
-      additionalProperties: false
-      properties: { id: {type: string}, title: {type: string}, priceAmount: {type: [number, "null"]}, priceDisplay: {type: string}, location: {type: string}, postcode: {type: string}, state: {type: string}, publishedAt: {type: string}, changedAt: {type: string}, paylivery: {type: [boolean, "null"]}, sellerId: {type: string}, url: {type: string}, imageCount: {type: number}, thumbnailUrl: {type: string} }
-      required: [id,title,priceAmount,priceDisplay,location,url,imageCount]
-    WlhSearchResponse:
-      type: object
-      additionalProperties: false
-      properties: { source: {type: string}, fetchedAt: {type: string}, sourceUrl: {type: string}, rowsFound: {type: [number, "null"]}, rowsReturned: {type: number}, filteredRowsReturned: {type: number}, category: { $ref: "#/components/schemas/WlhCategory" }, results: { type: array, items: { $ref: "#/components/schemas/WlhSearchResult" } } }
-      required: [source,fetchedAt,sourceUrl,rowsFound,rowsReturned,filteredRowsReturned,category,results]
-    WlhOfferDetail:
-      type: object
-      additionalProperties: false
-      properties: { id: {type: string}, title: {type: string}, description: {type: string}, priceAmount: {type: [number, "null"]}, priceDisplay: {type: string}, location: {type: string}, postcode: {type: string}, state: {type: string}, publishedAt: {type: string}, changedAt: {type: string}, status: {type: string}, seller: { type: object, additionalProperties: false, properties: { id: {type: string}, name: {type: string} }, required: [id, name] }, paylivery: {type: [boolean, "null"]}, deliveryOptions: { type: array, items: { type: object, additionalProperties: false, properties: { carrier: {type: string}, parcelSize: {type: string}, price: {}, originalPrice: {}, description: {type: string}, deliveryDays: {}, parcelInsurance: {} } } }, images: {type: array, items: {$ref: "#/components/schemas/WlhImage"}} }
-      required: [id,title,description,priceAmount,priceDisplay,location,paylivery,images]
     ErrorResponse:
       type: object
       additionalProperties: true
@@ -1069,3 +991,4 @@ components:
           $ref: "#/components/schemas/HelloUser"
           description: Selected validated token claims for the signed-in caller.
       description: Authenticated v0 Hello World response for the allowlisted user.
+
