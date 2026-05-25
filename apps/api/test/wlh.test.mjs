@@ -26,3 +26,10 @@ test('detail uses advert status/address/contact and paylivery false string not t
   const d = await s.offer('abc');
   assert.equal(d.priceAmount, 74.99); assert.equal(d.status, 'ACTIVE'); assert.equal(d.location, 'Vienna'); assert.equal(d.paylivery, true); assert.equal(d.images.length, 2);
 });
+
+test('search listing SEO_URL prepends /iad for kaufen-und-verkaufen paths', async () => {
+  const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { searchResult: { rowsFound: 1, rowsRequested: 30, rowsReturned: 1, pageRequested: 1, advertSummaryList: { advertSummary: [{ id: '997764051', attributes: [{ name: 'HEADING', values: ['super mario'] }, { name: 'SEO_URL', values: ['/kaufen-und-verkaufen/d/super-mario-3d-all-stars-nintendo-switch-997764051'] }] }] } } } } })}</script>`;
+  const s = new WlhService({ config: cfg, getIndex: async () => idx, fetchImpl: async () => new Response(html, { status: 200 }) });
+  const out = await s.search({ categoryId: '10' });
+  assert.equal(out.results[0].url, 'https://example.test/iad/kaufen-und-verkaufen/d/super-mario-3d-all-stars-nintendo-switch-997764051');
+});
