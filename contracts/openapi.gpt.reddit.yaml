@@ -1,0 +1,94 @@
+openapi: 3.1.0
+info:
+  title: JueZ API Catalogue (GPT Reddit)
+  version: 0.1.0
+servers:
+  - url: https://juez-api-prod.azurewebsites.net
+security:
+  - entraOAuth2:
+      - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Health
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /api/hello:
+    get:
+      operationId: hello
+      summary: Hello
+      security:
+        - entraOAuth2:
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HelloResponse"
+  /api/reddit/thread:
+    post:
+      operationId: redditThread
+      summary: Fetch reddit thread
+      security:
+        - entraOAuth2:
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RedditThreadRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedditThreadResponse"
+components:
+  securitySchemes:
+    entraOAuth2:
+      type: oauth2
+      description: Microsoft Entra OAuth 2.0 authorization-code flow for the dedicated ChatGPT Action client.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://login.microsoftonline.com/7ac3dfd6-e810-4693-805a-9535eb3ab166/oauth2/v2.0/authorize
+          tokenUrl: https://login.microsoftonline.com/7ac3dfd6-e810-4693-805a-9535eb3ab166/oauth2/v2.0/token
+          scopes:
+            api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access: Access protected JueZ API endpoints.
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        status: { type: string }
+        service: { type: string }
+        timestamp: { type: string, format: date-time }
+      required: [status, service, timestamp]
+    HelloResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        message: { type: string }
+        authenticated: { type: boolean }
+      required: [message, authenticated]
+    RedditThreadRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        post: { type: string }
+        sort: { type: string, enum: [confidence, top, new, controversial, old, qa] }
+        maxComments: { type: integer, minimum: 1, maximum: 200 }
+      required: [post]
+    RedditThreadResponse:
+      type: object
+      additionalProperties: true
