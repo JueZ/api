@@ -52,6 +52,13 @@ interface OpenApiOperation {
     description?: string;
     content?: Record<string, { schema?: OpenApiSchema; examples?: Record<string, { value?: unknown }> }>;
   }>;
+  parameters?: Array<{
+    name: string;
+    in: 'path' | 'query' | 'header' | 'cookie';
+    required?: boolean;
+    description?: string;
+    schema?: OpenApiSchema;
+  }>;
 }
 
 interface OpenApiDocument {
@@ -106,6 +113,7 @@ interface ApiOperationDoc {
   requestSchemaName: string;
   requestFields: SchemaFieldDoc[];
   requestExample: string;
+  parameterFields: (SchemaFieldDoc & { parameterIn: 'path' | 'query' })[];
   responses: ResponseDoc[];
   schemas: SchemaDoc[];
 }
@@ -202,7 +210,25 @@ const msalClient = createMsalClient(config);
             {{ operation.requiresAuth ? 'Requires Microsoft Entra bearer token with the configured API scope and allowlisted user.' : 'Public endpoint; no bearer token required.' }}
           </p>
 
-          @if (operation.requestFields.length) {
+          @if (operation.requestFields.length || operation.parameterFields.length) {
+            @if (operation.parameterFields.length) {
+              <div class="docs-panel">
+                <h3>URL parameters</h3>
+                <div class="field-table" role="table" [attr.aria-label]="operation.summary + ' url parameters'">
+                  @for (field of operation.parameterFields; track field.name) {
+                    <div class="field-row" role="row">
+                      <div role="cell">
+                        <strong>{{ field.name }}</strong>
+                        @if (field.required) { <span class="required">required</span> }
+                      </div>
+                      <div role="cell"><code>{{ field.parameterIn }}</code></div>
+                      <div role="cell"><code>{{ field.type }}</code></div>
+                      <div role="cell">{{ field.description }}</div>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
             <div class="docs-panel">
               <h3>Request body: <code>{{ operation.requestSchemaName }}</code></h3>
               <p class="muted">Content type: {{ operation.requestContentType }}{{ operation.requestRequired ? '; required' : '; optional' }}</p>
@@ -229,6 +255,17 @@ const msalClient = createMsalClient(config);
 
             <form class="try-form" (submit)="tryOperation(operation); $event.preventDefault()">
               <h3>Try this endpoint</h3>
+              @for (field of operation.parameterFields; track field.name) {
+                <label class="field">
+                  <span>{{ field.name }} ({{ field.parameterIn }}) @if (field.required) { <em>(required)</em> }</span>
+                  <input
+                    [type]="field.inputType"
+                    [value]="inputValue(operation.id, field.name)"
+                    (input)="setInputValue(operation.id, field.name, $any($event.target).value)"
+                  />
+                  <small>{{ field.description }}</small>
+                </label>
+              }
               @for (field of operation.requestFields; track field.name) {
                 <label class="field">
                   <span>{{ field.name }} @if (field.required) { <em>(required)</em> }</span>
@@ -463,12 +500,13 @@ export class AppComponent {
       }
 
       const init: RequestInit = { method: operation.method.toUpperCase(), headers };
+      const requestUrl = this.buildRequestUrl(operation);
       if (operation.requestFields.length) {
         headers['Content-Type'] = operation.requestContentType;
         init.body = JSON.stringify(this.buildRequestBody(operation));
       }
 
-      const response = await fetch(`${config.apiBaseUrl}${operation.path}`, init);
+      const response = await fetch(requestUrl, init);
       const responseText = await response.text();
       const responseBody = parseJsonOrText(responseText);
       const formattedBody = formatBody(responseBody, true);
@@ -511,6 +549,23 @@ export class AppComponent {
     }
 
     return body;
+  }
+
+  private buildRequestUrl(operation: ApiOperationDoc): string {
+    const values = this.formValues()[operation.id] ?? {};
+    let path = operation.path;
+    const query = new URLSearchParams();
+    for (const field of operation.parameterFields) {
+      const rawValue = values[field.name] ?? '';
+      if (!field.required && rawValue === '') continue;
+      if (field.parameterIn === 'path') {
+        path = path.replace(`{${field.name}}`, encodeURIComponent(rawValue));
+      } else if (field.parameterIn === 'query') {
+        query.set(field.name, rawValue);
+      }
+    }
+    const qs = query.toString();
+    return `${config.apiBaseUrl}${path}${qs ? `?${qs}` : ''}`;
   }
 
   private setOperationLoading(operationId: string, loading: boolean): void {
@@ -573,42 +628,53 @@ async function acquireAccessToken(account: AccountInfo): Promise<string> {
 }
 
 function buildApiOperations(document: OpenApiDocument): ApiOperationDoc[] {
-  return Object.entries(document.paths).flatMap(([path, pathItem]) =>
-    (Object.entries(pathItem) as [HttpMethod, OpenApiOperation][]).map(([method, operation]) => {
-      const id = operation.operationId ?? `${method}-${path.replace(/[^a-z0-9]+/gi, '-')}`;
-      const requestMedia = operation.requestBody?.content?.['application/json'];
-      const requestSchema = resolveSchema(requestMedia?.schema);
-      const requestExample = firstExample(requestMedia?.examples) ?? exampleFromSchema(requestSchema);
-      const responses = Object.entries(operation.responses ?? {}).map(([status, response]) => {
-        const responseMedia = response.content?.['application/json'];
-        const responseSchema = resolveSchema(responseMedia?.schema);
-        return {
-          status,
-          description: response.description ?? '',
-          schemaName: schemaName(responseMedia?.schema),
-          fields: schemaFields(responseSchema),
-          example: stringifyExample(firstExample(responseMedia?.examples) ?? exampleFromSchema(responseSchema)),
-        };
-      });
+  return Object.entries(document.paths)
+    .flatMap(([path, pathItem]) =>
+      Object.entries(pathItem)
+        .filter(([method]) => httpMethods.includes(method as HttpMethod))
+        .map(([method, operation]) => {
+          const typedOperation = operation as OpenApiOperation;
+          const id = typedOperation.operationId ?? `${method}-${path.replace(/[^a-z0-9]+/gi, '-')}`;
+          const requestMedia = typedOperation.requestBody?.content?.['application/json'];
+          const requestSchema = resolveSchema(requestMedia?.schema);
+          const requestExample = firstExample(requestMedia?.examples) ?? exampleFromSchema(requestSchema);
+          const responses = Object.entries(typedOperation.responses ?? {}).map(([status, response]) => {
+            const responseMedia = response.content?.['application/json'];
+            const responseSchema = resolveSchema(responseMedia?.schema);
+            return {
+              status,
+              description: response.description ?? '',
+              schemaName: schemaName(responseMedia?.schema),
+              fields: schemaFields(responseSchema),
+              example: stringifyExample(firstExample(responseMedia?.examples) ?? exampleFromSchema(responseSchema)),
+            };
+          });
 
-      return {
-        id,
-        method,
-        path,
-        tag: operation.tags?.[0] ?? 'API',
-        summary: operation.summary ?? `${method.toUpperCase()} ${path}`,
-        description: normalizeDescription(operation.description),
-        requiresAuth: Boolean(operation.security?.length),
-        requestRequired: operation.requestBody?.required === true,
-        requestContentType: requestMedia ? 'application/json' : '',
-        requestSchemaName: schemaName(requestMedia?.schema),
-        requestFields: schemaFields(requestSchema),
-        requestExample: stringifyExample(requestExample),
-        responses,
-        schemas: relatedSchemas([requestMedia?.schema, ...responses.map((response) => response.schemaName ? { $ref: `#/components/schemas/${response.schemaName}` } : undefined)]),
-      };
-    }),
-  );
+          return {
+            id,
+            method: method as HttpMethod,
+            path,
+            tag: typedOperation.tags?.[0] ?? 'API',
+            summary: typedOperation.summary ?? `${method.toUpperCase()} ${path}`,
+            description: normalizeDescription(typedOperation.description),
+            requiresAuth: Boolean(typedOperation.security?.length),
+            requestRequired: typedOperation.requestBody?.required === true,
+            requestContentType: requestMedia ? 'application/json' : '',
+            requestSchemaName: schemaName(requestMedia?.schema),
+            requestFields: schemaFields(requestSchema),
+            requestExample: stringifyExample(requestExample),
+            parameterFields: parameterFields(typedOperation),
+            responses,
+            schemas: relatedSchemas([
+              requestMedia?.schema,
+              ...responses.map((response) =>
+                response.schemaName ? { $ref: `#/components/schemas/${response.schemaName}` } : undefined,
+              ),
+            ]),
+          };
+        }),
+    )
+    .sort((left, right) => left.path.localeCompare(right.path) || left.method.localeCompare(right.method));
 }
 
 function relatedSchemas(schemaRefs: (OpenApiSchema | string | undefined)[]): SchemaDoc[] {
@@ -667,6 +733,27 @@ function schemaFields(schema: OpenApiSchema | undefined): SchemaFieldDoc[] {
       inputType: inputTypeFor(resolved),
     };
   });
+}
+
+function parameterFields(operation: OpenApiOperation): (SchemaFieldDoc & { parameterIn: 'path' | 'query' })[] {
+  return (operation.parameters ?? [])
+    .filter((parameter) => parameter.in === 'path' || parameter.in === 'query')
+    .map((parameter) => {
+      const parameterIn = parameter.in as 'path' | 'query';
+      const schema = resolveSchema(parameter.schema) ?? parameter.schema ?? { type: 'string' };
+      return {
+        name: parameter.name,
+        type: describeType(schema),
+        required: parameter.required === true,
+        description: parameter.description ?? schema.description ?? 'No description supplied yet.',
+        defaultValue: schema.default === undefined ? '' : String(schema.default),
+        constraints: describeConstraints(schema),
+        enumValues: (schema.enum ?? []).map(String),
+        example: stringifyInlineExample(firstSchemaExample(schema)),
+        inputType: inputTypeFor(schema),
+        parameterIn,
+      };
+    });
 }
 
 function resolveSchema(schema: OpenApiSchema | undefined): OpenApiSchema | undefined {
