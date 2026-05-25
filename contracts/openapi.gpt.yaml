@@ -495,3 +495,22 @@ components:
           type: string
       required:
         - error
+
+  /api/wlh/categories/top:
+    get:
+      summary: List top wlh categories.
+  /api/wlh/categories/{categoryId}:
+    get:
+      summary: Get one wlh category.
+  /api/wlh/categories/{categoryId}/children:
+    get:
+      summary: List child categories.
+  /api/wlh/search:
+    post:
+      summary: Search wlh offers with typed filters and requiredTerms post-filter.
+  /api/wlh/offers/{adId}:
+    get:
+      summary: Get wlh offer details.
+  /api/wlh/offers/{adId}/images:
+    get:
+      summary: Get wlh offer image metadata.

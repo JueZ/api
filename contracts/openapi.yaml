@@ -937,3 +937,8 @@ components:
           $ref: "#/components/schemas/HelloUser"
           description: Selected validated token claims for the signed-in caller.
       description: Authenticated v0 Hello World response for the allowlisted user.
+
+  /api/wlh/search:
+    post:
+      summary: Search wlh offers.
+      description: Use category walk flow (top -> category -> children). Supports typed filters and requiredTerms post-filter. Search hints: multiple terms behave like AND, quoted terms can improve exact matching, and -term excludes a term.

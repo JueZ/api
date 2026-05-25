@@ -105,6 +105,10 @@ jobs:
       REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
       REPAIRABLE_ERRORS_LLM_ENABLED: ${{ vars.REPAIRABLE_ERRORS_LLM_ENABLED }}
       REPAIRABLE_ERRORS_LLM_MODEL: ${{ vars.REPAIRABLE_ERRORS_LLM_MODEL }}
+      WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
+      WLH_CATEGORY_VERSION: ${{ vars.WLH_CATEGORY_VERSION }}
+      WLH_CATEGORY_BLOB_NAME: ${{ vars.WLH_CATEGORY_BLOB_NAME }}
+      WLH_CATEGORY_BLOB_CONTAINER: ${{ vars.WLH_CATEGORY_BLOB_CONTAINER }}
       DEPLOYED_AT_UTC: ${{ github.event.head_commit.timestamp || '' }}
       DEPLOYMENT_RUN_ID: ${{ github.run_id }}
       APPLICATIONINSIGHTS_NAME: ${{ vars.APPLICATIONINSIGHTS_NAME }}
@@ -208,6 +212,9 @@ jobs:
           : "${OIDC_REQUIRED_SCOPES:?OIDC_REQUIRED_SCOPES repository variable is required for $ENVIRONMENT_NAME}"
           : "${OIDC_ALLOWED_OBJECT_IDS:?OIDC_ALLOWED_OBJECT_IDS repository variable is required for $ENVIRONMENT_NAME}"
           : "${OIDC_ALLOWED_TENANTS:?OIDC_ALLOWED_TENANTS repository variable is required for $ENVIRONMENT_NAME}"
+          : "${WLH_BASE_URL:?WLH_BASE_URL environment secret is required for $ENVIRONMENT_NAME}"
+          : "${WLH_CATEGORY_BLOB_CONTAINER:?WLH_CATEGORY_BLOB_CONTAINER variable is required for $ENVIRONMENT_NAME}"
+          : "${WLH_CATEGORY_BLOB_NAME:?WLH_CATEGORY_BLOB_NAME variable is required for $ENVIRONMENT_NAME}"
           : "${WEB_AUTH_ENABLED:?WEB_AUTH_ENABLED repository variable is required for $ENVIRONMENT_NAME}"
           if [ "$WEB_AUTH_ENABLED" != "true" ]; then
             echo "WEB_AUTH_ENABLED must be true for $ENVIRONMENT_NAME deployment after the auth milestone." >&2
@@ -298,6 +305,9 @@ jobs:
                 redditClientId="${REDDIT_CLIENT_ID:-}" \
                 redditOAuthSecret="${REDDIT_CLIENT_SECRET:-}" \
                 redditUserAgent="${REDDIT_USER_AGENT:-}" \
+            wlhBaseUrl="${WLH_BASE_URL:-}" \
+            wlhCategoryBlobContainer="${WLH_CATEGORY_BLOB_CONTAINER:-wlh-reference}" \
+            wlhCategoryBlobName="${WLH_CATEGORY_BLOB_NAME:-categories-marketplace.v1.json.gz}" \
                 openAiCredential="$openai_credential" \
                 repairableErrorsLlmEnabled="${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" \
                 repairableErrorsLlmModel="${REPAIRABLE_ERRORS_LLM_MODEL:-}" \
