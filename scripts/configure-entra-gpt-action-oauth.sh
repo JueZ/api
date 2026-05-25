@@ -242,6 +242,8 @@ Scope: $scope_uri
 Production API base URL: $PRODUCTION_API_BASE_URL
 OpenAPI schema file:
   - combined: contracts/openapi.gpt.yaml
+
+
 Registered redirect URIs: $(jq -r 'join(", ")' <<<"$requested_redirect_uris_json")
 Admin consent status: $consent_status
 Recommended OIDC_ALLOWED_DELEGATED_CLIENT_IDS: $allowed_delegated_client_ids
