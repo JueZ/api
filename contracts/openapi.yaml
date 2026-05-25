@@ -386,6 +386,97 @@ paths:
                     caller_instruction: Retry later with the same request. Do not invent alternative request parameters for this upstream failure.
                     safe_debug_summary: Sanitized Reddit dependency failure diagnosis.
                     analysis_mode: fallback
+  /api/wlh/categories/top:
+    get:
+      operationId: getWlhCategoriesTop
+      summary: List top wlh categories
+      security:
+        - entraOAuth2:
+            - api.access
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/WlhCategory" }
+  /api/wlh/categories/{categoryId}:
+    get:
+      operationId: getWlhCategory
+      summary: Get one wlh category
+      security:
+        - entraOAuth2:
+            - api.access
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/WlhCategory" } } } }
+        "404": { description: Not found }
+  /api/wlh/categories/{categoryId}/children:
+    get:
+      operationId: getWlhCategoryChildren
+      summary: List child wlh categories
+      security:
+        - entraOAuth2:
+            - api.access
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/WlhCategory" } } } } }
+  /api/wlh/search:
+    post:
+      operationId: postWlhSearch
+      summary: Search wlh offers
+      security:
+        - entraOAuth2:
+            - api.access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WlhSearchRequest" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/WlhSearchResponse" } } } }
+        "400": { description: Bad request }
+        "404": { description: Not found }
+        "429": { description: Rate limited }
+        "502": { description: Upstream failure }
+  /api/wlh/offers/{adId}:
+    get:
+      operationId: getWlhOffer
+      summary: Get wlh offer detail
+      security:
+        - entraOAuth2:
+            - api.access
+      parameters:
+        - name: adId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/WlhOfferDetail" } } } }
+  /api/wlh/offers/{adId}/images:
+    get:
+      operationId: getWlhOfferImages
+      summary: Get wlh offer images
+      security:
+        - entraOAuth2:
+            - api.access
+      parameters:
+        - name: adId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { source: {type: string}, adId: {type: string}, images: {type: array, items: {$ref: "#/components/schemas/WlhImage"}} } } } } }
+
 components:
   securitySchemes:
     bearerJwt:
@@ -403,6 +494,47 @@ components:
           scopes:
             api.access: Access the v0 API catalogue.
   schemas:
+    WlhCategory:
+      type: object
+      additionalProperties: false
+      properties: { id: {type: string}, label: {type: string}, path: {type: string}, depth: {type: number}, parentId: {type: string}, hitCount: {type: number}, hasChildren: {type: boolean} }
+      required: [id,label,path,depth,hasChildren]
+    WlhSearchRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        categoryId: { type: string }
+        keyword: { type: string }
+        priceFrom: { type: number }
+        priceTo: { type: number }
+        areaId: { type: string }
+        paylivery: { type: boolean }
+        rows: { type: integer, minimum: 1, maximum: 100 }
+        page: { type: integer, minimum: 1 }
+        condition: { type: string, enum: [new, like_new, used, defect] }
+        delivery: { type: array, items: { type: string, enum: [pickup, shipping] } }
+        requiredTerms: { type: array, items: { type: string } }
+      required: [categoryId]
+    WlhImage:
+      type: object
+      additionalProperties: false
+      properties: { id: {type: string}, url: {type: string} }
+      required: [id,url]
+    WlhSearchResult:
+      type: object
+      additionalProperties: false
+      properties: { id: {type: string}, title: {type: string}, priceAmount: {type: [number, "null"]}, priceDisplay: {type: string}, location: {type: string}, url: {type: string}, imageCount: {type: number}, thumbnailUrl: {type: string} }
+      required: [id,title,priceAmount,priceDisplay,location,url,imageCount]
+    WlhSearchResponse:
+      type: object
+      additionalProperties: false
+      properties: { source: {type: string}, fetchedAt: {type: string}, sourceUrl: {type: string}, rowsFound: {type: [number, "null"]}, rowsReturned: {type: number}, filteredRowsReturned: {type: number}, category: { $ref: "#/components/schemas/WlhCategory" }, results: { type: array, items: { $ref: "#/components/schemas/WlhSearchResult" } } }
+      required: [source,fetchedAt,sourceUrl,rowsFound,rowsReturned,filteredRowsReturned,category,results]
+    WlhOfferDetail:
+      type: object
+      additionalProperties: true
+      properties: { id: {type: string}, title: {type: string}, description: {type: string}, priceAmount: {type: [number, "null"]}, priceDisplay: {type: string}, location: {type: string}, postcode: {type: string}, state: {type: string}, paylivery: {type: [boolean, "null"]}, images: {type: array, items: {$ref: "#/components/schemas/WlhImage"}} }
+      required: [id,title,description,priceAmount,priceDisplay,location,paylivery,images]
     ErrorResponse:
       type: object
       additionalProperties: true
