@@ -393,7 +393,21 @@ paths:
       security:
         - entraOAuth2:
             - api.access
-      responses: { "200": { description: OK }, "401": { description: Unauthorized } }
+      responses:
+        "200":
+          description: Top-level categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WlhCategory"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
   /api/wlh/categories/{categoryId}:
     get:
       operationId: getWlhCategory
@@ -401,8 +415,25 @@ paths:
       security:
         - entraOAuth2:
             - api.access
-      parameters: [{ name: categoryId, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: OK }, "404": { description: Not found } }
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WlhCategory"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/wlh/categories/{categoryId}/children:
     get:
       operationId: getWlhCategoryChildren
@@ -410,8 +441,27 @@ paths:
       security:
         - entraOAuth2:
             - api.access
-      parameters: [{ name: categoryId, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: OK }, "404": { description: Not found } }
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Child categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WlhCategory"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/wlh/search:
     post:
       operationId: postWlhSearch
@@ -419,8 +469,43 @@ paths:
       security:
         - entraOAuth2:
             - api.access
-      requestBody: { required: true, content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: OK }, "400": { description: Bad request }, "404": { description: Not found }, "429": { description: Rate limited }, "502": { description: Upstream failure } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WlhSearchRequest"
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WlhSearchResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Upstream failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/wlh/offers/{adId}:
     get:
       operationId: getWlhOffer
@@ -428,8 +513,23 @@ paths:
       security:
         - entraOAuth2:
             - api.access
-      parameters: [{ name: adId, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: OK }, "429": { description: Rate limited }, "502": { description: Upstream failure } }
+      parameters:
+        - name: adId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Offer detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WlhOfferDetail"
+        "429":
+          description: Rate limited
+        "502":
+          description: Upstream failure
   /api/wlh/offers/{adId}/images:
     get:
       operationId: getWlhOfferImages
@@ -437,8 +537,31 @@ paths:
       security:
         - entraOAuth2:
             - api.access
-      parameters: [{ name: adId, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: OK }, "429": { description: Rate limited }, "502": { description: Upstream failure } }
+      parameters:
+        - name: adId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Offer images
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  source: { type: string, description: Source system marker (`wlh`). }
+                  adId: { type: string }
+                  images:
+                    type: array
+                    items: { $ref: "#/components/schemas/WlhImage" }
+                required: [source, adId, images]
+        "429":
+          description: Rate limited
+        "502":
+          description: Upstream failure
 
 components:
   securitySchemes:
@@ -457,6 +580,123 @@ components:
           scopes:
             api.access: Access the v0 API catalogue.
   schemas:
+    WlhCategory:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string, description: Category identifier. }
+        label: { type: string, description: Category display label. }
+        path: { type: string, description: Category hierarchy path. }
+        depth: { type: number, description: Category depth in tree. }
+        parentId: { type: string, description: Parent category identifier. }
+        hitCount: { type: number, description: Approximate listing count. }
+        hasChildren: { type: boolean, description: True when child categories exist. }
+        url: { type: string, description: Category route path resolved against WLH_BASE_URL. }
+      required: [id, label, path, depth, hasChildren]
+    WlhSearchRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        categoryId: { type: string, description: Required category identifier for search. }
+        keyword: { type: string, description: Optional free-text search query. }
+        priceFrom: { type: number, description: Optional lower price bound. }
+        priceTo: { type: number, description: Optional upper price bound. }
+        areaId: { type: string, description: Optional area identifier. }
+        paylivery: { type: boolean, description: Restrict to listings with paylivery support. }
+        rows: { type: integer, minimum: 1, maximum: 100, description: Page size (default 30). }
+        page: { type: integer, minimum: 1, description: Page number (default 1). }
+        condition: { type: string, enum: [new, like_new, used, defect], description: Typed condition filter. }
+        delivery:
+          type: array
+          items: { type: string, enum: [pickup, shipping] }
+          description: Typed delivery filters.
+        requiredTerms:
+          type: array
+          items: { type: string }
+          description: Post-filter terms; all non-empty terms must match title/body.
+      required: [categoryId]
+    WlhImage:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string, description: Listing identifier. }
+        url: { type: string, description: Canonical listing URL resolved from runtime base URL. }
+      required: [id, url]
+    WlhSearchResult:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string, description: Listing identifier. }
+        title: { type: string, description: Listing title. }
+        priceAmount: { type: [number, "null"], description: Parsed numeric price amount when available. }
+        priceDisplay: { type: string, description: Human-readable price string. }
+        location: { type: string, description: Location label for the listing/offer. }
+        postcode: { type: string, description: Postal code when available. }
+        state: { type: string, description: Region/state value when available. }
+        publishedAt: { type: string, description: Published timestamp from upstream payload. }
+        changedAt: { type: string, description: Last changed timestamp from upstream payload. }
+        paylivery: { type: [boolean, "null"], description: True when paylivery options are detected. }
+        sellerId: { type: string, description: Seller identifier when present. }
+        url: { type: string, description: Canonical listing URL resolved from runtime base URL. }
+        imageCount: { type: number, description: Number of known images for the listing. }
+        thumbnailUrl: { type: string, description: Preferred thumbnail URL when available. }
+      required: [id, title, priceAmount, priceDisplay, location, url, imageCount]
+    WlhSearchResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        source: { type: string, description: Source system marker (`wlh`). }
+        fetchedAt: { type: string, description: UTC fetch timestamp. }
+        sourceUrl: { type: string, description: Source URL used for upstream fetch. }
+        rowsFound: { type: [number, "null"], description: Upstream reported total rows found. }
+        rowsReturned: { type: number, description: Raw rows returned before requiredTerms filtering. }
+        filteredRowsReturned: { type: number, description: Rows returned after requiredTerms filtering. }
+        category: { $ref: "#/components/schemas/WlhCategory" }
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/WlhSearchResult" }
+      required: [source, fetchedAt, sourceUrl, rowsFound, rowsReturned, filteredRowsReturned, category, results]
+    WlhOfferDetail:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string, description: Listing identifier. }
+        title: { type: string, description: Listing title. }
+        description: { type: string, description: HTML-cleaned offer description text. }
+        priceAmount: { type: [number, "null"], description: Parsed numeric price amount when available. }
+        priceDisplay: { type: string, description: Human-readable price string. }
+        location: { type: string, description: Location label for the listing/offer. }
+        postcode: { type: string, description: Postal code when available. }
+        state: { type: string, description: Region/state value when available. }
+        publishedAt: { type: string, description: Published timestamp from upstream payload. }
+        changedAt: { type: string, description: Last changed timestamp from upstream payload. }
+        status: { type: string, description: Offer status identifier. }
+        seller:
+          type: object
+          additionalProperties: false
+          properties:
+            id: { type: string, description: Listing identifier. }
+            name: { type: string }
+          required: [id, name]
+        paylivery: { type: [boolean, "null"], description: True when paylivery options are detected. }
+        images:
+          type: array
+          items: { $ref: "#/components/schemas/WlhImage" }
+        deliveryOptions:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              carrier: { type: string, description: Delivery carrier display name. }
+              parcelSize: { type: string, description: Parcel size label. }
+              price: { description: Delivery price payload value. }
+              originalPrice: { description: Original delivery price payload value. }
+              description: { type: string, description: HTML-cleaned offer description text. }
+              deliveryDays: { description: Delivery day range payload value. }
+              insurance: { description: Delivery insurance payload value. }
+      required: [id, title, description, priceAmount, priceDisplay, location, images]
+
     ErrorResponse:
       type: object
       additionalProperties: true
@@ -501,7 +741,7 @@ components:
           type: string
           description: Top-level request field path. JSON Pointer (/post) and JSONPath-style ($.post) forms are accepted in diagnostic repair plans.
         value_hint: { type: string }
-        operation_id: { type: string }
+        operation_id: { type: string, description: Listing identifier. }
         reason: { type: string }
     JsonPatchOperation:
       type: object
@@ -524,7 +764,7 @@ components:
       required: [type, title, status, detail, instance, rec_version, operation_id, diagnostic_id, classification, repairable, confidence, retry_policy, caller_instruction, safe_debug_summary, analysis_mode]
       properties:
         type: { type: string }
-        title: { type: string }
+        title: { type: string, description: Listing title. }
         status: { type: integer, minimum: 400, maximum: 599 }
         detail: { type: string }
         instance:
@@ -532,9 +772,9 @@ components:
           description: Concrete diagnostic occurrence URI in the form urn:diagnostic:<diagnostic_id>.
           example: urn:diagnostic:diag_example_invalid_json
         rec_version: { type: string, enum: ["1.0"] }
-        operation_id: { type: string }
-        diagnostic_id: { type: string }
-        trace_id: { type: string }
+        operation_id: { type: string, description: Listing identifier. }
+        diagnostic_id: { type: string, description: Listing identifier. }
+        trace_id: { type: string, description: Listing identifier. }
         classification:
           type: string
           enum: [caller_contract_violation, semantic_precondition_missing, resource_not_found, authorization_context_mismatch, version_skew, dependency_failure, capacity_or_timeout, service_bug_likely, security_suspicious, diagnostic_uncertain]
