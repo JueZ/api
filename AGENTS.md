@@ -47,6 +47,10 @@ The normal loop is mandatory for every repository-changing task unless the user 
 9. Production smoke tests run.
 10. If smoke tests fail, automation must fail closed and create a repair issue or PR.
 
+Codex must actively work toward this outcome end-to-end: fix failing checks (within repair-loop limits), achieve merge, and complete staged deployment (test then production when enabled and not explicitly skipped).
+
+For deployable/runtime-impacting changes, Codex should use GitHub CLI and Azure CLI diagnostics to validate test-environment deployment health and smoke behavior directly (without exposing secrets), and then continue the PR repair loop until merge/deploy gates pass or a concrete blocker is reported.
+
 ## No-human auto-merge rules
 
 Human review is not required for routine changes if all required checks pass.
