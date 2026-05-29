@@ -3,7 +3,13 @@ import test from 'node:test';
 import { validateReleaseLedger } from '../validate-release-ledger.mjs';
 import { parseRepairIssueBody, decideRepairIssueAction } from '../triage-repair-issues.mjs';
 import { forbiddenDiffFindings, highRiskPaths } from '../policy-guardrails.mjs';
-import { missingServiceAuthFields, selectServiceAuthConfig } from '../mint-smoke-token.mjs';
+import { DEFAULT_SMOKE_FETCH_TIMEOUT_MS, fetchJson, fetchWithTimeout, getSmokeFetchTimeoutMs, isTimeoutError } from '../lib/smoke-utils.mjs';
+import {
+  missingServiceAuthFields,
+  parseSmokeTokenFetchTimeoutMs,
+  sanitizeTokenEndpointErrorCode,
+  selectServiceAuthConfig,
+} from '../mint-smoke-token.mjs';
 
 test('release ledger validation accepts required runtime truth fields', () => {
   const ledger = {
@@ -61,4 +67,117 @@ test('smoke token mint config detects missing service variables', () => {
 
   assert.equal(config.prefix, 'TEST');
   assert.deepEqual(missingServiceAuthFields(config), ['tenantId', 'scope']);
+});
+
+
+test('smoke token timeout override defaults and validates safe bounds', () => {
+  assert.equal(parseSmokeTokenFetchTimeoutMs({}), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
+  assert.equal(parseSmokeTokenFetchTimeoutMs({ SMOKE_FETCH_TIMEOUT_MS: '2500' }), 2500);
+  assert.equal(parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '1500' }), 1500);
+  assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '0' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
+  assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '120001' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
+  assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: 'secret-ish' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
+});
+
+test('smoke token endpoint error code sanitizer avoids unsafe response text', () => {
+  assert.equal(sanitizeTokenEndpointErrorCode('invalid_client'), 'invalid_client');
+  assert.equal(sanitizeTokenEndpointErrorCode('invalid client: token abc123'), '');
+  assert.equal(sanitizeTokenEndpointErrorCode('x'.repeat(97)), '');
+});
+
+test('fetchWithTimeout aborts slow fetch calls', async () => {
+  const originalFetch = globalThis.fetch;
+  const keepAlive = setTimeout(() => {}, 50);
+  globalThis.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+  });
+
+  try {
+    await assert.rejects(
+      fetchWithTimeout('https://example.test', {}, 1),
+      (error) => isTimeoutError(error),
+    );
+  } finally {
+    clearTimeout(keepAlive);
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('smoke fetch timeout config uses safe defaults and positive overrides', () => {
+  assert.equal(getSmokeFetchTimeoutMs(undefined), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
+  assert.equal(getSmokeFetchTimeoutMs(''), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
+  assert.equal(getSmokeFetchTimeoutMs('0'), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
+  assert.equal(getSmokeFetchTimeoutMs('2500.9'), 2500);
+});
+
+test('fetchJson applies timeouts while preserving caller fetch options', async () => {
+  const originalFetch = globalThis.fetch;
+  const seen = {};
+  try {
+    globalThis.fetch = async (url, options) => {
+      seen.url = url;
+      seen.options = options;
+      return new Response('{"ok":true}', { status: 201 });
+    };
+
+    const headers = { 'X-Smoke-Run-Id': 'smoke-test' };
+    const result = await fetchJson('https://example.test/data', {
+      method: 'POST',
+      headers,
+      body: 'payload',
+      redirect: 'manual',
+      timeoutMs: 5000,
+    });
+
+    assert.equal(result.response.status, 201);
+    assert.deepEqual(result.json, { ok: true });
+    assert.equal(seen.url, 'https://example.test/data');
+    assert.equal(seen.options.method, 'POST');
+    assert.equal(seen.options.headers, headers);
+    assert.equal(seen.options.body, 'payload');
+    assert.equal(seen.options.redirect, 'manual');
+    assert.ok(seen.options.signal instanceof AbortSignal);
+    assert.equal('timeoutMs' in seen.options, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('smoke and release ledger modules import without operational side effects', async (t) => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { existsSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join, resolve } = await import('node:path');
+  const { pathToFileURL } = await import('node:url');
+
+  const originalCwd = process.cwd();
+  const originalFetch = globalThis.fetch;
+  const originalApiBaseUrl = process.env.API_BASE_URL;
+  const tempDir = await mkdtemp(join(tmpdir(), 'ops-script-import-'));
+  let fetchCalls = 0;
+
+  t.after(async () => {
+    process.chdir(originalCwd);
+    globalThis.fetch = originalFetch;
+    if (originalApiBaseUrl === undefined) delete process.env.API_BASE_URL; else process.env.API_BASE_URL = originalApiBaseUrl;
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  delete process.env.API_BASE_URL;
+  process.chdir(tempDir);
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error('import should not fetch');
+  };
+
+  const cacheBust = `?importSafety=${Date.now()}`;
+  const runtimeSmoke = await import(`${pathToFileURL(resolve(originalCwd, 'scripts/smoke-runtime.mjs')).href}${cacheBust}`);
+  const authSmoke = await import(`${pathToFileURL(resolve(originalCwd, 'scripts/smoke-auth.mjs')).href}${cacheBust}`);
+  const releaseLedger = await import(`${pathToFileURL(resolve(originalCwd, 'scripts/write-release-ledger.mjs')).href}${cacheBust}`);
+
+  assert.equal(typeof runtimeSmoke.runRuntimeSmoke, 'function');
+  assert.equal(typeof authSmoke.runAuthenticatedSmoke, 'function');
+  assert.equal(typeof releaseLedger.writeReleaseLedger, 'function');
+  assert.equal(fetchCalls, 0);
+  assert.equal(existsSync(join(tempDir, 'release-ledger.json')), false);
 });
