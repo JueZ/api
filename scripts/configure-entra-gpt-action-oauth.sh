@@ -168,12 +168,20 @@ if [ "$permission_exists" != "true" ]; then
 fi
 
 consent_status="not-attempted"
-if az ad app permission admin-consent --id "$gpt_app_id" >/tmp/gpt-action-admin-consent.out 2>/tmp/gpt-action-admin-consent.err; then
+admin_consent_out=""
+admin_consent_err=""
+cleanup_admin_consent_temp_files() {
+  [ -z "$admin_consent_out" ] || rm -f "$admin_consent_out"
+  [ -z "$admin_consent_err" ] || rm -f "$admin_consent_err"
+}
+trap cleanup_admin_consent_temp_files EXIT
+admin_consent_out="$(mktemp "${TMPDIR:-/tmp}/gpt-action-admin-consent.out.XXXXXX")"
+admin_consent_err="$(mktemp "${TMPDIR:-/tmp}/gpt-action-admin-consent.err.XXXXXX")"
+if az ad app permission admin-consent --id "$gpt_app_id" >"$admin_consent_out" 2>"$admin_consent_err"; then
   consent_status="granted-or-already-present"
 else
   consent_status="manual-admin-consent-may-be-required"
 fi
-rm -f /tmp/gpt-action-admin-consent.out /tmp/gpt-action-admin-consent.err
 
 if bool_is_true "$DELETE_EXISTING_CLIENT_SECRETS"; then
   echo "Deleting existing client secret credential(s) with display name '$DELETE_CLIENT_SECRET_DISPLAY_NAME'."
