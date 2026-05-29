@@ -35,11 +35,15 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
+        shell: bash
         run: |
+          set -euo pipefail
           if [ -f package-lock.json ]; then
             npm ci
           elif [ -f package.json ]; then
             npm install
+          else
+            echo "No root package.json found; install check is not applicable yet."
           fi
       - name: Triage repair issues
         env:
