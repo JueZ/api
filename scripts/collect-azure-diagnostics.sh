@@ -22,7 +22,6 @@ case "$environment_name" in
     ;;
   prod)
     resource_group="rg-api-prod"
-    prod_function_app="func-api-catalogue-prod-bfjstshehpbfk"
     ;;
   *)
     usage >&2
@@ -76,27 +75,51 @@ run_required "Resource group ${resource_group}" \
   az group show --name "$resource_group" --query "{name:name,location:location}" --output table
 
 section "Discover Function App"
-if [[ "$environment_name" == "prod" ]]; then
-  function_app="$prod_function_app"
-  printf '%s\n' "$function_app"
-else
-  function_apps=$(az resource list \
-    --resource-group "$resource_group" \
-    --resource-type Microsoft.Web/sites \
-    --query "[?contains(kind, 'functionapp')].name" \
-    --output tsv)
-  status=$?
-  if [[ $status -ne 0 ]]; then
-    printf 'ERROR: failed to discover Function Apps (exit code %s).\n' "$status" >&2
-    exit "$status"
-  fi
-  function_app=$(printf '%s\n' "$function_apps" | sed '/^$/d' | head -n 1)
+function_apps=$(az resource list \
+  --resource-group "$resource_group" \
+  --resource-type Microsoft.Web/sites \
+  --query "sort([?contains(kind, 'functionapp')].name)" \
+  --output tsv)
+status=$?
+if [[ $status -ne 0 ]]; then
+  printf 'ERROR: failed to discover Function Apps (exit code %s).\n' "$status" >&2
+  exit "$status"
+fi
+
+mapfile -t discovered_function_apps < <(printf '%s\n' "$function_apps" | sed '/^$/d')
+function_app_override="${AZURE_FUNCTIONAPP_NAME:-${FUNCTION_APP_NAME:-}}"
+
+if [[ ${#discovered_function_apps[@]} -eq 0 ]]; then
+  printf 'ERROR: no Function App found in %s.\n' "$resource_group" >&2
+  exit 1
+fi
+
+if [[ -n "$function_app_override" ]]; then
+  function_app=""
+  for discovered_function_app in "${discovered_function_apps[@]}"; do
+    if [[ "$discovered_function_app" == "$function_app_override" ]]; then
+      function_app="$discovered_function_app"
+      break
+    fi
+  done
+
   if [[ -z "$function_app" ]]; then
-    printf 'ERROR: no Function App found in %s.\n' "$resource_group" >&2
+    printf 'ERROR: requested Function App override %q was not found in %s. Discovered Function Apps: %s\n' \
+      "$function_app_override" \
+      "$resource_group" \
+      "$(printf '%s ' "${discovered_function_apps[@]}" | sed 's/ $//')" >&2
     exit 1
   fi
-  printf '%s\n' "$function_app"
+elif [[ ${#discovered_function_apps[@]} -eq 1 ]]; then
+  function_app="${discovered_function_apps[0]}"
+else
+  printf 'ERROR: multiple Function Apps found in %s. Set AZURE_FUNCTIONAPP_NAME or FUNCTION_APP_NAME to one of: %s\n' \
+    "$resource_group" \
+    "$(printf '%s ' "${discovered_function_apps[@]}" | sed 's/ $//')" >&2
+  exit 1
 fi
+
+printf '%s\n' "$function_app"
 
 run_required "Function App state" \
   az functionapp show \
