@@ -1,4 +1,4 @@
-import type { RedditCommentDto, RedditPostDto, RedditRateLimit, RedditSort, RedditThreadResponse, RedditThreadStats } from './types.js';
+import type { RedditCommentContinuationDto, RedditCommentDto, RedditCommentTreeResponse, RedditCommentTreeStats, RedditPostDto, RedditRateLimit, RedditSort, RedditThreadResponse, RedditThreadStats } from './types.js';
 
 export interface RedditListing<T = unknown> {
   kind?: string;
@@ -20,6 +20,15 @@ export interface MorePlaceholder {
 
 export interface NormalizedCommentTree {
   post: RedditPostDto;
+  comments: RedditCommentDto[];
+  commentByFullname: Map<string, RedditCommentDto>;
+  more: MorePlaceholder[];
+  commentsReturned: number;
+  truncated: boolean;
+  warnings: string[];
+}
+
+export interface NormalizedCommentBlock {
   comments: RedditCommentDto[];
   commentByFullname: Map<string, RedditCommentDto>;
   more: MorePlaceholder[];
@@ -59,7 +68,7 @@ export function normalizeInitialThread(
 }
 
 export function attachMoreChildren(
-  tree: NormalizedCommentTree,
+  tree: NormalizedCommentTree | NormalizedCommentBlock,
   things: unknown,
   parentId: string,
   depth: number,
@@ -104,23 +113,103 @@ export function attachMoreChildren(
 export function createThreadResponse(
   input: string,
   tree: NormalizedCommentTree,
-  stats: Omit<RedditThreadStats, 'commentsReturned'>,
+  stats: Omit<RedditThreadStats, 'commentsReturned' | 'continuationsReturned'>,
   rateLimit: RedditRateLimit,
   fetchedAt: Date = new Date(),
 ): RedditThreadResponse {
+  const commentContinuations = continuationDtos(tree.more);
   return {
     source: 'reddit',
     fetchedAt: fetchedAt.toISOString(),
     input,
     post: tree.post,
     comments: tree.comments,
+    commentContinuations,
     stats: {
       ...stats,
       commentsReturned: tree.commentsReturned,
       truncated: stats.truncated || tree.truncated,
       warnings: [...new Set([...tree.warnings, ...stats.warnings])],
+      continuationsReturned: commentContinuations.length,
     },
     redditRateLimit: rateLimit,
+  };
+}
+
+export function createCommentTreeResponse(
+  input: string,
+  post: RedditPostDto,
+  block: NormalizedCommentBlock,
+  stats: Omit<RedditCommentTreeStats, 'commentsReturned' | 'continuationsReturned'>,
+  rateLimit: RedditRateLimit,
+  details: { mode: 'comment' | 'children'; rootCommentId?: string; parentId?: string; requestedChildren?: string[] },
+  fetchedAt: Date = new Date(),
+): RedditCommentTreeResponse {
+  const commentContinuations = continuationDtos(block.more);
+  return {
+    source: 'reddit',
+    fetchedAt: fetchedAt.toISOString(),
+    input,
+    post,
+    mode: details.mode,
+    ...(details.rootCommentId ? { rootCommentId: details.rootCommentId } : {}),
+    ...(details.parentId ? { parentId: details.parentId } : {}),
+    ...(details.requestedChildren ? { requestedChildren: details.requestedChildren } : {}),
+    comments: block.comments,
+    commentContinuations,
+    stats: {
+      ...stats,
+      commentsReturned: block.commentsReturned,
+      truncated: stats.truncated || block.truncated,
+      warnings: [...new Set([...block.warnings, ...stats.warnings])],
+      continuationsReturned: commentContinuations.length,
+    },
+    redditRateLimit: rateLimit,
+  };
+}
+
+export function normalizeCommentBlockFromThings(
+  things: unknown,
+  parentId: string,
+  depth: number,
+  options: NormalizeOptions,
+): NormalizedCommentBlock {
+  const state = createNormalizeState(options.maxComments);
+  const comments: RedditCommentDto[] = [];
+  for (const thing of assertMoreChildrenListing(things)) {
+    if (state.commentsReturned >= state.maxComments) {
+      markTruncated(state, 'maxComments limit reached while parsing comment block.');
+      break;
+    }
+    if (thing.kind === 't1' && thing.data && typeof thing.data === 'object') {
+      const comment = normalizeComment(thing.data as Record<string, unknown>, depth, state);
+      if (comment) {
+        const parent = state.commentByFullname.get(comment.parentId) ?? state.commentByFullname.get(parentId);
+        if (parent) parent.replies.push(comment);
+        else comments.push(comment);
+      }
+    } else if (thing.kind === 'more') {
+      collectMore(thing.data, parentId, depth, state);
+    }
+  }
+  return { comments, commentByFullname: state.commentByFullname, more: state.more, commentsReturned: state.commentsReturned, truncated: state.truncated, warnings: state.warnings };
+}
+
+export function normalizeFocusedCommentBlock(
+  listings: unknown,
+  options: NormalizeOptions,
+): { post: RedditPostDto; block: NormalizedCommentBlock } {
+  const tree = normalizeInitialThread('', listings, options);
+  return {
+    post: tree.post,
+    block: {
+      comments: tree.comments,
+      commentByFullname: tree.commentByFullname,
+      more: tree.more,
+      commentsReturned: tree.commentsReturned,
+      truncated: tree.truncated,
+      warnings: tree.warnings,
+    },
   };
 }
 
@@ -297,4 +386,24 @@ export function commentsQuery(sort: RedditSort, maxComments: number): Record<str
     limit: Math.min(maxComments, 500),
     depth: 10,
   };
+}
+
+export function focusedCommentsQuery(sort: RedditSort, commentId: string, depth: number, limit: number): Record<string, string | number> {
+  return {
+    raw_json: 1,
+    sort,
+    comment: commentId,
+    context: 0,
+    depth,
+    limit: Math.min(limit, 500),
+  };
+}
+
+function continuationDtos(more: MorePlaceholder[]): RedditCommentContinuationDto[] {
+  return more.map((placeholder) => ({
+    parentId: placeholder.parentId,
+    depth: placeholder.depth,
+    children: placeholder.children,
+    childCount: placeholder.children.length,
+  }));
 }

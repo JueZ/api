@@ -218,11 +218,13 @@ paths:
                         createdUtc: 1767225660
                         depth: 0
                         replies: []
+                    commentContinuations: []
                     stats:
                       commentsReturned: 1
                       moreChildrenRequests: 0
                       truncated: false
                       warnings: []
+                      continuationsReturned: 0
                     redditRateLimit:
                       used: "12.0"
                       remaining: "588.0"
@@ -386,6 +388,83 @@ paths:
                     caller_instruction: Retry later with the same request. Do not invent alternative request parameters for this upstream failure.
                     safe_debug_summary: Sanitized Reddit dependency failure diagnosis.
                     analysis_mode: fallback
+  /api/reddit/comment-tree:
+    post:
+      operationId: postRedditCommentTree
+      summary: Fetch a bounded Reddit comment block or subtree
+      description: |
+        Protected endpoint for staged loading of large Reddit discussions. Call `/api/reddit/thread`
+        with small limits first, then use `commentId` to fetch a focused subtree or `children` plus
+        `parentId` from a returned continuation handle to load omitted comment blocks. The backend
+        calls fixed Reddit OAuth API endpoints and keeps each response bounded.
+      tags:
+        - Reddit
+      security:
+        - bearerJwt: []
+        - entraOAuth2:
+            - api.access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RedditCommentTreeRequest"
+            examples:
+              byCommentId:
+                value:
+                  post: https://www.reddit.com/r/redditdev/comments/abc123/example/
+                  commentId: def456
+                  depth: 3
+                  limit: 100
+              byContinuation:
+                value:
+                  post: abc123
+                  parentId: t1_def456
+                  children: ghi789,jkl012
+                  limit: 100
+      responses:
+        "200":
+          description: Bounded normalized Reddit comment block with optional continuation handles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedditCommentTreeResponse"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "403":
+          description: Forbidden or inaccessible Reddit content.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
+        "404":
+          description: Reddit post or comment not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
+        "429":
+          description: Reddit rate limited the backend.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
+        "502":
+          description: Reddit dependency failure.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
   /api/wlh/categories/top:
     get:
       operationId: getWlhCategoriesTop
@@ -1078,6 +1157,131 @@ components:
           examples:
             - []
       description: Normalized Reddit comment node. Replies recursively contain more RedditComment objects.
+    RedditCommentContinuation:
+      type: object
+      additionalProperties: false
+      required:
+        - parentId
+        - depth
+        - children
+        - childCount
+      properties:
+        parentId:
+          type: string
+          description: Parent fullname for the omitted block, usually `t1_...` or `t3_...`.
+          examples:
+            - t1_def456
+        depth:
+          type: integer
+          description: Depth to use when normalizing returned children.
+          examples:
+            - 1
+        children:
+          type: array
+          items:
+            type: string
+          description: Reddit comment IDs that can be sent to `/api/reddit/comment-tree` as a comma-separated string or array.
+          examples:
+            - [ghi789, jkl012]
+        childCount:
+          type: integer
+          description: Number of child IDs in this continuation handle.
+          examples:
+            - 2
+      description: Follow-up handle for omitted Reddit comments.
+    RedditCommentTreeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - post
+      properties:
+        post:
+          type: string
+          description: Same Reddit post input formats accepted by `/api/reddit/thread`.
+        commentId:
+          type: string
+          description: Raw Reddit comment ID or `t1_` fullname for focused subtree loading. Exactly one of `commentId` or `children` is required.
+        children:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          description: Omitted child comment IDs from a continuation handle, either comma-separated or an array. Exactly one of `commentId` or `children` is required.
+        parentId:
+          type: string
+          description: Optional parent fullname from the continuation handle.
+        sort:
+          type: string
+          enum: [confidence, top, new, controversial, old, qa]
+          default: confidence
+        depth:
+          type: integer
+          minimum: 0
+          maximum: 10
+          default: 3
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+        maxMoreChildrenRequests:
+          type: integer
+          minimum: 0
+          maximum: 5000
+          default: 0
+      description: Payload for loading one bounded Reddit comment subtree or continuation block.
+    RedditCommentTreeResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - source
+        - fetchedAt
+        - input
+        - post
+        - mode
+        - comments
+        - commentContinuations
+        - stats
+        - redditRateLimit
+      properties:
+        source:
+          type: string
+          const: reddit
+        fetchedAt:
+          type: string
+          format: date-time
+        input:
+          type: string
+        post:
+          $ref: "#/components/schemas/RedditPost"
+        mode:
+          type: string
+          enum: [comment, children]
+        rootCommentId:
+          type: string
+          description: Normalized root comment ID when `commentId` mode is used.
+        parentId:
+          type: string
+          description: Parent fullname when `children` mode is used.
+        requestedChildren:
+          type: array
+          items:
+            type: string
+          description: Normalized child IDs requested in `children` mode.
+        comments:
+          type: array
+          items:
+            $ref: "#/components/schemas/RedditComment"
+        commentContinuations:
+          type: array
+          items:
+            $ref: "#/components/schemas/RedditCommentContinuation"
+        stats:
+          $ref: "#/components/schemas/RedditThreadStats"
+        redditRateLimit:
+          $ref: "#/components/schemas/RedditRateLimit"
+      description: Bounded Reddit comment block returned for staged loading.
     RedditThreadStats:
       type: object
       additionalProperties: false
@@ -1086,6 +1290,7 @@ components:
         - moreChildrenRequests
         - truncated
         - warnings
+        - continuationsReturned
       properties:
         commentsReturned:
           type: integer
@@ -1109,6 +1314,11 @@ components:
           description: Human-readable warnings about truncation, inaccessible comments, or upstream limitations.
           examples:
             - []
+        continuationsReturned:
+          type: integer
+          description: Number of continuation handles returned for staged follow-up loading.
+          examples:
+            - 0
       description: Fetch and normalization statistics for the Reddit thread response.
     RedditRateLimit:
       type: object
@@ -1150,6 +1360,7 @@ components:
         - input
         - post
         - comments
+        - commentContinuations
         - stats
         - redditRateLimit
       properties:
@@ -1178,6 +1389,11 @@ components:
           items:
             $ref: "#/components/schemas/RedditComment"
           description: Top-level normalized Reddit comments with recursive replies.
+        commentContinuations:
+          type: array
+          items:
+            $ref: "#/components/schemas/RedditCommentContinuation"
+          description: Handles for omitted Reddit comment blocks that callers can pass to `/api/reddit/comment-tree`.
         stats:
           $ref: "#/components/schemas/RedditThreadStats"
           description: Backend fetch and normalization statistics.

@@ -5,6 +5,7 @@ import { normalizeRedditPostInput, parseRedditPostInput, unresolvedRedditShareUr
 import { attachMoreChildren, normalizeInitialThread } from '../dist/shared/reddit/normalize.js';
 import { RedditThreadService } from '../dist/shared/reddit/service.js';
 import { redditThreadHandler, setRedditThreadServiceForTesting, setRepairableErrorAnalyzerForTesting } from '../dist/functions/redditThread.js';
+import { redditCommentTreeHandler, setRedditCommentTreeServiceForTesting, setRepairableErrorAnalyzerForTesting as setCommentTreeRepairableErrorAnalyzerForTesting } from '../dist/functions/redditCommentTree.js';
 import { buildFallbackRepairableProblem, validateRepairableProblem } from '../dist/shared/errors/repairableProblem.js';
 import { buildRedditDiagnosticCapsule } from '../dist/shared/errors/diagnosticCapsule.js';
 
@@ -540,6 +541,109 @@ test('RedditThreadService accepts documented URL aliases as post input fallbacks
   assert.equal(response.post.id, 'abc123');
 });
 
+
+test('RedditThreadService exposes comment continuations when expansion is disabled', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) {
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      }
+      if (String(input).includes('/comments/abc123')) {
+        return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThread({ post: 'abc123', maxComments: 10, maxMoreChildrenRequests: 0 });
+
+  assert.equal(response.stats.truncated, true);
+  assert.equal(response.stats.continuationsReturned, 1);
+  assert.deepEqual(response.commentContinuations, [{ parentId: 't1_c1', depth: 1, children: ['c3'], childCount: 1 }]);
+});
+
+test('RedditThreadService fetches a focused Reddit comment tree by commentId', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const calls = [];
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      calls.push(String(input));
+      if (String(input).includes('/api/v1/access_token')) {
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      }
+      if (String(input).includes('/comments/abc123')) {
+        assert.match(String(input), /comment=c1/);
+        assert.match(String(input), /depth=2/);
+        return jsonResponse(threadFixtureWithoutMore(), 200, rateHeaders(1));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchCommentTree({ post: 'abc123', commentId: 't1_c1', depth: 2, limit: 20 });
+
+  assert.equal(response.mode, 'comment');
+  assert.equal(response.rootCommentId, 'c1');
+  assert.equal(response.post.id, 'abc123');
+  assert.equal(response.comments[0].id, 'c1');
+  assert.equal(response.stats.commentsReturned, 2);
+  assert.equal(calls.filter((url) => url.includes('/api/morechildren')).length, 0);
+});
+
+test('RedditThreadService fetches continuation children through public comment tree flow', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const calls = [];
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      calls.push(String(input));
+      if (String(input).includes('/api/v1/access_token')) {
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      }
+      if (String(input).includes('/comments/abc123')) {
+        return jsonResponse(threadFixtureWithoutMore(), 200, rateHeaders(1));
+      }
+      if (String(input).includes('/api/morechildren')) {
+        assert.match(String(input), /children=c3/);
+        assert.match(String(input), /link_id=t3_abc123/);
+        return jsonResponse(moreChildrenFixture(), 200, rateHeaders(2));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchCommentTree({ post: 'abc123', children: 'c3', parentId: 't1_c1', limit: 10 });
+
+  assert.equal(response.mode, 'children');
+  assert.deepEqual(response.requestedChildren, ['c3']);
+  assert.equal(response.parentId, 't1_c1');
+  assert.equal(response.comments[0].id, 'c3');
+  assert.equal(response.stats.moreChildrenRequests, 1);
+  assert.equal(calls.filter((url) => url.includes('/api/morechildren')).length, 1);
+});
+
+test('redditCommentTreeHandler calls comment tree service and uses endpoint-specific repair metadata', async () => {
+  await withEnv({ AUTH_ENABLED: 'false', REPAIRABLE_ERRORS_LLM_ENABLED: 'false' }, async () => {
+    setRedditCommentTreeServiceForTesting({ fetchCommentTree: async () => ({ ok: true }) });
+
+    const ok = await redditCommentTreeHandler(requestWithJson({ post: 'abc123', commentId: 'c1' }), contextStub());
+    assert.equal(ok.status, 200);
+    assert.deepEqual(ok.jsonBody, { ok: true });
+
+    setRedditCommentTreeServiceForTesting({ fetchCommentTree: async () => { throw new Error('boom'); } });
+    const problem = await redditCommentTreeHandler(requestWithJson({ post: 'abc123' }), contextStub());
+    assert.equal(problem.status, 502);
+    assert.equal(problem.jsonBody.operation_id, 'postRedditCommentTree');
+    assert.equal(problem.jsonBody.instance, `urn:diagnostic:${problem.jsonBody.diagnostic_id}`);
+  });
+});
+
 test('RedditThreadService expands MoreChildren placeholders when limits allow', async () => {
   process.env.REDDIT_CLIENT_ID = config.clientId;
   process.env.REDDIT_CLIENT_SECRET = config.secret;
@@ -980,7 +1084,9 @@ async function withEnv(values, fn) {
     await fn();
   } finally {
     setRedditThreadServiceForTesting(null);
+    setRedditCommentTreeServiceForTesting(null);
     setRepairableErrorAnalyzerForTesting(null);
+    setCommentTreeRepairableErrorAnalyzerForTesting(null);
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) {
         delete process.env[key];
