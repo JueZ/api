@@ -3,7 +3,7 @@ info:
   title: JueZ API Catalogue (GPT Reddit)
   version: 0.1.0
 servers:
-  - url: https://juez-api-prod.azurewebsites.net
+  - url: https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net
 security:
   - entraOAuth2:
       - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
