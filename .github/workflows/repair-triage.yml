@@ -25,6 +25,7 @@ permissions:
 jobs:
   repair-triage:
     name: triage codex-repair issues
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

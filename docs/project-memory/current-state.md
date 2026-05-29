@@ -1,5 +1,10 @@
 # Current state
 
+## 2026-05-29 GitHub Actions job timeouts
+
+- Workflow jobs now have explicit `timeout-minutes` values: short CI/static/policy/OIDC/repair jobs use 5-20 minute caps, while the shared deploy workflow and Codex main-delivery polling job use 90-minute caps for external deployment and workflow-wait operations.
+- Reusable-workflow caller jobs in deploy/promotion/rollback wrapper workflows intentionally do not set `timeout-minutes` because GitHub Actions/actionlint does not allow that key on `jobs.<id>.uses` caller jobs; the called `deploy-environment.yml` job enforces the deployment timeout.
+
 ## 2026-05-29 AGENTS rulebook refresh
 
 - `AGENTS.md` was rewritten into a shorter repository-level rulebook while preserving autonomous PR delivery, branch-protection, CI/policy, staged deployment, runtime-truth, telemetry, repair-loop, secret-handling, and project-memory guardrails.

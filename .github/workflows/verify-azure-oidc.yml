@@ -16,6 +16,7 @@ env:
 jobs:
   verify:
     name: verify azure oidc
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - name: Validate Azure OIDC configuration
