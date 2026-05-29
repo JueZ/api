@@ -229,6 +229,9 @@ jobs:
             echo "Validating $spec"
             npx redocly lint "$spec"
           done
+      - name: Check OpenAPI route drift
+        shell: bash
+        run: npm run ops:check-openapi-drift
 
   bicep-validation:
     name: Bicep validation
