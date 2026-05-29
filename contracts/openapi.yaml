@@ -487,6 +487,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
   /api/wlh/categories/{categoryId}:
     get:
       operationId: getWlhCategory
@@ -507,6 +513,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WlhCategory"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
         "404":
           description: Not found
           content:
@@ -535,6 +553,18 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/WlhCategory"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
         "404":
           description: Not found
           content:
@@ -567,6 +597,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
         "404":
           description: Not found
           content:
@@ -605,6 +647,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WlhOfferDetail"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
         "429":
           description: Rate limited
         "502":
@@ -637,6 +691,18 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/WlhImage" }
                 required: [source, adId, images]
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
         "429":
           description: Rate limited
         "502":
