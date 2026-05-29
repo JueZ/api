@@ -22,6 +22,7 @@ concurrency:
 jobs:
   enable-auto-merge:
     name: enable auto-merge
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     if: >-
       ${{
