@@ -1,5 +1,10 @@
 # Current state
 
+## 2026-05-29 AGENTS rulebook refresh
+
+- `AGENTS.md` was rewritten into a shorter repository-level rulebook while preserving autonomous PR delivery, branch-protection, CI/policy, staged deployment, runtime-truth, telemetry, repair-loop, secret-handling, and project-memory guardrails.
+- The replacement intentionally keeps a single clean copy of the rulebook despite the user-provided paste containing a duplicated second copy.
+
 ## 2026-05-18 Reddit /s/ redirect-without-location follow-up
 
 - User-provided live shell evidence (`curl https://www.reddit.com/r/AskReddit/s/LSdyZdjqm1`) showed a redirect-style HTML body containing an anchor to a canonical `/comments/<id>` URL (`1tgnlig`) while not relying on `Location` header processing.
