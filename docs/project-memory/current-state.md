@@ -1,5 +1,13 @@
 # Current state
 
+## 2026-05-29 WLH repairable diagnostics and catalogue state
+
+- Authenticated smoke coverage now emits structured, safe subcheck diagnostics so operators can identify which protected smoke subcheck failed without exposing secrets, request credentials, raw upstream payloads, or raw WLH HTML.
+- Production-failure issue reporting now distinguishes the GitHub workflow SHA from the runtime deployed `sourceRef`, reducing ambiguity when diagnosing whether a failed production check came from workflow logic or deployed application code.
+- WLH deterministic Repairable Error Contract responses are enabled, including parse-drift coverage and OpenAPI drift validation for the documented repairable response shape.
+- WLH LLM-assisted analysis remains disabled and must stay disabled unless sanitized, shape-only diagnostic capsules are implemented; raw WLH HTML, upstream bodies, credentials, and sensitive settings must not be included.
+- The Angular catalogue renders `RepairableProblem` responses and provides redacted curl commands so users can reproduce failures safely without exposing bearer tokens or other private values.
+
 
 ## 2026-05-29 Reddit staged comment loading
 
