@@ -83,13 +83,8 @@ export function buildRedditDiagnosticCapsule(args: {
     ...(args.trace_id ? { trace_id: args.trace_id } : {}),
     safe_error: args.safe_error,
     request_shape: buildRequestShape(args.body),
-    contract_summary: redditContractSummary(),
-    safe_examples: [
-      { post: 'abc123', sort: 'confidence', maxComments: 10000, maxMoreChildrenRequests: 1000 },
-      { post: 't3_abc123' },
-      { post: 'https://redd.it/abc123' },
-      { post: 'https://www.reddit.com/r/example/comments/abc123/example_title/' },
-    ],
+    contract_summary: redditContractSummary(args.operation_id, args.endpoint),
+    safe_examples: redditSafeExamples(args.operation_id, args.endpoint),
     security_policy: {
       raw_request_body_included: false,
       authorization_headers_included: false,
@@ -108,7 +103,30 @@ export function getTraceIdFromRequestOrContext(request: HttpRequest, context: In
   return invocationId ? invocationId.slice(0, 120) : undefined;
 }
 
-function redditContractSummary(): DiagnosticCapsule['contract_summary'] {
+function redditContractSummary(operationId?: string, endpoint?: string): DiagnosticCapsule['contract_summary'] {
+  if (operationId === 'postRedditCommentTree' || endpoint === '/api/reddit/comment-tree') {
+    return {
+      required: ['post'],
+      properties: {
+        post: { type: 'string', acceptedFormats: ['raw Reddit article ID', 't3 fullname', 'redd.it URL', 'reddit.com comments URL'] },
+        commentId: { type: 'string', requiredAlternative: 'children', description: 'raw Reddit comment ID or t1 fullname' },
+        children: { type: 'string_or_string_array', requiredAlternative: 'commentId', description: 'Reddit child comment IDs from a continuation handle' },
+        parentId: { type: 'string', description: 'optional t1/t3 fullname from the continuation handle' },
+        sort: { type: 'string', enum: ['confidence', 'top', 'new', 'controversial', 'old', 'qa'], default: 'confidence' },
+        depth: { type: 'integer', minimum: 0, maximum: 10, default: 3 },
+        limit: { type: 'integer', minimum: 1, maximum: 500, default: 100 },
+        maxMoreChildrenRequests: { type: 'integer', minimum: 0, maximum: 5000, default: 0 },
+      },
+      aliases: {
+        url: 'post',
+        redditUrl: 'post',
+        reddit_url: 'post',
+        threadUrl: 'post',
+        thread_url: 'post',
+      },
+    };
+  }
+
   return {
     required: ['post'],
     properties: {
@@ -135,6 +153,22 @@ function redditContractSummary(): DiagnosticCapsule['contract_summary'] {
       thread_url: 'post',
     },
   };
+}
+
+
+function redditSafeExamples(operationId?: string, endpoint?: string): unknown[] {
+  if (operationId === 'postRedditCommentTree' || endpoint === '/api/reddit/comment-tree') {
+    return [
+      { post: 'abc123', commentId: 'def456', depth: 3, limit: 100 },
+      { post: 'abc123', parentId: 't1_def456', children: 'ghi789,jkl012', limit: 100 },
+    ];
+  }
+  return [
+    { post: 'abc123', sort: 'confidence', maxComments: 10000, maxMoreChildrenRequests: 1000 },
+    { post: 't3_abc123' },
+    { post: 'https://redd.it/abc123' },
+    { post: 'https://www.reddit.com/r/example/comments/abc123/example_title/' },
+  ];
 }
 
 const SENSITIVE_SHAPE_KEY_PATTERNS = [

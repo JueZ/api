@@ -1,5 +1,12 @@
 # Current state
 
+
+## 2026-05-29 Reddit staged comment loading
+
+- Added staged Reddit comment loading design to the API surface: `/api/reddit/thread` now returns bounded `commentContinuations` handles for omitted comment blocks, and the new protected `POST /api/reddit/comment-tree` endpoint can fetch either a focused `commentId` subtree or `children` from a continuation handle.
+- The comment-tree endpoint reuses the existing Reddit OAuth client and fixed Reddit endpoints (`/comments/<article>` and `/api/morechildren`), keeps responses bounded by `depth`, `limit`, and `maxMoreChildrenRequests`, and preserves the existing Microsoft Entra auth/repairable-error pattern.
+- OpenAPI contracts (`contracts/openapi.yaml`, `contracts/openapi.gpt.yaml`, and `contracts/openapi.gpt.reddit.yaml`) document the staged GPT workflow so callers can load large Reddit threads through multiple smaller calls rather than one oversized response.
+
 ## 2026-05-29 GitHub Actions job timeouts
 
 - Workflow jobs now have explicit `timeout-minutes` values: short CI/static/policy/OIDC/repair jobs use 5-20 minute caps, while the shared deploy workflow and Codex main-delivery polling job use 90-minute caps for external deployment and workflow-wait operations.

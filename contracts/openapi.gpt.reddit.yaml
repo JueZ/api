@@ -54,6 +54,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RedditThreadResponse"
+  /api/reddit/comment-tree:
+    post:
+      operationId: postRedditCommentTree
+      summary: Fetch a bounded Reddit comment block
+      description: Use after `/api/reddit/thread` when a large thread needs staged loading. Send either `commentId` for one subtree or `children` from a returned continuation handle.
+      security:
+        - entraOAuth2:
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RedditCommentTreeRequest"
+      responses:
+        "200":
+          description: Normalized bounded Reddit comment block.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedditCommentTreeResponse"
+        "400":
+          description: Invalid request payload.
+        "401":
+          description: Unauthorized.
+        "403":
+          description: Forbidden.
+        "404":
+          description: Reddit content not found.
+        "429":
+          description: Reddit rate limited the backend.
+        "502":
+          description: Reddit dependency failure.
 components:
   securitySchemes:
     entraOAuth2:
@@ -92,3 +125,75 @@ components:
     RedditThreadResponse:
       type: object
       additionalProperties: true
+    RedditCommentTreeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        post:
+          type: string
+        commentId:
+          type: string
+          description: Raw comment ID or t1 fullname. Exactly one of commentId or children is required.
+        children:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          description: Child IDs from a continuation handle. Exactly one of commentId or children is required.
+        parentId:
+          type: string
+        sort:
+          type: string
+          enum: [confidence, top, new, controversial, old, qa]
+        depth:
+          type: integer
+          minimum: 0
+          maximum: 10
+          default: 3
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+        maxMoreChildrenRequests:
+          type: integer
+          minimum: 0
+          maximum: 5000
+          default: 0
+      required:
+        - post
+    RedditCommentTreeResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        source:
+          type: string
+        fetchedAt:
+          type: string
+          format: date-time
+        input:
+          type: string
+        post:
+          type: object
+          additionalProperties: true
+        mode:
+          type: string
+          enum: [comment, children]
+        comments:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        commentContinuations:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required:
+        - source
+        - fetchedAt
+        - input
+        - post
+        - mode
+        - comments
