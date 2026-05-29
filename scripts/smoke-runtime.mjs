@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { getSmokeRunId, requireUrl, fetchJson, assertEqual, safeSummary } from './lib/smoke-utils.mjs';
+import { getSmokeRunId, requireUrl, fetchJson, fetchWithTimeout, assertEqual, safeSummary } from './lib/smoke-utils.mjs';
 
 const apiBaseUrl = requireUrl('API_BASE_URL', process.env.API_BASE_URL);
 const frontendBaseUrl = process.env.FRONTEND_BASE_URL ? requireUrl('FRONTEND_BASE_URL', process.env.FRONTEND_BASE_URL) : '';
@@ -36,14 +36,21 @@ async function fetchHealthWithRetry() {
 
 async function fetchHelloWithRetry(expectedStatus) {
   let lastStatus = 0;
+  let lastError;
   for (let attempt = 1; attempt <= helloRetryAttempts; attempt += 1) {
-    const hello = await fetch(`${apiBaseUrl}/api/hello`, { headers, redirect: 'manual' });
-    lastStatus = hello.status;
-    if (hello.status === expectedStatus) return hello;
-    const isTransient = hello.status === 404 || hello.status === 502 || hello.status === 503;
-    if (!isTransient || attempt >= helloRetryAttempts) break;
+    try {
+      const hello = await fetchWithTimeout(`${apiBaseUrl}/api/hello`, { headers, redirect: 'manual' });
+      lastStatus = hello.status;
+      if (hello.status === expectedStatus) return hello;
+      const isTransient = hello.status === 404 || hello.status === 502 || hello.status === 503;
+      if (!isTransient || attempt >= helloRetryAttempts) break;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= helloRetryAttempts) break;
+    }
     await sleep(helloRetryDelayMs);
   }
+  if (lastError) throw lastError;
   throw new Error(`unauthenticated /api/hello status expected ${expectedStatus}, got ${lastStatus}`);
 }
 

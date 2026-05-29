@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { appendFile } from 'node:fs/promises';
+import { fetchWithTimeout, formatSmokeFetchError } from './lib/smoke-utils.mjs';
 
 const TOKEN_ENDPOINT_HOST = 'https://login.microsoftonline.com';
 const DEFAULT_GITHUB_OIDC_AUDIENCE = 'api://AzureADTokenExchange';
@@ -56,12 +57,18 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   const oidcUrl = new URL(githubRequestUrl);
   oidcUrl.searchParams.set('audience', config.githubOidcAudience);
-  const oidcResponse = await fetch(oidcUrl, {
-    headers: {
-      Authorization: `bearer ${githubRequestToken}`,
-      Accept: 'application/json',
-    },
-  });
+  let oidcResponse;
+  try {
+    oidcResponse = await fetchWithTimeout(oidcUrl, {
+      headers: {
+        Authorization: `bearer ${githubRequestToken}`,
+        Accept: 'application/json',
+      },
+    });
+  } catch (error) {
+    console.error(`GitHub OIDC token request failed: ${formatSmokeFetchError(error)}.`);
+    process.exit(2);
+  }
   if (!oidcResponse.ok) {
     console.error(`GitHub OIDC token request failed with HTTP ${oidcResponse.status}.`);
     process.exit(2);
@@ -80,11 +87,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
     client_assertion: clientAssertion,
   });
-  const tokenResponse = await fetch(`${TOKEN_ENDPOINT_HOST}/${encodeURIComponent(config.tenantId)}/oauth2/v2.0/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: form,
-  });
+  let tokenResponse;
+  try {
+    tokenResponse = await fetchWithTimeout(`${TOKEN_ENDPOINT_HOST}/${encodeURIComponent(config.tenantId)}/oauth2/v2.0/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form,
+    });
+  } catch (error) {
+    console.error(`Microsoft Entra token exchange failed: ${formatSmokeFetchError(error)}.`);
+    process.exit(2);
+  }
   if (!tokenResponse.ok) {
     let errorSummary = '';
     try {
