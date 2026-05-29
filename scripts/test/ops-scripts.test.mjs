@@ -49,6 +49,7 @@ test('policy guardrails ignore negated disable warnings while blocking actual di
   assert.ok(forbiddenDiffFindings('+ dis' + 'able CI=true').includes('ci-policy-disabled'));
 });
 
+
 test('smoke token mint config selects production service variables', () => {
   const config = selectServiceAuthConfig({
     ENVIRONMENT_NAME: 'prod',
@@ -60,12 +61,14 @@ test('smoke token mint config selects production service variables', () => {
   assert.equal(config.prefix, 'PROD');
   assert.deepEqual(missingServiceAuthFields(config), []);
 });
+
 test('smoke token mint config detects missing service variables', () => {
   const config = selectServiceAuthConfig({ ENVIRONMENT_NAME: 'test', TEST_SERVICE_AUTH_CLIENT_ID: 'client-id' });
 
   assert.equal(config.prefix, 'TEST');
   assert.deepEqual(missingServiceAuthFields(config), ['tenantId', 'scope']);
 });
+
 
 test('smoke fetch timeout config uses safe defaults and positive overrides', () => {
   assert.equal(getSmokeFetchTimeoutMs(undefined), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
@@ -125,4 +128,43 @@ test('fetchWithTimeout reports concise timeout errors', async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('smoke and release ledger modules import without operational side effects', async (t) => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { existsSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join, resolve } = await import('node:path');
+  const { pathToFileURL } = await import('node:url');
+
+  const originalCwd = process.cwd();
+  const originalFetch = globalThis.fetch;
+  const originalApiBaseUrl = process.env.API_BASE_URL;
+  const tempDir = await mkdtemp(join(tmpdir(), 'ops-script-import-'));
+  let fetchCalls = 0;
+
+  t.after(async () => {
+    process.chdir(originalCwd);
+    globalThis.fetch = originalFetch;
+    if (originalApiBaseUrl === undefined) delete process.env.API_BASE_URL; else process.env.API_BASE_URL = originalApiBaseUrl;
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  delete process.env.API_BASE_URL;
+  process.chdir(tempDir);
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error('import should not fetch');
+  };
+
+  const cacheBust = `?importSafety=${Date.now()}`;
+  const runtimeSmoke = await import(`${pathToFileURL(resolve(originalCwd, 'scripts/smoke-runtime.mjs')).href}${cacheBust}`);
+  const authSmoke = await import(`${pathToFileURL(resolve(originalCwd, 'scripts/smoke-auth.mjs')).href}${cacheBust}`);
+  const releaseLedger = await import(`${pathToFileURL(resolve(originalCwd, 'scripts/write-release-ledger.mjs')).href}${cacheBust}`);
+
+  assert.equal(typeof runtimeSmoke.runRuntimeSmoke, 'function');
+  assert.equal(typeof authSmoke.runAuthenticatedSmoke, 'function');
+  assert.equal(typeof releaseLedger.writeReleaseLedger, 'function');
+  assert.equal(fetchCalls, 0);
+  assert.equal(existsSync(join(tempDir, 'release-ledger.json')), false);
 });
