@@ -291,3 +291,35 @@ summary {
     grid-template-columns: 1fr;
   }
 }
+
+.anchor-link {
+  color: #bae6fd;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.problem-card {
+  background: rgb(127 29 29 / 32%);
+  border: 1px solid rgb(252 165 165 / 50%);
+  border-radius: 0.9rem;
+  color: #fee2e2;
+  margin: 1rem 0 0;
+  padding: 1rem;
+}
+
+.problem-heading {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.caller-instruction {
+  background: rgb(250 204 21 / 16%);
+  border: 1px solid rgb(250 204 21 / 45%);
+  border-radius: 0.75rem;
+  color: #fef3c7;
+  margin: 1rem 0;
+  padding: 1rem;
+}
