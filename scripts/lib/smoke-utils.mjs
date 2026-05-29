@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
+export const DEFAULT_SMOKE_FETCH_TIMEOUT_MS = 30_000;
+
 export function sanitizeSmokeRunId(value) {
   const normalized = String(value ?? '').trim();
   if (!normalized) return undefined;
@@ -13,6 +15,18 @@ export function getSmokeRunId(value = process.env.SMOKE_RUN_ID) {
 export function requireUrl(name, value) {
   if (!value) throw new Error(`${name} is required`);
   return new URL(value).toString().replace(/\/$/, '');
+}
+
+export function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_SMOKE_FETCH_TIMEOUT_MS) {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, timeoutSignal])
+    : timeoutSignal;
+  return fetch(url, { ...options, signal });
+}
+
+export function isTimeoutError(error) {
+  return error?.name === 'TimeoutError' || error?.name === 'AbortError';
 }
 
 export async function fetchJson(url, options = {}) {

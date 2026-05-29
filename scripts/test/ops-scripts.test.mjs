@@ -3,7 +3,13 @@ import test from 'node:test';
 import { validateReleaseLedger } from '../validate-release-ledger.mjs';
 import { parseRepairIssueBody, decideRepairIssueAction } from '../triage-repair-issues.mjs';
 import { forbiddenDiffFindings, highRiskPaths } from '../policy-guardrails.mjs';
-import { missingServiceAuthFields, selectServiceAuthConfig } from '../mint-smoke-token.mjs';
+import { DEFAULT_SMOKE_FETCH_TIMEOUT_MS, fetchWithTimeout, isTimeoutError } from '../lib/smoke-utils.mjs';
+import {
+  missingServiceAuthFields,
+  parseSmokeTokenFetchTimeoutMs,
+  sanitizeTokenEndpointErrorCode,
+  selectServiceAuthConfig,
+} from '../mint-smoke-token.mjs';
 
 test('release ledger validation accepts required runtime truth fields', () => {
   const ledger = {
@@ -61,4 +67,35 @@ test('smoke token mint config detects missing service variables', () => {
 
   assert.equal(config.prefix, 'TEST');
   assert.deepEqual(missingServiceAuthFields(config), ['tenantId', 'scope']);
+});
+
+
+test('smoke token timeout override defaults and validates safe bounds', () => {
+  assert.equal(parseSmokeTokenFetchTimeoutMs({}), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
+  assert.equal(parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '1500' }), 1500);
+  assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '0' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
+  assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '120001' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
+  assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: 'secret-ish' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
+});
+
+test('smoke token endpoint error code sanitizer avoids unsafe response text', () => {
+  assert.equal(sanitizeTokenEndpointErrorCode('invalid_client'), 'invalid_client');
+  assert.equal(sanitizeTokenEndpointErrorCode('invalid client: token abc123'), '');
+  assert.equal(sanitizeTokenEndpointErrorCode('x'.repeat(97)), '');
+});
+
+test('fetchWithTimeout aborts slow fetch calls', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+  });
+
+  try {
+    await assert.rejects(
+      fetchWithTimeout('https://example.test', {}, 1),
+      (error) => isTimeoutError(error),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
