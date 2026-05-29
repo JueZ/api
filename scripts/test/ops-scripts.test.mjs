@@ -86,6 +86,7 @@ test('smoke token endpoint error code sanitizer avoids unsafe response text', ()
 
 test('fetchWithTimeout aborts slow fetch calls', async () => {
   const originalFetch = globalThis.fetch;
+  const keepAlive = setTimeout(() => {}, 50);
   globalThis.fetch = async (_url, options) => new Promise((_resolve, reject) => {
     options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
   });
@@ -96,6 +97,7 @@ test('fetchWithTimeout aborts slow fetch calls', async () => {
       (error) => isTimeoutError(error),
     );
   } finally {
+    clearTimeout(keepAlive);
     globalThis.fetch = originalFetch;
   }
 });
