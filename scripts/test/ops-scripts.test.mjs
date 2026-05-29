@@ -111,7 +111,11 @@ test('fetchWithTimeout reports concise timeout errors', async () => {
   const originalFetch = globalThis.fetch;
   try {
     globalThis.fetch = async (_url, options) => new Promise((resolve, reject) => {
-      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+      const delay = setTimeout(() => resolve(new Response('{}')), 100);
+      options.signal.addEventListener('abort', () => {
+        clearTimeout(delay);
+        reject(options.signal.reason);
+      }, { once: true });
     });
 
     await assert.rejects(
