@@ -125,6 +125,41 @@ components:
     RedditThreadResponse:
       type: object
       additionalProperties: true
+      properties:
+        source:
+          type: string
+          description: Source system marker.
+        fetchedAt:
+          type: string
+          format: date-time
+        input:
+          type: string
+        post:
+          type: object
+          additionalProperties: true
+        comments:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        commentContinuations:
+          type: array
+          description: Follow-up handles for omitted comment blocks that can be sent to /api/reddit/comment-tree.
+          items:
+            type: object
+            additionalProperties: true
+        stats:
+          type: object
+          additionalProperties: true
+        redditRateLimit:
+          type: object
+          additionalProperties: true
+      required:
+        - source
+        - fetchedAt
+        - input
+        - post
+        - comments
     RedditCommentTreeRequest:
       type: object
       additionalProperties: false
