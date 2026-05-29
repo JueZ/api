@@ -18,6 +18,7 @@ concurrency:
 jobs:
   run-main-delivery:
     name: run main delivery after Codex auto-merge
+    timeout-minutes: 90
     if: >-
       ${{
         github.event_name == 'workflow_run' &&
