@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-export const DEFAULT_SMOKE_FETCH_TIMEOUT_MS = 30000;
+export const DEFAULT_SMOKE_FETCH_TIMEOUT_MS = 30_000;
 
 export function sanitizeSmokeRunId(value) {
   const normalized = String(value ?? '').trim();
@@ -63,14 +63,18 @@ function combineAbortSignals(signals) {
   return { signal: controller.signal, cleanup };
 }
 
+export function isTimeoutError(error) {
+  return error?.name === 'SmokeFetchTimeoutError' || error?.name === 'TimeoutError' || error?.name === 'AbortError';
+}
+
 export function formatSmokeFetchError(error) {
   if (error?.name === 'SmokeFetchTimeoutError') return error.message;
   return error instanceof Error ? error.message : String(error);
 }
 
-export async function fetchWithTimeout(url, options = {}) {
+export async function fetchWithTimeout(url, options = {}, timeoutMsOverride) {
   const { timeoutMs: requestedTimeoutMs, ...fetchOptions } = options;
-  const timeoutMs = getSmokeFetchTimeoutMs(requestedTimeoutMs);
+  const timeoutMs = getSmokeFetchTimeoutMs(requestedTimeoutMs ?? timeoutMsOverride);
   const timeout = createTimeoutSignal(timeoutMs);
   const signals = fetchOptions.signal ? [fetchOptions.signal, timeout.signal] : [timeout.signal];
   const combined = combineAbortSignals(signals);

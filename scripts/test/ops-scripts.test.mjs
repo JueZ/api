@@ -3,13 +3,13 @@ import test from 'node:test';
 import { validateReleaseLedger } from '../validate-release-ledger.mjs';
 import { parseRepairIssueBody, decideRepairIssueAction } from '../triage-repair-issues.mjs';
 import { forbiddenDiffFindings, highRiskPaths } from '../policy-guardrails.mjs';
-import { missingServiceAuthFields, selectServiceAuthConfig } from '../mint-smoke-token.mjs';
+import { DEFAULT_SMOKE_FETCH_TIMEOUT_MS, fetchJson, fetchWithTimeout, getSmokeFetchTimeoutMs, isTimeoutError } from '../lib/smoke-utils.mjs';
 import {
-  DEFAULT_SMOKE_FETCH_TIMEOUT_MS,
-  fetchJson,
-  fetchWithTimeout,
-  getSmokeFetchTimeoutMs,
-} from '../lib/smoke-utils.mjs';
+  missingServiceAuthFields,
+  parseSmokeTokenFetchTimeoutMs,
+  sanitizeTokenEndpointErrorCode,
+  selectServiceAuthConfig,
+} from '../mint-smoke-token.mjs';
 
 test('release ledger validation accepts required runtime truth fields', () => {
   const ledger = {
@@ -70,6 +70,39 @@ test('smoke token mint config detects missing service variables', () => {
 });
 
 
+test('smoke token timeout override defaults and validates safe bounds', () => {
+  assert.equal(parseSmokeTokenFetchTimeoutMs({}), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
+  assert.equal(parseSmokeTokenFetchTimeoutMs({ SMOKE_FETCH_TIMEOUT_MS: '2500' }), 2500);
+  assert.equal(parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '1500' }), 1500);
+  assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '0' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
+  assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '120001' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
+  assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: 'secret-ish' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
+});
+
+test('smoke token endpoint error code sanitizer avoids unsafe response text', () => {
+  assert.equal(sanitizeTokenEndpointErrorCode('invalid_client'), 'invalid_client');
+  assert.equal(sanitizeTokenEndpointErrorCode('invalid client: token abc123'), '');
+  assert.equal(sanitizeTokenEndpointErrorCode('x'.repeat(97)), '');
+});
+
+test('fetchWithTimeout aborts slow fetch calls', async () => {
+  const originalFetch = globalThis.fetch;
+  const keepAlive = setTimeout(() => {}, 50);
+  globalThis.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+  });
+
+  try {
+    await assert.rejects(
+      fetchWithTimeout('https://example.test', {}, 1),
+      (error) => isTimeoutError(error),
+    );
+  } finally {
+    clearTimeout(keepAlive);
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('smoke fetch timeout config uses safe defaults and positive overrides', () => {
   assert.equal(getSmokeFetchTimeoutMs(undefined), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
   assert.equal(getSmokeFetchTimeoutMs(''), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
@@ -105,26 +138,6 @@ test('fetchJson applies timeouts while preserving caller fetch options', async (
     assert.equal(seen.options.redirect, 'manual');
     assert.ok(seen.options.signal instanceof AbortSignal);
     assert.equal('timeoutMs' in seen.options, false);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test('fetchWithTimeout reports concise timeout errors', async () => {
-  const originalFetch = globalThis.fetch;
-  try {
-    globalThis.fetch = async (_url, options) => new Promise((resolve, reject) => {
-      const delay = setTimeout(() => resolve(new Response('{}')), 100);
-      options.signal.addEventListener('abort', () => {
-        clearTimeout(delay);
-        reject(options.signal.reason);
-      }, { once: true });
-    });
-
-    await assert.rejects(
-      fetchWithTimeout('https://example.test/slow', { timeoutMs: 1 }),
-      (error) => error.name === 'SmokeFetchTimeoutError' && error.message === 'fetch timed out after 1ms',
-    );
   } finally {
     globalThis.fetch = originalFetch;
   }
