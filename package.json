@@ -45,6 +45,7 @@
     "@angular/build": "21.2.10",
     "@angular/cli": "21.2.10",
     "@angular/compiler-cli": "21.2.12",
+    "@redocly/cli": "2.31.5",
     "@types/node": "24.10.1",
     "typescript": "5.9.3"
   },
