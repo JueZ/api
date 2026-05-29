@@ -1,8 +1,15 @@
 #!/usr/bin/env node
 import { appendFile } from 'node:fs/promises';
+import { fetchWithTimeout, getSmokeFetchTimeoutMs, isTimeoutError } from './lib/smoke-utils.mjs';
 
 const TOKEN_ENDPOINT_HOST = 'https://login.microsoftonline.com';
 const DEFAULT_GITHUB_OIDC_AUDIENCE = 'api://AzureADTokenExchange';
+const MAX_TOKEN_FETCH_TIMEOUT_MS = 120_000;
+
+export function sanitizeTokenEndpointErrorCode(value) {
+  const normalized = String(value ?? '').trim();
+  return /^[A-Za-z0-9_.-]{1,96}$/.test(normalized) ? normalized : '';
+}
 
 export function selectServiceAuthConfig(env = process.env) {
   const environmentName = (env.ENVIRONMENT_NAME || '').trim().toLowerCase();
@@ -16,6 +23,27 @@ export function selectServiceAuthConfig(env = process.env) {
     scope: env[`${prefix}_SERVICE_AUTH_SCOPE`] || '',
     githubOidcAudience: env.GITHUB_OIDC_AUDIENCE || DEFAULT_GITHUB_OIDC_AUDIENCE,
   };
+}
+
+export function parseSmokeTokenFetchTimeoutMs(env = process.env) {
+  const raw = env.SMOKE_TOKEN_FETCH_TIMEOUT_MS;
+  if (raw === undefined || raw === '') return getSmokeFetchTimeoutMs(env.SMOKE_FETCH_TIMEOUT_MS);
+
+  const timeoutMs = Number(raw);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TOKEN_FETCH_TIMEOUT_MS) {
+    throw new Error(`SMOKE_TOKEN_FETCH_TIMEOUT_MS must be an integer from 1 to ${MAX_TOKEN_FETCH_TIMEOUT_MS}.`);
+  }
+  return timeoutMs;
+}
+
+async function safeReadErrorCode(response) {
+  try {
+    const errorPayload = await response.json();
+    return sanitizeTokenEndpointErrorCode(errorPayload?.error);
+  } catch {
+    // Ignore non-JSON Entra errors; do not print response bodies because they can include sensitive context.
+    return '';
+  }
 }
 
 export function missingServiceAuthFields(config) {
@@ -54,19 +82,42 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(0);
   }
 
+  let tokenFetchTimeoutMs;
+  try {
+    tokenFetchTimeoutMs = parseSmokeTokenFetchTimeoutMs();
+  } catch (error) {
+    console.error(error.message);
+    process.exit(2);
+  }
+
   const oidcUrl = new URL(githubRequestUrl);
   oidcUrl.searchParams.set('audience', config.githubOidcAudience);
-  const oidcResponse = await fetch(oidcUrl, {
-    headers: {
-      Authorization: `bearer ${githubRequestToken}`,
-      Accept: 'application/json',
-    },
-  });
+  let oidcResponse;
+  try {
+    oidcResponse = await fetchWithTimeout(oidcUrl, {
+      headers: {
+        Authorization: `bearer ${githubRequestToken}`,
+        Accept: 'application/json',
+      },
+    }, tokenFetchTimeoutMs);
+  } catch (error) {
+    const message = isTimeoutError(error)
+      ? `GitHub OIDC token request timed out after ${tokenFetchTimeoutMs}ms.`
+      : 'GitHub OIDC token request failed before receiving a response.';
+    console.error(message);
+    process.exit(2);
+  }
   if (!oidcResponse.ok) {
     console.error(`GitHub OIDC token request failed with HTTP ${oidcResponse.status}.`);
     process.exit(2);
   }
-  const oidcPayload = await oidcResponse.json();
+  let oidcPayload;
+  try {
+    oidcPayload = await oidcResponse.json();
+  } catch {
+    console.error('GitHub OIDC token response was not valid JSON.');
+    process.exit(2);
+  }
   const clientAssertion = typeof oidcPayload.value === 'string' ? oidcPayload.value : '';
   if (!clientAssertion) {
     console.error('GitHub OIDC token response did not contain a token value.');
@@ -80,23 +131,33 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
     client_assertion: clientAssertion,
   });
-  const tokenResponse = await fetch(`${TOKEN_ENDPOINT_HOST}/${encodeURIComponent(config.tenantId)}/oauth2/v2.0/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: form,
-  });
+  let tokenResponse;
+  try {
+    tokenResponse = await fetchWithTimeout(`${TOKEN_ENDPOINT_HOST}/${encodeURIComponent(config.tenantId)}/oauth2/v2.0/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form,
+    }, tokenFetchTimeoutMs);
+  } catch (error) {
+    const message = isTimeoutError(error)
+      ? `Microsoft Entra token exchange timed out after ${tokenFetchTimeoutMs}ms.`
+      : 'Microsoft Entra token exchange failed before receiving a response.';
+    console.error(message);
+    process.exit(2);
+  }
   if (!tokenResponse.ok) {
-    let errorSummary = '';
-    try {
-      const errorPayload = await tokenResponse.json();
-      errorSummary = typeof errorPayload.error === 'string' ? ` (${errorPayload.error})` : '';
-    } catch {
-      // Ignore non-JSON Entra errors; do not print response bodies because they can include sensitive context.
-    }
+    const errorCode = await safeReadErrorCode(tokenResponse);
+    const errorSummary = errorCode ? ` (${errorCode})` : '';
     console.error(`Microsoft Entra token exchange failed with HTTP ${tokenResponse.status}${errorSummary}.`);
     process.exit(2);
   }
-  const tokenPayload = await tokenResponse.json();
+  let tokenPayload;
+  try {
+    tokenPayload = await tokenResponse.json();
+  } catch {
+    console.error('Microsoft Entra token response was not valid JSON.');
+    process.exit(2);
+  }
   const accessToken = typeof tokenPayload.access_token === 'string' ? tokenPayload.access_token : '';
   if (!accessToken) {
     console.error('Microsoft Entra token response did not include an access token.');
