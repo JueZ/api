@@ -38,6 +38,10 @@ paths:
     post:
       operationId: redditThread
       summary: Fetch reddit thread
+      description: >-
+        Fetch a Reddit post and an initial bounded comment slice. For initial discovery
+        when large threads are expected, use `maxMoreChildrenRequests: 0` and follow
+        returned continuation handles with `/api/reddit/comment-tree` for staged loads.
       security:
         - entraOAuth2:
             - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
@@ -120,7 +124,19 @@ components:
       properties:
         post: { type: string }
         sort: { type: string, enum: [confidence, top, new, controversial, old, qa] }
-        maxComments: { type: integer, minimum: 1, maximum: 200 }
+        maxComments:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 100
+        maxMoreChildrenRequests:
+          type: integer
+          minimum: 0
+          maximum: 5000
+          default: 0
+          description: >-
+            Safety limit for omitted-comment expansion requests. Use 0 when planning staged
+            follow-up loads through /api/reddit/comment-tree.
       required: [post]
     RedditThreadResponse:
       type: object
