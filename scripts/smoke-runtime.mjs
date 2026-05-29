@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { getSmokeRunId, requireUrl, fetchJson, assertEqual, safeSummary } from './lib/smoke-utils.mjs';
+import { getSmokeRunId, requireUrl, fetchJson, fetchWithTimeout, assertEqual, safeSummary } from './lib/smoke-utils.mjs';
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
-export async function runRuntimeSmoke({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
+export async function runRuntimeSmoke({ env = process.env, fetchImpl = fetchWithTimeout } = {}) {
   const apiBaseUrl = requireUrl('API_BASE_URL', env.API_BASE_URL);
   const frontendBaseUrl = env.FRONTEND_BASE_URL ? requireUrl('FRONTEND_BASE_URL', env.FRONTEND_BASE_URL) : '';
   const expectedSha = env.EXPECTED_DEPLOYED_COMMIT_SHA || '';
@@ -38,14 +38,21 @@ export async function runRuntimeSmoke({ env = process.env, fetchImpl = globalThi
 
   async function fetchHelloWithRetry(expectedStatus) {
     let lastStatus = 0;
+    let lastError;
     for (let attempt = 1; attempt <= helloRetryAttempts; attempt += 1) {
-      const hello = await fetchImpl(`${apiBaseUrl}/api/hello`, { headers, redirect: 'manual' });
-      lastStatus = hello.status;
-      if (hello.status === expectedStatus) return hello;
-      const isTransient = hello.status === 404 || hello.status === 502 || hello.status === 503;
-      if (!isTransient || attempt >= helloRetryAttempts) break;
+      try {
+        const hello = await fetchImpl(`${apiBaseUrl}/api/hello`, { headers, redirect: 'manual' });
+        lastStatus = hello.status;
+        if (hello.status === expectedStatus) return hello;
+        const isTransient = hello.status === 404 || hello.status === 502 || hello.status === 503;
+        if (!isTransient || attempt >= helloRetryAttempts) break;
+      } catch (error) {
+        lastError = error;
+        if (attempt >= helloRetryAttempts) break;
+      }
       await sleep(helloRetryDelayMs);
     }
+    if (lastError) throw lastError;
     throw new Error(`unauthenticated /api/hello status expected ${expectedStatus}, got ${lastStatus}`);
   }
 

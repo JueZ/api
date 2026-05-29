@@ -3,7 +3,7 @@ import test from 'node:test';
 import { validateReleaseLedger } from '../validate-release-ledger.mjs';
 import { parseRepairIssueBody, decideRepairIssueAction } from '../triage-repair-issues.mjs';
 import { forbiddenDiffFindings, highRiskPaths } from '../policy-guardrails.mjs';
-import { DEFAULT_SMOKE_FETCH_TIMEOUT_MS, fetchWithTimeout, isTimeoutError } from '../lib/smoke-utils.mjs';
+import { DEFAULT_SMOKE_FETCH_TIMEOUT_MS, fetchJson, fetchWithTimeout, getSmokeFetchTimeoutMs, isTimeoutError } from '../lib/smoke-utils.mjs';
 import {
   missingServiceAuthFields,
   parseSmokeTokenFetchTimeoutMs,
@@ -72,6 +72,7 @@ test('smoke token mint config detects missing service variables', () => {
 
 test('smoke token timeout override defaults and validates safe bounds', () => {
   assert.equal(parseSmokeTokenFetchTimeoutMs({}), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
+  assert.equal(parseSmokeTokenFetchTimeoutMs({ SMOKE_FETCH_TIMEOUT_MS: '2500' }), 2500);
   assert.equal(parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '1500' }), 1500);
   assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '0' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
   assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '120001' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
@@ -98,6 +99,46 @@ test('fetchWithTimeout aborts slow fetch calls', async () => {
     );
   } finally {
     clearTimeout(keepAlive);
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('smoke fetch timeout config uses safe defaults and positive overrides', () => {
+  assert.equal(getSmokeFetchTimeoutMs(undefined), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
+  assert.equal(getSmokeFetchTimeoutMs(''), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
+  assert.equal(getSmokeFetchTimeoutMs('0'), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
+  assert.equal(getSmokeFetchTimeoutMs('2500.9'), 2500);
+});
+
+test('fetchJson applies timeouts while preserving caller fetch options', async () => {
+  const originalFetch = globalThis.fetch;
+  const seen = {};
+  try {
+    globalThis.fetch = async (url, options) => {
+      seen.url = url;
+      seen.options = options;
+      return new Response('{"ok":true}', { status: 201 });
+    };
+
+    const headers = { 'X-Smoke-Run-Id': 'smoke-test' };
+    const result = await fetchJson('https://example.test/data', {
+      method: 'POST',
+      headers,
+      body: 'payload',
+      redirect: 'manual',
+      timeoutMs: 5000,
+    });
+
+    assert.equal(result.response.status, 201);
+    assert.deepEqual(result.json, { ok: true });
+    assert.equal(seen.url, 'https://example.test/data');
+    assert.equal(seen.options.method, 'POST');
+    assert.equal(seen.options.headers, headers);
+    assert.equal(seen.options.body, 'payload');
+    assert.equal(seen.options.redirect, 'manual');
+    assert.ok(seen.options.signal instanceof AbortSignal);
+    assert.equal('timeoutMs' in seen.options, false);
+  } finally {
     globalThis.fetch = originalFetch;
   }
 });

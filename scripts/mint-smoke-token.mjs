@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { appendFile } from 'node:fs/promises';
-import { DEFAULT_SMOKE_FETCH_TIMEOUT_MS, fetchWithTimeout, isTimeoutError } from './lib/smoke-utils.mjs';
+import { fetchWithTimeout, getSmokeFetchTimeoutMs, isTimeoutError } from './lib/smoke-utils.mjs';
 
 const TOKEN_ENDPOINT_HOST = 'https://login.microsoftonline.com';
 const DEFAULT_GITHUB_OIDC_AUDIENCE = 'api://AzureADTokenExchange';
@@ -27,7 +27,7 @@ export function selectServiceAuthConfig(env = process.env) {
 
 export function parseSmokeTokenFetchTimeoutMs(env = process.env) {
   const raw = env.SMOKE_TOKEN_FETCH_TIMEOUT_MS;
-  if (raw === undefined || raw === '') return DEFAULT_SMOKE_FETCH_TIMEOUT_MS;
+  if (raw === undefined || raw === '') return getSmokeFetchTimeoutMs(env.SMOKE_FETCH_TIMEOUT_MS);
 
   const timeoutMs = Number(raw);
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TOKEN_FETCH_TIMEOUT_MS) {
