@@ -65,6 +65,7 @@ permissions:
 jobs:
   deploy:
     name: deploy ${{ inputs.environmentName }}
+    timeout-minutes: 90
     runs-on: ubuntu-latest
     environment:
       name: ${{ inputs.githubEnvironment }}
