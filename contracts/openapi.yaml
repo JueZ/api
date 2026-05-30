@@ -515,18 +515,50 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/WlhCategory"
+              examples:
+                syntheticTopCategories:
+                  summary: Synthetic top-level WLH categories
+                  value:
+                    - id: "1000"
+                      label: "Home and Garden"
+                      path: "Home and Garden"
+                      depth: 0
+                      hitCount: 120
+                      hasChildren: true
+                      url: "https://example.invalid/wlh/categories/1000"
+                    - id: "2000"
+                      label: "Electronics"
+                      path: "Electronics"
+                      depth: 0
+                      hitCount: 85
+                      hasChildren: true
+                      url: "https://example.invalid/wlh/categories/2000"
         "401":
           description: Unauthorized
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+              examples:
+                missingBearerToken:
+                  summary: Missing bearer token
+                  value:
+                    error:
+                      code: unauthorized
+                      message: Missing bearer token.
         "403":
           description: Forbidden
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+              examples:
+                insufficientScope:
+                  summary: Caller lacks the required scope
+                  value:
+                    error:
+                      code: forbidden
+                      message: Insufficient scope for WLH access.
   /api/wlh/categories/{categoryId}:
     get:
       operationId: getWlhCategory
@@ -548,24 +580,55 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WlhCategory"
+              examples:
+                syntheticCategory:
+                  summary: Synthetic WLH category
+                  value:
+                    id: "1100"
+                    label: "Kitchen"
+                    path: "Home and Garden > Kitchen"
+                    depth: 1
+                    parentId: "1000"
+                    hitCount: 42
+                    hasChildren: true
+                    url: "https://example.invalid/wlh/categories/1100"
         "401":
           description: Unauthorized
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+              examples:
+                missingBearerToken:
+                  summary: Missing bearer token
+                  value:
+                    error:
+                      code: unauthorized
+                      message: Missing bearer token.
         "403":
           description: Forbidden
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+              examples:
+                insufficientScope:
+                  summary: Caller lacks the required scope
+                  value:
+                    error:
+                      code: forbidden
+                      message: Insufficient scope for WLH access.
         "404":
           description: Not found
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                categoryNotFound:
+                  summary: Category id is not known
+                  value:
+                    error: WLH_CATEGORY_NOT_FOUND
   /api/wlh/categories/{categoryId}/children:
     get:
       operationId: getWlhCategoryChildren
@@ -589,24 +652,63 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/WlhCategory"
+              examples:
+                syntheticChildCategories:
+                  summary: Synthetic child WLH categories
+                  value:
+                    - id: "1110"
+                      label: "Small Appliances"
+                      path: "Home and Garden > Kitchen > Small Appliances"
+                      depth: 2
+                      parentId: "1100"
+                      hitCount: 18
+                      hasChildren: false
+                      url: "https://example.invalid/wlh/categories/1110"
+                    - id: "1120"
+                      label: "Cookware"
+                      path: "Home and Garden > Kitchen > Cookware"
+                      depth: 2
+                      parentId: "1100"
+                      hitCount: 24
+                      hasChildren: false
+                      url: "https://example.invalid/wlh/categories/1120"
         "401":
           description: Unauthorized
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+              examples:
+                missingBearerToken:
+                  summary: Missing bearer token
+                  value:
+                    error:
+                      code: unauthorized
+                      message: Missing bearer token.
         "403":
           description: Forbidden
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+              examples:
+                insufficientScope:
+                  summary: Caller lacks the required scope
+                  value:
+                    error:
+                      code: forbidden
+                      message: Insufficient scope for WLH access.
         "404":
           description: Not found
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                categoryNotFound:
+                  summary: Parent category id is not known
+                  value:
+                    error: WLH_CATEGORY_NOT_FOUND
   /api/wlh/search:
     post:
       operationId: postWlhSearch
@@ -621,6 +723,24 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/WlhSearchRequest"
+            examples:
+              syntheticSearchRequest:
+                summary: Synthetic WLH search request
+                value:
+                  categoryId: "1110"
+                  keyword: "coffee grinder"
+                  priceFrom: 10
+                  priceTo: 80
+                  areaId: "900"
+                  paylivery: true
+                  rows: 2
+                  page: 1
+                  condition: used
+                  delivery:
+                    - pickup
+                    - shipping
+                  requiredTerms:
+                    - grinder
       responses:
         "200":
           description: Search results
@@ -628,42 +748,110 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WlhSearchResponse"
+              examples:
+                syntheticSearchResults:
+                  summary: Synthetic WLH search response
+                  value:
+                    source: wlh
+                    fetchedAt: "2026-05-30T12:00:00.000Z"
+                    sourceUrl: "https://example.invalid/wlh/search?category=1110&keyword=coffee%20grinder"
+                    rowsFound: 2
+                    rowsReturned: 2
+                    filteredRowsReturned: 1
+                    category:
+                      id: "1110"
+                      label: "Small Appliances"
+                      path: "Home and Garden > Kitchen > Small Appliances"
+                      depth: 2
+                      parentId: "1100"
+                      hitCount: 18
+                      hasChildren: false
+                      url: "https://example.invalid/wlh/categories/1110"
+                    results:
+                      - id: "SYNTHETIC-AD-1001"
+                        title: "Manual coffee grinder"
+                        priceAmount: 25
+                        priceDisplay: "25 EUR"
+                        location: "Sample District"
+                        postcode: "0000"
+                        state: "sample-state"
+                        publishedAt: "2026-05-29T09:30:00.000Z"
+                        changedAt: "2026-05-29T10:15:00.000Z"
+                        paylivery: true
+                        sellerId: "SYNTHETIC-SELLER-1"
+                        url: "https://example.invalid/wlh/offers/SYNTHETIC-AD-1001"
+                        imageCount: 2
+                        thumbnailUrl: "https://example.invalid/images/SYNTHETIC-AD-1001-thumb.jpg"
         "400":
           description: Bad request
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalidSearchRequest:
+                  summary: Search request failed validation
+                  value:
+                    error: INVALID_WLH_SEARCH_REQUEST
         "401":
           description: Unauthorized
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+              examples:
+                missingBearerToken:
+                  summary: Missing bearer token
+                  value:
+                    error:
+                      code: unauthorized
+                      message: Missing bearer token.
         "403":
           description: Forbidden
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+              examples:
+                insufficientScope:
+                  summary: Caller lacks the required scope
+                  value:
+                    error:
+                      code: forbidden
+                      message: Insufficient scope for WLH access.
         "404":
           description: Not found
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                categoryNotFound:
+                  summary: Search category id is not known
+                  value:
+                    error: WLH_CATEGORY_NOT_FOUND
         "429":
           description: Rate limited
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                rateLimited:
+                  summary: WLH upstream rate limit encountered
+                  value:
+                    error: WLH_RATE_LIMITED
         "502":
           description: Upstream failure
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                upstreamUnavailable:
+                  summary: WLH upstream dependency failed
+                  value:
+                    error: WLH_UPSTREAM_UNAVAILABLE
   /api/wlh/offers/{adId}:
     get:
       operationId: getWlhOffer
@@ -685,30 +873,86 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WlhOfferDetail"
+              examples:
+                syntheticOfferDetail:
+                  summary: Synthetic WLH offer detail
+                  value:
+                    id: "SYNTHETIC-AD-1001"
+                    title: "Manual coffee grinder"
+                    description: "Synthetic listing description for a used manual coffee grinder."
+                    priceAmount: 25
+                    priceDisplay: "25 EUR"
+                    location: "Sample District"
+                    postcode: "0000"
+                    state: "sample-state"
+                    publishedAt: "2026-05-29T09:30:00.000Z"
+                    changedAt: "2026-05-29T10:15:00.000Z"
+                    status: active
+                    seller:
+                      id: "SYNTHETIC-SELLER-1"
+                      name: "Synthetic Seller"
+                    paylivery: true
+                    images:
+                      - id: "SYNTHETIC-AD-1001-IMG-1"
+                        url: "https://example.invalid/images/SYNTHETIC-AD-1001-1.jpg"
+                      - id: "SYNTHETIC-AD-1001-IMG-2"
+                        url: "https://example.invalid/images/SYNTHETIC-AD-1001-2.jpg"
+                    deliveryOptions:
+                      - carrier: "Synthetic Parcel"
+                        parcelSize: small
+                        price: 4.99
+                        originalPrice: 5.99
+                        description: "Synthetic delivery option."
+                        deliveryDays: "2-4"
+                        insurance: true
         "401":
           description: Unauthorized
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+              examples:
+                missingBearerToken:
+                  summary: Missing bearer token
+                  value:
+                    error:
+                      code: unauthorized
+                      message: Missing bearer token.
         "403":
           description: Forbidden
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+              examples:
+                insufficientScope:
+                  summary: Caller lacks the required scope
+                  value:
+                    error:
+                      code: forbidden
+                      message: Insufficient scope for WLH access.
         "429":
           description: Rate limited
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                rateLimited:
+                  summary: WLH upstream rate limit encountered
+                  value:
+                    error: WLH_RATE_LIMITED
         "502":
           description: Upstream failure
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                upstreamUnavailable:
+                  summary: WLH upstream dependency failed
+                  value:
+                    error: WLH_UPSTREAM_UNAVAILABLE
   /api/wlh/offers/{adId}/images:
     get:
       operationId: getWlhOfferImages
@@ -739,32 +983,71 @@ paths:
                     type: string
                   images:
                     type: array
-                    items: { $ref: "#/components/schemas/WlhImage" }
-                required: [source, adId, images]
+                    items:
+                      $ref: "#/components/schemas/WlhImage"
+                required:
+                  - source
+                  - adId
+                  - images
+              examples:
+                syntheticOfferImages:
+                  summary: Synthetic WLH offer images
+                  value:
+                    source: wlh
+                    adId: "SYNTHETIC-AD-1001"
+                    images:
+                      - id: "SYNTHETIC-AD-1001-IMG-1"
+                        url: "https://example.invalid/images/SYNTHETIC-AD-1001-1.jpg"
+                      - id: "SYNTHETIC-AD-1001-IMG-2"
+                        url: "https://example.invalid/images/SYNTHETIC-AD-1001-2.jpg"
         "401":
           description: Unauthorized
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+              examples:
+                missingBearerToken:
+                  summary: Missing bearer token
+                  value:
+                    error:
+                      code: unauthorized
+                      message: Missing bearer token.
         "403":
           description: Forbidden
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthErrorResponse"
+              examples:
+                insufficientScope:
+                  summary: Caller lacks the required scope
+                  value:
+                    error:
+                      code: forbidden
+                      message: Insufficient scope for WLH access.
         "429":
           description: Rate limited
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                rateLimited:
+                  summary: WLH upstream rate limit encountered
+                  value:
+                    error: WLH_RATE_LIMITED
         "502":
           description: Upstream failure
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                upstreamUnavailable:
+                  summary: WLH upstream dependency failed
+                  value:
+                    error: WLH_UPSTREAM_UNAVAILABLE
   /api/reddit/thread/overview:
     post:
       operationId: postRedditThreadOverview
