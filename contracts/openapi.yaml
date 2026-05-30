@@ -694,8 +694,16 @@ paths:
                 $ref: "#/components/schemas/AuthErrorResponse"
         "429":
           description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "502":
           description: Upstream failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/wlh/offers/{adId}/images:
     get:
       operationId: getWlhOfferImages
@@ -741,8 +749,16 @@ paths:
                 $ref: "#/components/schemas/AuthErrorResponse"
         "429":
           description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "502":
           description: Upstream failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/reddit/thread/overview:
     post:
       operationId: postRedditThreadOverview
