@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { getSmokeRunId, requireUrl, fetchJson, assertEqual, safeSummary } from './lib/smoke-utils.mjs';
 
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
 export async function runAuthenticatedSmoke({ env = process.env } = {}) {
   const apiBaseUrl = requireUrl('API_BASE_URL', env.API_BASE_URL);
   const token = env.AUTH_ACCESS_TOKEN || '';
@@ -14,8 +16,29 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
   const shareSmokeExpectedPostId = env.REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID || '';
   const results = { status: 'passed', smokeRunId, apiBaseUrl, checks: [] };
   const headers = { 'X-Smoke-Run-Id': smokeRunId, Authorization: `Bearer ${token}` };
+  const healthRetryAttempts = Number(env.AUTH_HEALTH_RETRY_ATTEMPTS || env.RUNTIME_HEALTH_RETRY_ATTEMPTS || 10);
+  const healthRetryDelayMs = Number(env.AUTH_HEALTH_RETRY_DELAY_MS || env.RUNTIME_HEALTH_RETRY_DELAY_MS || 3000);
+  const protectedRetryAttempts = Number(env.AUTH_PROTECTED_RETRY_ATTEMPTS || healthRetryAttempts);
+  const protectedRetryDelayMs = Number(env.AUTH_PROTECTED_RETRY_DELAY_MS || healthRetryDelayMs);
 
   function record(name, status, details = {}) { results.checks.push({ name, status, ...details }); }
+
+  async function fetchJsonWithRetry(url, options, { attempts, delayMs, retryStatuses, label }) {
+    let last;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const response = await fetchJson(url, options);
+        last = response;
+        if (!retryStatuses.has(response.response.status) || attempt >= attempts) return response;
+      } catch (error) {
+        last = error;
+        if (attempt >= attempts) throw error;
+      }
+      await sleep(delayMs);
+    }
+    if (last instanceof Error) throw last;
+    throw new Error(`${label} did not return after ${attempts} attempts`);
+  }
 
   if (!token) {
     results.status = requireAuthSmoke ? 'blocked_auth_smoke' : 'skipped_auth_smoke';
@@ -24,21 +47,36 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
   }
 
   try {
-    const health = await fetchJson(`${apiBaseUrl}/health`, { headers: { 'X-Smoke-Run-Id': smokeRunId } });
+    const health = await fetchJsonWithRetry(`${apiBaseUrl}/health`, { headers: { 'X-Smoke-Run-Id': smokeRunId } }, {
+      attempts: healthRetryAttempts,
+      delayMs: healthRetryDelayMs,
+      retryStatuses: new Set([404, 502, 503]),
+      label: '/health',
+    });
     assertEqual('/health HTTP status', health.response.status, 200);
     if (environmentName) assertEqual('/health environmentName', health.json?.environmentName, environmentName);
     if (expectedSha) assertEqual('/health deployedCommitSha', health.json?.deployedCommitSha, expectedSha.toLowerCase());
     record('runtime-health', 'passed', { deployedCommitSha: health.json?.deployedCommitSha });
 
-    const hello = await fetchJson(`${apiBaseUrl}/api/hello`, { headers });
+    const hello = await fetchJsonWithRetry(`${apiBaseUrl}/api/hello`, { headers }, {
+      attempts: protectedRetryAttempts,
+      delayMs: protectedRetryDelayMs,
+      retryStatuses: new Set([404, 502, 503]),
+      label: 'authenticated /api/hello',
+    });
     assertEqual('authenticated /api/hello status', hello.response.status, 200);
     assertEqual('authenticated /api/hello authenticated flag', hello.json?.authenticated, true);
     record('authenticated-hello', 'passed');
 
-    const reddit = await fetchJson(`${apiBaseUrl}/api/reddit/thread`, {
+    const reddit = await fetchJsonWithRetry(`${apiBaseUrl}/api/reddit/thread`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ post: 'https://www.reddit.com/r/reddit.com/comments/87/the_downing_street_memo/', sort: 'top', maxComments: 1, maxMoreChildrenRequests: 0 }),
+    }, {
+      attempts: protectedRetryAttempts,
+      delayMs: protectedRetryDelayMs,
+      retryStatuses: new Set([404, 502, 503]),
+      label: 'authenticated /api/reddit/thread',
     });
     if (reddit.response.status >= 500 || reddit.response.status === 429) {
       results.status = 'dependency_blocked';
