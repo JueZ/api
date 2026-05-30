@@ -503,6 +503,7 @@ paths:
       operationId: getWlhCategoriesTop
       summary: List top wlh categories
       security:
+        - bearerJwt: []
         - entraOAuth2:
             - api.access
       responses:
@@ -531,6 +532,7 @@ paths:
       operationId: getWlhCategory
       summary: Get one wlh category
       security:
+        - bearerJwt: []
         - entraOAuth2:
             - api.access
       parameters:
@@ -569,6 +571,7 @@ paths:
       operationId: getWlhCategoryChildren
       summary: List child wlh categories
       security:
+        - bearerJwt: []
         - entraOAuth2:
             - api.access
       parameters:
@@ -609,6 +612,7 @@ paths:
       operationId: postWlhSearch
       summary: Search wlh offers
       security:
+        - bearerJwt: []
         - entraOAuth2:
             - api.access
       requestBody:
@@ -665,6 +669,7 @@ paths:
       operationId: getWlhOffer
       summary: Get wlh offer detail
       security:
+        - bearerJwt: []
         - entraOAuth2:
             - api.access
       parameters:
@@ -709,6 +714,7 @@ paths:
       operationId: getWlhOfferImages
       summary: Get wlh offer images
       security:
+        - bearerJwt: []
         - entraOAuth2:
             - api.access
       parameters:
