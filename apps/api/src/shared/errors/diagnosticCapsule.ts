@@ -104,6 +104,64 @@ export function getTraceIdFromRequestOrContext(request: HttpRequest, context: In
 }
 
 function redditContractSummary(operationId?: string, endpoint?: string): DiagnosticCapsule['contract_summary'] {
+  if (operationId === 'postRedditThreadOverview' || endpoint === '/api/reddit/thread/overview') {
+    return {
+      required: ['post'],
+      properties: {
+        post: { type: 'string', acceptedFormats: ['raw Reddit article ID', 't3 fullname', 'redd.it URL', 'reddit.com comments URL'] },
+        sort: { type: 'string', enum: ['confidence', 'top', 'new', 'controversial', 'old', 'qa'], default: 'confidence' },
+        maxComments: { type: 'integer', minimum: 1, maximum: 10000, default: 500, description: 'bounded snapshot size used to compute cheap thread stats' },
+      },
+      aliases: {
+        url: 'post',
+        redditUrl: 'post',
+        reddit_url: 'post',
+        threadUrl: 'post',
+        thread_url: 'post',
+      },
+    };
+  }
+
+  if (operationId === 'postRedditThreadComments' || endpoint === '/api/reddit/thread/comments') {
+    return {
+      required: ['post'],
+      properties: {
+        post: { type: 'string', acceptedFormats: ['raw Reddit article ID', 't3 fullname', 'redd.it URL', 'reddit.com comments URL'] },
+        sort: { type: 'string', enum: ['confidence', 'top', 'new', 'controversial', 'old', 'qa'], default: 'confidence' },
+        limit: { type: 'integer', minimum: 1, maximum: 500, default: 200 },
+        cursor: { type: 'string', description: 'opaque pagination cursor from the previous response' },
+        includeBody: { type: 'boolean', default: false },
+        bodyPreviewChars: { type: 'integer', minimum: 0, maximum: 500, default: 160 },
+        maxDepth: { type: 'integer', minimum: 0, maximum: 50 },
+        parentId: { type: 'string', description: 'optional t1/t3 parent fullname filter' },
+        minScore: { type: 'integer' },
+        minBodyLength: { type: 'integer', minimum: 0 },
+        includeDeleted: { type: 'boolean', default: false },
+        maxBytes: { type: 'integer', minimum: 1000, maximum: 2000000, default: 500000 },
+        maxComments: { type: 'integer', minimum: 1, maximum: 10000, default: 1000 },
+        maxMoreChildrenRequests: { type: 'integer', minimum: 0, maximum: 5000, default: 0 },
+      },
+      aliases: {
+        url: 'post',
+        redditUrl: 'post',
+        reddit_url: 'post',
+        threadUrl: 'post',
+        thread_url: 'post',
+      },
+    };
+  }
+
+  if (operationId === 'postRedditCommentsBatch' || endpoint === '/api/reddit/comments/batch') {
+    return {
+      required: ['ids'],
+      properties: {
+        ids: { type: 'string_or_string_array', description: 'Reddit comment IDs, raw or t1_ fullnames; maximum 100 unique IDs' },
+        fields: { type: 'string_or_string_array', description: 'optional field projection such as id,parentId,score,body,replyCount' },
+        maxBytes: { type: 'integer', minimum: 1000, maximum: 2000000, default: 500000 },
+      },
+    };
+  }
+
   if (operationId === 'postRedditCommentTree' || endpoint === '/api/reddit/comment-tree') {
     return {
       required: ['post'],
@@ -157,6 +215,25 @@ function redditContractSummary(operationId?: string, endpoint?: string): Diagnos
 
 
 function redditSafeExamples(operationId?: string, endpoint?: string): unknown[] {
+
+  if (operationId === 'postRedditThreadOverview' || endpoint === '/api/reddit/thread/overview') {
+    return [
+      { post: 'abc123', sort: 'confidence', maxComments: 500 },
+      { post: 'https://redd.it/abc123' },
+    ];
+  }
+  if (operationId === 'postRedditThreadComments' || endpoint === '/api/reddit/thread/comments') {
+    return [
+      { post: 'abc123', includeBody: false, limit: 200, bodyPreviewChars: 160 },
+      { post: 'abc123', minScore: 50, maxDepth: 3, includeBody: false, limit: 100 },
+    ];
+  }
+  if (operationId === 'postRedditCommentsBatch' || endpoint === '/api/reddit/comments/batch') {
+    return [
+      { ids: ['def456', 'ghi789'], fields: ['id', 'parentId', 'score', 'body', 'replyCount'] },
+      { ids: 'def456,ghi789', fields: 'id,score,bodyPreview' },
+    ];
+  }
   if (operationId === 'postRedditCommentTree' || endpoint === '/api/reddit/comment-tree') {
     return [
       { post: 'abc123', commentId: 'def456', depth: 3, limit: 100 },

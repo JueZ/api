@@ -8,6 +8,12 @@
 - WLH LLM-assisted analysis remains disabled and must stay disabled unless sanitized, shape-only diagnostic capsules are implemented; raw WLH HTML, upstream bodies, credentials, and sensitive settings must not be included.
 - The Angular catalogue renders `RepairableProblem` responses and provides redacted curl commands so users can reproduce failures safely without exposing bearer tokens or other private values.
 
+## 2026-05-29 Reddit queryable comment access
+
+- Added protected query-style Reddit comment access patterns for very large threads: `POST /api/reddit/thread/overview` returns cheap post/stat/coverage metadata, `POST /api/reddit/thread/comments` returns paginated comment skeletons or optional bodies with mechanical filters and byte limits, and `POST /api/reddit/comments/batch` hydrates selected comment IDs with field projection.
+- The queryable endpoints reuse the existing Reddit OAuth client, Microsoft Entra authorization, repairable-error contract, and bounded synchronous fetch model. They expose cursor/coverage metadata so GPT callers can sample high-score, controversial, deep, or high-reply branches without forcing one oversized full-thread response.
+- GPT OpenAPI contracts now include the queryable endpoints and the dedicated Reddit GPT contract points at the current production Function host `func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net`; the older single-response `/api/reddit/thread` and staged `/api/reddit/comment-tree` endpoints remain available.
+
 
 ## 2026-05-29 Reddit staged comment loading
 

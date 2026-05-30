@@ -3,7 +3,7 @@ import { RedditFetchError, RedditOAuthClient, RedditUpstreamError, type FetchLik
 import { isRedditShareUrl, normalizeMaxComments, normalizeMaxMoreChildrenRequests, normalizeRedditPostInput, normalizeRedditSort, parseRedditPostInput, RedditInputError, type NormalizedRedditPost } from './input.js';
 import { resolveRedditShareUrl, type RedditShareResolution } from './shareResolver.js';
 import { attachMoreChildren, commentsPath, commentsQuery, createCommentTreeResponse, createThreadResponse, focusedCommentsQuery, normalizeCommentBlockFromThings, normalizeFocusedCommentBlock, normalizeInitialThread, RedditContentError, type MorePlaceholder, type NormalizedCommentBlock } from './normalize.js';
-import type { RedditCommentTreeRequest, RedditCommentTreeResponse, RedditRateLimit, RedditThreadRequest, RedditThreadResponse, RedditSort } from './types.js';
+import type { RedditCommentDto, RedditCommentQueryRequest, RedditCommentQueryResponse, RedditCommentSkeletonDto, RedditCommentsBatchRequest, RedditCommentsBatchResponse, RedditCoverageDto, RedditRateLimit, RedditSort, RedditThreadOverviewRequest, RedditThreadOverviewResponse, RedditCommentTreeRequest, RedditCommentTreeResponse, RedditThreadRequest, RedditThreadResponse } from './types.js';
 
 const TIMEOUT_BUDGET_MS = 110_000;
 const MORE_CHILDREN_BATCH_SIZE = 100;
@@ -23,6 +23,118 @@ export class RedditThreadService {
   }
 
 
+
+
+
+  async fetchThreadOverview(request: RedditThreadOverviewRequest): Promise<RedditThreadOverviewResponse> {
+    const originalInput = normalizeRequestPostInput(request);
+    const normalizedPost = await this.normalizePostInput(originalInput);
+    let input = parseRedditPostInput(normalizedPost.post_id);
+    const sort = normalizeRedditSort(request.sort);
+    const maxComments = normalizeQuerySnapshotMaxComments(request.maxComments ?? 500);
+    const startedAt = this.now();
+
+    let initial = await this.client.getJson<unknown>(commentsPath(input.articleId), commentsQuery(sort, maxComments), { input: originalInput, normalizedPostId: input.articleId });
+    logRedditFetch({ originalInput, normalizedPostId: input.articleId, normalizedCommentId: normalizedPost.comment_id, requestUrl: initial.requestUrl, finalUrl: initial.finalUrl, status: initial.status, contentType: initial.contentType, redirectCount: 0, retryCount: initial.retryCount, startedAt });
+    if (initial.status === 404) {
+      const fallbackArticleId = await this.resolveRawCommentIdToArticleId(input.articleId);
+      if (fallbackArticleId) {
+        input = parseRedditPostInput(fallbackArticleId);
+        initial = await this.client.getJson<unknown>(commentsPath(input.articleId), commentsQuery(sort, maxComments), { input: originalInput, normalizedPostId: input.articleId });
+      }
+    }
+    assertRedditStatus(initial.status);
+    const tree = normalizeInitialThread(originalInput, initial.body, { maxComments });
+    const rows = flattenComments(tree.comments, { includeBody: false, bodyPreviewChars: 0 });
+    return {
+      source: 'reddit',
+      fetchedAt: new Date().toISOString(),
+      input: originalInput,
+      post: tree.post,
+      stats: {
+        topLevelComments: tree.comments.length,
+        maxDepth: rows.reduce((max, row) => Math.max(max, row.depth), 0),
+        deletedCount: rows.filter((row) => row.isDeleted).length,
+        loadedSnapshotCommentCount: rows.length,
+      },
+      availableSorts: ['confidence', 'top', 'new', 'controversial', 'old', 'qa'],
+      coverage: coverageFor(tree.post.numComments, rows, tree.more, sort, rows.length, false),
+      redditRateLimit: initial.rateLimit,
+    };
+  }
+
+  async fetchThreadComments(request: RedditCommentQueryRequest): Promise<RedditCommentQueryResponse> {
+    const originalInput = normalizeRequestPostInput(request);
+    const sort = normalizeRedditSort(request.sort);
+    const limit = normalizeQueryLimit(request.limit);
+    const offset = decodeCursor(request.cursor);
+    const includeBody = request.includeBody === true;
+    const bodyPreviewChars = normalizeBodyPreviewChars(request.bodyPreviewChars);
+    const maxBytes = normalizeMaxBytes(request.maxBytes);
+    const maxComments = normalizeQuerySnapshotMaxComments(request.maxComments);
+    const maxMoreChildrenRequests = normalizeMaxMoreChildrenRequests(request.maxMoreChildrenRequests ?? 0);
+    const thread = await this.fetchThread({ post: originalInput, sort, maxComments, maxMoreChildrenRequests });
+    let rows = flattenComments(thread.comments, { includeBody, bodyPreviewChars });
+    rows = applyCommentFilters(rows, request);
+    const page = pageRows(rows, offset, limit, maxBytes);
+    const comments = page.rows;
+    return {
+      source: 'reddit',
+      fetchedAt: new Date().toISOString(),
+      input: originalInput,
+      post: thread.post,
+      comments,
+      page: {
+        nextCursor: page.nextOffset < rows.length ? encodeCursor(page.nextOffset) : null,
+        hasMore: page.nextOffset < rows.length,
+        returned: comments.length,
+        truncatedBy: page.truncatedBy,
+      },
+      coverage: coverageFor(thread.post.numComments, flattenComments(thread.comments, { includeBody: false, bodyPreviewChars: 0 }), thread.commentContinuations.map((continuation) => ({ parentId: continuation.parentId, depth: continuation.depth, children: continuation.children })), sort, comments.length, page.nextOffset >= rows.length),
+      redditRateLimit: thread.redditRateLimit,
+    };
+  }
+
+  async fetchCommentsBatch(request: RedditCommentsBatchRequest): Promise<RedditCommentsBatchResponse> {
+    const ids = normalizeBatchIds(request.ids);
+    const fields = normalizeBatchFields(request.fields);
+    const maxBytes = normalizeMaxBytes(request.maxBytes);
+    const response = await this.client.getJson<unknown>('/api/info', { id: ids.map((id) => `t1_${id}`).join(','), raw_json: 1 });
+    assertRedditStatus(response.status, 'comment batch');
+    const rows = commentRowsFromInfoListing(response.body);
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const comments: Record<string, unknown>[] = [];
+    const found: string[] = [];
+    const missing: string[] = [];
+    const unavailable: string[] = [];
+    let truncatedBy: 'maxBytes' | null = null;
+    for (const id of ids) {
+      const row = byId.get(id);
+      if (!row) {
+        missing.push(id);
+        continue;
+      }
+      if (row.isDeleted) unavailable.push(id);
+      const projected = projectCommentFields(row, fields);
+      if (JSON.stringify([...comments, projected]).length > maxBytes) {
+        truncatedBy = 'maxBytes';
+        break;
+      }
+      comments.push(projected);
+      found.push(id);
+    }
+    return {
+      source: 'reddit',
+      fetchedAt: new Date().toISOString(),
+      ...(typeof request.post === 'string' ? { input: request.post } : {}),
+      comments,
+      found,
+      missing,
+      unavailable,
+      truncatedBy,
+      redditRateLimit: response.rateLimit,
+    };
+  }
 
   async fetchCommentTree(request: RedditCommentTreeRequest): Promise<RedditCommentTreeResponse> {
     const originalInput = normalizeRequestPostInput(request);
@@ -354,7 +466,7 @@ function chunk<T>(values: T[], size: number): T[][] {
   return chunks;
 }
 
-function normalizeRequestPostInput(request: RedditThreadRequest | RedditCommentTreeRequest): string {
+function normalizeRequestPostInput(request: RedditThreadRequest | RedditCommentTreeRequest | RedditThreadOverviewRequest | RedditCommentQueryRequest): string {
   if (!request || typeof request !== 'object') {
     throw new RedditInputError('post must be a non-empty string.');
   }
@@ -367,6 +479,206 @@ function normalizeRequestPostInput(request: RedditThreadRequest | RedditCommentT
 }
 
 
+
+
+function flattenComments(comments: RedditCommentDto[], options: { includeBody: boolean; bodyPreviewChars: number }): RedditCommentSkeletonDto[] {
+  const rows: RedditCommentSkeletonDto[] = [];
+  const visit = (comment: RedditCommentDto): void => {
+    const isDeleted = comment.author === '[deleted]' || comment.body === '[deleted]' || comment.body === '[removed]';
+    const row: RedditCommentSkeletonDto = {
+      id: comment.id,
+      fullname: comment.fullname,
+      parentId: comment.parentId,
+      depth: comment.depth,
+      score: comment.score,
+      replyCount: comment.replies.length,
+      bodyLength: comment.body.length,
+      bodyPreview: options.bodyPreviewChars > 0 ? comment.body.slice(0, options.bodyPreviewChars) : '',
+      createdUtc: comment.createdUtc,
+      isDeleted,
+      ...(options.includeBody ? { body: comment.body } : {}),
+    };
+    rows.push(row);
+    for (const reply of comment.replies) visit(reply);
+  };
+  for (const comment of comments) visit(comment);
+  return rows;
+}
+
+function applyCommentFilters(rows: RedditCommentSkeletonDto[], request: RedditCommentQueryRequest): RedditCommentSkeletonDto[] {
+  const maxDepth = normalizeOptionalInteger(request.maxDepth, 'maxDepth', 0, 50);
+  const minScore = normalizeOptionalInteger(request.minScore, 'minScore', -1000000, 1000000);
+  const minBodyLength = normalizeOptionalInteger(request.minBodyLength, 'minBodyLength', 0, 1000000);
+  const parentId = typeof request.parentId === 'string' && request.parentId.trim() ? request.parentId.trim().toLowerCase() : undefined;
+  const includeDeleted = request.includeDeleted === true;
+  return rows.filter((row) => {
+    if (maxDepth !== undefined && row.depth > maxDepth) return false;
+    if (minScore !== undefined && row.score < minScore) return false;
+    if (minBodyLength !== undefined && row.bodyLength < minBodyLength) return false;
+    if (parentId && row.parentId.toLowerCase() !== parentId) return false;
+    if (!includeDeleted && row.isDeleted) return false;
+    return true;
+  });
+}
+
+function pageRows(rows: RedditCommentSkeletonDto[], offset: number, limit: number, maxBytes: number): { rows: RedditCommentSkeletonDto[]; nextOffset: number; truncatedBy: 'limit' | 'maxBytes' | 'cursor' | null } {
+  const page: RedditCommentSkeletonDto[] = [];
+  let index = offset;
+  let truncatedBy: 'limit' | 'maxBytes' | 'cursor' | null = null;
+  while (index < rows.length && page.length < limit) {
+    const candidate = rows[index];
+    if (JSON.stringify([...page, candidate]).length > maxBytes) {
+      truncatedBy = 'maxBytes';
+      if (page.length === 0) {
+        page.push(candidate);
+        index += 1;
+      }
+      break;
+    }
+    page.push(candidate);
+    index += 1;
+  }
+  if (!truncatedBy && page.length >= limit && index < rows.length) truncatedBy = 'limit';
+  return { rows: page, nextOffset: index, truncatedBy };
+}
+
+function coverageFor(reportedTotal: number, rows: RedditCommentSkeletonDto[], more: { children: string[] }[], sort: RedditSort, uniqueReturned: number, complete: boolean): RedditCoverageDto {
+  const deleted = rows.filter((row) => row.isDeleted).length;
+  const continuationsRemaining = more.reduce((total, continuation) => total + continuation.children.length, 0);
+  const knownRemaining = Math.max(0, reportedTotal - uniqueReturned);
+  return {
+    reportedTotal,
+    uniqueReturned,
+    deleted,
+    unavailable: 0,
+    knownRemaining,
+    cursorsRemaining: !complete,
+    continuationsRemaining,
+    sortsSampled: [sort],
+    snapshotComplete: complete && continuationsRemaining === 0 && uniqueReturned >= Math.min(reportedTotal, rows.length),
+  };
+}
+
+function commentRowsFromInfoListing(value: unknown): RedditCommentSkeletonDto[] {
+  if (!value || typeof value !== 'object') return [];
+  const children = (value as { data?: { children?: unknown[] } }).data?.children;
+  if (!Array.isArray(children)) return [];
+  const rows: RedditCommentSkeletonDto[] = [];
+  for (const child of children) {
+    const thing = child as { kind?: unknown; data?: Record<string, unknown> };
+    const data = thing.data;
+    if (thing.kind !== 't1' || !data) continue;
+    const id = stringValue(data['id']);
+    if (!id) continue;
+    const body = stringValue(data['body']);
+    const author = stringValue(data['author']);
+    const isDeleted = author === '[deleted]' || body === '[deleted]' || body === '[removed]';
+    rows.push({
+      id: id.toLowerCase(),
+      fullname: stringValue(data['name']) || `t1_${id.toLowerCase()}`,
+      parentId: stringValue(data['parent_id']),
+      depth: 0,
+      score: numberValue(data['score']),
+      replyCount: 0,
+      bodyLength: body.length,
+      bodyPreview: body.slice(0, 200),
+      createdUtc: numberValue(data['created_utc']),
+      isDeleted,
+      body,
+    });
+  }
+  return rows;
+}
+
+const BATCH_FIELDS = new Set(['id', 'fullname', 'parentId', 'depth', 'score', 'createdUtc', 'body', 'bodyPreview', 'bodyLength', 'replyCount', 'isDeleted']);
+
+function projectCommentFields(row: RedditCommentSkeletonDto, fields: string[]): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const field of fields) {
+    result[field] = (row as unknown as Record<string, unknown>)[field];
+  }
+  return result;
+}
+
+function normalizeBatchIds(input: unknown): string[] {
+  const values = Array.isArray(input) ? input : typeof input === 'string' ? input.split(',') : null;
+  if (!values) throw new RedditInputError('ids must be an array of Reddit comment IDs or a comma-separated string.');
+  const ids = values.map((value) => {
+    if (typeof value !== 'string') throw new RedditInputError('ids must contain only Reddit comment ID strings.');
+    const id = value.trim().replace(/^t1_/i, '').toLowerCase();
+    if (!/^[a-z0-9][a-z0-9_]{1,12}$/i.test(id)) throw new RedditInputError('ids must contain valid Reddit comment IDs.');
+    return id;
+  }).filter(Boolean);
+  if (ids.length === 0) throw new RedditInputError('ids must contain at least one Reddit comment ID.');
+  return [...new Set(ids)].slice(0, 100);
+}
+
+function normalizeBatchFields(input: unknown): string[] {
+  if (input === undefined || input === null || input === '') return ['id', 'parentId', 'score', 'depth', 'body', 'replyCount'];
+  const values = Array.isArray(input) ? input : typeof input === 'string' ? input.split(',') : null;
+  if (!values) throw new RedditInputError('fields must be an array or comma-separated string.');
+  const fields = values.map((value) => {
+    if (typeof value !== 'string') throw new RedditInputError('fields must contain only strings.');
+    const field = value.trim();
+    if (!BATCH_FIELDS.has(field)) throw new RedditInputError('fields contains an unsupported comment field.');
+    return field;
+  });
+  return [...new Set(fields)].slice(0, 12);
+}
+
+function normalizeQueryLimit(input: unknown): number {
+  if (input === undefined || input === null) return 200;
+  if (typeof input !== 'number' || !Number.isInteger(input) || input < 1) throw new RedditInputError('limit must be a positive integer.');
+  return Math.min(input, 500);
+}
+
+function normalizeQuerySnapshotMaxComments(input: unknown): number {
+  if (input === undefined || input === null) return 1000;
+  if (typeof input !== 'number' || !Number.isInteger(input) || input < 1) throw new RedditInputError('maxComments must be a positive integer.');
+  return Math.min(input, 10000);
+}
+
+function normalizeBodyPreviewChars(input: unknown): number {
+  if (input === undefined || input === null) return 160;
+  if (typeof input !== 'number' || !Number.isInteger(input) || input < 0) throw new RedditInputError('bodyPreviewChars must be a non-negative integer.');
+  return Math.min(input, 500);
+}
+
+function normalizeMaxBytes(input: unknown): number {
+  if (input === undefined || input === null) return 500000;
+  if (typeof input !== 'number' || !Number.isInteger(input) || input < 1000) throw new RedditInputError('maxBytes must be an integer of at least 1000.');
+  return Math.min(input, 2000000);
+}
+
+function normalizeOptionalInteger(input: unknown, field: string, min: number, max: number): number | undefined {
+  if (input === undefined || input === null || input === '') return undefined;
+  if (typeof input !== 'number' || !Number.isInteger(input) || input < min) throw new RedditInputError(`${field} must be an integer greater than or equal to ${min}.`);
+  return Math.min(input, max);
+}
+
+function encodeCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ offset }), 'utf8').toString('base64url');
+}
+
+function decodeCursor(input: unknown): number {
+  if (input === undefined || input === null || input === '') return 0;
+  if (typeof input !== 'string' || input.length > 200) throw new RedditInputError('cursor must be an opaque cursor string.');
+  try {
+    const parsed = JSON.parse(Buffer.from(input, 'base64url').toString('utf8')) as { offset?: unknown };
+    if (typeof parsed.offset !== 'number' || !Number.isInteger(parsed.offset) || parsed.offset < 0) throw new Error('bad cursor');
+    return parsed.offset;
+  } catch {
+    throw new RedditInputError('cursor is invalid or expired.');
+  }
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
 
 function normalizeCommentTreeDepth(input: unknown): number {
   if (input === undefined || input === null) return 3;
