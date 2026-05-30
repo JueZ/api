@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-05-30 Production authenticated smoke transient 404 follow-up
+
+- Production promotion run `26668642239` for main commit `0fac737bdd3b8ac6bf04976d79498e9ec57addcd` deployed the Function App and passed unauthenticated runtime smoke, but failed `ops:smoke:auth` because the first authenticated-smoke `/health` probe returned transient `404` immediately after deployment.
+- Follow-up in progress: authenticated smoke now retries `/health`, authenticated `/api/hello`, and authenticated `POST /api/reddit/thread` on transient `404`/`502`/`503`, using safe `AUTH_*_RETRY_*` overrides and the existing runtime retry settings as defaults. This keeps production gates strict while avoiding a single cold-start/route-table race from failing an otherwise healthy deployment.
+
+
 ## 2026-05-29 WLH repairable diagnostics and catalogue state
 
 - Authenticated smoke coverage now emits structured, safe subcheck diagnostics so operators can identify which protected smoke subcheck failed without exposing secrets, request credentials, raw upstream payloads, or raw WLH HTML.

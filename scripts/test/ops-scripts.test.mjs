@@ -4,6 +4,7 @@ import { validateReleaseLedger } from '../validate-release-ledger.mjs';
 import { parseRepairIssueBody, decideRepairIssueAction } from '../triage-repair-issues.mjs';
 import { forbiddenDiffFindings, highRiskPaths } from '../policy-guardrails.mjs';
 import { DEFAULT_SMOKE_FETCH_TIMEOUT_MS, fetchJson, fetchWithTimeout, getSmokeFetchTimeoutMs, isTimeoutError } from '../lib/smoke-utils.mjs';
+import { runAuthenticatedSmoke } from '../smoke-auth.mjs';
 import {
   missingServiceAuthFields,
   parseSmokeTokenFetchTimeoutMs,
@@ -138,6 +139,58 @@ test('fetchJson applies timeouts while preserving caller fetch options', async (
     assert.equal(seen.options.redirect, 'manual');
     assert.ok(seen.options.signal instanceof AbortSignal);
     assert.equal('timeoutMs' in seen.options, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+
+test('authenticated smoke retries transient health and protected endpoint 404s after deployment', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url) => {
+      calls.push(String(url));
+      const path = new URL(String(url)).pathname;
+      if (path === '/health' && calls.filter((call) => new URL(call).pathname === '/health').length === 1) {
+        return new Response('not ready', { status: 404 });
+      }
+      if (path === '/api/hello' && calls.filter((call) => new URL(call).pathname === '/api/hello').length === 1) {
+        return new Response('not ready', { status: 404 });
+      }
+      if (path === '/api/reddit/thread' && calls.filter((call) => new URL(call).pathname === '/api/reddit/thread').length === 1) {
+        return new Response('not ready', { status: 404 });
+      }
+      if (path === '/health') {
+        return new Response(JSON.stringify({ status: 'ok', environmentName: 'prod', deployedCommitSha: 'a'.repeat(40) }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (path === '/api/hello') {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (path === '/api/reddit/thread') {
+        return new Response(JSON.stringify({ source: 'reddit' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    };
+
+    const { result, exitCode } = await runAuthenticatedSmoke({ env: {
+      API_BASE_URL: 'https://api.example.test',
+      AUTH_ACCESS_TOKEN: 'token',
+      ENVIRONMENT_NAME: 'prod',
+      EXPECTED_DEPLOYED_COMMIT_SHA: 'a'.repeat(40),
+      SMOKE_RUN_ID: 'smoke-test',
+      AUTH_HEALTH_RETRY_ATTEMPTS: '2',
+      AUTH_HEALTH_RETRY_DELAY_MS: '0',
+      AUTH_PROTECTED_RETRY_ATTEMPTS: '2',
+      AUTH_PROTECTED_RETRY_DELAY_MS: '0',
+    } });
+
+    assert.equal(exitCode, 0);
+    assert.equal(result.status, 'passed');
+    assert.equal(calls.filter((call) => new URL(call).pathname === '/health').length, 2);
+    assert.equal(calls.filter((call) => new URL(call).pathname === '/api/hello').length, 2);
+    assert.equal(calls.filter((call) => new URL(call).pathname === '/api/reddit/thread').length, 2);
   } finally {
     globalThis.fetch = originalFetch;
   }
