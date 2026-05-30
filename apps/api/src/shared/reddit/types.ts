@@ -112,6 +112,125 @@ export interface RedditCommentTreeResponse {
   redditRateLimit: RedditRateLimit;
 }
 
+export interface RedditCoverageDto {
+  reportedTotal: number;
+  uniqueReturned: number;
+  deleted: number;
+  unavailable: number;
+  knownRemaining: number;
+  cursorsRemaining: boolean;
+  continuationsRemaining: number;
+  sortsSampled: RedditSort[];
+  snapshotComplete: boolean;
+}
+
+export interface RedditCommentQueryRequest {
+  post?: string;
+  url?: string;
+  redditUrl?: string;
+  reddit_url?: string;
+  threadUrl?: string;
+  thread_url?: string;
+  sort?: RedditSort;
+  limit?: number;
+  cursor?: string;
+  includeBody?: boolean;
+  bodyPreviewChars?: number;
+  maxDepth?: number;
+  parentId?: string;
+  minScore?: number;
+  minBodyLength?: number;
+  includeDeleted?: boolean;
+  maxBytes?: number;
+  maxComments?: number;
+  maxMoreChildrenRequests?: number;
+}
+
+export interface RedditCommentSkeletonDto {
+  id: string;
+  fullname: string;
+  parentId: string;
+  depth: number;
+  score: number;
+  replyCount: number;
+  bodyLength: number;
+  bodyPreview: string;
+  createdUtc: number;
+  isDeleted: boolean;
+  body?: string;
+}
+
+export interface RedditCommentQueryPageInfo {
+  nextCursor: string | null;
+  hasMore: boolean;
+  returned: number;
+  truncatedBy: 'limit' | 'maxBytes' | 'cursor' | null;
+}
+
+export interface RedditThreadOverviewRequest {
+  post?: string;
+  url?: string;
+  redditUrl?: string;
+  reddit_url?: string;
+  threadUrl?: string;
+  thread_url?: string;
+  sort?: RedditSort;
+  maxComments?: number;
+}
+
+export interface RedditThreadOverviewStats {
+  topLevelComments: number;
+  maxDepth: number;
+  deletedCount: number;
+  loadedSnapshotCommentCount: number;
+}
+
+export interface RedditThreadOverviewResponse {
+  source: 'reddit';
+  fetchedAt: string;
+  input: string;
+  post: RedditPostDto;
+  stats: RedditThreadOverviewStats;
+  availableSorts: RedditSort[];
+  coverage: RedditCoverageDto;
+  redditRateLimit: RedditRateLimit;
+}
+
+export interface RedditCommentQueryResponse {
+  source: 'reddit';
+  fetchedAt: string;
+  input: string;
+  post: RedditPostDto;
+  comments: RedditCommentSkeletonDto[];
+  page: RedditCommentQueryPageInfo;
+  coverage: RedditCoverageDto;
+  redditRateLimit: RedditRateLimit;
+}
+
+export interface RedditCommentsBatchRequest {
+  post?: string;
+  url?: string;
+  redditUrl?: string;
+  reddit_url?: string;
+  threadUrl?: string;
+  thread_url?: string;
+  ids: string[] | string;
+  fields?: string[] | string;
+  maxBytes?: number;
+}
+
+export interface RedditCommentsBatchResponse {
+  source: 'reddit';
+  fetchedAt: string;
+  input?: string;
+  comments: Record<string, unknown>[];
+  found: string[];
+  missing: string[];
+  unavailable: string[];
+  truncatedBy: 'maxBytes' | null;
+  redditRateLimit: RedditRateLimit;
+}
+
 export interface ParsedRedditPostInput {
   articleId: string;
   fullname: string;

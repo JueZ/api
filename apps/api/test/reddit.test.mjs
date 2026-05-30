@@ -6,6 +6,9 @@ import { attachMoreChildren, normalizeInitialThread } from '../dist/shared/reddi
 import { RedditThreadService } from '../dist/shared/reddit/service.js';
 import { redditThreadHandler, setRedditThreadServiceForTesting, setRepairableErrorAnalyzerForTesting } from '../dist/functions/redditThread.js';
 import { redditCommentTreeHandler, setRedditCommentTreeServiceForTesting, setRepairableErrorAnalyzerForTesting as setCommentTreeRepairableErrorAnalyzerForTesting } from '../dist/functions/redditCommentTree.js';
+import { redditThreadOverviewHandler, setRedditThreadOverviewServiceForTesting, setRepairableErrorAnalyzerForTesting as setThreadOverviewRepairableErrorAnalyzerForTesting } from '../dist/functions/redditThreadOverview.js';
+import { redditThreadCommentsHandler, setRedditThreadCommentsServiceForTesting, setRepairableErrorAnalyzerForTesting as setThreadCommentsRepairableErrorAnalyzerForTesting } from '../dist/functions/redditThreadComments.js';
+import { redditCommentsBatchHandler, setRedditCommentsBatchServiceForTesting, setRepairableErrorAnalyzerForTesting as setCommentsBatchRepairableErrorAnalyzerForTesting } from '../dist/functions/redditCommentsBatch.js';
 import { buildFallbackRepairableProblem, validateRepairableProblem } from '../dist/shared/errors/repairableProblem.js';
 import { buildRedditDiagnosticCapsule } from '../dist/shared/errors/diagnosticCapsule.js';
 
@@ -644,6 +647,111 @@ test('redditCommentTreeHandler calls comment tree service and uses endpoint-spec
   });
 });
 
+
+test('RedditThreadService fetches a lightweight thread overview', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (String(input).includes('/comments/abc123')) return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThreadOverview({ post: 'abc123', maxComments: 10 });
+
+  assert.equal(response.post.id, 'abc123');
+  assert.equal(response.stats.topLevelComments, 1);
+  assert.equal(response.stats.maxDepth, 1);
+  assert.equal(response.stats.loadedSnapshotCommentCount, 2);
+  assert.equal(response.coverage.reportedTotal, 3);
+  assert.equal(response.coverage.continuationsRemaining, 1);
+});
+
+test('RedditThreadService pages comment skeletons with filters and byte controls', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (String(input).includes('/comments/abc123')) return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const firstPage = await service.fetchThreadComments({ post: 'abc123', limit: 1, includeBody: false, bodyPreviewChars: 4, maxComments: 10 });
+
+  assert.equal(firstPage.comments.length, 1);
+  assert.equal(firstPage.comments[0].id, 'c1');
+  assert.equal(firstPage.comments[0].body, undefined);
+  assert.equal(firstPage.comments[0].bodyPreview, 'root');
+  assert.equal(firstPage.page.hasMore, true);
+  assert.ok(firstPage.page.nextCursor);
+
+  const secondPage = await service.fetchThreadComments({ post: 'abc123', cursor: firstPage.page.nextCursor, limit: 1, includeBody: true, maxComments: 10 });
+
+  assert.equal(secondPage.comments[0].id, 'c2');
+  assert.equal(secondPage.comments[0].body, 'reply comment');
+});
+
+test('RedditThreadService fetches full comments by ID with field projection', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (String(input).includes('/api/info')) return jsonResponse(infoListing({
+        kind: 't1',
+        data: {
+          id: 'c1',
+          name: 't1_c1',
+          parent_id: 't3_abc123',
+          author: 'commenter',
+          body: 'full body',
+          score: 7,
+          created_utc: 456,
+        },
+      }), 200, rateHeaders(1));
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchCommentsBatch({ ids: ['c1', 'missing'], fields: ['id', 'score', 'body'] });
+
+  assert.deepEqual(response.found, ['c1']);
+  assert.deepEqual(response.missing, ['missing']);
+  assert.deepEqual(response.comments, [{ id: 'c1', score: 7, body: 'full body' }]);
+});
+
+test('queryable Reddit handlers delegate and expose endpoint-specific operation IDs', async () => {
+  await withEnv({ AUTH_ENABLED: 'false', REPAIRABLE_ERRORS_LLM_ENABLED: 'false' }, async () => {
+    setRedditThreadOverviewServiceForTesting({ fetchThreadOverview: async () => ({ ok: 'overview' }) });
+    setRedditThreadCommentsServiceForTesting({ fetchThreadComments: async () => ({ ok: 'comments' }) });
+    setRedditCommentsBatchServiceForTesting({ fetchCommentsBatch: async () => ({ ok: 'batch' }) });
+
+    const overview = await redditThreadOverviewHandler(requestWithJson({ post: 'abc123' }), contextStub());
+    assert.equal(overview.status, 200);
+    assert.deepEqual(overview.jsonBody, { ok: 'overview' });
+
+    const comments = await redditThreadCommentsHandler(requestWithJson({ post: 'abc123' }), contextStub());
+    assert.equal(comments.status, 200);
+    assert.deepEqual(comments.jsonBody, { ok: 'comments' });
+
+    const batch = await redditCommentsBatchHandler(requestWithJson({ ids: ['c1'] }), contextStub());
+    assert.equal(batch.status, 200);
+    assert.deepEqual(batch.jsonBody, { ok: 'batch' });
+
+    setRedditThreadCommentsServiceForTesting({ fetchThreadComments: async () => { throw new Error('boom'); } });
+    const problem = await redditThreadCommentsHandler(requestWithJson({ post: 'abc123' }), contextStub());
+    assert.equal(problem.status, 502);
+    assert.equal(problem.jsonBody.operation_id, 'postRedditThreadComments');
+  });
+});
+
 test('RedditThreadService expands MoreChildren placeholders when limits allow', async () => {
   process.env.REDDIT_CLIENT_ID = config.clientId;
   process.env.REDDIT_CLIENT_SECRET = config.secret;
@@ -1085,8 +1193,14 @@ async function withEnv(values, fn) {
   } finally {
     setRedditThreadServiceForTesting(null);
     setRedditCommentTreeServiceForTesting(null);
+    setRedditThreadOverviewServiceForTesting(null);
+    setRedditThreadCommentsServiceForTesting(null);
+    setRedditCommentsBatchServiceForTesting(null);
     setRepairableErrorAnalyzerForTesting(null);
     setCommentTreeRepairableErrorAnalyzerForTesting(null);
+    setThreadOverviewRepairableErrorAnalyzerForTesting(null);
+    setThreadCommentsRepairableErrorAnalyzerForTesting(null);
+    setCommentsBatchRepairableErrorAnalyzerForTesting(null);
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) {
         delete process.env[key];
