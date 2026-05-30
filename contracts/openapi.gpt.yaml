@@ -879,6 +879,7 @@ components:
           minimum: 1
           maximum: 10000
           default: 10000
+          description: Maximum number of normalized comments to return. Large full-body responses can exceed GPT/tool response limits; for medium or large threads prefer the overview, paginated comments, batch hydration, and comment-tree endpoints.
         maxMoreChildrenRequests:
           type: integer
           minimum: 0
@@ -1420,7 +1421,10 @@ components:
         score:
           type: integer
         replyCount:
-          type: integer
+          type:
+            - integer
+            - "null"
+          description: Number of loaded direct replies, or null when the source endpoint does not include reply-tree data (for example comments-batch hydration).
         bodyLength:
           type: integer
         bodyPreview:

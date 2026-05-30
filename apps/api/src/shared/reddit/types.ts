@@ -152,7 +152,7 @@ export interface RedditCommentSkeletonDto {
   parentId: string;
   depth: number;
   score: number;
-  replyCount: number;
+  replyCount: number | null;
   bodyLength: number;
   bodyPreview: string;
   createdUtc: number;

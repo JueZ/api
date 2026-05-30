@@ -579,7 +579,7 @@ function commentRowsFromInfoListing(value: unknown): RedditCommentSkeletonDto[] 
       parentId: stringValue(data['parent_id']),
       depth: 0,
       score: numberValue(data['score']),
-      replyCount: 0,
+      replyCount: null,
       bodyLength: body.length,
       bodyPreview: body.slice(0, 200),
       createdUtc: numberValue(data['created_utc']),

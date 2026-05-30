@@ -342,3 +342,8 @@ Last updated: 2026-05-16
 
 - The production service-smoke Microsoft Entra app was configured from Azure Cloud Shell with app role `api.service`, a GitHub Actions federated credential for `repo:JueZ/api:environment:production`, and production environment variables `PROD_SERVICE_AUTH_CLIENT_ID`, `PROD_SERVICE_AUTH_TENANT_ID`, and `PROD_SERVICE_AUTH_SCOPE`.
 - Deployment workflows now mint the authenticated smoke bearer token just-in-time from GitHub OIDC and do not require or store an `AUTH_ACCESS_TOKEN` secret.
+
+### 2026-05-30 — Reddit staged loading production behavior note
+
+- Live GPT/API testing against a large public Reddit thread showed the staged endpoints (`postRedditThreadOverview`, `postRedditThreadComments`, `postRedditCommentTree`, and `postRedditCommentsBatch`) are the safe production path for medium/large threads; a 300-comment full `postRedditThread` response can exceed GPT/tool response limits even when smaller full responses work.
+- `postRedditCommentsBatch` hydrates comments through Reddit `api/info`, which does not provide reply-tree data. Batch `replyCount` is therefore represented as unknown (`null`) instead of a misleading `0`; callers should use skeleton pages or comment-tree fetches when reply structure matters.

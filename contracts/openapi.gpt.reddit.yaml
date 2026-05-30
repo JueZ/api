@@ -239,6 +239,7 @@ components:
           minimum: 1
           maximum: 200
           default: 100
+          description: Keep full-thread GPT requests compact; use staged overview/comments/batch/comment-tree endpoints for medium or large threads.
         maxMoreChildrenRequests:
           type: integer
           minimum: 0
@@ -579,7 +580,10 @@ components:
         score:
           type: integer
         replyCount:
-          type: integer
+          type:
+            - integer
+            - "null"
+          description: Number of loaded direct replies, or null when the source endpoint does not include reply-tree data (for example comments-batch hydration).
         bodyLength:
           type: integer
         bodyPreview:
