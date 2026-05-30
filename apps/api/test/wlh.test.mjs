@@ -1,5 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { exportJWK, generateKeyPair, SignJWT } from 'jose';
+import { wlhSearchHandler, setWlhSearchServiceForTesting } from '../dist/functions/wlhSearch.js';
+import { handler as wlhCategoriesHandler, setWlhCategoryServiceForTesting } from '../dist/functions/wlhCategories.js';
+import { setWlhOfferServiceForTesting } from '../dist/functions/wlhOffer.js';
 import { WlhService, searchUrlForCategory, wlhPathFromStoredUrl } from '../dist/shared/wlh/service.js';
 
 const cfg = { baseUrl: 'https://example.test', storageAccountName: 'x', categoryBlobContainer: 'wlh-reference', categoryBlobName: 'categories-marketplace.v1.json.gz', categoryFile: '', categoryVersion: 'v1' };
@@ -33,3 +38,171 @@ test('search listing SEO_URL prepends /iad for kaufen-und-verkaufen paths', asyn
   const out = await s.search({ categoryId: '10' });
   assert.equal(out.results[0].url, 'https://example.test/iad/kaufen-und-verkaufen/d/super-mario-3d-all-stars-nintendo-switch-997764051');
 });
+
+test('invalid JSON on WLH search returns RepairableProblem', async () => {
+  await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
+    const response = await wlhSearchHandler(requestThatThrowsJson(), contextStub());
+    assertRepairableProblem(response, 400, 'postWlhSearch', 'caller_contract_violation');
+  });
+});
+
+test('invalid search body returns RepairableProblem', async () => {
+  await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
+    const s = new WlhService({ config: cfg, getIndex: async () => idx, fetchImpl: async () => new Response('', { status: 500 }) });
+    setWlhSearchServiceForTesting(s);
+    const response = await wlhSearchHandler(requestWithJson({ categoryId: '10', condition: 'broken' }), contextStub());
+    assertRepairableProblem(response, 400, 'postWlhSearch', 'caller_contract_violation');
+    assert.equal(response.jsonBody.invalid_fields[0].path, 'condition');
+  });
+});
+
+test('unknown category returns RepairableProblem', async () => {
+  await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
+    setWlhCategoryServiceForTesting(new WlhService({ config: cfg, getIndex: async () => idx }));
+    const response = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/999', { categoryId: '999' });
+    assertRepairableProblem(response, 404, 'getWlhCategory', 'caller_contract_violation');
+  });
+});
+
+test('upstream 429 maps to capacity_or_timeout', async () => {
+  await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
+    const s = new WlhService({ config: cfg, getIndex: async () => idx, fetchImpl: async () => new Response('<html></html>', { status: 429 }) });
+    setWlhSearchServiceForTesting(s);
+    const response = await wlhSearchHandler(requestWithJson({ categoryId: '10' }), contextStub());
+    assertRepairableProblem(response, 429, 'postWlhSearch', 'capacity_or_timeout');
+  });
+});
+
+test('parse failure maps to version_skew or dependency_failure', async () => {
+  await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
+    const s = new WlhService({ config: cfg, getIndex: async () => idx, fetchImpl: async () => new Response('<html>shape changed</html>', { status: 200 }) });
+    setWlhSearchServiceForTesting(s);
+    const response = await wlhSearchHandler(requestWithJson({ categoryId: '10' }), contextStub());
+    assert.equal(response.status, 502);
+    assert.equal(response.headers['Content-Type'], 'application/problem+json');
+    assert.ok(['version_skew', 'dependency_failure'].includes(response.jsonBody.classification));
+    assert.equal(response.jsonBody.operation_id, 'postWlhSearch');
+  });
+});
+
+test('401/403 WLH auth failures keep auth envelope', async () => {
+  await withWlhEnv({ AUTH_ENABLED: 'true' }, async () => {
+    const unauthorized = await wlhSearchHandler(requestWithJson({ categoryId: '10' }, null), contextStub());
+    assert.equal(unauthorized.status, 401);
+    assert.equal(unauthorized.jsonBody.error.code, 'unauthorized');
+    assert.equal(unauthorized.jsonBody.rec_version, undefined);
+    assert.notEqual(unauthorized.headers['Content-Type'], 'application/problem+json');
+  });
+
+  const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
+  try {
+    const token = await new SignJWT({ sub: 'blocked-sub', oid: 'blocked-oid', scp: 'api.access' })
+      .setProtectedHeader({ alg: 'RS256', kid })
+      .setIssuer(issuer)
+      .setAudience('api://catalogue-test')
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .sign(privateKey);
+    await withWlhEnv({
+      AUTH_ENABLED: 'true',
+      OIDC_ISSUER: issuer,
+      OIDC_AUDIENCE: 'api://catalogue-test',
+      OIDC_JWKS_URI: jwksUri,
+      OIDC_ALLOWED_OBJECT_IDS: 'allowed-oid',
+      OIDC_ALLOWED_SUBJECTS: '',
+      OIDC_ALLOWED_APP_OBJECT_IDS: '',
+      OIDC_ALLOWED_CLIENT_IDS: '',
+    }, async () => {
+      const forbidden = await wlhSearchHandler(requestWithJson({ categoryId: '10' }, `Bearer ${token}`), contextStub());
+      assert.equal(forbidden.status, 403);
+      assert.equal(forbidden.jsonBody.error.code, 'forbidden');
+      assert.equal(forbidden.jsonBody.rec_version, undefined);
+      assert.notEqual(forbidden.headers['Content-Type'], 'application/problem+json');
+    });
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+async function wlhCategoryHandlerRequest(method, url, params) {
+  return wlhCategoriesHandler({ method, url, params, headers: new Headers(), json: async () => ({}) }, contextStub());
+}
+
+function requestWithJson(body, authorization = undefined) {
+  return {
+    method: 'POST',
+    url: 'https://api.test/api/wlh/search',
+    params: {},
+    headers: new Headers(authorization === undefined ? {} : authorization === null ? {} : { authorization }),
+    json: async () => body,
+  };
+}
+
+function requestThatThrowsJson(authorization = undefined) {
+  return {
+    method: 'POST',
+    url: 'https://api.test/api/wlh/search',
+    params: {},
+    headers: new Headers(authorization === undefined ? {} : authorization === null ? {} : { authorization }),
+    json: async () => { throw new Error('invalid json'); },
+  };
+}
+
+function contextStub() {
+  return { invocationId: 'invocation-test', warn: () => undefined };
+}
+
+function assertRepairableProblem(response, status, operationId, classification) {
+  assert.equal(response.status, status);
+  assert.equal(response.headers['Content-Type'], 'application/problem+json');
+  assert.equal(response.jsonBody.rec_version, '1.0');
+  assert.equal(response.jsonBody.operation_id, operationId);
+  assert.equal(response.jsonBody.classification, classification);
+  assert.equal(response.jsonBody.analysis_mode, 'deterministic');
+  assert.ok(response.jsonBody.diagnostic_id.startsWith('diag_'));
+  assert.ok(response.jsonBody.retry_policy);
+  assert.ok(response.jsonBody.caller_instruction);
+  assert.ok(response.jsonBody.safe_debug_summary);
+  const serialized = JSON.stringify(response.jsonBody);
+  assert.doesNotMatch(serialized, /<html|Authorization|Bearer|access_token|client_secret|raw upstream response body/i);
+}
+
+async function withWlhEnv(values, fn) {
+  const previous = {};
+  for (const [key, value] of Object.entries(values)) {
+    previous[key] = process.env[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    await fn();
+  } finally {
+    setWlhSearchServiceForTesting(null);
+    setWlhCategoryServiceForTesting(null);
+    setWlhOfferServiceForTesting(null);
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+async function startJwksServer() {
+  const { publicKey, privateKey } = await generateKeyPair('RS256');
+  const jwk = await exportJWK(publicKey);
+  const kid = 'wlh-test-key';
+  jwk.kid = kid;
+  jwk.alg = 'RS256';
+  const server = createServer((req, res) => {
+    if (req.url === '/jwks') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ keys: [jwk] }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  return { server, issuer: 'https://login.example.test/tenant/v2.0', jwksUri: `http://127.0.0.1:${port}/jwks`, privateKey, kid };
+}

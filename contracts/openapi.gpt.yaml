@@ -411,14 +411,9 @@ paths:
         "404":
           description: Not found
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                categoryNotFound:
-                  summary: Category id is not known
-                  value:
-                    error: WLH_CATEGORY_NOT_FOUND
+                $ref: "#/components/schemas/RepairableProblem"
   /api/wlh/categories/{categoryId}/children:
     get:
       operationId: getWlhCategoryChildren
@@ -490,14 +485,9 @@ paths:
         "404":
           description: Not found
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                categoryNotFound:
-                  summary: Parent category id is not known
-                  value:
-                    error: WLH_CATEGORY_NOT_FOUND
+                $ref: "#/components/schemas/RepairableProblem"
   /api/wlh/search:
     post:
       operationId: postWlhSearch
@@ -573,14 +563,9 @@ paths:
         "400":
           description: Bad request
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                invalidSearchRequest:
-                  summary: Search request failed validation
-                  value:
-                    error: INVALID_WLH_SEARCH_REQUEST
+                $ref: "#/components/schemas/RepairableProblem"
         "401":
           description: Unauthorized
           content:
@@ -610,36 +595,21 @@ paths:
         "404":
           description: Not found
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                categoryNotFound:
-                  summary: Search category id is not known
-                  value:
-                    error: WLH_CATEGORY_NOT_FOUND
+                $ref: "#/components/schemas/RepairableProblem"
         "429":
           description: Rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                rateLimited:
-                  summary: WLH upstream rate limit encountered
-                  value:
-                    error: WLH_RATE_LIMITED
+                $ref: "#/components/schemas/RepairableProblem"
         "502":
           description: Upstream failure
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                upstreamUnavailable:
-                  summary: WLH upstream dependency failed
-                  value:
-                    error: WLH_UPSTREAM_UNAVAILABLE
+                $ref: "#/components/schemas/RepairableProblem"
   /api/wlh/offers/{adId}:
     get:
       operationId: getWlhOffer
@@ -721,25 +691,15 @@ paths:
         "429":
           description: Rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                rateLimited:
-                  summary: WLH upstream rate limit encountered
-                  value:
-                    error: WLH_RATE_LIMITED
+                $ref: "#/components/schemas/RepairableProblem"
         "502":
           description: Upstream failure
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                upstreamUnavailable:
-                  summary: WLH upstream dependency failed
-                  value:
-                    error: WLH_UPSTREAM_UNAVAILABLE
+                $ref: "#/components/schemas/RepairableProblem"
   /api/wlh/offers/{adId}/images:
     get:
       operationId: getWlhOfferImages
@@ -815,25 +775,16 @@ paths:
         "429":
           description: Rate limited
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                rateLimited:
-                  summary: WLH upstream rate limit encountered
-                  value:
-                    error: WLH_RATE_LIMITED
+                $ref: "#/components/schemas/RepairableProblem"
         "502":
           description: Upstream failure
+
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              examples:
-                upstreamUnavailable:
-                  summary: WLH upstream dependency failed
-                  value:
-                    error: WLH_UPSTREAM_UNAVAILABLE
+                $ref: "#/components/schemas/RepairableProblem"
   /api/reddit/comment-tree:
     post:
       operationId: postRedditCommentTree
@@ -1443,6 +1394,7 @@ components:
             - dependency_failure
             - capacity_or_timeout
             - service_bug_likely
+            - internal_error
             - security_suspicious
             - diagnostic_uncertain
         repairable:
