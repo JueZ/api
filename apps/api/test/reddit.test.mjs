@@ -720,11 +720,11 @@ test('RedditThreadService fetches full comments by ID with field projection', as
     },
   });
 
-  const response = await service.fetchCommentsBatch({ ids: ['c1', 'missing'], fields: ['id', 'score', 'body'] });
+  const response = await service.fetchCommentsBatch({ ids: ['c1', 'missing'], fields: ['id', 'score', 'body', 'replyCount'] });
 
   assert.deepEqual(response.found, ['c1']);
   assert.deepEqual(response.missing, ['missing']);
-  assert.deepEqual(response.comments, [{ id: 'c1', score: 7, body: 'full body' }]);
+  assert.deepEqual(response.comments, [{ id: 'c1', score: 7, body: 'full body', replyCount: null }]);
 });
 
 test('queryable Reddit handlers delegate and expose endpoint-specific operation IDs', async () => {
