@@ -8,6 +8,7 @@ export type RepairableErrorClassification =
   | 'dependency_failure'
   | 'capacity_or_timeout'
   | 'service_bug_likely'
+  | 'internal_error'
   | 'security_suspicious'
   | 'diagnostic_uncertain';
 
@@ -97,6 +98,7 @@ const CLASSIFICATIONS: readonly RepairableErrorClassification[] = [
   'dependency_failure',
   'capacity_or_timeout',
   'service_bug_likely',
+  'internal_error',
   'security_suspicious',
   'diagnostic_uncertain',
 ] as const;
