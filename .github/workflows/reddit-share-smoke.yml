@@ -1,0 +1,142 @@
+name: Reddit Share Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment_name:
+        description: GitHub/Azure environment to smoke. Use test unless explicitly diagnosing production.
+        required: false
+        default: test
+        type: choice
+        options:
+          - test
+          - prod
+      api_base_url:
+        description: Optional API base URL override. Defaults to the known Function App URL for the selected environment.
+        required: false
+        type: string
+      share_url:
+        description: Reddit /s/ share URL to verify.
+        required: false
+        default: https://www.reddit.com/r/macbookpro/s/nnlryuZCNX
+        type: string
+      expected_post_id:
+        description: Expected Reddit post ID when the share URL resolves.
+        required: false
+        default: 1tryldy
+        type: string
+      require_share_success:
+        description: Fail the workflow when Reddit web blocks share URL resolution instead of reporting dependency_blocked.
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  DEFAULT_TEST_API_BASE_URL: https://func-api-catalogue-test-iwt54bovfzvrc.azurewebsites.net
+  DEFAULT_PROD_API_BASE_URL: https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net
+
+jobs:
+  reddit-share-smoke:
+    name: reddit share smoke (${{ inputs.environment_name || 'test' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ inputs.environment_name == 'prod' && 'production' || 'test' }}
+    env:
+      ENVIRONMENT_NAME: ${{ inputs.environment_name || 'test' }}
+      TEST_SERVICE_AUTH_CLIENT_ID: ${{ vars.TEST_SERVICE_AUTH_CLIENT_ID }}
+      TEST_SERVICE_AUTH_TENANT_ID: ${{ vars.TEST_SERVICE_AUTH_TENANT_ID }}
+      TEST_SERVICE_AUTH_SCOPE: ${{ vars.TEST_SERVICE_AUTH_SCOPE }}
+      PROD_SERVICE_AUTH_CLIENT_ID: ${{ vars.PROD_SERVICE_AUTH_CLIENT_ID }}
+      PROD_SERVICE_AUTH_TENANT_ID: ${{ vars.PROD_SERVICE_AUTH_TENANT_ID }}
+      PROD_SERVICE_AUTH_SCOPE: ${{ vars.PROD_SERVICE_AUTH_SCOPE }}
+      SMOKE_INPUT_API_BASE_URL: ${{ inputs.api_base_url }}
+      REDDIT_SHARE_URL_SMOKE_ENABLED: true
+      REDDIT_SHARE_URL_SMOKE_REQUIRED: ${{ inputs.require_share_success }}
+      REDDIT_SHARE_URL_SMOKE_URL: ${{ inputs.share_url }}
+      REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID: ${{ inputs.expected_post_id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve smoke target
+        shell: bash
+        run: |
+          set -euo pipefail
+          environment_name="${ENVIRONMENT_NAME:-test}"
+          api_base_url="$SMOKE_INPUT_API_BASE_URL"
+          if [ -z "$api_base_url" ]; then
+            case "$environment_name" in
+              prod) api_base_url="$DEFAULT_PROD_API_BASE_URL" ;;
+              test) api_base_url="$DEFAULT_TEST_API_BASE_URL" ;;
+              *)
+                echo "Unsupported environment_name: $environment_name" >&2
+                exit 2
+                ;;
+            esac
+          fi
+          smoke_run_id="reddit-share-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          {
+            echo "API_BASE_URL=$api_base_url"
+            echo "SMOKE_RUN_ID=$smoke_run_id"
+            echo "REQUIRE_AUTH_SMOKE=$([ "$environment_name" = "prod" ] && echo true || echo false)"
+          } >> "$GITHUB_ENV"
+          {
+            echo "### Reddit share smoke target"
+            echo "- Environment: $environment_name"
+            echo "- API base URL: $api_base_url"
+            echo "- Share URL host/path: $(node -e 'const u=new URL(process.argv[1]); console.log(`${u.host}${u.pathname}`)' "$REDDIT_SHARE_URL_SMOKE_URL")"
+            echo "- Expected post ID: $REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID"
+            echo "- Smoke run ID: $smoke_run_id"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Mint authenticated smoke token with GitHub OIDC
+        run: npm run --silent ops:mint-smoke-token
+
+      - name: Run Reddit share authenticated smoke
+        id: reddit-share-smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/smoke"
+          results_path="$RUNNER_TEMP/smoke/reddit-share-auth-smoke.json"
+          npm run --silent ops:smoke:auth | tee "$results_path"
+          echo "results_path=$results_path" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize Reddit share smoke
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          results_path="${{ steps.reddit-share-smoke.outputs.results_path }}"
+          if [ -z "$results_path" ] || [ ! -f "$results_path" ]; then
+            echo "### Reddit share smoke" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Result file was not produced." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node --input-type=module - "$results_path" <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          import { readFileSync } from 'node:fs';
+          const result = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+          console.log('### Reddit share smoke result');
+          console.log(`- Status: ${result.status}`);
+          if (result.blockedReason) console.log(`- Blocked reason: ${result.blockedReason}`);
+          for (const check of result.checks ?? []) {
+            const details = Object.entries(check)
+              .filter(([key]) => !['name', 'status'].includes(key))
+              .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+              .join(', ');
+            console.log(`- ${check.name}: ${check.status}${details ? ` (${details})` : ''}`);
+          }
+          NODE

@@ -1,5 +1,10 @@
 # Current state
 
+## 2026-05-31 Reddit share smoke workflow
+
+- Added a manual `Reddit Share Smoke` GitHub Actions workflow for testing Reddit `/s/` share-wrapper resolution through the existing GitHub OIDC service-token path instead of asking operators to mint tokens or alter credentials from Cloud Shell.
+- The workflow targets test by default, runs authenticated `/health`, `/api/hello`, baseline Reddit thread, and optional Reddit share URL smoke checks via `scripts/smoke-auth.mjs`, and reports Reddit web share-resolution blocks as `dependency_blocked` unless explicitly required.
+
 ## 2026-05-30 Production authenticated smoke transient 404 follow-up
 
 - Production promotion run `26668642239` for main commit `0fac737bdd3b8ac6bf04976d79498e9ec57addcd` deployed the Function App and passed unauthenticated runtime smoke, but failed `ops:smoke:auth` because the first authenticated-smoke `/health` probe returned transient `404` immediately after deployment.
