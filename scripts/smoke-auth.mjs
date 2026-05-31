@@ -97,12 +97,21 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
           body: JSON.stringify({ post: shareSmokeUrl, sort: 'top', maxComments: 1, maxMoreChildrenRequests: 0 }),
         });
         const shareBody = JSON.stringify(shareReddit.json ?? {});
-        if (shareReddit.response.status === 400 && /REDDIT_SHARE_RESOLUTION_BLOCKED|Reddit \/s\/ share URL|\/s\/ share URL|comments<\/id>|comments\/<id>/i.test(shareBody)) {
+        const shareResolutionBlocked = /REDDIT_SHARE_RESOLUTION_BLOCKED|Reddit \/s\/ share URL|\/s\/ share URL|comments<\/id>|comments\/<id>|without exposing a canonical|challenge/i.test(shareBody);
+        const shareResolutionHttpStatus = shareReddit.json?.redditFetchError?.status
+          ?? shareReddit.json?.safe_error?.original_status
+          ?? shareReddit.json?.safe_error?.httpStatus
+          ?? shareReddit.json?.resolution?.httpStatus;
+        if (
+          (shareReddit.response.status === 400 && shareResolutionBlocked)
+          || ([403, 429].includes(Number(shareResolutionHttpStatus)) && shareResolutionBlocked)
+        ) {
           results.status = 'dependency_blocked';
           results.blockedReason = 'reddit web share URL resolution blocked from server egress';
           record('reddit-share-url-resolution', 'dependency_blocked', {
             statusCode: shareReddit.response.status,
-            safeReason: 'reddit web share URL resolution blocked from server egress',
+            upstreamStatusCode: Number(shareResolutionHttpStatus) || undefined,
+            safeReason: 'reddit web returned a 403/challenge or rate limit without canonical metadata',
           });
           return { result: results, exitCode: shareSmokeRequired ? 3 : 0, output: 'stdout' };
         }

@@ -35,6 +35,11 @@ on:
         required: false
         default: false
         type: boolean
+      redditShareUrlSmokeEnabled:
+        description: Run the optional authenticated Reddit share URL smoke against the configured /s/ URL.
+        required: false
+        default: false
+        type: boolean
     secrets:
       REDDIT_CLIENT_SECRET:
         description: Reddit OAuth client secret for app-only API access.
@@ -589,6 +594,9 @@ jobs:
           export ENVIRONMENT_NAME
           export SMOKE_RUN_ID
           export REQUIRE_AUTH_SMOKE=$([ "$ENVIRONMENT_NAME" = "prod" ] && echo true || echo false)
+          export REDDIT_SHARE_URL_SMOKE_ENABLED="${{ inputs.redditShareUrlSmokeEnabled && 'true' || 'false' }}"
+          export REDDIT_SHARE_URL_SMOKE_URL="https://www.reddit.com/r/macbookpro/s/nnlryuZCNX"
+          export REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID="1tryldy"
           npm run --silent ops:smoke:auth | tee "$smoke_dir/auth-smoke.json"
           echo "AUTH_SMOKE_RESULTS_PATH=$smoke_dir/auth-smoke.json" >> "$GITHUB_ENV"
       - name: Run telemetry gate
