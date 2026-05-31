@@ -196,6 +196,105 @@ test('authenticated smoke retries transient health and protected endpoint 404s a
   }
 });
 
+
+test('authenticated share URL smoke passes only when expected post id matches', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      const path = new URL(String(url)).pathname;
+      calls.push({ path, body: options.body ? JSON.parse(String(options.body)) : null });
+      if (path === '/health') {
+        return new Response(JSON.stringify({ status: 'ok', environmentName: 'test', deployedCommitSha: 'b'.repeat(40) }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (path === '/api/hello') {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (path === '/api/reddit/thread') {
+        const body = JSON.parse(String(options.body));
+        const postId = body.post.includes('/s/') ? '1tryldy' : '87';
+        return new Response(JSON.stringify({ post: { id: postId } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    };
+
+    const { result, exitCode } = await runAuthenticatedSmoke({ env: {
+      API_BASE_URL: 'https://api.example.test',
+      AUTH_ACCESS_TOKEN: 'token',
+      ENVIRONMENT_NAME: 'test',
+      EXPECTED_DEPLOYED_COMMIT_SHA: 'b'.repeat(40),
+      SMOKE_RUN_ID: 'smoke-test',
+      REDDIT_SHARE_URL_SMOKE_ENABLED: 'true',
+      REDDIT_SHARE_URL_SMOKE_URL: 'https://www.reddit.com/r/macbookpro/s/nnlryuZCNX',
+      REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID: '1tryldy',
+    } });
+
+    assert.equal(exitCode, 0);
+    assert.equal(result.status, 'passed');
+    assert.deepEqual(
+      result.checks.find((check) => check.name === 'reddit-share-url-resolution'),
+      { name: 'reddit-share-url-resolution', status: 'passed', postId: '1tryldy' },
+    );
+    assert.equal(calls.filter((call) => call.path === '/api/reddit/thread').length, 2);
+    assert.equal(calls.at(-1).body.post, 'https://www.reddit.com/r/macbookpro/s/nnlryuZCNX');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('authenticated share URL smoke records Reddit challenge as dependency blocked', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      const path = new URL(String(url)).pathname;
+      if (path === '/health') {
+        return new Response(JSON.stringify({ status: 'ok', environmentName: 'test' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (path === '/api/hello') {
+        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (path === '/api/reddit/thread') {
+        const body = JSON.parse(String(options.body));
+        if (body.post.includes('/s/')) {
+          return new Response(JSON.stringify({
+            code: 'REDDIT_SHARE_RESOLUTION_BLOCKED',
+            detail: 'Reddit web returned HTTP 403 challenge without exposing a canonical /comments/<id> redirect.',
+            resolution: { httpStatus: 403 },
+          }), { status: 400, headers: { 'content-type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({ post: { id: '87' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    };
+
+    const { result, exitCode } = await runAuthenticatedSmoke({ env: {
+      API_BASE_URL: 'https://api.example.test',
+      AUTH_ACCESS_TOKEN: 'token',
+      ENVIRONMENT_NAME: 'test',
+      SMOKE_RUN_ID: 'smoke-test',
+      REDDIT_SHARE_URL_SMOKE_ENABLED: 'true',
+      REDDIT_SHARE_URL_SMOKE_URL: 'https://www.reddit.com/r/macbookpro/s/nnlryuZCNX',
+      REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID: '1tryldy',
+    } });
+
+    assert.equal(exitCode, 0);
+    assert.equal(result.status, 'dependency_blocked');
+    assert.equal(result.blockedReason, 'reddit web share URL resolution blocked from server egress');
+    assert.deepEqual(
+      result.checks.find((check) => check.name === 'reddit-share-url-resolution'),
+      {
+        name: 'reddit-share-url-resolution',
+        status: 'dependency_blocked',
+        statusCode: 400,
+        upstreamStatusCode: 403,
+        safeReason: 'reddit web returned a 403/challenge or rate limit without canonical metadata',
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('smoke and release ledger modules import without operational side effects', async (t) => {
   const { mkdtemp, rm } = await import('node:fs/promises');
   const { existsSync } = await import('node:fs');

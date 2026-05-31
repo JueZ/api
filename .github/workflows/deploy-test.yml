@@ -21,6 +21,11 @@ on:
         required: false
         default: true
         type: boolean
+      reddit_share_url_smoke:
+        description: Run optional authenticated Reddit /s/ share URL smoke after deployment.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -52,3 +57,4 @@ jobs:
       deployFrontend: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_frontend }}
       deployFunctions: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_functions }}
       sourceRef: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.commit_sha || github.sha }}
+      redditShareUrlSmokeEnabled: ${{ github.event_name == 'workflow_dispatch' && inputs.reddit_share_url_smoke }}

@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-05-31 Workflow-dispatched Reddit share URL smoke
+
+- `Deploy Test` workflow_dispatch now has an optional `reddit_share_url_smoke` input that enables the existing GitHub Actions service-token authenticated smoke path for `https://www.reddit.com/r/macbookpro/s/nnlryuZCNX`; it expects the protected Reddit endpoint to return `post.id == "1tryldy"`.
+- The reusable deployment workflow passes the smoke configuration into `scripts/smoke-auth.mjs` only during the authenticated smoke step, after `scripts/mint-smoke-token.mjs` has minted the short-lived token through GitHub OIDC.
+- Reddit web 403/challenge or rate-limit responses without canonical metadata are recorded as `dependency_blocked` for the optional share URL smoke rather than as application failures unless the smoke is explicitly marked required.
+
 ## 2026-05-30 Production authenticated smoke transient 404 follow-up
 
 - Production promotion run `26668642239` for main commit `0fac737bdd3b8ac6bf04976d79498e9ec57addcd` deployed the Function App and passed unauthenticated runtime smoke, but failed `ops:smoke:auth` because the first authenticated-smoke `/health` probe returned transient `404` immediately after deployment.
