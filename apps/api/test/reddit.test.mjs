@@ -261,6 +261,33 @@ test('RedditThreadService resolves 403 HTML when canonical metadata is still pre
 });
 
 
+test('RedditThreadService resolves macbookpro share wrapper to canonical comments URL before fetching comments', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  const shareUrl = 'https://www.reddit.com/r/macbookpro/s/nnlryuZCNX';
+  const canonicalUrl = 'https://www.reddit.com/r/macbookpro/comments/1tryldy/after_proper_investigation_at_apple_store_now_i/';
+  const calls = [];
+  const service = new RedditThreadService({
+    fetchImpl: async (input, init) => {
+      calls.push({ input: String(input), init });
+      assert.doesNotMatch(String(input), /\/s\/nnlryuZCNX\.json/);
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (String(input) === shareUrl) return redirectResponse(canonicalUrl);
+      if (String(input) === canonicalUrl) return responseWithUrl({}, canonicalUrl);
+      if (String(input).includes('/comments/1tryldy')) return jsonResponse(threadFixtureWithoutMore('1tryldy'), 200, rateHeaders(2));
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThread({ post: shareUrl, maxComments: 10, maxMoreChildrenRequests: 0 });
+
+  assert.equal(response.post.id, '1tryldy');
+  assert.equal(calls.some((call) => call.input.includes('/api/info') && call.input.includes('url=')), false);
+  assert.equal(calls.some((call) => call.input === shareUrl), true);
+  assert.equal(calls.some((call) => call.input.includes('/comments/1tryldy')), true);
+});
+
 test('RedditThreadService resolves share URL when redirect status has no Location but HTML anchor contains canonical comments URL', async () => {
   process.env.REDDIT_CLIENT_ID = config.clientId;
   process.env.REDDIT_CLIENT_SECRET = config.secret;
