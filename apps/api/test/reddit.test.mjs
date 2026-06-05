@@ -18,6 +18,26 @@ const config = {
   userAgent: 'script:test:v0.1.0 (by u/example)',
 };
 
+function headerValue(init, name) {
+  const headers = init?.headers;
+  if (!headers) return null;
+  if (typeof headers.get === 'function') return headers.get(name);
+  const lowerName = name.toLowerCase();
+  if (Array.isArray(headers)) {
+    const entry = headers.find(([key]) => String(key).toLowerCase() === lowerName);
+    return entry ? entry[1] : null;
+  }
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === lowerName) return value;
+  }
+  return null;
+}
+
+function assertRedditAuthenticatedRequest(call) {
+  assert.equal(headerValue(call.init, 'Authorization'), 'Bearer mock-token');
+  assert.equal(headerValue(call.init, 'User-Agent'), config.userAgent);
+}
+
 test('parseRedditPostInput accepts supported ID and URL formats', () => {
   assert.deepEqual(parseRedditPostInput('abc123'), { articleId: 'abc123', fullname: 't3_abc123' });
   assert.deepEqual(parseRedditPostInput('t3_ABC123'), { articleId: 'abc123', fullname: 't3_abc123' });
@@ -171,7 +191,9 @@ test('RedditThreadService resolves Reddit share URLs through web redirect before
 
   assert.equal(response.input, shareUrl);
   assert.equal(response.post.id, '1tgoo04');
-  assert.ok(calls.some((call) => call.input === shareUrl));
+  const shareCall = calls.find((call) => call.input === shareUrl);
+  assert.ok(shareCall);
+  assertRedditAuthenticatedRequest(shareCall);
   assert.ok(calls.some((call) => call.input.includes('/comments/1tgoo04')));
   assert.equal(calls.some((call) => call.input.includes('/api/info') && call.input.includes('url=')), false);
   assert.equal(calls.some((call) => /\/s\/JYIXy2cjSJ\.json/.test(call.input)), false);
@@ -200,7 +222,9 @@ test('RedditThreadService resolves multi-hop Reddit share redirects', async () =
   const response = await service.fetchThread({ post: shareUrl, maxComments: 10 });
 
   assert.equal(response.post.id, 'abc123');
-  assert.deepEqual(calls.filter((call) => call.input === shareUrl || call.input === intermediateUrl).map((call) => call.init.method), ['GET', 'GET']);
+  const redirectCalls = calls.filter((call) => call.input === shareUrl || call.input === intermediateUrl);
+  assert.deepEqual(redirectCalls.map((call) => call.init.method), ['GET', 'GET']);
+  redirectCalls.forEach(assertRedditAuthenticatedRequest);
 });
 
 test('RedditThreadService does not require api/info to resolve Reddit share URLs', async () => {
@@ -319,6 +343,7 @@ test('RedditThreadService maps Reddit web 403 share resolution to structured cal
   const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
   const service = new RedditThreadService({
     fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
       if (String(input) === shareUrl) return textResponseWithUrl('<html>blocked</html>', shareUrl, 403, { 'content-type': 'text/html; charset=utf-8' });
       throw new Error(`unexpected URL ${String(input)}`);
     },
@@ -371,6 +396,7 @@ test('RedditThreadService treats HTML 200 feed or challenge as unresolved share 
   const shareUrl = 'https://www.reddit.com/r/science/s/DQGxxt7XzY';
   const service = new RedditThreadService({
     fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
       if (String(input) === shareUrl) return textResponseWithUrl('<html>challenge</html>', shareUrl, 200, { 'content-type': 'text/html; charset=utf-8' });
       throw new Error(`unexpected URL ${String(input)}`);
     },
@@ -390,6 +416,7 @@ test('RedditThreadService blocks unsafe Reddit share redirects without fetching 
   const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
   const service = new RedditThreadService({
     fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
       calls.push(String(input));
       if (String(input) === shareUrl) return redirectResponse('https://evil.example/phish');
       throw new Error(`unexpected URL ${String(input)}`);
@@ -409,7 +436,10 @@ test('RedditThreadService returns max_redirects_exceeded for excessive share red
   process.env.REDDIT_USER_AGENT = config.userAgent;
   const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
   const service = new RedditThreadService({
-    fetchImpl: async (input) => redirectResponse(`${String(input).replace(/\/$/, '')}/next`),
+    fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      return redirectResponse(`${String(input).replace(/\/$/, '')}/next`);
+    },
   });
 
   await assert.rejects(
@@ -531,6 +561,7 @@ test('RedditThreadService returns a structured input error when share URL resolu
   const shareUrl = 'https://www.reddit.com/r/OpenAI/s/iuZlOIPdCI';
   const service = new RedditThreadService({
     fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
       if (String(input) === shareUrl) {
         return responseWithUrl({}, shareUrl);
       }
@@ -1280,7 +1311,9 @@ async function fetchThreadFromShareHtml({ html, status = 200 }) {
 }
 
 function assertShareHtmlResolvedWithoutFallbacks(calls) {
-  assert.ok(calls.some((call) => call.input === 'https://www.reddit.com/r/AskReddit/s/JYIXy2cjSJ'));
+  const shareCall = calls.find((call) => call.input === 'https://www.reddit.com/r/AskReddit/s/JYIXy2cjSJ');
+  assert.ok(shareCall);
+  assertRedditAuthenticatedRequest(shareCall);
   assert.ok(calls.some((call) => call.input.includes('/comments/1tgoo04')));
   assert.equal(calls.some((call) => call.input.includes('/api/info') && call.input.includes('url=')), false);
   assert.equal(calls.some((call) => /\/s\/JYIXy2cjSJ\.json/.test(call.input)), false);
