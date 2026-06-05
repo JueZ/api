@@ -151,6 +151,7 @@ export class RedditOAuthClient {
   }
 
   async resolveRedditUrl(inputUrl: string): Promise<RedditRedirectResult> {
+    const tokenValue = await this.getAccessToken();
     let url = validateRedirectUrl(inputUrl);
     const redirectChain = [url.toString()];
     let lastResponse: Response | null = null;
@@ -162,6 +163,7 @@ export class RedditOAuthClient {
         headers: {
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9',
+          Authorization: `Bearer ${tokenValue}`,
           'User-Agent': this.config.userAgent,
         },
       });
