@@ -38,7 +38,7 @@ npm run type-check
 A minimal local MCP initialize request after starting the Functions host should include both accepted response media types:
 
 ```bash
-curl -sS http://localhost:7071/api/mcp \
+curl -sS http://localhost:7071/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"local-test","version":"1"}}}'
@@ -51,10 +51,10 @@ When `AUTH_ENABLED=true`, protected tool calls require a valid bearer token and 
 ChatGPT Developer Mode requires an HTTPS public connector URL. For local development, expose the Functions host through a secure HTTPS tunnel such as your approved dev tunnel provider, then point ChatGPT at:
 
 ```text
-https://<public-host>/api/mcp
+https://<public-host>/mcp
 ```
 
-If your deployment or local host maps Azure Functions routes without the default `/api` prefix, use that environment's public `/mcp` path instead. The Azure Functions route added in code is `mcp`; local Core Tools commonly expose it under `/api/mcp` unless the host prefix is changed.
+This repo's `apps/api/host.json` sets `extensions.http.routePrefix` to an empty string, so the Azure Functions route is exposed as `/mcp` rather than `/api/mcp`.
 
 Do not use hidden URLs, shared static bearer tokens, API keys, or unauthenticated private-data endpoints as a substitute for OAuth.
 
@@ -63,8 +63,8 @@ Do not use hidden URLs, shared static bearer tokens, API keys, or unauthenticate
 1. In ChatGPT, open **Settings -> Apps & Connectors -> Advanced settings -> Developer Mode**.
 2. Create a connector.
 3. Set the connector URL to the public HTTPS MCP endpoint, for example:
-   - local tunnel: `https://<public-host>/api/mcp`
-   - deployed Functions/custom domain: `https://<deployed-host>/api/mcp` or `https://<deployed-host>/mcp`, depending on route-prefix configuration.
+   - local tunnel: `https://<public-host>/mcp`
+   - deployed Functions/custom domain: `https://<deployed-host>/mcp`.
 4. Complete OAuth linking when prompted.
 
 ## Microsoft Entra compatibility notes

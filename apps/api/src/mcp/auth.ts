@@ -5,6 +5,13 @@ import { authorizeBearerToken, readAuthConfig, type AuthenticatedUser, type Auth
 export const MCP_SCOPE = 'api.access';
 export const MCP_PROTECTED_RESOURCE_PATH = '/.well-known/oauth-protected-resource';
 
+export type McpAuthChallengeError = 'invalid_token' | 'insufficient_scope';
+
+export interface McpWwwAuthenticateOptions {
+  error: McpAuthChallengeError;
+  errorDescription: string;
+}
+
 export interface McpProtectedResourceMetadata {
   resource: string;
   authorization_servers: string[];
@@ -43,9 +50,19 @@ export function buildMcpProtectedResourceMetadata(request?: HttpRequest, env: No
   };
 }
 
-export function buildMcpWwwAuthenticate(request?: HttpRequest, env: NodeJS.ProcessEnv = process.env): string {
+export function buildMcpWwwAuthenticate(
+  request: HttpRequest | undefined,
+  options: McpWwwAuthenticateOptions,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
   const origin = getMcpResourceOrigin(request, env);
-  return `Bearer resource_metadata="${origin}${MCP_PROTECTED_RESOURCE_PATH}", scope="${MCP_SCOPE}"`;
+  const parameters: Array<[string, string]> = [
+    ['resource_metadata', `${origin}${MCP_PROTECTED_RESOURCE_PATH}`],
+    ['scope', MCP_SCOPE],
+    ['error', options.error],
+    ['error_description', options.errorDescription],
+  ];
+  return `Bearer ${parameters.map(([key, value]) => `${key}="${quoteWwwAuthenticateValue(value)}"`).join(', ')}`;
 }
 
 export async function authorizeMcpTool(
@@ -55,11 +72,15 @@ export async function authorizeMcpTool(
   return authorizeBearerToken(authorizationHeader, context);
 }
 
-export function mcpAuthErrorResult(wwwAuthenticate: string, message = 'Authentication required: no valid access token provided.'): CallToolResult {
+export function mcpAuthErrorResult(
+  wwwAuthenticate: string,
+  error: McpAuthChallengeError,
+  errorDescription: string,
+): CallToolResult {
   return {
     isError: true,
-    content: [{ type: 'text', text: message }],
-    structuredContent: { error: 'unauthorized' },
+    content: [{ type: 'text', text: errorDescription }],
+    structuredContent: { error },
     _meta: {
       'mcp/www_authenticate': [wwwAuthenticate],
     },
@@ -72,6 +93,10 @@ export function safeUser(user: AuthenticatedUser): { subject: string; objectId?:
     ...(user.objectId ? { objectId: user.objectId } : {}),
     ...(user.tenantId ? { tenantId: user.tenantId } : {}),
   };
+}
+
+function quoteWwwAuthenticateValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
 function normalizeOrigin(value: string | undefined): string | undefined {

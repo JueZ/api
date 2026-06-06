@@ -29,7 +29,12 @@ test('MCP initialize and tools/list expose the private read-only tool catalogue'
 
     for (const tool of tools) {
       assert.equal(tool.annotations.readOnlyHint, true, `${tool.name} must be read-only`);
-      if (tool.name !== 'health_check') {
+      assert.ok(tool.outputSchema, `${tool.name} must expose an output schema`);
+      if (tool.name === 'health_check') {
+        assert.deepEqual(tool.securitySchemes, [{ type: 'noauth' }]);
+        assert.deepEqual(tool._meta.securitySchemes, [{ type: 'noauth' }]);
+      } else {
+        assert.deepEqual(tool.securitySchemes, [{ type: 'oauth2', scopes: ['api.access'] }]);
         assert.deepEqual(tool._meta.securitySchemes, [{ type: 'oauth2', scopes: ['api.access'] }]);
       }
     }

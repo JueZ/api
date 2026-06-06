@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-06-06 MCP gateway hardening follow-up
+
+- Hardened the private ChatGPT Developer Mode MCP gateway descriptors so tool listings expose both top-level `securitySchemes` and `_meta.securitySchemes`, plus minimal output schemas for each read-only tool.
+- MCP auth challenges now include `resource_metadata`, `scope`, `error`, and `error_description`, using `invalid_token` for missing/invalid bearer tokens and `insufficient_scope` for valid but unauthorized tokens.
+- MCP setup docs now consistently use `/mcp` because `apps/api/host.json` sets the Azure Functions route prefix to an empty string.
+
 ## 2026-06-06 Private ChatGPT Developer Mode MCP gateway
 
 - Added a private MCP Streamable HTTP gateway on the existing Azure Functions backend as an additional interface; existing REST routes, GPT Actions OpenAPI contracts, Angular app, auth model, and deployment flow remain in place.

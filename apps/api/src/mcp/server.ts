@@ -7,7 +7,7 @@ import { createHealthResponse, createHelloResponse } from '../shared/responses.j
 import { RedditThreadService } from '../shared/reddit/service.js';
 import type { RedditThreadOverviewRequest, RedditThreadRequest } from '../shared/reddit/types.js';
 import { WlhService } from '../shared/wlh/service.js';
-import { authorizeMcpTool, buildMcpWwwAuthenticate, mcpAuthErrorResult, safeUser } from './auth.js';
+import { authorizeMcpTool, buildMcpWwwAuthenticate, mcpAuthErrorResult, safeUser, type McpAuthChallengeError } from './auth.js';
 
 export interface McpGatewayServices {
   reddit: Pick<RedditThreadService, 'fetchThread' | 'fetchThreadOverview'>;
@@ -28,21 +28,53 @@ const redditSortSchema = z.enum(['confidence', 'top', 'new', 'controversial', 'o
 const protectedSecuritySchemes = [{ type: 'oauth2', scopes: ['api.access'] }];
 const noauthSecuritySchemes = [{ type: 'noauth' }];
 const readOnlyAnnotations = { readOnlyHint: true };
+const healthToolSecurity = { securitySchemes: noauthSecuritySchemes, _meta: { securitySchemes: noauthSecuritySchemes } };
+const protectedToolSecurity = { securitySchemes: protectedSecuritySchemes, _meta: { securitySchemes: protectedSecuritySchemes } };
+
+const healthOutputSchema = z.object({
+  service: z.literal('api-catalogue'),
+  status: z.literal('ok'),
+  mcpGateway: z.object({ endpoint: z.string(), version: z.string() }).passthrough(),
+}).passthrough();
+const helloOutputSchema = z.object({
+  message: z.literal('Hello, Martin'),
+  authenticated: z.literal(true),
+  user: z.object({ subject: z.string(), objectId: z.string().optional(), tenantId: z.string().optional() }).passthrough(),
+}).passthrough();
+const redditThreadOutputSchema = z.object({
+  source: z.literal('reddit'),
+  post: z.object({ id: z.string() }).passthrough(),
+  stats: z.object({ commentsReturned: z.number() }).passthrough(),
+}).passthrough();
+const redditOverviewOutputSchema = z.object({
+  source: z.literal('reddit'),
+  post: z.object({ id: z.string() }).passthrough(),
+  stats: z.object({ loadedSnapshotCommentCount: z.number() }).passthrough(),
+}).passthrough();
+const wlhSearchOutputSchema = z.object({
+  source: z.literal('wlh').optional(),
+  rowsReturned: z.number().optional(),
+  filteredRowsReturned: z.number().optional(),
+  results: z.array(z.unknown()).optional(),
+}).passthrough();
+const wlhOfferOutputSchema = z.object({ id: z.string() }).passthrough();
+const wlhCategoriesOutputSchema = z.object({
+  source: z.literal('wlh'),
+  categories: z.array(z.unknown()),
+}).passthrough();
+const wlhCategoryChildrenOutputSchema = z.object({
+  source: z.literal('wlh'),
+  categoryId: z.string(),
+  categories: z.array(z.unknown()),
+}).passthrough();
 
 export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
   const server = new McpServer({ name: 'api-catalogue-private-mcp', version: MCP_VERSION });
   const services = options.services ?? defaultServices();
-  const wwwAuthenticate = buildMcpWwwAuthenticate(options.request);
-
   async function requireAuth(): Promise<CallToolResult | undefined> {
     const auth = await authorizeMcpTool(options.authorizationHeader, options.context);
     if (!auth.ok) {
-      const status = auth.response.status ?? 401;
-      const code = status === 403 ? 'forbidden' : 'unauthorized';
-      return {
-        ...mcpAuthErrorResult(wwwAuthenticate, status === 403 ? 'Authorization failed for this MCP tool.' : undefined),
-        structuredContent: { error: code },
-      };
+      return mcpAuthorizationFailureResult(auth, options.request);
     }
     return undefined;
   }
@@ -53,8 +85,9 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
       title: 'Health check',
       description: 'Check whether the private MCP gateway and API catalogue are reachable. Returns public health/build metadata only.',
       inputSchema: {},
+      outputSchema: healthOutputSchema,
       annotations: readOnlyAnnotations,
-      _meta: { securitySchemes: noauthSecuritySchemes },
+      ...healthToolSecurity,
     },
     async () => {
       const health = createHealthResponse();
@@ -69,14 +102,13 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
       title: 'Hello authenticated',
       description: 'Verify OAuth linking by calling the same safe user response shape as GET /api/hello.',
       inputSchema: {},
+      outputSchema: helloOutputSchema,
       annotations: readOnlyAnnotations,
-      _meta: { securitySchemes: protectedSecuritySchemes },
+      ...protectedToolSecurity,
     },
     async () => {
       const auth = await authorizeMcpTool(options.authorizationHeader, options.context);
-      if (!auth.ok) return auth.response.status === 403
-        ? { ...mcpAuthErrorResult(wwwAuthenticate, 'Authorization failed for this MCP tool.'), structuredContent: { error: 'forbidden' } }
-        : mcpAuthErrorResult(wwwAuthenticate);
+      if (!auth.ok) return mcpAuthorizationFailureResult(auth, options.request);
       const structuredContent = createHelloResponse(safeUser(auth.user));
       return textResult(structuredContent, 'OAuth linking succeeded for the private API catalogue.');
     },
@@ -98,8 +130,9 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
         maxComments: z.number().int().positive().optional(),
         maxMoreChildrenRequests: z.number().int().min(0).optional(),
       },
+      outputSchema: redditThreadOutputSchema,
       annotations: readOnlyAnnotations,
-      _meta: { securitySchemes: protectedSecuritySchemes },
+      ...protectedToolSecurity,
     },
     async (args) => {
       const authError = await requireAuth();
@@ -124,8 +157,9 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
         sort: redditSortSchema.optional(),
         maxComments: z.number().int().positive().optional(),
       },
+      outputSchema: redditOverviewOutputSchema,
       annotations: readOnlyAnnotations,
-      _meta: { securitySchemes: protectedSecuritySchemes },
+      ...protectedToolSecurity,
     },
     async (args) => {
       const authError = await requireAuth();
@@ -153,8 +187,9 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
         delivery: z.array(z.enum(['pickup', 'shipping'])).optional(),
         requiredTerms: z.array(z.string()).optional(),
       },
+      outputSchema: wlhSearchOutputSchema,
       annotations: readOnlyAnnotations,
-      _meta: { securitySchemes: protectedSecuritySchemes },
+      ...protectedToolSecurity,
     },
     async (args) => {
       const authError = await requireAuth();
@@ -171,8 +206,9 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
       title: 'WLH offer detail',
       description: 'Fetch one Willhaben/WLH offer detail using the protected WLH service.',
       inputSchema: { adId: z.string() },
+      outputSchema: wlhOfferOutputSchema,
       annotations: readOnlyAnnotations,
-      _meta: { securitySchemes: protectedSecuritySchemes },
+      ...protectedToolSecurity,
     },
     async ({ adId }) => {
       const authError = await requireAuth();
@@ -188,8 +224,9 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
       title: 'WLH top categories',
       description: 'List top-level Willhaben/WLH categories.',
       inputSchema: {},
+      outputSchema: wlhCategoriesOutputSchema,
       annotations: readOnlyAnnotations,
-      _meta: { securitySchemes: protectedSecuritySchemes },
+      ...protectedToolSecurity,
     },
     async () => {
       const authError = await requireAuth();
@@ -206,8 +243,9 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
       title: 'WLH category children',
       description: 'List child categories for a Willhaben/WLH category.',
       inputSchema: { categoryId: z.string() },
+      outputSchema: wlhCategoryChildrenOutputSchema,
       annotations: readOnlyAnnotations,
-      _meta: { securitySchemes: protectedSecuritySchemes },
+      ...protectedToolSecurity,
     },
     async ({ categoryId }) => {
       const authError = await requireAuth();
@@ -229,7 +267,13 @@ export async function handleMcpHttpRequest(request: HttpRequest, context: Invoca
   if (request.method === 'GET' && !request.headers.get('authorization')) {
     return {
       status: 401,
-      headers: { ...corsHeaders(), 'WWW-Authenticate': buildMcpWwwAuthenticate(request) },
+      headers: {
+        ...corsHeaders(),
+        'WWW-Authenticate': buildMcpWwwAuthenticate(request, {
+          error: 'invalid_token',
+          errorDescription: 'Missing bearer token.',
+        }),
+      },
       jsonBody: { error: { code: 'unauthorized', message: 'Authentication is required to open an MCP event stream.' } },
     };
   }
@@ -259,6 +303,35 @@ export async function handleMcpHttpRequest(request: HttpRequest, context: Invoca
   } finally {
     await server.close();
   }
+}
+
+
+function mcpAuthorizationFailureResult(auth: Extract<Awaited<ReturnType<typeof authorizeMcpTool>>, { ok: false }>, request?: HttpRequest): CallToolResult {
+  const challenge = authChallengeForFailure(auth);
+  return mcpAuthErrorResult(
+    buildMcpWwwAuthenticate(request, challenge),
+    challenge.error,
+    challenge.errorDescription,
+  );
+}
+
+function authChallengeForFailure(auth: Extract<Awaited<ReturnType<typeof authorizeMcpTool>>, { ok: false }>): { error: McpAuthChallengeError; errorDescription: string } {
+  const status = auth.response.status ?? 401;
+  return {
+    error: status === 403 ? 'insufficient_scope' : 'invalid_token',
+    errorDescription: safeAuthErrorDescription(auth),
+  };
+}
+
+function safeAuthErrorDescription(auth: Extract<Awaited<ReturnType<typeof authorizeMcpTool>>, { ok: false }>): string {
+  const body = auth.response.jsonBody;
+  if (isRecord(body)) {
+    const error = body['error'];
+    if (isRecord(error) && typeof error['message'] === 'string' && error['message'].trim().length > 0) {
+      return error['message'];
+    }
+  }
+  return auth.response.status === 403 ? 'Token is valid but is not authorized for this MCP tool.' : 'Missing, malformed, or invalid bearer token.';
 }
 
 function defaultServices(): McpGatewayServices {
@@ -307,9 +380,24 @@ async function toHttpResponseInit(response: Response): Promise<HttpResponseInit>
   const contentType = response.headers.get('content-type') ?? '';
   const text = await response.text();
   if (contentType.includes('application/json') && text.length > 0) {
-    return { status: response.status, headers, jsonBody: JSON.parse(text) as unknown };
+    return { status: response.status, headers, jsonBody: addTopLevelSecuritySchemes(JSON.parse(text) as unknown) };
   }
   return { status: response.status, headers, body: text };
+}
+
+
+function addTopLevelSecuritySchemes(jsonBody: unknown): unknown {
+  if (!isRecord(jsonBody) || !isRecord(jsonBody['result'])) return jsonBody;
+  const tools = jsonBody['result']['tools'];
+  if (!Array.isArray(tools)) return jsonBody;
+  for (const tool of tools) {
+    if (!isRecord(tool) || tool['securitySchemes'] !== undefined || !isRecord(tool['_meta'])) continue;
+    const securitySchemes = tool['_meta']['securitySchemes'];
+    if (Array.isArray(securitySchemes)) {
+      tool['securitySchemes'] = securitySchemes;
+    }
+  }
+  return jsonBody;
 }
 
 function corsHeaders(): Record<string, string> {
