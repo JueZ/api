@@ -1,0 +1,90 @@
+import type { HttpRequest, InvocationContext } from '@azure/functions';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { authorizeBearerToken, readAuthConfig, type AuthenticatedUser, type AuthorizationResult } from '../shared/security/auth.js';
+
+export const MCP_SCOPE = 'api.access';
+export const MCP_PROTECTED_RESOURCE_PATH = '/.well-known/oauth-protected-resource';
+
+export interface McpProtectedResourceMetadata {
+  resource: string;
+  authorization_servers: string[];
+  scopes_supported: string[];
+  resource_documentation?: string;
+}
+
+export function getMcpResourceOrigin(request?: HttpRequest, env: NodeJS.ProcessEnv = process.env): string {
+  const configured = normalizeOrigin(env['MCP_RESOURCE_ORIGIN']);
+  if (configured) return configured;
+
+  if (request) {
+    const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
+    const host = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim() ?? request.headers.get('host')?.trim();
+    if (host) {
+      const proto = forwardedProto && forwardedProto.length > 0 ? forwardedProto : new URL(request.url).protocol.replace(':', '');
+      return `${proto}://${host}`.replace(/\/$/, '');
+    }
+    return new URL(request.url).origin;
+  }
+
+  return 'http://localhost:7071';
+}
+
+export function buildMcpProtectedResourceMetadata(request?: HttpRequest, env: NodeJS.ProcessEnv = process.env): McpProtectedResourceMetadata {
+  const authConfig = readAuthConfig(env);
+  const authorizationServers = (authConfig.issuers && authConfig.issuers.length > 0)
+    ? authConfig.issuers
+    : authConfig.issuer ? [authConfig.issuer] : [];
+  const documentation = normalizeOptionalUrl(env['MCP_RESOURCE_DOCUMENTATION_URL']);
+  return {
+    resource: getMcpResourceOrigin(request, env),
+    authorization_servers: authorizationServers,
+    scopes_supported: [MCP_SCOPE],
+    ...(documentation ? { resource_documentation: documentation } : {}),
+  };
+}
+
+export function buildMcpWwwAuthenticate(request?: HttpRequest, env: NodeJS.ProcessEnv = process.env): string {
+  const origin = getMcpResourceOrigin(request, env);
+  return `Bearer resource_metadata="${origin}${MCP_PROTECTED_RESOURCE_PATH}", scope="${MCP_SCOPE}"`;
+}
+
+export async function authorizeMcpTool(
+  authorizationHeader: string | null | undefined,
+  context: InvocationContext,
+): Promise<AuthorizationResult> {
+  return authorizeBearerToken(authorizationHeader, context);
+}
+
+export function mcpAuthErrorResult(wwwAuthenticate: string, message = 'Authentication required: no valid access token provided.'): CallToolResult {
+  return {
+    isError: true,
+    content: [{ type: 'text', text: message }],
+    structuredContent: { error: 'unauthorized' },
+    _meta: {
+      'mcp/www_authenticate': [wwwAuthenticate],
+    },
+  };
+}
+
+export function safeUser(user: AuthenticatedUser): { subject: string; objectId?: string; tenantId?: string } {
+  return {
+    subject: user.subject,
+    ...(user.objectId ? { objectId: user.objectId } : {}),
+    ...(user.tenantId ? { tenantId: user.tenantId } : {}),
+  };
+}
+
+function normalizeOrigin(value: string | undefined): string | undefined {
+  if (!value || value.trim().length === 0) return undefined;
+  try {
+    const parsed = new URL(value);
+    return parsed.origin;
+  } catch {
+    return value.replace(/\/$/, '');
+  }
+}
+
+function normalizeOptionalUrl(value: string | undefined): string | undefined {
+  if (!value || value.trim().length === 0) return undefined;
+  return value.trim();
+}

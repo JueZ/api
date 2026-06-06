@@ -67,6 +67,15 @@ export async function authorizeRequest(
   config: AuthConfig = readAuthConfig(),
   verifier: JwtVerifier = verifyJwtWithJose,
 ): Promise<AuthorizationResult> {
+  return authorizeBearerToken(request.headers.get('authorization'), context, config, verifier);
+}
+
+export async function authorizeBearerToken(
+  authorizationHeader: string | null | undefined,
+  context: InvocationContext,
+  config: AuthConfig = readAuthConfig(),
+  verifier: JwtVerifier = verifyJwtWithJose,
+): Promise<AuthorizationResult> {
   if (!config.enabled) {
     return {
       ok: true,
@@ -83,7 +92,6 @@ export async function authorizeRequest(
     return unauthorized('Authentication is not configured.');
   }
 
-  const authorizationHeader = request.headers.get('authorization');
   if (!authorizationHeader) {
     return unauthorized('Missing bearer token.');
   }
