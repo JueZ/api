@@ -43,7 +43,7 @@ export function buildMcpProtectedResourceMetadata(request?: HttpRequest, env: No
     : authConfig.issuer ? [authConfig.issuer] : [];
   const documentation = normalizeOptionalUrl(env['MCP_RESOURCE_DOCUMENTATION_URL']);
   return {
-    resource: getMcpResourceOrigin(request, env),
+    resource: authConfig.audience ?? getMcpResourceOrigin(request, env),
     authorization_servers: authorizationServers,
     scopes_supported: [MCP_SCOPE],
     ...(documentation ? { resource_documentation: documentation } : {}),

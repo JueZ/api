@@ -38,7 +38,7 @@ test('protected resource metadata is generated from safe environment values', as
     const response = await oauthProtectedResourceHandler(request('GET', 'https://ignored.test/.well-known/oauth-protected-resource'), contextStub());
     assert.equal(response.status, 200);
     assert.deepEqual(response.jsonBody, {
-      resource: 'https://mcp.example.test',
+      resource: 'api://catalogue-test',
       authorization_servers: ['https://login.example.test/tenant/v2.0'],
       scopes_supported: ['api.access'],
       resource_documentation: 'https://docs.example.test/mcp',

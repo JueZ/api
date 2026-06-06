@@ -1,5 +1,10 @@
 # Current state
 
+## 2026-06-06 MCP protected-resource audience fix
+
+- MCP protected-resource metadata now reports `resource: OIDC_AUDIENCE` when configured, matching Microsoft Entra Application ID URI / scope-prefix requirements while keeping `MCP_RESOURCE_ORIGIN` only for `resource_metadata` discovery URLs.
+- This addresses ChatGPT Developer Mode OAuth linking failures where Entra rejects mismatched `resource=https://<mcp-host>` and `scope=api://.../api.access` with `AADSTS9010010`.
+
 ## 2026-06-06 MCP gateway hardening follow-up
 
 - Hardened the private ChatGPT Developer Mode MCP gateway descriptors so tool listings expose both top-level `securitySchemes` and `_meta.securitySchemes`, plus minimal output schemas for each read-only tool.
