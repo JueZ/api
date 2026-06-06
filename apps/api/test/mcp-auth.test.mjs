@@ -52,8 +52,11 @@ test('unauthenticated private MCP tool fails closed with OAuth challenge metadat
     assert.equal(response.status, 200);
     const result = response.jsonBody.result;
     assert.equal(result.isError, true);
-    assert.equal(result.structuredContent.error, 'unauthorized');
-    assert.match(result._meta['mcp/www_authenticate'][0], /resource_metadata="https:\/\/mcp\.example\.test\/\.well-known\/oauth-protected-resource"/);
+    assert.equal(result.structuredContent.error, 'invalid_token');
+    assertChallenge(result, {
+      error: 'invalid_token',
+      errorDescription: 'Missing bearer token.',
+    });
   });
 });
 
@@ -62,34 +65,93 @@ test('MCP GET event stream without bearer returns HTTP 401 WWW-Authenticate', as
     const response = await handleMcpHttpRequest(request('GET', 'https://mcp.example.test/mcp'), contextStub(), stubServices());
     assert.equal(response.status, 401);
     assert.match(response.headers['WWW-Authenticate'], /Bearer resource_metadata=/);
+    assert.match(response.headers['WWW-Authenticate'], /scope="api\.access"/);
+    assert.match(response.headers['WWW-Authenticate'], /error="invalid_token"/);
+    assert.match(response.headers['WWW-Authenticate'], /error_description="Missing bearer token\."/);
   });
 });
 
-test('invalid MCP token scope, audience, and user are rejected without leaking token material', async () => {
+test('AUTH_ENABLED=true plus a valid signed JWT can call hello_authenticated', async () => {
   const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
   try {
+    const token = await signToken(privateKey, kid, issuer, { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'api.access' });
     await withEnv({ ...baseEnv, OIDC_ISSUER: issuer, OIDC_JWKS_URI: jwksUri }, async () => {
-      for (const claims of [
-        { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'wrong.scope' },
-        { sub: 'blocked-subject', oid: 'blocked-oid', scp: 'api.access' },
-      ]) {
-        const token = await signToken(privateKey, kid, issuer, claims);
-        const response = await mcpCall('hello_authenticated', {}, `Bearer ${token}`);
-        assert.equal(response.jsonBody.result.isError, true);
-        assert.equal(response.jsonBody.result.structuredContent.error, 'forbidden');
-        assert.doesNotMatch(JSON.stringify(response.jsonBody), new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-      }
-
-      const wrongAudience = await signToken(privateKey, kid, issuer, { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'api.access' }, 'api://wrong');
-      const response = await mcpCall('hello_authenticated', {}, `Bearer ${wrongAudience}`);
-      assert.equal(response.jsonBody.result.isError, true);
-      assert.equal(response.jsonBody.result.structuredContent.error, 'unauthorized');
-      assert.doesNotMatch(JSON.stringify(response.jsonBody), /api:\/\/wrong|allowed-oid|allowed-subject/);
+      const response = await mcpCall('hello_authenticated', {}, `Bearer ${token}`);
+      assert.equal(response.status, 200);
+      assert.equal(response.jsonBody.result.structuredContent.authenticated, true);
+      assert.deepEqual(response.jsonBody.result.structuredContent.user, {
+        subject: 'allowed-subject',
+        objectId: 'allowed-oid',
+      });
+      assert.doesNotMatch(JSON.stringify(response.jsonBody), tokenRegex(token));
     });
   } finally {
     await closeServer(server);
   }
 });
+
+test('AUTH_ENABLED=true plus a valid signed JWT can call a protected data tool via stub services', async () => {
+  const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
+  try {
+    const token = await signToken(privateKey, kid, issuer, { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'api.access' });
+    const calls = [];
+    const services = stubServices(calls);
+    await withEnv({ ...baseEnv, OIDC_ISSUER: issuer, OIDC_JWKS_URI: jwksUri }, async () => {
+      const response = await mcpCall('reddit_get_thread', { post: 'abc' }, `Bearer ${token}`, services);
+      assert.equal(response.status, 200);
+      assert.equal(response.jsonBody.result.structuredContent.post.id, 'abc');
+      assert.deepEqual(calls, [['fetchThread', { post: 'abc' }]]);
+      assert.doesNotMatch(JSON.stringify(response.jsonBody), tokenRegex(token));
+    });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('wrong audience, missing scope, blocked user, and blocked delegated client fail closed', async () => {
+  const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
+  try {
+    await withEnv({ ...baseEnv, OIDC_ISSUER: issuer, OIDC_JWKS_URI: jwksUri }, async () => {
+      const wrongAudience = await signToken(privateKey, kid, issuer, { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'api.access' }, 'api://wrong');
+      const wrongAudienceResponse = await mcpCall('hello_authenticated', {}, `Bearer ${wrongAudience}`);
+      assert.equal(wrongAudienceResponse.jsonBody.result.isError, true);
+      assert.equal(wrongAudienceResponse.jsonBody.result.structuredContent.error, 'invalid_token');
+      assertChallenge(wrongAudienceResponse.jsonBody.result, { error: 'invalid_token', errorDescription: 'Invalid bearer token.' });
+      assert.doesNotMatch(JSON.stringify(wrongAudienceResponse.jsonBody), /api:\/\/wrong|allowed-oid|allowed-subject/);
+
+      const missingScope = await signToken(privateKey, kid, issuer, { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'wrong.scope' });
+      const missingScopeResponse = await mcpCall('hello_authenticated', {}, `Bearer ${missingScope}`);
+      assertInsufficientScope(missingScopeResponse, 'Required scope or role is missing.', missingScope);
+
+      const blockedUser = await signToken(privateKey, kid, issuer, { sub: 'blocked-subject', oid: 'blocked-oid', scp: 'api.access' });
+      const blockedUserResponse = await mcpCall('hello_authenticated', {}, `Bearer ${blockedUser}`);
+      assertInsufficientScope(blockedUserResponse, 'User is not allowed.', blockedUser);
+
+      const blockedDelegatedClient = await signToken(privateKey, kid, issuer, { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'api.access', azp: 'blocked-client-id' });
+      await withEnv({ OIDC_ALLOWED_DELEGATED_CLIENT_IDS: 'allowed-client-id' }, async () => {
+        const blockedDelegatedClientResponse = await mcpCall('hello_authenticated', {}, `Bearer ${blockedDelegatedClient}`);
+        assertInsufficientScope(blockedDelegatedClientResponse, 'Delegated OAuth client is not allowed.', blockedDelegatedClient);
+      });
+    });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+function assertInsufficientScope(response, errorDescription, token) {
+  assert.equal(response.jsonBody.result.isError, true);
+  assert.equal(response.jsonBody.result.structuredContent.error, 'insufficient_scope');
+  assertChallenge(response.jsonBody.result, { error: 'insufficient_scope', errorDescription });
+  assert.doesNotMatch(JSON.stringify(response.jsonBody), tokenRegex(token));
+}
+
+function assertChallenge(result, { error, errorDescription }) {
+  const challenge = result._meta['mcp/www_authenticate'][0];
+  assert.match(challenge, /resource_metadata="https:\/\/mcp\.example\.test\/\.well-known\/oauth-protected-resource"/);
+  assert.match(challenge, /scope="api\.access"/);
+  assert.match(challenge, new RegExp(`error="${escapeRegExp(error)}"`));
+  assert.match(challenge, new RegExp(`error_description="${escapeRegExp(errorDescription)}"`));
+}
 
 function request(method, url, body, authorization) {
   const headers = new Headers({ accept: 'application/json, text/event-stream', 'content-type': 'application/json' });
@@ -97,11 +159,11 @@ function request(method, url, body, authorization) {
   return { method, url, headers, params: {}, json: async () => body };
 }
 
-async function mcpCall(name, args = {}, authorization) {
+async function mcpCall(name, args = {}, authorization, services = stubServices()) {
   return handleMcpHttpRequest(
     request('POST', 'https://mcp.example.test/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, authorization),
     contextStub(),
-    stubServices(),
+    services,
   );
 }
 
@@ -109,10 +171,13 @@ function contextStub() {
   return { invocationId: 'mcp-auth-test', warn: () => undefined };
 }
 
-function stubServices() {
+function stubServices(calls = []) {
   return {
     reddit: {
-      fetchThread: async () => ({ source: 'reddit', post: { id: 'abc' }, stats: { commentsReturned: 0 } }),
+      fetchThread: async (args) => {
+        calls.push(['fetchThread', args]);
+        return { source: 'reddit', post: { id: args?.post ?? 'abc' }, stats: { commentsReturned: 0 } };
+      },
       fetchThreadOverview: async () => ({ source: 'reddit', post: { id: 'abc' }, stats: { loadedSnapshotCommentCount: 0 } }),
     },
     wlh: {
@@ -173,4 +238,12 @@ async function startJwksServer() {
 
 async function closeServer(server) {
   await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+}
+
+function tokenRegex(token) {
+  return new RegExp(escapeRegExp(token));
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
