@@ -1,5 +1,12 @@
 # Current state
 
+## 2026-06-06 Private ChatGPT Developer Mode MCP gateway
+
+- Added a private MCP Streamable HTTP gateway on the existing Azure Functions backend as an additional interface; existing REST routes, GPT Actions OpenAPI contracts, Angular app, auth model, and deployment flow remain in place.
+- The MCP implementation exposes read-only tools for health, authenticated hello, Reddit thread/overview, and WLH search/offer/category access. All private/API-backed tools reuse the existing Microsoft Entra OAuth/OIDC validation through the shared bearer-token authorization path and advertise `api.access` OAuth metadata.
+- Added `GET /.well-known/oauth-protected-resource` metadata with `MCP_RESOURCE_ORIGIN` support for ChatGPT Developer Mode OAuth discovery. `health_check` is public-only safe metadata; protected tool calls fail closed and include MCP OAuth challenge metadata.
+- Setup and Entra compatibility notes live in `docs/setup/mcp-devmode.md`; ChatGPT redirect/client IDs still need to be configured in the operator's Entra app registration before live connector linking.
+
 ## 2026-05-31 Workflow-dispatched Reddit share URL smoke
 
 - `Deploy Test` workflow_dispatch now has an optional `reddit_share_url_smoke` input that enables the existing GitHub Actions service-token authenticated smoke path for `https://www.reddit.com/r/macbookpro/s/nnlryuZCNX`; it expects the protected Reddit endpoint to return `post.id == "1tryldy"`.

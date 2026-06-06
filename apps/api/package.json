@@ -6,9 +6,11 @@
   "main": "dist/functions/*.js",
   "dependencies": {
     "@azure/functions": "4.14.0",
+    "@azure/identity": "^4.13.0",
+    "@azure/storage-blob": "^12.29.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "jose": "^6.2.3",
     "openai": "^6.38.0",
-    "@azure/identity": "^4.13.0",
-    "@azure/storage-blob": "^12.29.1"
+    "zod": "^4.4.3"
   }
 }

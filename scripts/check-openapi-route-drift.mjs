@@ -21,6 +21,10 @@ const STALE_SPLIT_OPERATION_IDS = new Set([
   'getWlhTopCategories',
   'searchWlh',
 ]);
+const INTENTIONAL_NON_OPENAPI_ROUTES = new Set([
+  '/mcp',
+  '/.well-known/oauth-protected-resource',
+]);
 
 function isStringLiteralLike(node) {
   return ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node);
@@ -63,6 +67,10 @@ function normalizeRoute(route) {
 
 function detectProtectedSource(sourceText) {
   return /\bauthorizeRequest\s*\(/.test(sourceText);
+}
+
+function isIntentionalNonOpenApiRoute(route) {
+  return INTENTIONAL_NON_OPENAPI_ROUTES.has(route.path);
 }
 
 export function extractRoutesFromSource(sourceText, filePath = '<inline>') {
@@ -108,7 +116,7 @@ export function extractRoutesFromSource(sourceText, filePath = '<inline>') {
   }
 
   visit(sourceFile);
-  return routes;
+  return routes.filter((route) => !isIntentionalNonOpenApiRoute(route));
 }
 
 export function extractRoutesFromFunctions(functionsDir = DEFAULT_FUNCTIONS_GLOB_DIR) {

@@ -39,6 +39,28 @@ test('extracts app.http routes and documentable methods from Azure Functions sou
   ]);
 });
 
+
+
+test('excludes intentional non-OpenAPI protocol and metadata routes', () => {
+  const source = `
+    import { app } from '@azure/functions';
+    app.http('mcp', {
+      methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+      authLevel: 'anonymous',
+      route: 'mcp',
+      handler,
+    });
+    app.http('oauthProtectedResource', {
+      methods: ['GET', 'OPTIONS'],
+      authLevel: 'anonymous',
+      route: '.well-known/oauth-protected-resource',
+      handler,
+    });
+  `;
+
+  assert.deepEqual(extractRoutesFromSource(source, 'mcp.ts'), []);
+});
+
 test('detects duplicate operationIds within a contract', () => {
   const issues = findDuplicateOperationIds({
     paths: {
