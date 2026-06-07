@@ -36,6 +36,13 @@ export function getMcpResourceOrigin(request?: HttpRequest, env: NodeJS.ProcessE
   return 'http://localhost:7071';
 }
 
+export function getMcpOAuthScope(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = normalizeOptionalString(env['MCP_OAUTH_SCOPE']);
+  if (configured) return configured;
+
+  return qualifyOAuthScope(readAuthConfig(env).audience, MCP_SCOPE);
+}
+
 export function buildMcpProtectedResourceMetadata(request?: HttpRequest, env: NodeJS.ProcessEnv = process.env): McpProtectedResourceMetadata {
   const authConfig = readAuthConfig(env);
   const authorizationServers = (authConfig.issuers && authConfig.issuers.length > 0)
@@ -45,7 +52,7 @@ export function buildMcpProtectedResourceMetadata(request?: HttpRequest, env: No
   return {
     resource: authConfig.audience ?? getMcpResourceOrigin(request, env),
     authorization_servers: authorizationServers,
-    scopes_supported: [MCP_SCOPE],
+    scopes_supported: [getMcpOAuthScope(env)],
     ...(documentation ? { resource_documentation: documentation } : {}),
   };
 }
@@ -58,7 +65,7 @@ export function buildMcpWwwAuthenticate(
   const origin = getMcpResourceOrigin(request, env);
   const parameters: Array<[string, string]> = [
     ['resource_metadata', `${origin}${MCP_PROTECTED_RESOURCE_PATH}`],
-    ['scope', MCP_SCOPE],
+    ['scope', getMcpOAuthScope(env)],
     ['error', options.error],
     ['error_description', options.errorDescription],
   ];
@@ -109,7 +116,16 @@ function normalizeOrigin(value: string | undefined): string | undefined {
   }
 }
 
-function normalizeOptionalUrl(value: string | undefined): string | undefined {
+function normalizeOptionalString(value: string | undefined): string | undefined {
   if (!value || value.trim().length === 0) return undefined;
   return value.trim();
+}
+
+function normalizeOptionalUrl(value: string | undefined): string | undefined {
+  return normalizeOptionalString(value);
+}
+
+function qualifyOAuthScope(audience: string | undefined, scope: string): string {
+  if (!audience || scope.includes('://')) return scope;
+  return `${audience.replace(/\/$/, '')}/${scope.replace(/^\//, '')}`;
 }

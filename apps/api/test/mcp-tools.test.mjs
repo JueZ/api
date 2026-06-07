@@ -4,6 +4,7 @@ import { handleMcpHttpRequest } from '../dist/mcp/server.js';
 
 const authEnv = {
   AUTH_ENABLED: 'false',
+  OIDC_AUDIENCE: 'api://catalogue-test',
   MCP_RESOURCE_ORIGIN: 'https://mcp.example.test',
 };
 
@@ -34,8 +35,8 @@ test('MCP initialize and tools/list expose the private read-only tool catalogue'
         assert.deepEqual(tool.securitySchemes, [{ type: 'noauth' }]);
         assert.deepEqual(tool._meta.securitySchemes, [{ type: 'noauth' }]);
       } else {
-        assert.deepEqual(tool.securitySchemes, [{ type: 'oauth2', scopes: ['api.access'] }]);
-        assert.deepEqual(tool._meta.securitySchemes, [{ type: 'oauth2', scopes: ['api.access'] }]);
+        assert.deepEqual(tool.securitySchemes, [{ type: 'oauth2', scopes: ['api://catalogue-test/api.access'] }]);
+        assert.deepEqual(tool._meta.securitySchemes, [{ type: 'oauth2', scopes: ['api://catalogue-test/api.access'] }]);
       }
     }
   });

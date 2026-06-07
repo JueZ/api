@@ -7,7 +7,7 @@ import { createHealthResponse, createHelloResponse } from '../shared/responses.j
 import { RedditThreadService } from '../shared/reddit/service.js';
 import type { RedditThreadOverviewRequest, RedditThreadRequest } from '../shared/reddit/types.js';
 import { WlhService } from '../shared/wlh/service.js';
-import { authorizeMcpTool, buildMcpWwwAuthenticate, mcpAuthErrorResult, safeUser, type McpAuthChallengeError } from './auth.js';
+import { authorizeMcpTool, buildMcpWwwAuthenticate, getMcpOAuthScope, mcpAuthErrorResult, safeUser, type McpAuthChallengeError } from './auth.js';
 
 export interface McpGatewayServices {
   reddit: Pick<RedditThreadService, 'fetchThread' | 'fetchThreadOverview'>;
@@ -25,11 +25,9 @@ const MCP_VERSION = '0.1.0';
 const jsonRpcContentType = 'application/json';
 
 const redditSortSchema = z.enum(['confidence', 'top', 'new', 'controversial', 'old', 'qa']);
-const protectedSecuritySchemes = [{ type: 'oauth2', scopes: ['api.access'] }];
 const noauthSecuritySchemes = [{ type: 'noauth' }];
 const readOnlyAnnotations = { readOnlyHint: true };
 const healthToolSecurity = { securitySchemes: noauthSecuritySchemes, _meta: { securitySchemes: noauthSecuritySchemes } };
-const protectedToolSecurity = { securitySchemes: protectedSecuritySchemes, _meta: { securitySchemes: protectedSecuritySchemes } };
 
 const healthOutputSchema = z.object({
   service: z.literal('api-catalogue'),
@@ -71,6 +69,7 @@ const wlhCategoryChildrenOutputSchema = z.object({
 export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
   const server = new McpServer({ name: 'api-catalogue-private-mcp', version: MCP_VERSION });
   const services = options.services ?? defaultServices();
+  const protectedToolSecurity = createProtectedToolSecurity();
   async function requireAuth(): Promise<CallToolResult | undefined> {
     const auth = await authorizeMcpTool(options.authorizationHeader, options.context);
     if (!auth.ok) {
@@ -305,6 +304,11 @@ export async function handleMcpHttpRequest(request: HttpRequest, context: Invoca
   }
 }
 
+
+function createProtectedToolSecurity(): { securitySchemes: Array<{ type: 'oauth2'; scopes: string[] }>; _meta: { securitySchemes: Array<{ type: 'oauth2'; scopes: string[] }> } } {
+  const protectedSecuritySchemes = [{ type: 'oauth2' as const, scopes: [getMcpOAuthScope()] }];
+  return { securitySchemes: protectedSecuritySchemes, _meta: { securitySchemes: protectedSecuritySchemes } };
+}
 
 function mcpAuthorizationFailureResult(auth: Extract<Awaited<ReturnType<typeof authorizeMcpTool>>, { ok: false }>, request?: HttpRequest): CallToolResult {
   const challenge = authChallengeForFailure(auth);
