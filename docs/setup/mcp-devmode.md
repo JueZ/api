@@ -75,7 +75,7 @@ The MCP gateway preserves the existing Microsoft Entra OAuth/OIDC model. Before 
 - Authorization Code + PKCE is supported by the Entra app registration used for ChatGPT Developer Mode.
 - The redirect URI shown by ChatGPT Developer Mode is added to the Entra app registration.
 - The exposed API Application ID URI/audience matches `OIDC_AUDIENCE`; the protected-resource metadata `resource` value must be this audience, not the MCP host origin.
-- The delegated scope includes `api.access`, matching `OIDC_REQUIRED_SCOPES`.
+- The delegated scope exposed by Entra is `<OIDC_AUDIENCE>/api.access`; issued access tokens should contain the short `scp` claim `api.access`, matching `OIDC_REQUIRED_SCOPES`.
 - `OIDC_ALLOWED_DELEGATED_CLIENT_IDS` includes the ChatGPT/connector delegated client ID when that allowlist is configured.
 - User allowlists (`OIDC_ALLOWED_OBJECT_IDS` or `OIDC_ALLOWED_SUBJECTS`) still include the intended operator.
 - `authorizeRequest`/`authorizeBearerToken` can validate the resulting token issuer, audience, scope/role, tenant, user, and delegated client.
@@ -104,9 +104,12 @@ MCP-specific safe settings:
 ```text
 MCP_RESOURCE_ORIGIN=https://<deployed-function-app-or-custom-domain>  # Public HTTPS MCP origin used to build resource_metadata URLs
 MCP_RESOURCE_DOCUMENTATION_URL=https://<optional-docs-url>
+MCP_OAUTH_SCOPE=<optional-full-oauth-scope-override>
 ```
 
 `OIDC_AUDIENCE` is the OAuth resource, token audience, and Microsoft Entra Application ID URI, for example `api://97df847a-3e44-4aa7-82ea-557f3dfe0203`. The protected-resource metadata endpoint returns this value as `resource` so Entra can match the requested scope prefix.
+
+The MCP gateway advertises the OAuth request scope as `<OIDC_AUDIENCE>/api.access` when `OIDC_AUDIENCE` is configured, for example `api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access`. This is the scope ChatGPT should request from Entra. The backend still validates the resulting access token against the short `scp`/role value in `OIDC_REQUIRED_SCOPES`, normally `api.access`. Use `MCP_OAUTH_SCOPE` only if a non-standard authorization server requires a different advertised request scope.
 
 `MCP_RESOURCE_ORIGIN` is only the public HTTPS origin used to construct `resource_metadata` URLs in `WWW-Authenticate`, for example `https://<deployed-function-app-or-custom-domain>`. It is not the OAuth audience and should not be used as the metadata `resource` when `OIDC_AUDIENCE` is configured. In local development only, if `MCP_RESOURCE_ORIGIN` is missing, the gateway derives the origin from the request host/proxy headers.
 
@@ -137,7 +140,7 @@ The token is valid, but neither the object ID nor subject matches the configured
 
 ### Wrong `aud`, `iss`, or scope
 
-Ensure `OIDC_AUDIENCE`, `OIDC_ISSUER`, and `OIDC_REQUIRED_SCOPES` match the token issued by Entra. The MCP protected-resource metadata advertises `api.access` as the supported scope and returns `resource: OIDC_AUDIENCE`.
+Ensure `OIDC_AUDIENCE`, `OIDC_ISSUER`, and `OIDC_REQUIRED_SCOPES` match the token issued by Entra. The MCP protected-resource metadata returns `resource: OIDC_AUDIENCE` and advertises the fully qualified request scope `<OIDC_AUDIENCE>/api.access` so ChatGPT does not mix `resource=api://...` with a short `scope=api.access` authorization request.
 
 ### Entra `AADSTS9010010` resource/scope mismatch
 
@@ -163,7 +166,7 @@ requested scope:
 api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access
 ```
 
-`MCP_RESOURCE_ORIGIN` should still be the HTTPS host used for the `resource_metadata` URL, not the `api://...` OAuth audience.
+`MCP_RESOURCE_ORIGIN` should still be the HTTPS host used for the `resource_metadata` URL, not the `api://...` OAuth audience. If ChatGPT reports that not all permissions were granted after connecting, reconnect after confirming the discovered/default scope is the fully qualified value (`api://.../api.access`) rather than the short value (`api.access`).
 
 ### ChatGPT OAuth linking does not start
 

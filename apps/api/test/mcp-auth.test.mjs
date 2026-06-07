@@ -40,7 +40,7 @@ test('protected resource metadata is generated from safe environment values', as
     assert.deepEqual(response.jsonBody, {
       resource: 'api://catalogue-test',
       authorization_servers: ['https://login.example.test/tenant/v2.0'],
-      scopes_supported: ['api.access'],
+      scopes_supported: ['api://catalogue-test/api.access'],
       resource_documentation: 'https://docs.example.test/mcp',
     });
   });
@@ -65,7 +65,7 @@ test('MCP GET event stream without bearer returns HTTP 401 WWW-Authenticate', as
     const response = await handleMcpHttpRequest(request('GET', 'https://mcp.example.test/mcp'), contextStub(), stubServices());
     assert.equal(response.status, 401);
     assert.match(response.headers['WWW-Authenticate'], /Bearer resource_metadata=/);
-    assert.match(response.headers['WWW-Authenticate'], /scope="api\.access"/);
+    assert.match(response.headers['WWW-Authenticate'], /scope="api:\/\/catalogue-test\/api\.access"/);
     assert.match(response.headers['WWW-Authenticate'], /error="invalid_token"/);
     assert.match(response.headers['WWW-Authenticate'], /error_description="Missing bearer token\."/);
   });
@@ -148,7 +148,7 @@ function assertInsufficientScope(response, errorDescription, token) {
 function assertChallenge(result, { error, errorDescription }) {
   const challenge = result._meta['mcp/www_authenticate'][0];
   assert.match(challenge, /resource_metadata="https:\/\/mcp\.example\.test\/\.well-known\/oauth-protected-resource"/);
-  assert.match(challenge, /scope="api\.access"/);
+  assert.match(challenge, /scope="api:\/\/catalogue-test\/api\.access"/);
   assert.match(challenge, new RegExp(`error="${escapeRegExp(error)}"`));
   assert.match(challenge, new RegExp(`error_description="${escapeRegExp(errorDescription)}"`));
 }

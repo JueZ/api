@@ -1,5 +1,10 @@
 # Current state
 
+## 2026-06-07 MCP Entra scope advertising fix
+
+- MCP protected-resource metadata, WWW-Authenticate challenges, and protected tool descriptors now advertise the fully qualified Entra OAuth request scope (`<OIDC_AUDIENCE>/api.access`) when `OIDC_AUDIENCE` is configured, while backend JWT validation still expects the short token `scp`/role from `OIDC_REQUIRED_SCOPES` (`api.access`).
+- This avoids ChatGPT connecting with only a base scope workaround and then warning that not all action permissions were granted because tool descriptors requested short `api.access` while Entra granted the fully qualified scope.
+
 ## 2026-06-06 MCP protected-resource audience fix
 
 - MCP protected-resource metadata now reports `resource: OIDC_AUDIENCE` when configured, matching Microsoft Entra Application ID URI / scope-prefix requirements while keeping `MCP_RESOURCE_ORIGIN` only for `resource_metadata` discovery URLs.
