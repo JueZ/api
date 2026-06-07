@@ -24,12 +24,15 @@ test('MCP initialize and tools/list expose the private read-only tool catalogue'
       'reddit_get_thread_overview',
       'wlh_categories_top',
       'wlh_category_children',
+      'wlh_find_category',
       'wlh_get_offer',
       'wlh_search',
     ].sort());
 
     for (const tool of tools) {
       assert.equal(tool.annotations.readOnlyHint, true, `${tool.name} must be read-only`);
+      assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`);
+      assert.equal(tool.annotations.idempotentHint, true, `${tool.name} must be idempotent`);
       assert.ok(tool.outputSchema, `${tool.name} must expose an output schema`);
       if (tool.name === 'health_check') {
         assert.deepEqual(tool.securitySchemes, [{ type: 'noauth' }]);
@@ -57,18 +60,26 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
   const calls = [];
   const services = stubServices(calls);
   await withEnv(authEnv, async () => {
-    const reddit = await mcpCall('reddit_get_thread', { post: 'abc', sort: 'top', maxComments: 2 }, 'Bearer local-dev-token', services);
+    const reddit = await mcpCall('reddit_get_thread', { postId: 'abc', sort: 'top', maxComments: 2 }, 'Bearer local-dev-token', services);
     assert.equal(reddit.jsonBody.result.structuredContent.post.id, 'abc');
-    assert.equal(reddit.jsonBody.result.content[0].text, 'Fetched Reddit thread abc with 2 comments.');
+    assert.equal(reddit.jsonBody.result.structuredContent.comments[0].body, 'hello');
+    assert.equal(reddit.jsonBody.result.content[0].text, 'Fetched Reddit thread abc with 1 model-readable comments.');
 
-    const overview = await mcpCall('reddit_get_thread_overview', { post: 'abc' }, 'Bearer local-dev-token', services);
+    const overview = await mcpCall('reddit_get_thread_overview', { postId: 'abc' }, 'Bearer local-dev-token', services);
     assert.equal(overview.jsonBody.result.structuredContent.stats.loadedSnapshotCommentCount, 5);
 
-    const search = await mcpCall('wlh_search', { categoryId: '10', keyword: 'bike' }, 'Bearer local-dev-token', services);
-    assert.equal(search.jsonBody.result.structuredContent.filteredRowsReturned, 1);
+    const findCategory = await mcpCall('wlh_find_category', { query: 'bike' }, 'Bearer local-dev-token', services);
+    assert.equal(findCategory.jsonBody.result.structuredContent.matches[0].id, '10');
 
-    const offer = await mcpCall('wlh_get_offer', { adId: '123' }, 'Bearer local-dev-token', services);
-    assert.equal(offer.jsonBody.result.structuredContent.id, '123');
+    const search = await mcpCall('wlh_search', { keyword: 'bike' }, 'Bearer local-dev-token', services);
+    assert.equal(search.jsonBody.result.structuredContent.filteredRowsReturned, 1);
+    assert.equal(search.jsonBody.result.structuredContent.results[0].title, 'Bike');
+    assert.equal(search.jsonBody.result.structuredContent.results[0].thumbnailUrl, 'thumb');
+
+    const offer = await mcpCall('wlh_get_offer', { url: 'https://www.willhaben.at/iad/kaufen-und-verkaufen/d/bike-123456789' }, 'Bearer local-dev-token', services);
+    assert.equal(offer.jsonBody.result.structuredContent.id, '123456789');
+    assert.equal(offer.jsonBody.result.structuredContent.title, 'Offer');
+    assert.equal(offer.jsonBody.result.structuredContent.images[0].full, 'image1');
 
     const top = await mcpCall('wlh_categories_top', {}, 'Bearer local-dev-token', services);
     assert.equal(top.jsonBody.result.structuredContent.categories[0].id, '10');
@@ -80,8 +91,12 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
   assert.deepEqual(calls, [
     ['fetchThread', { post: 'abc', sort: 'top', maxComments: 2 }],
     ['fetchThreadOverview', { post: 'abc' }],
-    ['search', { categoryId: '10', keyword: 'bike' }],
-    ['offer', '123'],
+    ['topCategories'],
+    ['children', '10'],
+    ['topCategories'],
+    ['children', '10'],
+    ['search', { keyword: 'bike', categoryId: '10' }],
+    ['offer', '123456789'],
     ['topCategories'],
     ['children', '10'],
   ]);
@@ -110,29 +125,29 @@ function stubServices(calls = []) {
     reddit: {
       fetchThread: async (args) => {
         calls.push(['fetchThread', args]);
-        return { source: 'reddit', post: { id: args.post }, comments: [], commentContinuations: [], stats: { commentsReturned: 2 }, redditRateLimit: { used: null, remaining: null, resetSeconds: null } };
+        return { source: 'reddit', post: { id: args.post, title: 'Thread', subreddit: 'test', numComments: 1 }, comments: [{ id: 'c1', parentId: `t3_${args.post}`, author: 'a', body: 'hello', score: 1, depth: 0, createdUtc: 1, replies: [] }], commentContinuations: [], stats: { commentsReturned: 1 }, redditRateLimit: { used: null, remaining: null, resetSeconds: null } };
       },
       fetchThreadOverview: async (args) => {
         calls.push(['fetchThreadOverview', args]);
-        return { source: 'reddit', post: { id: args.post }, stats: { loadedSnapshotCommentCount: 5 }, availableSorts: ['top'], coverage: {}, redditRateLimit: { used: null, remaining: null, resetSeconds: null } };
+        return { source: 'reddit', post: { id: args.post, title: 'Thread', subreddit: 'test', numComments: 5 }, stats: { loadedSnapshotCommentCount: 5 }, availableSorts: ['top'], coverage: {}, redditRateLimit: { used: null, remaining: null, resetSeconds: null } };
       },
     },
     wlh: {
       search: async (args) => {
         calls.push(['search', args]);
-        return { source: 'wlh', rowsReturned: 1, filteredRowsReturned: 1, results: [{ id: '123' }] };
+        return { source: 'wlh', rowsFound: 1, rowsReturned: 1, filteredRowsReturned: 1, category: { id: args.categoryId, label: 'Bikes', path: '/bikes', depth: 1, hasChildren: false }, results: [{ id: '123', title: 'Bike', priceAmount: 99, priceDisplay: '€ 99', location: 'Vienna', url: 'https://example.test/123', thumbnailUrl: 'thumb', paylivery: true, imageCount: 1 }] };
       },
       offer: async (adId) => {
         calls.push(['offer', adId]);
-        return { source: 'wlh', id: adId, title: 'Offer' };
+        return { source: 'wlh', id: adId, title: 'Offer', description: 'Nice bike', priceAmount: 99, location: 'Vienna', paylivery: true, images: [{ id: 'i1', url: 'image1' }, { id: 'i2', url: 'image1' }] };
       },
       topCategories: async () => {
         calls.push(['topCategories']);
-        return [{ id: '10', label: 'Top', path: '/', depth: 0, hasChildren: true }];
+        return [{ id: '10', label: 'Bikes', path: '/bikes', depth: 0, hasChildren: true }];
       },
       children: async (categoryId) => {
         calls.push(['children', categoryId]);
-        return [{ id: '11', label: 'Child', path: '/child', depth: 1, parentId: categoryId, hasChildren: false }];
+        return [{ id: '11', label: 'Bike parts', path: '/bikes/parts', depth: 1, parentId: categoryId, hasChildren: false }];
       },
     },
   };

@@ -17,12 +17,28 @@ All tools are read-only. `health_check` is intentionally public and returns only
 | --- | --- | --- |
 | `health_check` | No auth | Check that the MCP gateway/API catalogue is reachable. |
 | `hello_authenticated` | OAuth | Verify ChatGPT OAuth linking and return the same safe user shape as `GET /api/hello`. |
-| `reddit_get_thread` | OAuth | Fetch a Reddit thread snapshot using the existing Reddit service. |
-| `reddit_get_thread_overview` | OAuth | Fetch the compact Reddit thread overview using the existing service. |
-| `wlh_search` | OAuth | Search Willhaben/WLH offers using the existing WLH service. |
-| `wlh_get_offer` | OAuth | Fetch one WLH offer/detail using the existing WLH service. |
+| `reddit_get_thread` | OAuth | Fetch a normalized Reddit thread snapshot with compact model-readable comments. |
+| `reddit_get_thread_overview` | OAuth | Fetch a compact Reddit thread overview; prefer this before full thread snapshots. |
+| `wlh_find_category` | OAuth | Resolve natural-language category text to likely WLH category IDs. |
+| `wlh_search` | OAuth | Search Willhaben/WLH offers with optional category inference and normalized listing summaries. |
+| `wlh_get_offer` | OAuth | Fetch one Willhaben/WLH offer/detail from either an ad ID or listing URL. |
 | `wlh_categories_top` | OAuth | List top-level WLH categories. |
 | `wlh_category_children` | OAuth | List child categories for a WLH category. |
+
+
+## Tool design notes
+
+The MCP gateway is intentionally tool-only for this milestone. It now returns compact, model-readable `structuredContent` for Reddit and Willhaben tools rather than exposing raw upstream payloads as the primary model path:
+
+- Reddit overview returns normalized post, stats, coverage, and sort metadata.
+- Reddit thread snapshots return normalized post data plus a bounded, flattened comment list with truncated comment bodies.
+- WLH search returns normalized listing summaries with IDs, titles, prices, location, URLs, thumbnails, PayLivery hints, and category/query metadata.
+- WLH offer detail accepts either `adId` or a Willhaben listing `url` and returns normalized title, price, location, seller, delivery, PayLivery, description, and deduplicated images.
+- WLH category lookup supports `wlh_find_category` so broad natural-language searches can find a category before calling `wlh_search`.
+
+All Reddit/WLH tools remain read-only and advertise `readOnlyHint`, `destructiveHint: false`, `idempotentHint`, and `openWorldHint` annotations. The server instructions recommend: Reddit overview before full thread; WLH direct URL to `wlh_get_offer`; broad WLH searches through category lookup/search/offer detail.
+
+This MCP-only tool shaping change does not alter existing REST routes or authenticated smoke coverage for `GET /api/hello` and `POST /api/reddit/thread`.
 
 ## Local testing
 

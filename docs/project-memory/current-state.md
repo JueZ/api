@@ -1,5 +1,10 @@
 # Current state
 
+## 2026-06-07 MCP LLM-native tool improvements
+
+- MCP Reddit and WLH tools now return compact normalized `structuredContent` DTOs with stronger output schemas instead of surfacing raw provider/service payloads as the primary model-visible shape.
+- WLH MCP ergonomics now include `wlh_find_category`, optional category inference for search, URL-or-ID offer lookup, deduplicated offer images, richer tool descriptions, read-only/idempotent/non-destructive/open-world annotations, and server instructions for preferred Reddit/WLH tool order.
+
 ## 2026-06-07 MCP Entra scope advertising fix
 
 - MCP protected-resource metadata, WWW-Authenticate challenges, and protected tool descriptors now advertise the fully qualified Entra OAuth request scope (`<OIDC_AUDIENCE>/api.access`) when `OIDC_AUDIENCE` is configured, while backend JWT validation still expects the short token `scp`/role from `OIDC_REQUIRED_SCOPES` (`api.access`).

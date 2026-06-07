@@ -97,7 +97,7 @@ test('AUTH_ENABLED=true plus a valid signed JWT can call a protected data tool v
     const calls = [];
     const services = stubServices(calls);
     await withEnv({ ...baseEnv, OIDC_ISSUER: issuer, OIDC_JWKS_URI: jwksUri }, async () => {
-      const response = await mcpCall('reddit_get_thread', { post: 'abc' }, `Bearer ${token}`, services);
+      const response = await mcpCall('reddit_get_thread', { postId: 'abc' }, `Bearer ${token}`, services);
       assert.equal(response.status, 200);
       assert.equal(response.jsonBody.result.structuredContent.post.id, 'abc');
       assert.deepEqual(calls, [['fetchThread', { post: 'abc' }]]);
