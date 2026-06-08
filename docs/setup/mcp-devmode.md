@@ -40,6 +40,20 @@ All Reddit/WLH tools remain read-only and advertise `readOnlyHint`, `destructive
 
 This MCP-only tool shaping change does not alter existing REST routes or authenticated smoke coverage for `GET /api/hello` and `POST /api/reddit/thread`.
 
+## MCP hardening and tool reliability
+
+This private connector remains tool-only; it does not register MCP resources, ChatGPT UI widgets, iframe components, component CSP, `_meta.ui.resourceUri`, or `_meta["openai/outputTemplate"]` metadata.
+
+The tool descriptors and handlers are hardened for ChatGPT Developer Mode use:
+
+- Reddit tools require exactly one of `postId` or `url`, validate supported Reddit hosts, and reject ambiguous calls before reaching the Reddit service.
+- `wlh_get_offer` requires exactly one of `adId` or a Willhaben listing `url`, validates Willhaben hosts, and extracts only realistic numeric ad IDs.
+- `wlh_search` validates price ranges, date/datetime recency filters, bounded radius, bounded required terms, and sane string lengths before calling WLH.
+- Successful tool outputs use exact normalized `structuredContent` schemas instead of raw provider payloads.
+- Reddit thread results include MCP-level truncation metadata: `modelCommentsReturned`, `modelCommentLimit`, `bodyCharLimit`, `modelTruncated`, and `upstreamCommentsReturned` when available.
+- Upstream Reddit/WLH failures are mapped to safe MCP tool errors such as `upstream_unavailable`, `upstream_rate_limited`, `not_found`, `unsupported_url`, or `invalid_arguments` without stack traces, headers, cookies, claims, tokens, credentials, or raw upstream bodies.
+- Tool descriptors include short `_meta["openai/toolInvocation/invoking"]` and `_meta["openai/toolInvocation/invoked"]` status strings only; no UI metadata is advertised.
+
 ## Local testing
 
 Use Node.js 22.

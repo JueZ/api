@@ -34,6 +34,13 @@ test('MCP initialize and tools/list expose the private read-only tool catalogue'
       assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`);
       assert.equal(tool.annotations.idempotentHint, true, `${tool.name} must be idempotent`);
       assert.ok(tool.outputSchema, `${tool.name} must expose an output schema`);
+      assert.equal(typeof tool._meta['openai/toolInvocation/invoking'], 'string');
+      assert.equal(typeof tool._meta['openai/toolInvocation/invoked'], 'string');
+      assert.ok(tool._meta['openai/toolInvocation/invoking'].length <= 64);
+      assert.ok(tool._meta['openai/toolInvocation/invoked'].length <= 64);
+      assert.equal(tool._meta.ui, undefined, `${tool.name} must not advertise UI metadata`);
+      assert.equal(tool._meta['openai/outputTemplate'], undefined, `${tool.name} must not advertise an output template`);
+      assert.equal(tool._meta['openai/widgetAccessible'], undefined, `${tool.name} must not advertise widget access`);
       if (tool.name === 'health_check') {
         assert.deepEqual(tool.securitySchemes, [{ type: 'noauth' }]);
         assert.deepEqual(tool._meta.securitySchemes, [{ type: 'noauth' }]);
@@ -63,7 +70,14 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
     const reddit = await mcpCall('reddit_get_thread', { postId: 'abc', sort: 'top', maxComments: 2 }, 'Bearer local-dev-token', services);
     assert.equal(reddit.jsonBody.result.structuredContent.post.id, 'abc');
     assert.equal(reddit.jsonBody.result.structuredContent.comments[0].body, 'hello');
+    assert.equal(reddit.jsonBody.result.structuredContent.stats.modelCommentsReturned, 1);
+    assert.equal(reddit.jsonBody.result.structuredContent.stats.modelCommentLimit, 50);
+    assert.equal(reddit.jsonBody.result.structuredContent.stats.bodyCharLimit, 800);
+    assert.equal(reddit.jsonBody.result.structuredContent.stats.modelTruncated, false);
     assert.equal(reddit.jsonBody.result.content[0].text, 'Fetched Reddit thread abc with 1 model-readable comments.');
+
+    const redditUrl = await mcpCall('reddit_get_thread', { url: 'https://www.reddit.com/r/test/comments/abc/example/' }, 'Bearer local-dev-token', services);
+    assert.equal(redditUrl.jsonBody.result.structuredContent.post.id, 'https://www.reddit.com/r/test/comments/abc/example/');
 
     const overview = await mcpCall('reddit_get_thread_overview', { postId: 'abc' }, 'Bearer local-dev-token', services);
     assert.equal(overview.jsonBody.result.structuredContent.stats.loadedSnapshotCommentCount, 5);
@@ -90,6 +104,7 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
 
   assert.deepEqual(calls, [
     ['fetchThread', { post: 'abc', sort: 'top', maxComments: 2 }],
+    ['fetchThread', { url: 'https://www.reddit.com/r/test/comments/abc/example/' }],
     ['fetchThreadOverview', { post: 'abc' }],
     ['topCategories'],
     ['children', '10'],
@@ -100,6 +115,49 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
     ['topCategories'],
     ['children', '10'],
   ]);
+});
+
+
+test('MCP validation rejects invalid Reddit and WLH arguments with safe tool errors', async () => {
+  await withEnv(authEnv, async () => {
+    await assertToolError(await mcpCall('reddit_get_thread', {}, 'Bearer local-dev-token'), 'invalid_arguments');
+    await assertToolError(await mcpCall('reddit_get_thread', { postId: 'abc', url: 'https://www.reddit.com/r/test/comments/abc/example/' }, 'Bearer local-dev-token'), 'invalid_arguments');
+    const validPost = await mcpCall('reddit_get_thread', { postId: 'abc123' }, 'Bearer local-dev-token');
+    assert.equal(validPost.jsonBody.result.structuredContent.post.id, 'abc123');
+    const validUrl = await mcpCall('reddit_get_thread_overview', { url: 'https://redd.it/abc123' }, 'Bearer local-dev-token');
+    assert.equal(validUrl.jsonBody.result.structuredContent.post.id, 'https://redd.it/abc123');
+
+    await assertToolError(await mcpCall('wlh_get_offer', {}, 'Bearer local-dev-token'), 'invalid_arguments');
+    await assertToolError(await mcpCall('wlh_get_offer', { adId: '123456', url: 'https://www.willhaben.at/iad/kaufen-und-verkaufen/d/test-123456' }, 'Bearer local-dev-token'), 'invalid_arguments');
+    await assertToolError(await mcpCall('wlh_get_offer', { url: 'https://example.com/iad/kaufen-und-verkaufen/d/test-123456' }, 'Bearer local-dev-token'), 'unsupported_url');
+
+    await assertToolError(await mcpCall('wlh_search', { keyword: 'bike', priceFrom: -1 }, 'Bearer local-dev-token'), 'invalid_arguments');
+    await assertToolError(await mcpCall('wlh_search', { keyword: 'bike', priceFrom: 100, priceTo: 10 }, 'Bearer local-dev-token'), 'invalid_arguments');
+    await assertToolError(await mcpCall('wlh_search', { keyword: 'bike', postedSince: 'not-a-date' }, 'Bearer local-dev-token'), 'invalid_arguments');
+    await assertToolError(await mcpCall('wlh_search', { keyword: 'bike', radiusKm: 501 }, 'Bearer local-dev-token'), 'invalid_arguments');
+  });
+});
+
+test('external service exceptions become safe MCP tool errors without sensitive material', async () => {
+  const secretNeedles = /Bearer|token|claims|headers|cookie|secret|password|Authorization/i;
+  const services = stubServices();
+  services.reddit.fetchThread = async () => {
+    throw new Error('upstream exploded with Authorization: Bearer SHOULD_NOT_LEAK and stack trace');
+  };
+  services.wlh.search = async () => {
+    const error = new Error('rate-limited with cookie SHOULD_NOT_LEAK');
+    error.status = 429;
+    throw error;
+  };
+  await withEnv(authEnv, async () => {
+    const reddit = await mcpCall('reddit_get_thread', { postId: 'abc' }, 'Bearer local-dev-token', services);
+    assertToolError(reddit, 'upstream_unavailable', 'reddit');
+    assert.doesNotMatch(JSON.stringify(reddit.jsonBody), secretNeedles);
+
+    const wlh = await mcpCall('wlh_search', { keyword: 'bike' }, 'Bearer local-dev-token', services);
+    assertToolError(wlh, 'upstream_rate_limited', 'wlh');
+    assert.doesNotMatch(JSON.stringify(wlh.jsonBody), secretNeedles);
+  });
 });
 
 async function mcpRequest(body, authorization = undefined, services = stubServices()) {
@@ -120,16 +178,28 @@ async function mcpCall(name, args = {}, authorization, services = stubServices()
   return mcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, authorization, services);
 }
 
+
+function assertToolError(response, error, source = undefined) {
+  assert.equal(response.status, 200);
+  assert.equal(response.jsonBody.result.isError, true);
+  assert.equal(response.jsonBody.result.structuredContent.error, error);
+  if (source) assert.equal(response.jsonBody.result.structuredContent.source, source);
+  const serialized = JSON.stringify(response.jsonBody);
+  assert.doesNotMatch(serialized, /Bearer|local-dev-token|claims|headers|cookie|secret|password|Authorization/i);
+}
+
 function stubServices(calls = []) {
   return {
     reddit: {
       fetchThread: async (args) => {
         calls.push(['fetchThread', args]);
-        return { source: 'reddit', post: { id: args.post, title: 'Thread', subreddit: 'test', numComments: 1 }, comments: [{ id: 'c1', parentId: `t3_${args.post}`, author: 'a', body: 'hello', score: 1, depth: 0, createdUtc: 1, replies: [] }], commentContinuations: [], stats: { commentsReturned: 1 }, redditRateLimit: { used: null, remaining: null, resetSeconds: null } };
+        const id = args.post ?? args.url;
+        return { source: 'reddit', post: { id, title: 'Thread', subreddit: 'test', numComments: 1 }, comments: [{ id: 'c1', parentId: `t3_${id}`, author: 'a', body: 'hello', score: 1, depth: 0, createdUtc: 1, replies: [] }], commentContinuations: [], stats: { commentsReturned: 1 }, redditRateLimit: { used: null, remaining: null, resetSeconds: null } };
       },
       fetchThreadOverview: async (args) => {
         calls.push(['fetchThreadOverview', args]);
-        return { source: 'reddit', post: { id: args.post, title: 'Thread', subreddit: 'test', numComments: 5 }, stats: { loadedSnapshotCommentCount: 5 }, availableSorts: ['top'], coverage: {}, redditRateLimit: { used: null, remaining: null, resetSeconds: null } };
+        const id = args.post ?? args.url;
+        return { source: 'reddit', post: { id, title: 'Thread', subreddit: 'test', numComments: 5 }, stats: { loadedSnapshotCommentCount: 5 }, availableSorts: ['top'], coverage: {}, redditRateLimit: { used: null, remaining: null, resetSeconds: null } };
       },
     },
     wlh: {

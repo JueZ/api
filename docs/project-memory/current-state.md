@@ -1,5 +1,10 @@
 # Current state
 
+## 2026-06-08 MCP tool-only hardening
+
+- The private MCP gateway remains tool-only with no registered resources, output templates, widgets, or ChatGPT UI metadata. Tool descriptors now include only short invocation status strings in addition to existing security metadata.
+- MCP Reddit/WLH tools now fail closed on ambiguous or invalid inputs before service calls, use exact normalized output schemas, expose Reddit model-truncation metadata, and map upstream service exceptions to safe tool errors without stack traces, headers, cookies, claims, tokens, credentials, or raw upstream payloads.
+
 ## 2026-06-07 MCP LLM-native tool improvements
 
 - MCP Reddit and WLH tools now return compact normalized `structuredContent` DTOs with stronger output schemas instead of surfacing raw provider/service payloads as the primary model-visible shape.
