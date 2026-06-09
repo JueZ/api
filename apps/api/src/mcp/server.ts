@@ -39,7 +39,6 @@ const redditSortSchema = z.enum(['confidence', 'top', 'new', 'controversial', 'o
 const wlhConditionSchema = z.enum(['new', 'like_new', 'used', 'defect']);
 const wlhDeliverySchema = z.enum(['pickup', 'shipping']);
 const wlhSortSchema = z.enum(['relevance', 'price_asc', 'price_desc', 'newest']);
-const wlhSellerTypeSchema = z.enum(['private', 'commercial']);
 const noauthSecuritySchemes = [{ type: 'noauth' }];
 const localOnlyAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true };
 const externalReadOnlyAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
@@ -156,7 +155,6 @@ const wlhSearchQuerySchema = z.object({
   categoryPath: z.string().optional(),
   locationText: z.string().optional(),
   postcode: z.string().optional(),
-  radiusKm: z.number().optional(),
   priceFrom: z.number().optional(),
   priceTo: z.number().optional(),
   areaId: z.string().optional(),
@@ -168,8 +166,13 @@ const wlhSearchQuerySchema = z.object({
   requiredTerms: z.array(z.string()).optional(),
   sort: wlhSortSchema.optional(),
   postedSince: z.string().optional(),
-  sellerType: wlhSellerTypeSchema.optional(),
   imageRequired: z.boolean().optional(),
+});
+const wlhFilterApplicationSchema = z.object({
+  field: z.string(),
+  appliedAs: z.enum(['sent_to_wlh', 'category_inference', 'service_post_filter', 'mcp_post_filter', 'mcp_post_sort']),
+  effective: z.boolean(),
+  note: z.string().optional(),
 });
 const wlhSearchOutputSchema = z.object({
   source: z.literal('wlh'),
@@ -179,6 +182,7 @@ const wlhSearchOutputSchema = z.object({
   filteredRowsReturned: z.number(),
   category: categorySchema.optional(),
   results: z.array(wlhListingSchema),
+  filterApplications: z.array(wlhFilterApplicationSchema),
   sourceUrl: z.string().optional(),
   fetchedAt: z.string().optional(),
 });
@@ -205,6 +209,26 @@ const wlhOfferOutputSchema = z.object({
 const wlhCategoriesOutputSchema = z.object({ source: z.literal('wlh'), categories: z.array(categorySchema) });
 const wlhCategoryChildrenOutputSchema = z.object({ source: z.literal('wlh'), categoryId: z.string(), categories: z.array(categorySchema) });
 const wlhFindCategoryOutputSchema = z.object({ source: z.literal('wlh'), query: z.string(), matches: z.array(categorySchema.extend({ score: z.number() })) });
+
+const wlhSearchInputSchema = z.object({
+  keyword: nonEmptyText(120, 'Search keywords. Omit only when categoryId/categoryPath and filters are enough.').optional(),
+  categoryId: nonEmptyText(40, 'Willhaben category ID from wlh_find_category or category tools. Optional; inferred from keyword/categoryPath when omitted.').optional(),
+  categoryPath: nonEmptyText(200, 'Human-readable category path or category words used to infer a categoryId when categoryId is omitted.').optional(),
+  locationText: nonEmptyText(120, 'Location text such as Wien or Graz. Applied as an MCP post-filter against returned listing location, postcode, and state fields; not sent to WLH.').optional(),
+  postcode: nonEmptyText(16, 'Austrian postcode or short postal prefix. Applied as an MCP post-filter against returned listing postcode; not sent to WLH.').optional(),
+  priceFrom: finiteNumber('Minimum price in EUR. Must be non-negative and no greater than priceTo.').optional(),
+  priceTo: finiteNumber('Maximum price in EUR. Must be non-negative and no less than priceFrom.').optional(),
+  areaId: nonEmptyText(40, 'WLH area/location ID if known.').optional(),
+  paylivery: z.boolean().describe('When true, prefer offers with PayLivery.').optional(),
+  rows: z.number().int().positive().max(100).describe('Maximum rows requested from WLH; max 100.').optional(),
+  page: z.number().int().positive().describe('One-based result page. Defaults to service behavior when omitted.').optional(),
+  condition: wlhConditionSchema.describe('Condition filter: new, like_new, used, or defect.').optional(),
+  delivery: z.array(wlhDeliverySchema).max(2).describe('Delivery preferences: pickup, shipping, or both.').optional(),
+  requiredTerms: z.array(nonEmptyText(60, 'A term that must appear in model-visible search matching.')).max(8).describe('Terms that must appear in a listing. Maximum 8 terms, 60 characters each.').optional(),
+  sort: wlhSortSchema.describe('MCP post-sort for the returned page only. WLH global result ordering is not changed.').optional(),
+  postedSince: isoDateLikeSchema.describe('MCP post-filter against returned listing publishedAt values; not sent to WLH.').optional(),
+  imageRequired: z.boolean().describe('When true, MCP post-filters returned listings to those with imageCount greater than 0; not sent to WLH.').optional(),
+}).strict();
 
 export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
   const server = new McpServer({ name: 'api-catalogue-private-mcp', version: MCP_VERSION }, { instructions: serverInstructions });
@@ -334,28 +358,8 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     'wlh_search',
     {
       title: 'WLH search',
-      description: 'Use this when the user wants to find Willhaben offers by keyword, price, category, location, condition, PayLivery, or delivery preference. Use wlh_find_category first when the category is unclear; use wlh_get_offer for a specific listing.',
-      inputSchema: {
-        keyword: nonEmptyText(120, 'Search keywords. Omit only when categoryId/categoryPath and filters are enough.').optional(),
-        categoryId: nonEmptyText(40, 'Willhaben category ID from wlh_find_category or category tools. Optional; inferred from keyword/categoryPath when omitted.').optional(),
-        categoryPath: nonEmptyText(200, 'Human-readable category path or category words used to infer a categoryId when categoryId is omitted.').optional(),
-        locationText: nonEmptyText(120, 'Location text such as Wien or Graz. Used as a safe required term when the underlying WLH service has no location field.').optional(),
-        postcode: nonEmptyText(16, 'Austrian postcode or short postal prefix.').optional(),
-        radiusKm: z.number().finite().describe('Search radius in kilometers. Must be between >0 and 500.').optional(),
-        priceFrom: finiteNumber('Minimum price in EUR. Must be non-negative and no greater than priceTo.').optional(),
-        priceTo: finiteNumber('Maximum price in EUR. Must be non-negative and no less than priceFrom.').optional(),
-        areaId: nonEmptyText(40, 'WLH area/location ID if known.').optional(),
-        paylivery: z.boolean().describe('When true, prefer offers with PayLivery.').optional(),
-        rows: z.number().int().positive().max(100).describe('Maximum rows requested from WLH; max 100.').optional(),
-        page: z.number().int().positive().describe('One-based result page. Defaults to service behavior when omitted.').optional(),
-        condition: wlhConditionSchema.describe('Condition filter: new, like_new, used, or defect.').optional(),
-        delivery: z.array(wlhDeliverySchema).max(2).describe('Delivery preferences: pickup, shipping, or both.').optional(),
-        requiredTerms: z.array(nonEmptyText(60, 'A term that must appear in model-visible search matching.')).max(8).describe('Terms that must appear in a listing. Maximum 8 terms, 60 characters each.').optional(),
-        sort: wlhSortSchema.describe('Preferred result ordering.').optional(),
-        postedSince: isoDateLikeSchema.optional(),
-        sellerType: wlhSellerTypeSchema.describe('Seller type preference. Accepted for tool ergonomics; returned listings omit sellerType unless available from the service.').optional(),
-        imageRequired: z.boolean().describe('When true, prefer listings that include at least one image.').optional(),
-      },
+      description: 'Use this when the user wants to find Willhaben offers by keyword, price, category, location, condition, PayLivery, delivery preference, recency, image presence, or visible postcode/location text. Use wlh_find_category first when the category is unclear; use wlh_get_offer for a specific listing.',
+      inputSchema: wlhSearchInputSchema,
       outputSchema: wlhSearchOutputSchema,
       annotations: externalReadOnlyAnnotations,
       ...withToolStatus(protectedToolSecurity, 'Searching Willhaben…', 'Willhaben results ready'),
@@ -368,7 +372,7 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
       return await withToolErrorBoundary('wlh', async () => {
         const searchRequest = await toWlhSearchRequest(services.wlh, args);
         const response = await services.wlh.search(searchRequest);
-        const structuredContent = toMcpWlhSearch(response, args);
+        const structuredContent = toMcpWlhSearch(response, args, searchRequest);
         return textResult(structuredContent, summarizeWlhSearch(structuredContent));
       });
     },
@@ -715,10 +719,20 @@ function toMcpRedditContinuation(value: unknown): Record<string, unknown> {
 
 async function toWlhSearchRequest(wlh: McpGatewayServices['wlh'], args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const categoryId = stringValue(args['categoryId']) ?? await inferWlhCategoryId(wlh, args);
+  const delivery = arrayValue(args['delivery']).filter((item): item is string => typeof item === 'string');
+  const requiredTerms = arrayValue(args['requiredTerms']).filter((item): item is string => typeof item === 'string');
   return compactRecord({
-    ...args,
+    keyword: stringValue(args['keyword']),
     categoryId,
-    ...(args['locationText'] && !args['requiredTerms'] ? { requiredTerms: [String(args['locationText'])] } : {}),
+    priceFrom: numberValue(args['priceFrom']),
+    priceTo: numberValue(args['priceTo']),
+    areaId: stringValue(args['areaId']),
+    paylivery: booleanValue(args['paylivery']),
+    rows: numberValue(args['rows']),
+    page: numberValue(args['page']),
+    condition: stringValue(args['condition']),
+    delivery: delivery.length > 0 ? delivery : undefined,
+    requiredTerms: requiredTerms.length > 0 ? requiredTerms : undefined,
   });
 }
 
@@ -739,25 +753,26 @@ function validateWlhSearchArgs(args: Record<string, unknown>): CallToolResult | 
   if (priceFrom !== undefined && priceFrom < 0) return invalidArgument('priceFrom must be non-negative.');
   if (priceTo !== undefined && priceTo < 0) return invalidArgument('priceTo must be non-negative.');
   if (priceFrom !== undefined && priceTo !== undefined && priceFrom > priceTo) return invalidArgument('priceFrom must be less than or equal to priceTo.');
-  const radiusKm = numberValue(args['radiusKm']);
-  if (args['radiusKm'] !== undefined && (radiusKm === undefined || radiusKm <= 0 || radiusKm > 500)) return invalidArgument('radiusKm must be greater than 0 and at most 500.');
   const postedSince = stringValue(args['postedSince']);
   if (args['postedSince'] !== undefined && (!postedSince || !isIsoDateOrDateTime(postedSince))) return invalidArgument('postedSince must be a valid ISO date or ISO datetime.');
   return undefined;
 }
 
-function toMcpWlhSearch(response: unknown, query: unknown): Record<string, unknown> {
+function toMcpWlhSearch(response: unknown, query: unknown, searchRequest: unknown): Record<string, unknown> {
   const record = asRecord(response);
-  const results = arrayValue(record['results']).map(toMcpWlhListing).filter((listing) => listing.id.length > 0);
+  const rawResults = arrayValue(record['results']).map(toMcpWlhListing).filter((listing) => listing.id.length > 0);
+  const postFiltered = applyMcpWlhPostFilters(rawResults, query);
+  const results = sortMcpWlhResults(postFiltered, stringValue(asRecord(query)['sort']));
   const category = toMcpWlhCategory(record['category']);
   return compactRecord({
     source: 'wlh',
-    query: toMcpWlhSearchQuery(query),
+    query: toMcpWlhSearchQuery({ ...asRecord(query), categoryId: stringValue(asRecord(searchRequest)['categoryId']) ?? stringValue(asRecord(query)['categoryId']) }),
     totalApprox: numberValue(record['rowsFound']) ?? null,
-    rowsReturned: numberValue(record['rowsReturned']) ?? results.length,
-    filteredRowsReturned: numberValue(record['filteredRowsReturned']) ?? results.length,
+    rowsReturned: numberValue(record['rowsReturned']) ?? rawResults.length,
+    filteredRowsReturned: results.length,
     category: category.id.length > 0 ? category : undefined,
     results,
+    filterApplications: describeWlhFilterApplications(query, searchRequest),
     sourceUrl: stringValue(record['sourceUrl']),
     fetchedAt: stringValue(record['fetchedAt']),
   });
@@ -772,7 +787,6 @@ function toMcpWlhSearchQuery(value: unknown): Record<string, unknown> {
     categoryPath: stringValue(query['categoryPath']),
     locationText: stringValue(query['locationText']),
     postcode: stringValue(query['postcode']),
-    radiusKm: numberValue(query['radiusKm']),
     priceFrom: numberValue(query['priceFrom']),
     priceTo: numberValue(query['priceTo']),
     areaId: stringValue(query['areaId']),
@@ -784,9 +798,74 @@ function toMcpWlhSearchQuery(value: unknown): Record<string, unknown> {
     requiredTerms: arrayValue(query['requiredTerms']).filter((item): item is string => typeof item === 'string'),
     sort: stringValue(query['sort']),
     postedSince: stringValue(query['postedSince']),
-    sellerType: stringValue(query['sellerType']),
     imageRequired: booleanValue(query['imageRequired']),
   });
+}
+
+function applyMcpWlhPostFilters(results: Array<{ id: string; [key: string]: unknown }>, queryValue: unknown): Array<{ id: string; [key: string]: unknown }> {
+  const query = asRecord(queryValue);
+  const locationText = normalizeMcpSearchText(stringValue(query['locationText']));
+  const postcode = normalizeMcpSearchText(stringValue(query['postcode']));
+  const postedSince = dateTimeValue(stringValue(query['postedSince']));
+  const imageRequired = booleanValue(query['imageRequired']);
+  return results.filter((listing) => {
+    if (locationText) {
+      const locationHaystack = normalizeMcpSearchText([listing['location'], listing['postcode'], listing['state']].filter(Boolean).join(' '));
+      if (!locationHaystack.includes(locationText)) return false;
+    }
+    if (postcode) {
+      const listingPostcode = normalizeMcpSearchText(stringValue(listing['postcode']));
+      if (!listingPostcode.startsWith(postcode)) return false;
+    }
+    if (postedSince) {
+      const publishedAt = dateTimeValue(stringValue(listing['publishedAt']));
+      if (!publishedAt || publishedAt < postedSince) return false;
+    }
+    if (imageRequired === true && (numberValue(listing['imageCount']) ?? 0) <= 0) return false;
+    return true;
+  });
+}
+
+function sortMcpWlhResults(results: Array<{ id: string; [key: string]: unknown }>, sort: string | undefined): Array<{ id: string; [key: string]: unknown }> {
+  const sorted = [...results];
+  if (sort === 'price_asc') return sorted.sort((a, b) => nullableSortNumber(a['priceAmount'], Number.POSITIVE_INFINITY) - nullableSortNumber(b['priceAmount'], Number.POSITIVE_INFINITY));
+  if (sort === 'price_desc') return sorted.sort((a, b) => nullableSortNumber(b['priceAmount'], Number.NEGATIVE_INFINITY) - nullableSortNumber(a['priceAmount'], Number.NEGATIVE_INFINITY));
+  if (sort === 'newest') return sorted.sort((a, b) => (dateTimeValue(stringValue(b['publishedAt']))?.getTime() ?? 0) - (dateTimeValue(stringValue(a['publishedAt']))?.getTime() ?? 0));
+  return sorted;
+}
+
+function describeWlhFilterApplications(queryValue: unknown, searchRequestValue: unknown): Array<Record<string, unknown>> {
+  const query = asRecord(queryValue);
+  const searchRequest = asRecord(searchRequestValue);
+  const applications: Array<Record<string, unknown>> = [];
+  const sentFields = ['keyword', 'categoryId', 'priceFrom', 'priceTo', 'areaId', 'paylivery', 'rows', 'page', 'condition', 'delivery'];
+  for (const field of sentFields) {
+    if (searchRequest[field] !== undefined) applications.push({ field, appliedAs: 'sent_to_wlh', effective: true });
+  }
+  if (query['categoryPath'] !== undefined && query['categoryId'] === undefined) applications.push({ field: 'categoryPath', appliedAs: 'category_inference', effective: true, note: `Inferred categoryId ${String(searchRequest['categoryId'] ?? '') || '0'} before calling WLH.` });
+  if (Array.isArray(searchRequest['requiredTerms']) && searchRequest['requiredTerms'].length > 0) applications.push({ field: 'requiredTerms', appliedAs: 'service_post_filter', effective: true, note: 'Filtered by the WLH service against returned listing title/body text before MCP shaping.' });
+  for (const field of ['locationText', 'postcode', 'postedSince', 'imageRequired']) {
+    if (query[field] !== undefined) applications.push({ field, appliedAs: 'mcp_post_filter', effective: true, note: 'Applied only to the listings returned by the underlying WLH request.' });
+  }
+  const sort = stringValue(query['sort']);
+  if (sort && sort !== 'relevance') applications.push({ field: 'sort', appliedAs: 'mcp_post_sort', effective: true, note: 'Sorted only the listings returned by the underlying WLH request; WLH global result ordering is unchanged.' });
+  if (sort === 'relevance') applications.push({ field: 'sort', appliedAs: 'mcp_post_sort', effective: false, note: 'Relevance is the default WLH order; MCP does not send a sort parameter or reorder the returned page.' });
+  return applications;
+}
+
+function nullableSortNumber(value: unknown, fallback: number): number {
+  const number = numberValue(value);
+  return number === undefined ? fallback : number;
+}
+
+function dateTimeValue(value: string | undefined): Date | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function normalizeMcpSearchText(value: unknown): string {
+  return String(value ?? '').trim().toLocaleLowerCase('de-AT');
 }
 
 function toMcpWlhListing(value: unknown): { id: string; [key: string]: unknown } {

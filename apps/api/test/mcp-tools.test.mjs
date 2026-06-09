@@ -41,6 +41,12 @@ test('MCP initialize and tools/list expose the private read-only tool catalogue'
       assert.equal(tool._meta.ui, undefined, `${tool.name} must not advertise UI metadata`);
       assert.equal(tool._meta['openai/outputTemplate'], undefined, `${tool.name} must not advertise an output template`);
       assert.equal(tool._meta['openai/widgetAccessible'], undefined, `${tool.name} must not advertise widget access`);
+      if (tool.name === 'wlh_search') {
+        const inputProperties = tool.inputSchema.properties;
+        assert.equal(inputProperties.radiusKm, undefined);
+        assert.equal(inputProperties.sellerType, undefined);
+        assert.equal(tool.inputSchema.additionalProperties, false);
+      }
       if (tool.name === 'health_check') {
         assert.deepEqual(tool.securitySchemes, [{ type: 'noauth' }]);
         assert.deepEqual(tool._meta.securitySchemes, [{ type: 'noauth' }]);
@@ -89,6 +95,10 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
     assert.equal(search.jsonBody.result.structuredContent.filteredRowsReturned, 1);
     assert.equal(search.jsonBody.result.structuredContent.results[0].title, 'Bike');
     assert.equal(search.jsonBody.result.structuredContent.results[0].thumbnailUrl, 'thumb');
+    assert.deepEqual(search.jsonBody.result.structuredContent.filterApplications.map((entry) => [entry.field, entry.appliedAs]), [
+      ['keyword', 'sent_to_wlh'],
+      ['categoryId', 'sent_to_wlh'],
+    ]);
 
     const offer = await mcpCall('wlh_get_offer', { url: 'https://www.willhaben.at/iad/kaufen-und-verkaufen/d/bike-123456789' }, 'Bearer local-dev-token', services);
     assert.equal(offer.jsonBody.result.structuredContent.id, '123456789');
@@ -118,6 +128,57 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
 });
 
 
+
+test('MCP wlh_search exposes only effective filters and reports how each one is applied', async () => {
+  const calls = [];
+  const services = stubServices(calls);
+  services.wlh.search = async (args) => {
+    calls.push(['search', args]);
+    return {
+      source: 'wlh',
+      rowsFound: 4,
+      rowsReturned: 4,
+      filteredRowsReturned: 4,
+      category: { id: args.categoryId, label: 'Bikes', path: '/bikes', depth: 1, hasChildren: false },
+      results: [
+        { id: '1', title: 'Bike one', priceAmount: 100, location: 'Wien', postcode: '1010', state: 'Wien', publishedAt: '2026-06-02T10:00:00Z', imageCount: 1 },
+        { id: '2', title: 'Bike two', priceAmount: 250, location: 'Wien', postcode: '1010', state: 'Wien', publishedAt: '2026-06-03T10:00:00Z', imageCount: 2 },
+        { id: '3', title: 'Bike old', priceAmount: 300, location: 'Wien', postcode: '1010', state: 'Wien', publishedAt: '2026-05-01T10:00:00Z', imageCount: 3 },
+        { id: '4', title: 'Bike Graz', priceAmount: 400, location: 'Graz', postcode: '8010', state: 'Steiermark', publishedAt: '2026-06-04T10:00:00Z', imageCount: 4 },
+      ],
+    };
+  };
+
+  await withEnv(authEnv, async () => {
+    const response = await mcpCall('wlh_search', {
+      keyword: 'bike',
+      categoryId: '10',
+      requiredTerms: ['bike'],
+      locationText: 'Wien',
+      postcode: '101',
+      postedSince: '2026-06-01',
+      imageRequired: true,
+      sort: 'price_desc',
+    }, 'Bearer local-dev-token', services);
+
+    const content = response.jsonBody.result.structuredContent;
+    assert.equal(response.status, 200);
+    assert.equal(content.filteredRowsReturned, 2);
+    assert.deepEqual(content.results.map((result) => result.id), ['2', '1']);
+    assert.deepEqual(calls.at(-1), ['search', { keyword: 'bike', categoryId: '10', requiredTerms: ['bike'] }]);
+    assert.deepEqual(Object.fromEntries(content.filterApplications.map((entry) => [entry.field, entry.appliedAs])), {
+      keyword: 'sent_to_wlh',
+      categoryId: 'sent_to_wlh',
+      requiredTerms: 'service_post_filter',
+      locationText: 'mcp_post_filter',
+      postcode: 'mcp_post_filter',
+      postedSince: 'mcp_post_filter',
+      imageRequired: 'mcp_post_filter',
+      sort: 'mcp_post_sort',
+    });
+  });
+});
+
 test('MCP validation rejects invalid Reddit and WLH arguments with safe tool errors', async () => {
   await withEnv(authEnv, async () => {
     await assertToolError(await mcpCall('reddit_get_thread', {}, 'Bearer local-dev-token'), 'invalid_arguments');
@@ -134,7 +195,8 @@ test('MCP validation rejects invalid Reddit and WLH arguments with safe tool err
     await assertToolError(await mcpCall('wlh_search', { keyword: 'bike', priceFrom: -1 }, 'Bearer local-dev-token'), 'invalid_arguments');
     await assertToolError(await mcpCall('wlh_search', { keyword: 'bike', priceFrom: 100, priceTo: 10 }, 'Bearer local-dev-token'), 'invalid_arguments');
     await assertToolError(await mcpCall('wlh_search', { keyword: 'bike', postedSince: 'not-a-date' }, 'Bearer local-dev-token'), 'invalid_arguments');
-    await assertToolError(await mcpCall('wlh_search', { keyword: 'bike', radiusKm: 501 }, 'Bearer local-dev-token'), 'invalid_arguments');
+    assertMcpValidationError(await mcpCall('wlh_search', { keyword: 'bike', radiusKm: 10 }, 'Bearer local-dev-token'), 'radiusKm');
+    assertMcpValidationError(await mcpCall('wlh_search', { keyword: 'bike', sellerType: 'private' }, 'Bearer local-dev-token'), 'sellerType');
   });
 });
 
@@ -178,6 +240,15 @@ async function mcpCall(name, args = {}, authorization, services = stubServices()
   return mcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, authorization, services);
 }
 
+
+function assertMcpValidationError(response, field) {
+  assert.equal(response.status, 200);
+  assert.equal(response.jsonBody.result.isError, true);
+  const text = response.jsonBody.result.content[0].text;
+  assert.match(text, /Input validation error/);
+  assert.match(text, new RegExp(field));
+  assert.doesNotMatch(JSON.stringify(response.jsonBody), /Bearer|local-dev-token|claims|headers|cookie|secret|password|Authorization/i);
+}
 
 function assertToolError(response, error, source = undefined) {
   assert.equal(response.status, 200);
