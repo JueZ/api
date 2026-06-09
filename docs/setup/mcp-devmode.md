@@ -32,13 +32,38 @@ The MCP gateway is intentionally tool-only for this milestone. It now returns co
 
 - Reddit overview returns normalized post, stats, coverage, and sort metadata.
 - Reddit thread snapshots return normalized post data plus a bounded, flattened comment list with truncated comment bodies.
-- WLH search returns normalized listing summaries with IDs, titles, prices, location, URLs, thumbnails, PayLivery hints, and category/query metadata.
+- WLH search returns normalized listing summaries with IDs, titles, prices, location, URLs, thumbnails, PayLivery hints, category/query metadata, and `filterApplications` metadata explaining whether each requested WLH search field was sent to WLH, used for category inference, post-filtered, or post-sorted by MCP.
 - WLH offer detail accepts either `adId` or a Willhaben listing `url` and returns normalized title, price, location, seller, delivery, PayLivery, description, and deduplicated images.
 - WLH category lookup supports `wlh_find_category` so broad natural-language searches can find a category before calling `wlh_search`.
 
 All Reddit/WLH tools remain read-only and advertise `readOnlyHint`, `destructiveHint: false`, `idempotentHint`, and `openWorldHint` annotations. The server instructions recommend: Reddit overview before full thread; WLH direct URL to `wlh_get_offer`; broad WLH searches through category lookup/search/offer detail.
 
 This MCP-only tool shaping change does not alter existing REST routes or authenticated smoke coverage for `GET /api/hello` and `POST /api/reddit/thread`.
+
+
+### `wlh_search` filter semantics
+
+`wlh_search` accepts only fields whose behavior is implemented and visible to the caller. Successful results include a `filterApplications` array so clients can tell how each requested field was applied.
+
+| Input field | Final behavior |
+| --- | --- |
+| `keyword` | Sent to WLH as `keyword`. |
+| `categoryId` | Sent to WLH as the search category. |
+| `categoryPath` | Used only to infer `categoryId` when `categoryId` is omitted; not sent to WLH. |
+| `priceFrom`, `priceTo` | Sent to WLH as `PRICE_FROM` / `PRICE_TO` after MCP validation. |
+| `areaId` | Sent to WLH as `areaId` when the caller already knows a WLH location/area ID. |
+| `paylivery` | Sent to WLH as `paylivery=true` when true. |
+| `rows`, `page` | Sent to WLH after MCP/schema bounds validation. |
+| `condition` | Sent to WLH through the WLH tree-attribute IDs used by the shared WLH service. |
+| `delivery` | Sent to WLH through the WLH tree-attribute IDs used by the shared WLH service. |
+| `requiredTerms` | Applied by the shared WLH service as a post-filter against returned listing title/body text. |
+| `locationText` | Applied by MCP as a post-filter against returned listing `location`, `postcode`, and `state`; not sent to WLH and not a radius search. |
+| `postcode` | Applied by MCP as a prefix post-filter against returned listing `postcode`; not sent to WLH. |
+| `postedSince` | Applied by MCP as a post-filter against returned listing `publishedAt`; not sent to WLH. |
+| `imageRequired` | Applied by MCP as a post-filter requiring `imageCount > 0`; not sent to WLH. |
+| `sort` | For `price_asc`, `price_desc`, and `newest`, MCP sorts only the returned page after filtering; WLH global ordering is not changed. `relevance` leaves WLH's default returned order unchanged. |
+
+`radiusKm` and `sellerType` are intentionally not advertised and are rejected if supplied, because neither field can currently be implemented from the shared WLH search response without pretending to apply an effective WLH filter.
 
 ## MCP hardening and tool reliability
 
@@ -48,7 +73,7 @@ The tool descriptors and handlers are hardened for ChatGPT Developer Mode use:
 
 - Reddit tools require exactly one of `postId` or `url`, validate supported Reddit hosts, and reject ambiguous calls before reaching the Reddit service.
 - `wlh_get_offer` requires exactly one of `adId` or a Willhaben listing `url`, validates Willhaben hosts, and extracts only realistic numeric ad IDs.
-- `wlh_search` validates price ranges, date/datetime recency filters, bounded radius, bounded required terms, and sane string lengths before calling WLH.
+- `wlh_search` validates price ranges, date/datetime recency filters, bounded required terms, and sane string lengths before calling WLH. Unsupported historical MCP fields such as `radiusKm` and `sellerType` are rejected instead of being silently accepted.
 - Successful tool outputs use exact normalized `structuredContent` schemas instead of raw provider payloads.
 - Reddit thread results include MCP-level truncation metadata: `modelCommentsReturned`, `modelCommentLimit`, `bodyCharLimit`, `modelTruncated`, and `upstreamCommentsReturned` when available.
 - Upstream Reddit/WLH failures are mapped to safe MCP tool errors such as `upstream_unavailable`, `upstream_rate_limited`, `not_found`, `unsupported_url`, or `invalid_arguments` without stack traces, headers, cookies, claims, tokens, credentials, or raw upstream bodies.
