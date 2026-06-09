@@ -2,7 +2,7 @@
 
 ## Status
 
-Feasible for this repository's current Azure Functions host, with deployment validation still required in the test environment before production rollout.
+Feasible and validated for this repository's current Azure Functions host. PR #246 deployed successfully through the normal test and production workflow gates for merge commit `677b1adfbe551c48525ef8b11a0722f5515d9989` on 2026-06-09.
 
 This note evaluates migration away from an account-key-based `AzureWebJobsStorage` connection string. The target state is an identity-based Azure Functions host-storage connection using the Function App's system-assigned managed identity and storage-account-scoped Azure RBAC.
 
@@ -82,22 +82,19 @@ Migration is currently feasible because:
 4. The Function App only registers HTTP triggers, so host-only storage roles plus diagnostic table support are sufficient.
 5. Existing application code that reads WLH category blobs uses `DefaultAzureCredential` and `WLH_STORAGE_ACCOUNT_NAME`, not the `AzureWebJobsStorage` connection string.
 
-## Rollout and validation plan
+## Rollout and validation evidence
 
-1. Deploy the Bicep change to the test resource group through the normal `Deploy Test` workflow.
-2. Confirm the Function App app-setting names include the identity-based `AzureWebJobsStorage__*` settings and do not include the legacy `AzureWebJobsStorage` setting value.
-3. Confirm the Function App system-assigned managed identity has `Storage Blob Data Owner` and `Storage Table Data Contributor` on the storage account.
-4. Restart/sync triggers through the workflow and confirm the Function host starts without host-storage errors.
-5. Run unauthenticated smoke and runtime-truth checks against test.
-6. Run authenticated smoke against `GET /api/hello` and `POST /api/reddit/thread` when the service-token/OIDC smoke setup is available.
-7. Inspect Application Insights/Azure Monitor for host-storage, table diagnostic, and package-read failures, without printing secrets or full app settings.
-8. Promote only after PR CI, Policy Check, test deployment, smoke, and runtime-truth gates pass.
+PR #246 completed the migration through the normal protected delivery flow for merge commit `677b1adfbe551c48525ef8b11a0722f5515d9989`:
+
+1. PR CI, Policy Check, and Codex Auto-Merge passed.
+2. Post-merge `main` CI passed for `677b1adfbe551c48525ef8b11a0722f5515d9989`.
+3. `Deploy Test` run `27229870948` succeeded for `677b1adfbe551c48525ef8b11a0722f5515d9989`, including Bicep deployment, Function package deployment, runtime smoke, authenticated smoke, telemetry gate, and release-ledger upload.
+4. `Promote Production` run `27229866903` succeeded for `677b1adfbe551c48525ef8b11a0722f5515d9989`, including Bicep deployment, Function package deployment, runtime smoke, authenticated smoke, telemetry gate, and release-ledger upload.
+
+Future validation should still confirm app-setting names and managed-identity role assignments without printing values if an operator changes storage, identity, or hosting configuration manually. Run authenticated smoke against `GET /api/hello` and `POST /api/reddit/thread` whenever this storage identity path is changed again.
 
 ## Compensating controls and rollback
 
-Until test deployment and smoke validation have passed:
-
-- Keep production unchanged until the normal protected delivery flow reaches production promotion.
 - Keep shared-key disablement out of this migration to avoid combining two storage-authentication changes.
 - Treat deployment identity role-assignment permissions as a known bootstrap prerequisite: the deployment identity must be able to create/update the Bicep-managed Function App storage role assignments, or the assignments must be pre-provisioned safely.
 

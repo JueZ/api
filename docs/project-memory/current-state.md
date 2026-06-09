@@ -1,14 +1,15 @@
 # Current state
 
+## 2026-06-09 Azure Functions identity-based host storage validated
+
+- `infra/main.bicep` targets identity-based `AzureWebJobsStorage` settings instead of an account-key connection string. The Function App system-assigned identity is assigned `Storage Blob Data Owner` and `Storage Table Data Contributor` on the storage account.
+- PR #246 merge commit `677b1adfbe551c48525ef8b11a0722f5515d9989` passed post-merge `main` CI, `Deploy Test` run `27229870948`, and `Promote Production` run `27229866903`, including runtime smoke, authenticated smoke, telemetry gate, and release-ledger upload.
+- Design, rollback, and revisit details live in `docs/security/azure-functions-identity-host-storage.md`. Shared-key disablement remains a separate future hardening step.
+
 ## 2026-06-09 shared API CORS helper
 
 - API handlers now use a shared application-level CORS helper that reads `API_CORS_ALLOWED_ORIGINS`, mirroring the Bicep `apiCorsAllowedOrigins` parameter deployed to Azure Functions platform CORS.
 - When origins are configured, responses echo only a matching request `Origin` and omit `Access-Control-Allow-Origin` for disallowed origins such as `https://evil.example`; an empty setting intentionally preserves the wildcard fallback for local/back-compat deployments.
-
-## 2026-06-09 Azure Functions identity-based host storage pending validation
-
-- `infra/main.bicep` now targets identity-based `AzureWebJobsStorage` settings instead of an account-key connection string. The Function App system-assigned identity is assigned `Storage Blob Data Owner` and `Storage Table Data Contributor` on the storage account.
-- Design and rollout details live in `docs/security/azure-functions-identity-host-storage.md`. Test deployment, smoke, runtime-truth, and telemetry validation are still required before considering the migration proven in production.
 
 ## 2026-06-09 Split GPT OpenAPI contract cleanup
 
