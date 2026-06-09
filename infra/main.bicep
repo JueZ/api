@@ -239,6 +239,11 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         }
 
         {
+          name: 'API_CORS_ALLOWED_ORIGINS'
+          value: apiCorsAllowedOrigins
+        }
+
+        {
           name: 'REDDIT_CLIENT_ID'
           value: redditClientId
         }

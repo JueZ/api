@@ -4,6 +4,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import * as z from 'zod/v4';
 import { createHealthResponse, createHelloResponse } from '../shared/responses.js';
+import { createCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
 import { RedditThreadService } from '../shared/reddit/service.js';
 import type { RedditThreadOverviewRequest, RedditThreadRequest } from '../shared/reddit/types.js';
 import { WlhService } from '../shared/wlh/service.js';
@@ -448,14 +449,14 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
 
 export async function handleMcpHttpRequest(request: HttpRequest, context: InvocationContext, services?: McpGatewayServices): Promise<HttpResponseInit> {
   if (request.method === 'OPTIONS') {
-    return { status: 204, headers: corsHeaders() };
+    return { status: 204, headers: corsHeaders(request) };
   }
 
   if (request.method === 'GET' && !request.headers.get('authorization')) {
     return {
       status: 401,
       headers: {
-        ...corsHeaders(),
+        ...corsHeaders(request),
         'WWW-Authenticate': buildMcpWwwAuthenticate(request, {
           error: 'invalid_token',
           errorDescription: 'Missing bearer token.',
@@ -469,7 +470,7 @@ export async function handleMcpHttpRequest(request: HttpRequest, context: Invoca
   if (parsedBody === invalidJson) {
     return {
       status: 400,
-      headers: { ...corsHeaders(), 'Content-Type': jsonRpcContentType },
+      headers: { ...corsHeaders(request), 'Content-Type': jsonRpcContentType },
       jsonBody: { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } },
     };
   }
@@ -486,7 +487,7 @@ export async function handleMcpHttpRequest(request: HttpRequest, context: Invoca
   try {
     const webRequest = toWebRequest(request, parsedBody === undefined ? undefined : parsedBody);
     const response = await transport.handleRequest(webRequest, parsedBody === undefined ? undefined : { parsedBody });
-    return await toHttpResponseInit(response);
+    return await toHttpResponseInit(response, request);
   } finally {
     await server.close();
   }
@@ -1029,8 +1030,8 @@ function toWebRequest(request: HttpRequest, parsedBody: unknown): Request {
   });
 }
 
-async function toHttpResponseInit(response: Response): Promise<HttpResponseInit> {
-  const headers = corsHeaders();
+async function toHttpResponseInit(response: Response, request: HttpRequest): Promise<HttpResponseInit> {
+  const headers = corsHeaders(request);
   response.headers.forEach((value, key) => { headers[key] = value; });
   const contentType = response.headers.get('content-type') ?? '';
   const text = await response.text();
@@ -1054,13 +1055,14 @@ function addTopLevelSecuritySchemes(jsonBody: unknown): unknown {
   return jsonBody;
 }
 
-function corsHeaders(): Record<string, string> {
-  return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, mcp-session-id, Last-Event-ID, mcp-protocol-version',
-    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-    'Access-Control-Expose-Headers': 'WWW-Authenticate, mcp-session-id, mcp-protocol-version',
-  };
+const corsOptions = {
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  headers: ['Authorization', 'Content-Type', 'mcp-session-id', 'Last-Event-ID', 'mcp-protocol-version'],
+  exposeHeaders: ['WWW-Authenticate', 'mcp-session-id', 'mcp-protocol-version'],
+} satisfies CorsOptions;
+
+function corsHeaders(request?: HttpRequest): Record<string, string> {
+  return createCorsHeaders(request, corsOptions);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

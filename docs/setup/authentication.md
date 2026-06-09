@@ -108,6 +108,7 @@ WEB_AUTH_AUTHORITY=<MSAL authority URL, usually issuer without token-specific as
 WEB_AUTH_REDIRECT_URI=<production frontend redirect URI>
 WEB_AUTH_API_SCOPE=api://<api-app-client-id>/api.access
 WEB_API_BASE_URL=https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net
+API_CORS_ALLOWED_ORIGINS=<comma-separated browser origins allowed by app-level API CORS>
 TEST_WEB_AUTH_REDIRECT_URI=<optional test frontend redirect URI override>
 TEST_WEB_API_BASE_URL=<optional test API base URL override>
 ```
@@ -117,6 +118,11 @@ needs a fixed redirect value; when omitted, the Angular app uses the deployed te
 origin at runtime. If you provide it, add that exact URI to the same SPA app registration that
 production uses. `TEST_WEB_API_BASE_URL` is normally omitted so the test frontend calls the
 Function App discovered during the test deployment instead of the production API.
+
+`apiCorsAllowedOrigins` configures Azure Functions platform CORS and is also mirrored into the
+backend app setting `API_CORS_ALLOWED_ORIGINS`. Application-level API responses reflect only a
+configured matching `Origin`; disallowed browser origins receive no `Access-Control-Allow-Origin`
+header. An empty app setting intentionally keeps the local/back-compat wildcard fallback.
 
 For test-zone app-only service tests, set `OIDC_REQUIRED_SCOPES=api.access,api.test` as an environment-level variable for the GitHub `test` environment and set the service allowlists there. Leave production service allowlists empty unless production app-to-app access is intentionally required.
 
@@ -138,7 +144,7 @@ Azure CLI queries such as:
 az functionapp config appsettings list \
   --resource-group rg-api-prod \
   --name func-api-catalogue-prod-bfjstshehpbfk \
-  --query "[?name=='AUTH_ENABLED' || name=='OIDC_ISSUER' || name=='OIDC_AUDIENCE' || name=='OIDC_REQUIRED_SCOPES' || name=='OIDC_ALLOWED_OBJECT_IDS'].name" \
+  --query "[?name=='AUTH_ENABLED' || name=='OIDC_ISSUER' || name=='OIDC_AUDIENCE' || name=='OIDC_REQUIRED_SCOPES' || name=='OIDC_ALLOWED_OBJECT_IDS' || name=='API_CORS_ALLOWED_ORIGINS'].name" \
   -o table
 ```
 
@@ -159,6 +165,7 @@ az functionapp config appsettings set \
     OIDC_ALLOWED_APP_OBJECT_IDS='' \
     OIDC_ALLOWED_CLIENT_IDS='' \
     OIDC_ALLOWED_TENANTS='' \
+    API_CORS_ALLOWED_ORIGINS='<frontend origin>' \
     AUTH_DEBUG=false \
   -o none
 ```
@@ -193,6 +200,24 @@ Unauthenticated protected endpoint should return `401` when `AUTH_ENABLED=true`:
 
 ```bash
 curl --show-error --silent --output - --write-out '\n%{http_code}\n' \
+  https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net/api/hello
+```
+
+Browser preflight should echo the configured frontend origin and should not allow unrelated
+origins:
+
+```bash
+FRONTEND_ORIGIN='https://<your-static-web-origin>'
+curl --show-error --silent --include --request OPTIONS \
+  -H "Origin: ${FRONTEND_ORIGIN}" \
+  -H 'Access-Control-Request-Method: GET' \
+  -H 'Access-Control-Request-Headers: Authorization, Content-Type' \
+  https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net/api/hello
+
+curl --show-error --silent --include --request OPTIONS \
+  -H 'Origin: https://evil.example' \
+  -H 'Access-Control-Request-Method: GET' \
+  -H 'Access-Control-Request-Headers: Authorization, Content-Type' \
   https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net/api/hello
 ```
 
