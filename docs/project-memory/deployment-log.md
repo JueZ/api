@@ -1,5 +1,11 @@
 # Deployment log
 
+## 2026-06-09 — Identity-based Azure Functions host storage deployed
+
+- Event: PR #246 migrated `AzureWebJobsStorage` from an account-key connection string to identity-based host storage for merge commit `677b1adfbe551c48525ef8b11a0722f5515d9989`.
+- Validation: Post-merge `main` CI passed. `Deploy Test` run `27229870948` and `Promote Production` run `27229866903` both passed, including Bicep deployment, Function package deployment, runtime smoke, authenticated smoke, telemetry gate, and release-ledger upload.
+- Follow-up: Keep storage shared-key disablement as a separate future hardening step and revisit role requirements if non-HTTP triggers or Durable Functions are added.
+
 ## 2026-05-17 Repairable Error LLM diagnostics config deployed
 
 - PR #152 (`Wire repairable OpenAI diagnostics deployment config`) merged at main commit `c9e57514468c312b6a694eacf8040111677da71b` after PR CI and Policy Check passed.
