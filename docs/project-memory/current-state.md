@@ -1,5 +1,10 @@
 # Current state
 
+## 2026-06-09 GitHub Actions SHA pinning
+
+- GitHub Actions workflows now pin external action references to full-length commit SHAs instead of mutable version tags, retaining the previous tag only as an inline readability comment.
+- Dependabot GitHub Actions updates are configured to open weekly PRs so action pins can be reviewed and refreshed without reintroducing mutable workflow references.
+
 ## 2026-06-09 Azure Functions identity-based host storage validated
 
 - `infra/main.bicep` targets identity-based `AzureWebJobsStorage` settings instead of an account-key connection string. The Function App system-assigned identity is assigned `Storage Blob Data Owner` and `Storage Table Data Contributor` on the storage account.

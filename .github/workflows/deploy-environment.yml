@@ -129,7 +129,7 @@ jobs:
       PROD_SERVICE_AUTH_SCOPE: ${{ vars.PROD_SERVICE_AUTH_SCOPE }}
     steps:
       - name: Checkout deployment source
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
           ref: ${{ inputs.sourceRef || github.sha }}
           fetch-depth: 0
@@ -241,13 +241,13 @@ jobs:
             : "${REPAIRABLE_ERRORS_LLM_MODEL:?REPAIRABLE_ERRORS_LLM_MODEL repository variable is required when Repairable Error LLM diagnostics are enabled}"
           fi
       - name: Azure OIDC login
-        uses: azure/login@v3
+        uses: azure/login@2dd0bbf4064d5a1812889dc200bb8eed2597f82a # tag=v3
         with:
           client-id: ${{ env.AZURE_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
         with:
           node-version: '22'
       - name: Install dependencies
@@ -636,7 +636,7 @@ jobs:
           echo "RELEASE_LEDGER_PATH=$RELEASE_LEDGER_PATH" >> "$GITHUB_ENV"
       - name: Upload release ledger
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
         with:
           name: release-ledger-${{ inputs.environmentName }}-${{ inputs.sourceRef || github.sha }}
           path: ${{ runner.temp }}/smoke/release-ledger-${{ inputs.environmentName }}.json
@@ -673,7 +673,7 @@ jobs:
             }' > .github/deploy-test-provenance.json
       - name: Upload test deployment provenance
         if: ${{ inputs.environmentName == 'test' && success() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
         with:
           name: deploy-test-provenance-${{ inputs.sourceRef || github.sha }}
           path: .github/deploy-test-provenance.json
@@ -697,7 +697,7 @@ jobs:
           echo "::notice title=Production values resolved::Smoke tests passed for $EFFECTIVE_BASE_URL using Function App $EFFECTIVE_FUNCTIONAPP_NAME and storage account $EFFECTIVE_STORAGE_ACCOUNT."
       - name: Create production issue on failed deploy or smoke
         if: ${{ failure() && inputs.environmentName == 'prod' }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # tag=v8
         with:
           script: |
             const title = `Production deployment failed for ${context.sha.substring(0, 7)}`;
