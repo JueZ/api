@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-06-09 — Identity-based Azure Functions host storage
+
+- Decision: Migrate `AzureWebJobsStorage` in `infra/main.bicep` from an account-key connection string to identity-based host storage using the Function App system-assigned managed identity.
+- Rationale: Azure Functions runtime `~4` supports identity-based host storage, the app is HTTP-trigger-only, and deployment already uses external run-from-package packages with managed-identity package reads.
+- Consequence: The Function App identity now needs storage-account-scoped `Storage Blob Data Owner` for host storage/package reads and `Storage Table Data Contributor` for Functions diagnostic events. Test deployment and smoke/runtime-truth validation are required before relying on the migration in production.
+- Reference: `docs/security/azure-functions-identity-host-storage.md`.
+
 ## 2026-05-17 — Stop creating repair issues for routine PR check failures
 
 - Decision: Remove the PR-level `Codex Autofix` issue-creation workflow and keep repair issue creation only for production deployment or production smoke-test failures.
