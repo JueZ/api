@@ -1,5 +1,10 @@
 # Current state
 
+## 2026-06-09 Azure Functions identity-based host storage pending validation
+
+- `infra/main.bicep` now targets identity-based `AzureWebJobsStorage` settings instead of an account-key connection string. The Function App system-assigned identity is assigned `Storage Blob Data Owner` and `Storage Table Data Contributor` on the storage account.
+- Design and rollout details live in `docs/security/azure-functions-identity-host-storage.md`. Test deployment, smoke, runtime-truth, and telemetry validation are still required before considering the migration proven in production.
+
 ## 2026-06-09 Split GPT OpenAPI contract cleanup
 
 - Removed the unused split GPT Actions contracts (`contracts/openapi.gpt.reddit.yaml` and `contracts/openapi.gpt.wlh.yaml`). GPT Builder setup, docs, CI, and drift checks now treat `contracts/openapi.gpt.yaml` as the only supported GPT Actions OpenAPI schema; authenticated smoke coverage for `GET /api/hello` and `POST /api/reddit/thread` remains unchanged.
