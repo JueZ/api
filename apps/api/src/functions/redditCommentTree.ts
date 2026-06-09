@@ -13,6 +13,7 @@ import {
 import { mapRedditError, RedditThreadService } from '../shared/reddit/service.js';
 import type { RedditCommentTreeRequest } from '../shared/reddit/types.js';
 import { authorizeRequest } from '../shared/security/auth.js';
+import { createCorsHeaders, withCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
 
 const OPERATION_ID = 'postRedditCommentTree';
 const ENDPOINT = '/api/reddit/comment-tree';
@@ -31,13 +32,13 @@ export async function redditCommentTreeHandler(
   if (request.method === 'OPTIONS') {
     return {
       status: 204,
-      headers: corsHeaders(),
+      headers: corsHeaders(request),
     };
   }
 
   const authorization = await authorizeRequest(request, context);
   if (!authorization.ok) {
-    return withCors(authorization.response);
+    return withCors(authorization.response, request);
   }
 
   const traceId = getTraceIdFromRequestOrContext(request, context);
@@ -54,7 +55,7 @@ export async function redditCommentTreeHandler(
       failureStage: 'json_parse',
       safeError: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' },
     });
-    return problemResponse(problem);
+    return problemResponse(problem, request);
   }
 
   try {
@@ -62,7 +63,7 @@ export async function redditCommentTreeHandler(
     return withCors({
       status: 200,
       jsonBody: response,
-    });
+    }, request);
   } catch (error) {
     const mapped = mapRedditError(error);
     const diagnosticId = createDiagnosticId();
@@ -88,7 +89,7 @@ export async function redditCommentTreeHandler(
       });
     }
 
-    return problemResponse(problem);
+    return problemResponse(problem, request);
   }
 }
 
@@ -156,12 +157,12 @@ async function problemForRedditError(args: {
   });
 }
 
-function problemResponse(problem: RepairableProblem): HttpResponseInit {
+function problemResponse(problem: RepairableProblem, request: HttpRequest): HttpResponseInit {
   return withCors({
     status: problem.status,
     headers: { 'Content-Type': 'application/problem+json' },
     jsonBody: problem,
-  });
+  }, request);
 }
 
 function failureStageForStatus(status: number): DiagnosticCapsule['failure_stage'] {
@@ -171,20 +172,12 @@ function failureStageForStatus(status: number): DiagnosticCapsule['failure_stage
   return 'unknown';
 }
 
-function withCors(response: HttpResponseInit): HttpResponseInit {
-  return {
-    ...response,
-    headers: {
-      ...corsHeaders(),
-      ...response.headers,
-    },
-  };
+const corsOptions = { methods: ['POST', 'OPTIONS'] } satisfies CorsOptions;
+
+function withCors(response: HttpResponseInit, request?: HttpRequest): HttpResponseInit {
+  return withCorsHeaders(request, response, corsOptions);
 }
 
-function corsHeaders(): Record<string, string> {
-  return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  };
+function corsHeaders(request?: HttpRequest): Record<string, string> {
+  return createCorsHeaders(request, corsOptions);
 }

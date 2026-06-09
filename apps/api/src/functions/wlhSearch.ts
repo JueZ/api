@@ -1,6 +1,7 @@
 import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
 import { getTraceIdFromRequestOrContext } from '../shared/errors/diagnosticCapsule.js';
 import { authorizeRequest } from '../shared/security/auth.js';
+import { createCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
 import { buildWlhProblem, WLH_OPERATION_IDS, wlhProblemForError, wlhProblemResponse } from '../shared/wlh/problem.js';
 import { WlhService } from '../shared/wlh/service.js';
 
@@ -8,21 +9,21 @@ let service: WlhService | null = null;
 export function setWlhSearchServiceForTesting(s: WlhService | null) { service = s; }
 function currentService(): WlhService { return service ??= new WlhService(); }
 
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
+const corsOptions = { methods: ['POST', 'OPTIONS'] } satisfies CorsOptions;
 
 export async function wlhSearchHandler(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
-  if (request.method === 'OPTIONS') return { status: 204, headers: cors };
+  if (request.method === 'OPTIONS') return { status: 204, headers: corsHeaders(request) };
   const auth = await authorizeRequest(request, context);
-  if (!auth.ok) return { ...auth.response, headers: { ...cors, ...auth.response.headers } };
+  if (!auth.ok) return { ...auth.response, headers: { ...corsHeaders(request), ...auth.response.headers } };
   const traceId = getTraceIdFromRequestOrContext(request, context);
   let body;
   try {
     body = await request.json();
   } catch {
-    return wlhProblemResponse(buildWlhProblem({ operationId: WLH_OPERATION_IDS.postWlhSearch, failureKind: 'invalid_json', traceId }), cors);
+    return wlhProblemResponse(buildWlhProblem({ operationId: WLH_OPERATION_IDS.postWlhSearch, failureKind: 'invalid_json', traceId }), corsHeaders(request));
   }
   try {
-    return { status: 200, headers: cors, jsonBody: await currentService().search(body) };
+    return { status: 200, headers: corsHeaders(request), jsonBody: await currentService().search(body) };
   } catch (e) {
     const problem = wlhProblemForError({ operationId: WLH_OPERATION_IDS.postWlhSearch, error: e, traceId });
     if (problem.status >= 500) {
@@ -34,8 +35,12 @@ export async function wlhSearchHandler(request: HttpRequest, context: Invocation
         safe_debug_summary: problem.safe_debug_summary,
       });
     }
-    return wlhProblemResponse(problem, cors);
+    return wlhProblemResponse(problem, corsHeaders(request));
   }
 }
 
 app.http('wlhSearch', { methods: ['POST', 'OPTIONS'], authLevel: 'anonymous', route: 'api/wlh/search', handler: wlhSearchHandler });
+
+function corsHeaders(request?: HttpRequest): Record<string, string> {
+  return createCorsHeaders(request, corsOptions);
+}

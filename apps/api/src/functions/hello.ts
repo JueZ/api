@@ -2,6 +2,7 @@ import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } 
 import { logSmokeRunId } from '../shared/smokeCorrelation.js';
 import { createHelloResponse } from '../shared/responses.js';
 import { authorizeRequest } from '../shared/security/auth.js';
+import { createCorsHeaders, withCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
 
 export async function helloHandler(
   request: HttpRequest,
@@ -12,20 +13,20 @@ export async function helloHandler(
   if (request.method === 'OPTIONS') {
     return {
       status: 204,
-      headers: corsHeaders(),
+      headers: corsHeaders(request),
     };
   }
 
   const authorization = await authorizeRequest(request, context);
 
   if (!authorization.ok) {
-    return withCors(authorization.response);
+    return withCors(authorization.response, request);
   }
 
   return withCors({
     status: 200,
     jsonBody: createHelloResponse(authorization.user),
-  });
+  }, request);
 }
 
 app.http('hello', {
@@ -35,20 +36,12 @@ app.http('hello', {
   handler: helloHandler,
 });
 
-function withCors(response: HttpResponseInit): HttpResponseInit {
-  return {
-    ...response,
-    headers: {
-      ...corsHeaders(),
-      ...response.headers,
-    },
-  };
+const corsOptions = { methods: ['GET', 'OPTIONS'] } satisfies CorsOptions;
+
+function withCors(response: HttpResponseInit, request?: HttpRequest): HttpResponseInit {
+  return withCorsHeaders(request, response, corsOptions);
 }
 
-function corsHeaders(): Record<string, string> {
-  return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  };
+function corsHeaders(request?: HttpRequest): Record<string, string> {
+  return createCorsHeaders(request, corsOptions);
 }

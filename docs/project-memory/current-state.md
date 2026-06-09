@@ -1,5 +1,10 @@
 # Current state
 
+## 2026-06-09 shared API CORS helper
+
+- API handlers now use a shared application-level CORS helper that reads `API_CORS_ALLOWED_ORIGINS`, mirroring the Bicep `apiCorsAllowedOrigins` parameter deployed to Azure Functions platform CORS.
+- When origins are configured, responses echo only a matching request `Origin` and omit `Access-Control-Allow-Origin` for disallowed origins such as `https://evil.example`; an empty setting intentionally preserves the wildcard fallback for local/back-compat deployments.
+
 ## 2026-06-09 Azure Functions identity-based host storage pending validation
 
 - `infra/main.bicep` now targets identity-based `AzureWebJobsStorage` settings instead of an account-key connection string. The Function App system-assigned identity is assigned `Storage Blob Data Owner` and `Storage Table Data Contributor` on the storage account.

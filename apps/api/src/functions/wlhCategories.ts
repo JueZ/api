@@ -1,6 +1,7 @@
 import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
 import { getTraceIdFromRequestOrContext } from '../shared/errors/diagnosticCapsule.js';
 import { authorizeRequest } from '../shared/security/auth.js';
+import { createCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
 import { buildWlhProblem, WLH_OPERATION_IDS, type WlhOperationId, wlhProblemForError, wlhProblemResponse } from '../shared/wlh/problem.js';
 import { WlhService } from '../shared/wlh/service.js';
 
@@ -8,23 +9,23 @@ let service: WlhService | null = null;
 export function setWlhCategoryServiceForTesting(s: WlhService | null) { service = s; }
 function currentService(): WlhService { return service ??= new WlhService(); }
 
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Allow-Methods': 'GET, OPTIONS' };
+const corsOptions = { methods: ['GET', 'OPTIONS'] } satisfies CorsOptions;
 
 export async function handler(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
-  if (request.method === 'OPTIONS') return { status: 204, headers: cors };
+  if (request.method === 'OPTIONS') return { status: 204, headers: corsHeaders(request) };
   const auth = await authorizeRequest(request, context);
-  if (!auth.ok) return { ...auth.response, headers: { ...cors, ...auth.response.headers } };
+  if (!auth.ok) return { ...auth.response, headers: { ...corsHeaders(request), ...auth.response.headers } };
   const traceId = getTraceIdFromRequestOrContext(request, context);
   const { operationId, categoryId } = routeInfo(request);
   if ((operationId === WLH_OPERATION_IDS.getWlhCategory || operationId === WLH_OPERATION_IDS.getWlhCategoryChildren) && !validCategoryId(categoryId)) {
-    return wlhProblemResponse(buildWlhProblem({ operationId, failureKind: 'input_validation', field: 'categoryId', traceId }), cors);
+    return wlhProblemResponse(buildWlhProblem({ operationId, failureKind: 'input_validation', field: 'categoryId', traceId }), corsHeaders(request));
   }
   try {
     let body;
     if (operationId === WLH_OPERATION_IDS.getWlhCategoriesTop) body = await currentService().topCategories();
     else if (operationId === WLH_OPERATION_IDS.getWlhCategoryChildren) body = await currentService().children(categoryId);
     else body = await currentService().category(categoryId);
-    return { status: 200, headers: cors, jsonBody: body };
+    return { status: 200, headers: corsHeaders(request), jsonBody: body };
   } catch (e) {
     const problem = wlhProblemForError({ operationId, error: e, traceId });
     if (problem.status >= 500) {
@@ -36,7 +37,7 @@ export async function handler(request: HttpRequest, context: InvocationContext):
         safe_debug_summary: problem.safe_debug_summary,
       });
     }
-    return wlhProblemResponse(problem, cors);
+    return wlhProblemResponse(problem, corsHeaders(request));
   }
 }
 
@@ -54,4 +55,8 @@ function routeInfo(request: HttpRequest): { operationId: WlhOperationId; categor
 
 function validCategoryId(categoryId: unknown): categoryId is string {
   return typeof categoryId === 'string' && categoryId.trim().length > 0;
+}
+
+function corsHeaders(request?: HttpRequest): Record<string, string> {
+  return createCorsHeaders(request, corsOptions);
 }
