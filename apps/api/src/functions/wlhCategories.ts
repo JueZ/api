@@ -46,8 +46,9 @@ app.http('wlhCategoryChildren', { methods: ['GET', 'OPTIONS'], authLevel: 'anony
 
 function routeInfo(request: HttpRequest): { operationId: WlhOperationId; categoryId: string } {
   const categoryId = request.params['categoryId'];
-  if (request.url.endsWith('/top')) return { operationId: WLH_OPERATION_IDS.getWlhCategoriesTop, categoryId: '' };
-  if (request.url.endsWith('/children')) return { operationId: WLH_OPERATION_IDS.getWlhCategoryChildren, categoryId };
+  const pathname = new URL(request.url).pathname;
+  if (pathname.endsWith('/top')) return { operationId: WLH_OPERATION_IDS.getWlhCategoriesTop, categoryId: '' };
+  if (pathname.endsWith('/children')) return { operationId: WLH_OPERATION_IDS.getWlhCategoryChildren, categoryId };
   return { operationId: WLH_OPERATION_IDS.getWlhCategory, categoryId };
 }
 
