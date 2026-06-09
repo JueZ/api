@@ -4,7 +4,7 @@
 
 - Decision: Migrate `AzureWebJobsStorage` in `infra/main.bicep` from an account-key connection string to identity-based host storage using the Function App system-assigned managed identity.
 - Rationale: Azure Functions runtime `~4` supports identity-based host storage, the app is HTTP-trigger-only, and deployment already uses external run-from-package packages with managed-identity package reads.
-- Consequence: The Function App identity now needs storage-account-scoped `Storage Blob Data Owner` for host storage/package reads and `Storage Table Data Contributor` for Functions diagnostic events. Test deployment and smoke/runtime-truth validation are required before relying on the migration in production.
+- Consequence: The Function App identity now needs storage-account-scoped `Storage Blob Data Owner` for host storage/package reads and `Storage Table Data Contributor` for Functions diagnostic events. Validation completed through PR #246 post-merge `main` CI, `Deploy Test` run `27229870948`, and `Promote Production` run `27229866903`; keep shared-key disablement as a separate future hardening step.
 - Reference: `docs/security/azure-functions-identity-host-storage.md`.
 
 ## 2026-05-17 — Stop creating repair issues for routine PR check failures
