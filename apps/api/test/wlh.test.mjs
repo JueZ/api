@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { wlhSearchHandler, setWlhSearchServiceForTesting } from '../dist/functions/wlhSearch.js';
 import { handler as wlhCategoriesHandler, setWlhCategoryServiceForTesting } from '../dist/functions/wlhCategories.js';
-import { setWlhOfferServiceForTesting } from '../dist/functions/wlhOffer.js';
+import { handler as wlhOfferHandler, setWlhOfferServiceForTesting } from '../dist/functions/wlhOffer.js';
 import { WlhService, searchUrlForCategory, wlhPathFromStoredUrl } from '../dist/shared/wlh/service.js';
 
 const cfg = { baseUrl: 'https://example.test', storageAccountName: 'x', categoryBlobContainer: 'wlh-reference', categoryBlobName: 'categories-marketplace.v1.json.gz', categoryFile: '', categoryVersion: 'v1' };
@@ -37,6 +37,66 @@ test('search listing SEO_URL prepends /iad for kaufen-und-verkaufen paths', asyn
   const s = new WlhService({ config: cfg, getIndex: async () => idx, fetchImpl: async () => new Response(html, { status: 200 }) });
   const out = await s.search({ categoryId: '10' });
   assert.equal(out.results[0].url, 'https://example.test/iad/kaufen-und-verkaufen/d/super-mario-3d-all-stars-nintendo-switch-997764051');
+});
+
+
+
+test('WLH category route detection ignores query strings', async () => {
+  await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
+    setWlhCategoryServiceForTesting(new WlhService({ config: cfg, getIndex: async () => idx }));
+
+    const top = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/top?x=1', {});
+    assert.equal(top.status, 200);
+    assert.deepEqual(top.jsonBody.map((category) => category.id), ['10']);
+
+    const children = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/10/children?x=1', { categoryId: '10' });
+    assert.equal(children.status, 200);
+    assert.deepEqual(children.jsonBody.map((category) => category.id), ['11']);
+  });
+});
+
+test('WLH category route detection still handles non-query routes', async () => {
+  await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
+    setWlhCategoryServiceForTesting(new WlhService({ config: cfg, getIndex: async () => idx }));
+
+    const top = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/top', {});
+    assert.equal(top.status, 200);
+    assert.deepEqual(top.jsonBody.map((category) => category.id), ['10']);
+
+    const children = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/10/children', { categoryId: '10' });
+    assert.equal(children.status, 200);
+    assert.deepEqual(children.jsonBody.map((category) => category.id), ['11']);
+  });
+});
+
+test('WLH offer image route detection ignores query strings', async () => {
+  await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
+    const calls = [];
+    setWlhOfferServiceForTesting({
+      offer: async (adId) => { calls.push(['offer', adId]); return { source: 'wlh', adId }; },
+      offerImages: async (adId) => { calls.push(['offerImages', adId]); return { source: 'wlh', adId, images: [{ full: 'https://images.test/1.jpg' }] }; },
+    });
+
+    const images = await wlhOfferHandlerRequest('GET', 'https://api.test/api/wlh/offers/123/images?x=1', { adId: '123' });
+    assert.equal(images.status, 200);
+    assert.deepEqual(images.jsonBody, { source: 'wlh', adId: '123', images: [{ full: 'https://images.test/1.jpg' }] });
+    assert.deepEqual(calls, [['offerImages', '123']]);
+  });
+});
+
+test('WLH offer route detection still handles non-query image routes', async () => {
+  await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
+    const calls = [];
+    setWlhOfferServiceForTesting({
+      offer: async (adId) => { calls.push(['offer', adId]); return { source: 'wlh', adId }; },
+      offerImages: async (adId) => { calls.push(['offerImages', adId]); return { source: 'wlh', adId, images: [] }; },
+    });
+
+    const images = await wlhOfferHandlerRequest('GET', 'https://api.test/api/wlh/offers/123/images', { adId: '123' });
+    assert.equal(images.status, 200);
+    assert.deepEqual(images.jsonBody, { source: 'wlh', adId: '123', images: [] });
+    assert.deepEqual(calls, [['offerImages', '123']]);
+  });
 });
 
 test('invalid JSON on WLH search returns RepairableProblem', async () => {
@@ -126,6 +186,10 @@ test('401/403 WLH auth failures keep auth envelope', async () => {
 
 async function wlhCategoryHandlerRequest(method, url, params) {
   return wlhCategoriesHandler({ method, url, params, headers: new Headers(), json: async () => ({}) }, contextStub());
+}
+
+async function wlhOfferHandlerRequest(method, url, params) {
+  return wlhOfferHandler({ method, url, params, headers: new Headers(), json: async () => ({}) }, contextStub());
 }
 
 function requestWithJson(body, authorization = undefined) {

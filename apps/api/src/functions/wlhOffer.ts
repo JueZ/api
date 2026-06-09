@@ -10,7 +10,7 @@ function currentService(): WlhService { return service ??= new WlhService(); }
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Allow-Methods': 'GET, OPTIONS' };
 
-async function handler(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+export async function handler(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (request.method === 'OPTIONS') return { status: 204, headers: cors };
   const auth = await authorizeRequest(request, context);
   if (!auth.ok) return { ...auth.response, headers: { ...cors, ...auth.response.headers } };
@@ -42,7 +42,8 @@ app.http('wlhOffer', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', rout
 app.http('wlhOfferImages', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'api/wlh/offers/{adId}/images', handler });
 
 function operationForRequest(request: HttpRequest): WlhOperationId {
-  return request.url.endsWith('/images') ? WLH_OPERATION_IDS.getWlhOfferImages : WLH_OPERATION_IDS.getWlhOffer;
+  const pathname = new URL(request.url).pathname;
+  return pathname.endsWith('/images') ? WLH_OPERATION_IDS.getWlhOfferImages : WLH_OPERATION_IDS.getWlhOffer;
 }
 
 function validAdId(adId: unknown): adId is string {
