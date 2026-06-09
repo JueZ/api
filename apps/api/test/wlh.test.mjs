@@ -39,23 +39,21 @@ test('search listing SEO_URL prepends /iad for kaufen-und-verkaufen paths', asyn
   assert.equal(out.results[0].url, 'https://example.test/iad/kaufen-und-verkaufen/d/super-mario-3d-all-stars-nintendo-switch-997764051');
 });
 
-
-
-test('WLH category route detection ignores query strings', async () => {
+test('WLH category route detection uses metadata and ignores query strings', async () => {
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
     setWlhCategoryServiceForTesting(new WlhService({ config: cfg, getIndex: async () => idx }));
 
-    const top = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/top?x=1', {});
+    const top = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/top?x=1', {}, { functionName: 'wlhCategoriesTop' });
     assert.equal(top.status, 200);
     assert.deepEqual(top.jsonBody.map((category) => category.id), ['10']);
 
-    const children = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/10/children?x=1', { categoryId: '10' });
+    const children = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/10/children?x=1', { categoryId: '10' }, { functionName: 'wlhCategoryChildren' });
     assert.equal(children.status, 200);
     assert.deepEqual(children.jsonBody.map((category) => category.id), ['11']);
   });
 });
 
-test('WLH category route detection still handles non-query routes', async () => {
+test('WLH category route detection still handles non-query pathname fallback routes', async () => {
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
     setWlhCategoryServiceForTesting(new WlhService({ config: cfg, getIndex: async () => idx }));
 
@@ -69,7 +67,7 @@ test('WLH category route detection still handles non-query routes', async () => 
   });
 });
 
-test('WLH offer image route detection ignores query strings', async () => {
+test('WLH offer image route detection uses metadata and ignores query strings', async () => {
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
     const calls = [];
     setWlhOfferServiceForTesting({
@@ -77,14 +75,14 @@ test('WLH offer image route detection ignores query strings', async () => {
       offerImages: async (adId) => { calls.push(['offerImages', adId]); return { source: 'wlh', adId, images: [{ full: 'https://images.test/1.jpg' }] }; },
     });
 
-    const images = await wlhOfferHandlerRequest('GET', 'https://api.test/api/wlh/offers/123/images?x=1', { adId: '123' });
+    const images = await wlhOfferHandlerRequest('GET', 'https://api.test/api/wlh/offers/123/images?x=1', { adId: '123' }, { functionName: 'wlhOfferImages' });
     assert.equal(images.status, 200);
     assert.deepEqual(images.jsonBody, { source: 'wlh', adId: '123', images: [{ full: 'https://images.test/1.jpg' }] });
     assert.deepEqual(calls, [['offerImages', '123']]);
   });
 });
 
-test('WLH offer route detection still handles non-query image routes', async () => {
+test('WLH offer route detection still handles non-query pathname fallback image routes', async () => {
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
     const calls = [];
     setWlhOfferServiceForTesting({
@@ -93,6 +91,28 @@ test('WLH offer route detection still handles non-query image routes', async () 
     });
 
     const images = await wlhOfferHandlerRequest('GET', 'https://api.test/api/wlh/offers/123/images', { adId: '123' });
+    assert.equal(images.status, 200);
+    assert.deepEqual(images.jsonBody, { source: 'wlh', adId: '123', images: [] });
+    assert.deepEqual(calls, [['offerImages', '123']]);
+  });
+});
+
+test('WLH route detection prefers Azure metadata when available', async () => {
+  await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
+    setWlhCategoryServiceForTesting(new WlhService({ config: cfg, getIndex: async () => idx }));
+    const children = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/10?view=children', { categoryId: '10' }, { functionName: 'wlhCategoryChildren' });
+    assert.equal(children.status, 200);
+    assert.deepEqual(children.jsonBody.map((category) => category.id), ['11']);
+  });
+
+  await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
+    const calls = [];
+    setWlhOfferServiceForTesting({
+      offer: async (adId) => { calls.push(['offer', adId]); return { source: 'wlh', adId }; },
+      offerImages: async (adId) => { calls.push(['offerImages', adId]); return { source: 'wlh', adId, images: [] }; },
+    });
+
+    const images = await wlhOfferHandlerRequest('GET', 'https://api.test/api/wlh/offers/123?view=images', { adId: '123' }, { functionName: 'wlhOfferImages' });
     assert.equal(images.status, 200);
     assert.deepEqual(images.jsonBody, { source: 'wlh', adId: '123', images: [] });
     assert.deepEqual(calls, [['offerImages', '123']]);
@@ -184,12 +204,12 @@ test('401/403 WLH auth failures keep auth envelope', async () => {
   }
 });
 
-async function wlhCategoryHandlerRequest(method, url, params) {
-  return wlhCategoriesHandler({ method, url, params, headers: new Headers(), json: async () => ({}) }, contextStub());
+async function wlhCategoryHandlerRequest(method, url, params, context = {}) {
+  return wlhCategoriesHandler({ method, url, params, headers: new Headers(), json: async () => ({}) }, contextStub(context));
 }
 
-async function wlhOfferHandlerRequest(method, url, params) {
-  return wlhOfferHandler({ method, url, params, headers: new Headers(), json: async () => ({}) }, contextStub());
+async function wlhOfferHandlerRequest(method, url, params, context = {}) {
+  return wlhOfferHandler({ method, url, params, headers: new Headers(), json: async () => ({}) }, contextStub(context));
 }
 
 function requestWithJson(body, authorization = undefined) {
@@ -212,8 +232,8 @@ function requestThatThrowsJson(authorization = undefined) {
   };
 }
 
-function contextStub() {
-  return { invocationId: 'invocation-test', warn: () => undefined };
+function contextStub(overrides = {}) {
+  return { invocationId: 'invocation-test', functionName: 'testFunction', warn: () => undefined, ...overrides };
 }
 
 function assertRepairableProblem(response, status, operationId, classification) {

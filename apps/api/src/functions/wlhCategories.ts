@@ -16,7 +16,7 @@ export async function handler(request: HttpRequest, context: InvocationContext):
   const auth = await authorizeRequest(request, context);
   if (!auth.ok) return { ...auth.response, headers: { ...corsHeaders(request), ...auth.response.headers } };
   const traceId = getTraceIdFromRequestOrContext(request, context);
-  const { operationId, categoryId } = routeInfo(request);
+  const { operationId, categoryId } = routeInfo(request, context);
   if ((operationId === WLH_OPERATION_IDS.getWlhCategory || operationId === WLH_OPERATION_IDS.getWlhCategoryChildren) && !validCategoryId(categoryId)) {
     return wlhProblemResponse(buildWlhProblem({ operationId, failureKind: 'input_validation', field: 'categoryId', traceId }), corsHeaders(request));
   }
@@ -45,8 +45,12 @@ app.http('wlhCategoriesTop', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymou
 app.http('wlhCategoryById', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'api/wlh/categories/{categoryId}', handler });
 app.http('wlhCategoryChildren', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'api/wlh/categories/{categoryId}/children', handler });
 
-function routeInfo(request: HttpRequest): { operationId: WlhOperationId; categoryId: string } {
+function routeInfo(request: HttpRequest, context: InvocationContext): { operationId: WlhOperationId; categoryId: string } {
   const categoryId = request.params['categoryId'];
+  if (context.functionName === 'wlhCategoriesTop') return { operationId: WLH_OPERATION_IDS.getWlhCategoriesTop, categoryId: '' };
+  if (context.functionName === 'wlhCategoryChildren') return { operationId: WLH_OPERATION_IDS.getWlhCategoryChildren, categoryId };
+  if (context.functionName === 'wlhCategoryById') return { operationId: WLH_OPERATION_IDS.getWlhCategory, categoryId };
+
   const pathname = new URL(request.url).pathname;
   if (pathname.endsWith('/top')) return { operationId: WLH_OPERATION_IDS.getWlhCategoriesTop, categoryId: '' };
   if (pathname.endsWith('/children')) return { operationId: WLH_OPERATION_IDS.getWlhCategoryChildren, categoryId };

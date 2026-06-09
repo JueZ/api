@@ -16,7 +16,7 @@ export async function handler(request: HttpRequest, context: InvocationContext):
   const auth = await authorizeRequest(request, context);
   if (!auth.ok) return { ...auth.response, headers: { ...corsHeaders(request), ...auth.response.headers } };
   const traceId = getTraceIdFromRequestOrContext(request, context);
-  const operationId = operationForRequest(request);
+  const operationId = operationForRequest(request, context);
   const adId = request.params['adId'];
   if (!validAdId(adId)) {
     return wlhProblemResponse(buildWlhProblem({ operationId, failureKind: 'input_validation', field: 'adId', traceId }), corsHeaders(request));
@@ -42,7 +42,10 @@ export async function handler(request: HttpRequest, context: InvocationContext):
 app.http('wlhOffer', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'api/wlh/offers/{adId}', handler });
 app.http('wlhOfferImages', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'api/wlh/offers/{adId}/images', handler });
 
-function operationForRequest(request: HttpRequest): WlhOperationId {
+function operationForRequest(request: HttpRequest, context: InvocationContext): WlhOperationId {
+  if (context.functionName === 'wlhOfferImages') return WLH_OPERATION_IDS.getWlhOfferImages;
+  if (context.functionName === 'wlhOffer') return WLH_OPERATION_IDS.getWlhOffer;
+
   const pathname = new URL(request.url).pathname;
   return pathname.endsWith('/images') ? WLH_OPERATION_IDS.getWlhOfferImages : WLH_OPERATION_IDS.getWlhOffer;
 }
