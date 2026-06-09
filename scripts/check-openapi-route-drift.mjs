@@ -8,6 +8,10 @@ import YAML from 'yaml';
 const DEFAULT_FUNCTIONS_GLOB_DIR = 'apps/api/src/functions';
 const CANONICAL_CONTRACT = 'contracts/openapi.yaml';
 const GPT_CONTRACT = 'contracts/openapi.gpt.yaml';
+const REMOVED_SPLIT_GPT_CONTRACTS = [
+  'contracts/openapi.gpt.reddit.yaml',
+  'contracts/openapi.gpt.wlh.yaml',
+];
 const HTTP_METHODS = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace']);
 const DOCUMENTED_METHODS = new Set(['get', 'put', 'post', 'delete', 'head', 'patch', 'trace']);
 const AUTH_RESPONSE_STATUSES = ['401', '403'];
@@ -264,6 +268,13 @@ export function findUnstableSharedOperationIds(canonicalContract, gptContract) {
   return issues;
 }
 
+export function findUnexpectedSplitContractFiles(baseDir = '.') {
+  return REMOVED_SPLIT_GPT_CONTRACTS
+    .map((contractPath) => path.join(baseDir, contractPath))
+    .filter((contractPath) => fs.existsSync(contractPath))
+    .map((contractPath) => `${path.relative(baseDir, contractPath) || contractPath} was removed; use ${GPT_CONTRACT} as the only GPT Actions contract.`);
+}
+
 export function findStaleSplitContractReferences(gptContract, rawText = '') {
   const issues = [];
   const staleReferences = new Set();
@@ -308,6 +319,7 @@ export function checkOpenApiRouteDrift({
   canonicalContract,
   gptContract,
   gptRawText = '',
+  baseDir = '.',
 } = {}) {
   const routes = implementationRoutes ?? extractRoutesFromFunctions();
   const canonical = canonicalContract ?? parseOpenApiFile(CANONICAL_CONTRACT);
@@ -315,6 +327,7 @@ export function checkOpenApiRouteDrift({
   const rawGpt = gptRawText || (fs.existsSync(GPT_CONTRACT) ? fs.readFileSync(GPT_CONTRACT, 'utf8') : '');
 
   const issues = [
+    ...findUnexpectedSplitContractFiles(baseDir),
     ...findMissingCanonicalRoutes(routes, canonical),
     ...findProtectedRouteAuthIssues(routes, [
       { name: 'canonical OpenAPI', contract: canonical },

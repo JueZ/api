@@ -7,9 +7,7 @@ v0 serverless foundation for a personal API catalogue platform.
 - Angular frontend in `apps/web`.
 - Azure Functions TypeScript backend in `apps/api`.
 - OpenAPI contract in `contracts/openapi.yaml`.
-- GPT Actions OpenAPI contracts:
-  - Combined: `contracts/openapi.gpt.yaml`
-
+- GPT Actions OpenAPI contract for GPT Builder: `contracts/openapi.gpt.yaml` (the only supported GPT Actions schema; split Reddit/WLH schemas were removed).
 
 - Low-cost Bicep infrastructure skeleton in `infra/main.bicep`.
 - Setup documentation in `docs/setup/v0-hello-world.md`, authentication and GPT Actions OAuth setup in `docs/setup/authentication.md`, OAuth security guidance in `docs/security/service-oauth-authentication.md`, and staged deployment setup commands in `docs/setup/staged-deployment.md`.
