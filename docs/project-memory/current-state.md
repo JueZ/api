@@ -1,5 +1,10 @@
 # Current state
 
+## 2026-06-09 Split GPT OpenAPI contract cleanup
+
+- Removed the unused split GPT Actions contracts (`contracts/openapi.gpt.reddit.yaml` and `contracts/openapi.gpt.wlh.yaml`). GPT Builder setup, docs, CI, and drift checks now treat `contracts/openapi.gpt.yaml` as the only supported GPT Actions OpenAPI schema; authenticated smoke coverage for `GET /api/hello` and `POST /api/reddit/thread` remains unchanged.
+- `scripts/check-openapi-route-drift.mjs` now fails if either split-contract path is reintroduced, making stale split-contract drift explicit instead of relying on ad hoc Redocly discovery.
+
 ## 2026-06-08 MCP tool-only hardening
 
 - The private MCP gateway remains tool-only with no registered resources, output templates, widgets, or ChatGPT UI metadata. Tool descriptors now include only short invocation status strings in addition to existing security metadata.
@@ -64,7 +69,7 @@
 
 - Added staged Reddit comment loading design to the API surface: `/api/reddit/thread` now returns bounded `commentContinuations` handles for omitted comment blocks, and the new protected `POST /api/reddit/comment-tree` endpoint can fetch either a focused `commentId` subtree or `children` from a continuation handle.
 - The comment-tree endpoint reuses the existing Reddit OAuth client and fixed Reddit endpoints (`/comments/<article>` and `/api/morechildren`), keeps responses bounded by `depth`, `limit`, and `maxMoreChildrenRequests`, and preserves the existing Microsoft Entra auth/repairable-error pattern.
-- OpenAPI contracts (`contracts/openapi.yaml`, `contracts/openapi.gpt.yaml`, and `contracts/openapi.gpt.reddit.yaml`) document the staged GPT workflow so callers can load large Reddit threads through multiple smaller calls rather than one oversized response.
+- OpenAPI contracts (`contracts/openapi.yaml` and `contracts/openapi.gpt.yaml`) document the staged GPT workflow so callers can load large Reddit threads through multiple smaller calls rather than one oversized response; the older split GPT contracts were removed and are no longer supported inputs for GPT Builder or CI.
 
 ## 2026-05-29 GitHub Actions job timeouts
 

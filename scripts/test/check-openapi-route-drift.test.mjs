@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   extractRoutesFromSource,
   findDuplicateOperationIds,
   findGptWlhThinSchemaIssues,
   findMissingCanonicalRoutes,
   findStaleSplitContractReferences,
+  findUnexpectedSplitContractFiles,
 } from '../check-openapi-route-drift.mjs';
 
 test('extracts app.http routes and documentable methods from Azure Functions source', () => {
@@ -133,4 +137,21 @@ test('detects stale split-contract references in the GPT Actions contract', () =
   assert.equal(issues.length, 2);
   assert.match(issues[0], /openapi\.gpt\.reddit\.yaml/);
   assert.match(issues[1], /stale split-contract operationId 'redditThread'/);
+});
+
+test('detects removed split GPT contract files if they are reintroduced', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'split-gpt-contract-'));
+  try {
+    const contractDir = path.join(tmp, 'contracts');
+    fs.mkdirSync(contractDir);
+    fs.writeFileSync(path.join(contractDir, 'openapi.gpt.reddit.yaml'), 'openapi: 3.1.0\n');
+
+    const issues = findUnexpectedSplitContractFiles(tmp);
+
+    assert.deepEqual(issues, [
+      'contracts/openapi.gpt.reddit.yaml was removed; use contracts/openapi.gpt.yaml as the only GPT Actions contract.',
+    ]);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

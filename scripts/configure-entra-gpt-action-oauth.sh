@@ -249,7 +249,7 @@ Token URL: $token_url
 Scope: $scope_uri
 Production API base URL: $PRODUCTION_API_BASE_URL
 OpenAPI schema file:
-  - combined: contracts/openapi.gpt.yaml
+  - contracts/openapi.gpt.yaml (only supported GPT Actions schema; do not use removed split Reddit/WLH schemas)
 
 
 Registered redirect URIs: $(jq -r 'join(", ")' <<<"$requested_redirect_uris_json")
