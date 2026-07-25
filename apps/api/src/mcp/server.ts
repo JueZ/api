@@ -14,7 +14,7 @@ import { authorizeMcpTool, buildMcpWwwAuthenticate, getMcpOAuthScope, mcpAuthErr
 export interface McpGatewayServices {
   reddit: Pick<RedditThreadService, 'fetchThread' | 'fetchThreadOverview'>;
   wlh: Pick<WlhService, 'search' | 'offer' | 'topCategories' | 'children'>;
-  bring: Pick<BringService, 'listLists' | 'getList' | 'addItems' | 'completeItems'>;
+  bring: Pick<BringService, 'listLists' | 'getList' | 'addItems' | 'completeItems' | 'removeItems'>;
 }
 
 export interface McpRequestOptions {
@@ -48,6 +48,7 @@ const localOnlyAnnotations = { readOnlyHint: true, destructiveHint: false, idemp
 const externalReadOnlyAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 const bringAddAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
 const bringCompleteAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true };
+const bringRemoveAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true };
 
 const nonEmptyText = (maxLength: number, description: string) => z.string().trim().min(1).max(maxLength).describe(description);
 const redditPostIdSchema = nonEmptyText(32, 'Reddit post ID/base36 fullname ID. Provide this instead of url; do not provide both.');
@@ -61,9 +62,9 @@ const healthToolSecurity = toolSecurityWithStatus(noauthSecuritySchemes, 'Checki
 const bringListUuidSchema = z.string().uuid().describe('Bring list UUID. Omit to use the configured or account default list.').optional();
 const bringItemInputSchema = z.object({ name: nonEmptyText(200, 'Shopping item name.'), specification: z.string().max(500).optional(), uuid: z.string().uuid().optional() }).strict();
 const bringItemsInputSchema = { listUuid: bringListUuidSchema, items: z.array(bringItemInputSchema).min(1).max(50) };
-const bringListsOutputSchema = z.object({ source: z.literal('bring'), lists: z.array(z.object({ uuid: z.string(), name: z.string(), theme: z.string().optional(), isDefault: z.boolean() })) });
+const bringListsOutputSchema = z.object({ source: z.literal('bring'), lists: z.array(z.object({ uuid: z.string(), name: z.string(), theme: z.string().optional(), isDefault: z.boolean(), shared: z.boolean() })) });
 const bringListOutputSchema = z.object({ uuid: z.string(), name: z.string().optional(), items: z.array(z.object({ uuid: z.string().optional(), name: z.string(), specification: z.string().optional(), status: z.enum(['active', 'completed']) })) });
-const bringMutationOutputSchema = z.object({ source: z.literal('bring'), listUuid: z.string(), operation: z.enum(['add', 'complete']), itemCount: z.number(), items: z.array(bringItemInputSchema) });
+const bringMutationOutputSchema = z.object({ source: z.literal('bring'), listUuid: z.string(), operation: z.enum(['add', 'complete', 'remove']), itemCount: z.number(), items: z.array(bringItemInputSchema) });
 
 const categorySchema = z.object({
   id: z.string(),
@@ -308,6 +309,11 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     title: 'Complete Bring items', description: 'Mark 1–50 Bring shopping items complete in one destructive batch. Omit listUuid to use the default list.', inputSchema: bringItemsInputSchema, outputSchema: bringMutationOutputSchema,
     annotations: bringCompleteAnnotations, ...withToolStatus(protectedToolSecurity, 'Completing Bring items…', 'Bring items completed'),
   }, async ({ listUuid, items }) => { const authError = await requireAuth(); if (authError) return authError; return withToolErrorBoundary('bring', async () => { const result = await services.bring.completeItems(listUuid, items); return textResult(result, `Completed ${result.itemCount} Bring items.`); }); });
+
+  server.registerTool('bring_remove_items', {
+    title: 'Remove Bring items', description: 'Remove 1–50 items from a specific accessible Bring shopping list in one destructive batch. This also works for shared lists returned by bring_list_lists. Omit listUuid to use the default list.', inputSchema: bringItemsInputSchema, outputSchema: bringMutationOutputSchema,
+    annotations: bringRemoveAnnotations, ...withToolStatus(protectedToolSecurity, 'Removing Bring items…', 'Bring items removed'),
+  }, async ({ listUuid, items }) => { const authError = await requireAuth(); if (authError) return authError; return withToolErrorBoundary('bring', async () => { const result = await services.bring.removeItems(listUuid, items); return textResult(result, `Removed ${result.itemCount} Bring items.`); }); });
 
   server.registerTool(
     'reddit_get_thread',

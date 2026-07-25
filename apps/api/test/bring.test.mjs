@@ -62,7 +62,14 @@ test('cache failures and corrupt payloads are safe', async () => {
 
 test('list loading, default resolution and batch add/complete preserve duplicates and characters', async () => {
   const calls = []; const service = new BringService({ config: cfg, sessionStore: null, fetchImpl: async (url, init) => { if (String(url).endsWith('bringauth')) return json(login); if (init?.method === 'PUT') { calls.push(JSON.parse(String(init.body))); return json({ ok: true }); } return json({ purchase: [{ name: 'Milch' }], recently: [] }); } });
-  assert.equal((await service.getList()).items[0].name, 'Milch'); const items = [{ name: 'Äpfel & Milch', specification: '2 Liter' }, { name: 'Äpfel & Milch', specification: '1 Liter' }]; await service.addItems(undefined, items); await service.completeItems(undefined, items); assert.deepEqual(calls.map((x) => x.operation), ['add', 'complete']); assert.equal(calls[0].items.length, 2);
+  assert.equal((await service.getList()).items[0].name, 'Milch'); const items = [{ name: 'Äpfel & Milch', specification: '2 Liter' }, { name: 'Äpfel & Milch', specification: '1 Liter' }]; await service.addItems(undefined, items); await service.completeItems(undefined, items); await service.removeItems(undefined, items); assert.deepEqual(calls.map((x) => x.operation), ['add', 'complete', 'remove']); assert.equal(calls[0].items.length, 2);
+});
+
+test('all accessible own and shared lists can be selected by UUID', async () => {
+  const sharedUuid = '22222222-2222-4222-8222-222222222222';
+  const service = new BringService({ config: cfg, sessionStore: null, fetchImpl: async (url) => { if (String(url).endsWith('bringauth')) return json(login); if (String(url).includes('/lists') && !String(url).includes('/v2/bringlists/')) return json({ lists: [{ listUuid, name: 'Mine' }, { listUuid: sharedUuid, name: 'Family', isShared: true }] }); return json({ purchase: [{ name: 'Bread' }] }); } });
+  const lists = await service.listLists(); assert.deepEqual(lists.lists.map((x) => [x.name, x.shared]), [['Mine', false], ['Family', true]]);
+  assert.equal((await service.getList(sharedUuid)).uuid, sharedUuid);
 });
 
 test('item input bounds, lengths, UUIDs and unknown fields fail closed', () => {
@@ -72,6 +79,25 @@ test('item input bounds, lengths, UUIDs and unknown fields fail closed', () => {
 test('protected HTTP route preserves existing OAuth envelope and injects service', async () => {
   await withEnv({ AUTH_ENABLED: 'true' }, async () => { const response = await bringHandler({ method: 'GET', url: 'https://api.test/api/bring/lists', params: {}, headers: new Headers() }, context()); assert.equal(response.status, 401); assert.equal(response.jsonBody.error.code, 'unauthorized'); });
   await withEnv({ AUTH_ENABLED: 'false' }, async () => { setBringServiceForTesting({ listLists: async () => ({ source: 'bring', lists: [] }) }); const response = await bringHandler({ method: 'GET', url: 'https://api.test/api/bring/lists', params: {}, headers: new Headers() }, context({ functionName: 'bringListLists' })); assert.equal(response.status, 200); }); setBringServiceForTesting(null);
+});
+
+test('protected HTTP removal route selects a list UUID and accepts a batch', async () => {
+  const calls = [];
+  const api = {
+    listLists: async () => ({ source: 'bring', lists: [] }),
+    getList: async () => ({ source: 'bring', uuid: listUuid, items: [] }),
+    addItems: async () => ({}),
+    completeItems: async () => ({}),
+    removeItems: async (selectedListUuid, items) => { calls.push([selectedListUuid, items]); return { source: 'bring', listUuid: selectedListUuid, operation: 'remove', itemCount: items.length, items }; },
+  };
+  await withEnv({ AUTH_ENABLED: 'false' }, async () => {
+    setBringServiceForTesting(api);
+    const response = await bringHandler({ method: 'POST', url: `https://api.test/api/bring/lists/${listUuid}/items/remove`, params: { listUuid }, headers: new Headers(), json: async () => ({ items: [{ name: 'Milch' }] }) }, context({ functionName: 'bringRemoveItems' }));
+    assert.equal(response.status, 200);
+    assert.equal(response.jsonBody.operation, 'remove');
+    assert.deepEqual(calls, [[listUuid, [{ name: 'Milch' }]]]);
+  });
+  setBringServiceForTesting(null);
 });
 
 function json(value, status = 200) { return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } }); }

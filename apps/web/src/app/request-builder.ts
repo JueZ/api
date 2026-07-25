@@ -27,6 +27,12 @@ export function buildRequestBody(operation: ApiOperationDoc, values: OperationFo
       body[field.name] = Number(rawValue);
     } else if (field.inputType === 'checkbox') {
       body[field.name] = rawValue === 'true';
+    } else if (field.inputType === 'textarea') {
+      try {
+        body[field.name] = JSON.parse(rawValue) as unknown;
+      } catch {
+        throw new Error(`${field.name} must be valid JSON.`);
+      }
     } else {
       body[field.name] = rawValue;
     }

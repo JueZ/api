@@ -16,7 +16,9 @@ GitHub repository **variables** provide non-secret runtime configuration:
 
 GitHub repository **secrets** `BRING_EMAIL` and `BRING_PASSWORD` contain the technical-account credentials. Deployment passes them as secure Bicep parameters. Azure Function settings also include `BRING_STORAGE_ACCOUNT_NAME`, which refers to the existing private deployment storage account. No new storage account, database, Redis service, plan, or always-on resource is created.
 
-All HTTP routes and MCP tools use the existing API/MCP OAuth authorization. HTTP routes require an explicit list UUID. MCP and the service layer may omit it and use `BRING_DEFAULT_LIST_UUID`, the login-derived default, or the first available list. Write calls accept 1–50 strictly validated items per batch.
+All HTTP routes and MCP tools use the existing API/MCP OAuth authorization. `GET /api/bring/lists` returns every own or shared list visible to the configured technical account, including a normalized `shared` marker. HTTP item routes require an explicit list UUID, so callers can select exactly which accessible list to read or edit. MCP and the service layer may omit it and use `BRING_DEFAULT_LIST_UUID`, the login-derived default, or the first available list. Add, complete, and remove calls accept 1–50 strictly validated items per batch.
+
+The MCP gateway exposes `bring_list_lists`, `bring_get_items`, `bring_add_items`, `bring_complete_items`, and `bring_remove_items`. Creating, deleting, sharing, or changing membership of whole lists remains intentionally unsupported; this integration only edits items in lists already accessible to the technical account.
 
 ## Authentication and cache lifecycle
 
@@ -37,4 +39,3 @@ Set `BRING_SESSION_CACHE_ENABLED=false` to disable durable caching. Process-loca
 Tests mock `fetch`, authentication, time, and session stores; unit/PR CI never calls Bring!. Run `npm run test:api`, `npm run ops:check-openapi-drift`, and `npm run ops:policy-guardrails`. Deployment verification should confirm the exact deployed commit through `/health`, then exercise protected routes only with the established authenticated smoke mechanism. A cache outage should not prevent operations; account-auth failures are dependency failures and do not invalidate the caller's API OAuth token.
 
 Expected upstream failures include rate limiting, timeouts, account-auth rejection, server failures, plain-text/HTML errors, and response drift. The service maps these to sanitized repairable problems. Because the upstream API is unofficial, response drift remains the primary residual risk and rollback is the normal repository rollback workflow to a known-good full `main` SHA.
-

@@ -22,6 +22,7 @@ test('MCP initialize and tools/list expose protected Bring reads and controlled 
       'bring_complete_items',
       'bring_get_items',
       'bring_list_lists',
+      'bring_remove_items',
       'health_check',
       'hello_authenticated',
       'reddit_get_thread',
@@ -35,7 +36,7 @@ test('MCP initialize and tools/list expose protected Bring reads and controlled 
 
     for (const tool of tools) {
       if (tool.name === 'bring_add_items') assert.deepEqual(tool.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
-      else if (tool.name === 'bring_complete_items') assert.deepEqual(tool.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
+      else if (tool.name === 'bring_complete_items' || tool.name === 'bring_remove_items') assert.deepEqual(tool.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
       else { assert.equal(tool.annotations.readOnlyHint, true, `${tool.name} must be read-only`); assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`); assert.equal(tool.annotations.idempotentHint, true, `${tool.name} must be idempotent`); }
       assert.ok(tool.outputSchema, `${tool.name} must expose an output schema`);
       assert.equal(typeof tool._meta['openai/toolInvocation/invoking'], 'string');
@@ -70,6 +71,26 @@ test('authenticated MCP hello returns safe user shape without full claims or tok
     assert.deepEqual(response.jsonBody.result.structuredContent.user, { subject: 'local-dev-placeholder' });
     const serialized = JSON.stringify(response.jsonBody);
     assert.doesNotMatch(serialized, /local-dev-token|Bearer|claims|scp|roles|preferred_username/i);
+  });
+});
+
+test('MCP Bring tools select accessible lists and perform batch edits', async () => {
+  const services = stubServices();
+  const sharedListUuid = '22222222-2222-4222-8222-222222222222';
+  services.bring.listLists = async () => ({ source: 'bring', lists: [{ uuid: sharedListUuid, name: 'Family', isDefault: false, shared: true }] });
+  const items = [{ name: 'Äpfel & Milch', specification: '2 Stück' }];
+
+  await withEnv(authEnv, async () => {
+    const lists = await mcpCall('bring_list_lists', {}, 'Bearer local-dev-token', services);
+    assert.equal(lists.jsonBody.result.structuredContent.lists[0].shared, true);
+    const selected = await mcpCall('bring_get_items', { listUuid: sharedListUuid }, 'Bearer local-dev-token', services);
+    assert.equal(selected.jsonBody.result.structuredContent.uuid, sharedListUuid);
+    for (const [tool, operation] of [['bring_add_items', 'add'], ['bring_complete_items', 'complete'], ['bring_remove_items', 'remove']]) {
+      const response = await mcpCall(tool, { listUuid: sharedListUuid, items }, 'Bearer local-dev-token', services);
+      assert.equal(response.jsonBody.result.structuredContent.listUuid, sharedListUuid);
+      assert.equal(response.jsonBody.result.structuredContent.operation, operation);
+      assert.deepEqual(response.jsonBody.result.structuredContent.items, items);
+    }
   });
 });
 
@@ -296,10 +317,11 @@ function stubServices(calls = []) {
       },
     },
     bring: {
-      listLists: async () => ({ source: 'bring', lists: [{ uuid: '11111111-1111-4111-8111-111111111111', name: 'Home', isDefault: true }] }),
+      listLists: async () => ({ source: 'bring', lists: [{ uuid: '11111111-1111-4111-8111-111111111111', name: 'Home', isDefault: true, shared: false }] }),
       getList: async (listUuid) => ({ uuid: listUuid ?? '11111111-1111-4111-8111-111111111111', items: [{ name: 'Milch', status: 'active' }] }),
       addItems: async (listUuid, items) => ({ source: 'bring', listUuid: listUuid ?? '11111111-1111-4111-8111-111111111111', operation: 'add', itemCount: items.length, items }),
       completeItems: async (listUuid, items) => ({ source: 'bring', listUuid: listUuid ?? '11111111-1111-4111-8111-111111111111', operation: 'complete', itemCount: items.length, items }),
+      removeItems: async (listUuid, items) => ({ source: 'bring', listUuid: listUuid ?? '11111111-1111-4111-8111-111111111111', operation: 'remove', itemCount: items.length, items }),
     },
   };
 }

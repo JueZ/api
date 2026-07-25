@@ -2,9 +2,10 @@
 
 ## 2026-07-25 unofficial Bring! shopping-list integration
 
-- The private API catalogue now includes OAuth-protected Bring! list reads plus controlled batch add/complete operations over an undocumented upstream API. HTTP routes require explicit list UUIDs; MCP/service calls can use the configured or account-derived default.
+- The private API catalogue now includes OAuth-protected Bring! list reads plus controlled batch add/complete/remove operations over an undocumented upstream API. HTTP routes require explicit list UUIDs; MCP/service calls can use the configured or account-derived default.
 - Authentication uses one process-local session/authentication promise, a 60-second expiry window, one refresh-or-login recovery path, and an optional versioned session blob in the existing private deployment storage account through the Function managed identity. Credentials are GitHub secrets and secure Bicep parameters; tokens and credentials are excluded from normalized responses and logs.
 - Repository deployment variables and secrets are wired through the existing reusable staged deployment workflow. Operational guidance and the unofficial-upstream risk are recorded in `docs/integrations/bring.md`.
+- The Angular OpenAPI explorer provides a Bring-specific workflow guide and JSON-array editors for batch item requests. Existing own and shared lists can be selected by UUID and their items can be read, added, completed, or removed through HTTP and MCP; whole-list creation/deletion/sharing is out of scope.
 
 ## 2026-06-09 GitHub Actions SHA pinning
 

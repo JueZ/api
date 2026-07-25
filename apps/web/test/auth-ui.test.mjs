@@ -159,6 +159,14 @@ test('OpenAPI request payload fields render interactive controls', () => {
   assert.match(mainSource, /setInputValue\(operation\.id, field\.name/);
   assert.match(mainSource, /buildRequestBody\(operation, values\)/);
   assert.doesNotMatch(mainSource, /sort: 'confidence'/);
+  assert.match(mainSource, /field\.inputType === 'textarea'/);
+  assert.match(mainSource, /Bring! lists and items/);
+});
+
+test('complex OpenAPI request fields are parsed as JSON for Bring item batches', () => {
+  const operation = operationFixture({ requestFields: [{ name: 'items', type: 'BringItemInput[]', required: true, description: '', defaultValue: '', constraints: '', enumValues: [], example: '', inputType: 'textarea' }] });
+  assert.deepEqual(helpers.buildRequestBody(operation, { items: '[{"name":"Milch"}]' }), { items: [{ name: 'Milch' }] });
+  assert.throws(() => helpers.buildRequestBody(operation, { items: 'not json' }), /items must be valid JSON/);
 });
 
 test('only the canonical OpenAPI YAML is committed while Angular copies it as an asset', () => {

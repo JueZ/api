@@ -65,7 +65,7 @@ export interface SchemaFieldDoc {
   constraints: string;
   enumValues: string[];
   example: string;
-  inputType: 'text' | 'number' | 'select' | 'checkbox';
+  inputType: 'text' | 'number' | 'select' | 'checkbox' | 'textarea';
 }
 
 export interface SchemaDoc {
@@ -332,6 +332,9 @@ function inputTypeFor(schema: OpenApiSchema): SchemaFieldDoc['inputType'] {
   }
   if (schema.type === 'boolean') {
     return 'checkbox';
+  }
+  if (schema.type === 'array' || schema.type === 'object' || schema.items || schema.properties) {
+    return 'textarea';
   }
   return 'text';
 }

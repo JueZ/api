@@ -180,6 +180,17 @@ code {
   max-width: min(72rem, 100%);
 }
 
+.bring-guide {
+  border-color: #7db99a;
+  background: linear-gradient(135deg, #f4fff8 0%, #ffffff 70%);
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  font: 0.9rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .endpoint-heading {
   align-items: center;
   display: flex;
