@@ -1,5 +1,7 @@
 # Current state
 
+- 2026-07-25: A production incident was identified in the unofficial Bring mutation path: reads work, but the deployed batch payload uses `{ items, operation }` instead of Bring's private `{ changes, sender }` wire shape and rejects valid empty `204` responses. A scoped protocol/observability fix is in delivery; production add/remove verification remains pending until that deployment completes.
+
 ## 2026-07-25 Bring production route-conflict repair
 
 - Production telemetry exposed an Azure Functions host error caused by separate GET and POST Function registrations sharing the same Bring item route. The route now uses one multi-method `bringItems` registration, with handler-level method dispatch and a regression test that forbids duplicate registration.

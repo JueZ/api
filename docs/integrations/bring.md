@@ -20,6 +20,8 @@ All HTTP routes and MCP tools use the existing API/MCP OAuth authorization. `GET
 
 The MCP gateway exposes `bring_list_lists`, `bring_get_items`, `bring_add_items`, `bring_complete_items`, and `bring_remove_items`. Creating, deleting, sharing, or changing membership of whole lists remains intentionally unsupported; this integration only edits items in lists already accessible to the technical account.
 
+Bring item mutations use the private batch endpoint `PUT v2/bringlists/{listUuid}/items`. The request body contains a `changes` array with Bring's private `itemId`, `spec`, `uuid`, location-placeholder fields, and operation values `TO_PURCHASE`, `TO_RECENTLY`, or `REMOVE`; successful empty `204` responses are valid. This wire format is deliberately isolated in the native client because it is undocumented and may change without notice.
+
 ## Authentication and cache lifecycle
 
 Each Function instance maintains one in-memory session and one shared authentication promise, preventing duplicate cold-start logins. Tokens are treated as expired 60 seconds early. On expiry the client attempts one refresh; an invalid refresh token clears the cache and causes one email/password login. A normal upstream `401` causes exactly one reauthentication and request retry.
@@ -39,3 +41,5 @@ Set `BRING_SESSION_CACHE_ENABLED=false` to disable durable caching. Process-loca
 Tests mock `fetch`, authentication, time, and session stores; unit/PR CI never calls Bring!. Run `npm run test:api`, `npm run ops:check-openapi-drift`, and `npm run ops:policy-guardrails`. Deployment verification should confirm the exact deployed commit through `/health`, then exercise protected routes only with the established authenticated smoke mechanism. A cache outage should not prevent operations; account-auth failures are dependency failures and do not invalidate the caller's API OAuth token.
 
 Expected upstream failures include rate limiting, timeouts, account-auth rejection, server failures, plain-text/HTML errors, and response drift. The service maps these to sanitized repairable problems. Because the upstream API is unofficial, response drift remains the primary residual risk and rollback is the normal repository rollback workflow to a known-good full `main` SHA.
+
+Failed upstream calls emit bounded structured diagnostics containing the operation, sanitized endpoint template, HTTP method/status, content type, retry count, and at most 240 characters of redacted non-authentication response text. Authentication response bodies are never excerpted. MCP errors distinguish Bring authentication, timeout, invalid-response, rate-limit, not-found, and other upstream failures; they may expose only the numeric upstream status, never raw response content, headers, credentials, or session tokens.

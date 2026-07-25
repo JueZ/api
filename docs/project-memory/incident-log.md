@@ -1,5 +1,13 @@
 # Incident log
 
+## 2026-07-25 — Bring batch writes used the wrong private payload and rejected valid empty success responses
+
+- Symptom: production Bring list reads succeeded, while `bring_add_items` reproducibly returned the generic MCP error `upstream_unavailable` and created no item.
+- Evidence: the deployed client sent `{ items, operation }` to the correct private batch endpoint. Current community protocol tests use `{ changes, sender }`, per-item `itemId`/`spec` fields, location placeholders, and operation values `TO_PURCHASE`, `TO_RECENTLY`, or `REMOVE`. Live verification also confirmed that successful mutations return an empty body and the current list response nests `purchase`/`recently` under `items`.
+- Root cause: the initial integration selected the correct endpoint but invented an incompatible batch request shape, used legacy web client identity headers that current writes reject, and required JSON on every successful response. MCP error mapping then collapsed the upstream rejection into a generic error, and the MCP path did not emit the available upstream diagnostic metadata.
+- Fix: encode the established private batch shape and client identity headers, accept empty successful mutation responses, normalize the current nested list response, retain a bounded redacted non-auth response excerpt in server-only diagnostics, emit safe structured telemetry, and return specific MCP Bring classifications with an optional numeric upstream status.
+- Status: fix and staged production verification pending.
+
 ## 2026-05-17 — Production authenticated smoke rejected service token after variables were added
 
 - Symptom: `Promote Production` run `25995591995` deployed main commit `2c2584e2f89b5d80404b589d058dfa4ad88276e7`, runtime `/health` passed, and GitHub OIDC minted a production service smoke token, but authenticated `GET /api/hello` returned `403`.

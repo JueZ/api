@@ -9,6 +9,7 @@ import { RedditThreadService } from '../shared/reddit/service.js';
 import type { RedditThreadOverviewRequest, RedditThreadRequest } from '../shared/reddit/types.js';
 import { WlhService } from '../shared/wlh/service.js';
 import { BringService } from '../shared/bring/service.js';
+import { BringUpstreamError } from '../shared/bring/client.js';
 import { authorizeMcpTool, buildMcpWwwAuthenticate, getMcpOAuthScope, mcpAuthErrorResult, safeUser, type McpAuthChallengeError } from './auth.js';
 
 export interface McpGatewayServices {
@@ -245,7 +246,7 @@ const wlhSearchInputSchema = z.object({
 
 export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
   const server = new McpServer({ name: 'api-catalogue-private-mcp', version: MCP_VERSION }, { instructions: serverInstructions });
-  const services = options.services ?? defaultServices();
+  const services = options.services ?? defaultServices(options.context);
   const protectedToolSecurity = createProtectedToolSecurity();
   async function requireAuth(): Promise<CallToolResult | undefined> {
     const auth = await authorizeMcpTool(options.authorizationHeader, options.context);
@@ -540,7 +541,7 @@ type ToolSecurity = {
   _meta: Record<string, unknown> & { securitySchemes: Array<{ type: string; scopes?: string[] }> };
 };
 type ToolSource = 'reddit' | 'wlh' | 'bring' | 'mcp';
-type SafeToolErrorCode = 'invalid_arguments' | 'upstream_unavailable' | 'upstream_rate_limited' | 'not_found' | 'unsupported_url';
+type SafeToolErrorCode = 'invalid_arguments' | 'upstream_unavailable' | 'upstream_rate_limited' | 'not_found' | 'unsupported_url' | 'bring_authentication_failed' | 'bring_timeout' | 'bring_invalid_response' | 'bring_upstream_error';
 
 function toolSecurityWithStatus(securitySchemes: ToolSecurity['securitySchemes'], invoking: string, invoked: string): ToolSecurity {
   return { securitySchemes, _meta: { securitySchemes, 'openai/toolInvocation/invoking': invoking, 'openai/toolInvocation/invoked': invoked } };
@@ -554,11 +555,21 @@ async function withToolErrorBoundary(source: ToolSource, action: () => Promise<C
   try {
     return await action();
   } catch (error) {
-    return safeToolError(classifyToolError(error), safeToolErrorMessage(error, source), source);
+    const code = classifyToolError(error);
+    const upstreamStatus = error instanceof BringUpstreamError ? error.diagnostics?.upstreamStatus : undefined;
+    return safeToolError(code, safeToolErrorMessage(error, source), source, upstreamStatus);
   }
 }
 
 function classifyToolError(error: unknown): SafeToolErrorCode {
+  if (error instanceof BringUpstreamError) {
+    if (error.kind === 'authentication') return 'bring_authentication_failed';
+    if (error.kind === 'timeout') return 'bring_timeout';
+    if (error.kind === 'version_skew') return 'bring_invalid_response';
+    if (error.kind === 'rate_limit') return 'upstream_rate_limited';
+    if (error.kind === 'not_found') return 'not_found';
+    return 'bring_upstream_error';
+  }
   const record = asRecord(error);
   const status = numberValue(record['status']) ?? numberValue(record['statusCode']);
   const name = stringValue(record['name']) ?? '';
@@ -572,11 +583,15 @@ function safeToolErrorMessage(error: unknown, source: ToolSource): string {
   const code = classifyToolError(error);
   if (code === 'upstream_rate_limited') return `${source.toUpperCase()} is rate limiting requests. Retry later.`;
   if (code === 'not_found') return `${source.toUpperCase()} resource was not found.`;
+  if (code === 'bring_authentication_failed') return 'Bring account authentication failed; the caller OAuth token remains valid.';
+  if (code === 'bring_timeout') return 'Bring timed out. Retry later.';
+  if (code === 'bring_invalid_response') return 'Bring returned an unexpected response format.';
+  if (code === 'bring_upstream_error') return 'Bring rejected or failed the upstream operation.';
   return `${source.toUpperCase()} service is temporarily unavailable.`;
 }
 
-function safeToolError(code: SafeToolErrorCode, message: string, source?: ToolSource): CallToolResult {
-  return { isError: true, structuredContent: compactRecord({ error: code, source }) as Record<string, unknown>, content: [{ type: 'text', text: message }] };
+function safeToolError(code: SafeToolErrorCode, message: string, source?: ToolSource, upstreamStatus?: number): CallToolResult {
+  return { isError: true, structuredContent: compactRecord({ error: code, source, upstreamStatus }) as Record<string, unknown>, content: [{ type: 'text', text: message }] };
 }
 
 function isToolErrorResult(value: unknown): value is CallToolResult {
@@ -612,8 +627,12 @@ function safeAuthErrorDescription(auth: Extract<Awaited<ReturnType<typeof author
   return auth.response.status === 403 ? 'Token is valid but is not authorized for this MCP tool.' : 'Missing, malformed, or invalid bearer token.';
 }
 
-function defaultServices(): McpGatewayServices {
-  return { reddit: new RedditThreadService(), wlh: new WlhService(), bring: new BringService() };
+function defaultServices(context: InvocationContext): McpGatewayServices {
+  return {
+    reddit: new RedditThreadService(),
+    wlh: new WlhService(),
+    bring: new BringService({ warn: (message, details) => context.warn(message, details) }),
+  };
 }
 
 function textResult(structuredContent: object, text: string): CallToolResult {
