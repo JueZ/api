@@ -81,6 +81,23 @@ test('protected HTTP route preserves existing OAuth envelope and injects service
   await withEnv({ AUTH_ENABLED: 'false' }, async () => { setBringServiceForTesting({ listLists: async () => ({ source: 'bring', lists: [] }) }); const response = await bringHandler({ method: 'GET', url: 'https://api.test/api/bring/lists', params: {}, headers: new Headers() }, context({ functionName: 'bringListLists' })); assert.equal(response.status, 200); }); setBringServiceForTesting(null);
 });
 
+test('shared Bring items Function dispatches GET and POST without duplicate Azure routes', async () => {
+  await withEnv({ AUTH_ENABLED: 'false' }, async () => {
+    const calls = [];
+    setBringServiceForTesting({
+      getList: async (uuid) => { calls.push(['get', uuid]); return { uuid, items: [] }; },
+      addItems: async (uuid, items) => { calls.push(['add', uuid, items]); return { source: 'bring', listUuid: uuid, operation: 'add', itemCount: items.length, items }; },
+    });
+    const get = await bringHandler({ method: 'GET', url: `https://api.test/api/bring/lists/${listUuid}/items`, params: { listUuid }, headers: new Headers() }, context({ functionName: 'bringItems' }));
+    const post = await bringHandler({ method: 'POST', url: `https://api.test/api/bring/lists/${listUuid}/items`, params: { listUuid }, headers: new Headers(), json: async () => ({ items: [{ name: 'Milch' }] }) }, context({ functionName: 'bringItems' }));
+    assert.equal(get.status, 200); assert.equal(post.status, 200);
+    assert.deepEqual(calls, [['get', listUuid], ['add', listUuid, [{ name: 'Milch' }]]]);
+  });
+  setBringServiceForTesting(null);
+  const source = await import('node:fs/promises').then((fs) => fs.readFile(new URL('../src/functions/bring.ts', import.meta.url), 'utf8'));
+  assert.equal((source.match(/route: 'api\/bring\/lists\/\{listUuid\}\/items'/g) ?? []).length, 1);
+});
+
 test('protected HTTP removal route selects a list UUID and accepts a batch', async () => {
   const calls = [];
   const api = {

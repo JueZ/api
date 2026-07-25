@@ -146,3 +146,10 @@ Entries are reverse chronological.
 - **Root cause:** The completed `Codex Auto-Merge` `workflow_run` payload contained no `pull_requests[0]`, and `codex-main-delivery.yml` treated the missing PR number as inapplicable instead of resolving the PR from the immutable head SHA.
 - **Recovery:** Dispatched guarded `main` CI for merge `2f888aea0ff622629d723557731ad06ef716d970`; the normal `workflow_run` chain then started Deploy Test and Promote Production. A duplicate manually dispatched Deploy Test run was cancelled after the automatic test run started.
 - **Prevention:** Main delivery now queries GitHub's commit-associated-pulls endpoint when the workflow-run payload omits its PR array, while preserving the existing merged-PR, ancestry, CI, test, production, smoke, telemetry, and runtime-truth gates.
+
+## 2026-07-25 — Bring GET/add route conflict in production
+
+- **Symptom:** Production `/health` remained reachable, but Application Insights repeatedly reported `bringGetItems` in error and Bring item access was unavailable or unreliable.
+- **Root cause:** `bringGetItems` and `bringAddItems` were registered as separate Azure Functions with the identical `api/bring/lists/{listUuid}/items` route. The Node Functions host rejected the duplicate route even though the registrations used different HTTP methods.
+- **Fix:** Register one `bringItems` Function for `GET`, `POST`, and `OPTIONS`, and dispatch GET versus add semantics inside the protected handler. Complete and remove routes remain separate because their paths are unique.
+- **Prevention:** API tests assert method dispatch through `bringItems` and statically assert that the shared item route is registered only once.

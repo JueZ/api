@@ -1,5 +1,9 @@
 # Current state
 
+## 2026-07-25 Bring production route-conflict repair
+
+- Production telemetry exposed an Azure Functions host error caused by separate GET and POST Function registrations sharing the same Bring item route. The route now uses one multi-method `bringItems` registration, with handler-level method dispatch and a regression test that forbids duplicate registration.
+
 ## 2026-07-25 unofficial Bring! shopping-list integration
 
 - The private API catalogue now includes OAuth-protected Bring! list reads plus controlled batch add/complete/remove operations over an undocumented upstream API. HTTP routes require explicit list UUIDs; MCP/service calls can use the configured or account-derived default.
