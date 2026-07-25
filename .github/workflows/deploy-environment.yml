@@ -50,6 +50,12 @@ on:
       WLH_BASE_URL:
         description: WLH upstream base URL.
         required: true
+      BRING_EMAIL:
+        description: Bring! technical account email.
+        required: true
+      BRING_PASSWORD:
+        description: Bring! technical account password.
+        required: true
     outputs:
       effectiveBaseUrl:
         description: Resolved Function App base URL.
@@ -118,6 +124,13 @@ jobs:
       WLH_CATEGORY_VERSION: ${{ vars.WLH_CATEGORY_VERSION }}
       WLH_CATEGORY_BLOB_NAME: ${{ vars.WLH_CATEGORY_BLOB_NAME }}
       WLH_CATEGORY_BLOB_CONTAINER: ${{ vars.WLH_CATEGORY_BLOB_CONTAINER }}
+      BRING_BASE_URL: ${{ vars.BRING_BASE_URL }}
+      BRING_CLIENT_API_KEY: ${{ vars.BRING_CLIENT_API_KEY }}
+      BRING_COUNTRY: ${{ vars.BRING_COUNTRY }}
+      BRING_DEFAULT_LIST_UUID: ${{ vars.BRING_DEFAULT_LIST_UUID }}
+      BRING_SESSION_CACHE_ENABLED: ${{ vars.BRING_SESSION_CACHE_ENABLED }}
+      BRING_SESSION_CACHE_CONTAINER: ${{ vars.BRING_SESSION_CACHE_CONTAINER }}
+      BRING_SESSION_CACHE_BLOB: ${{ vars.BRING_SESSION_CACHE_BLOB }}
       DEPLOYED_AT_UTC: ${{ github.event.head_commit.timestamp || '' }}
       DEPLOYMENT_RUN_ID: ${{ github.run_id }}
       APPLICATIONINSIGHTS_NAME: ${{ vars.APPLICATIONINSIGHTS_NAME }}
@@ -272,9 +285,13 @@ jobs:
         env:
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
+          BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
         run: |
           set -euo pipefail
           : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
+          : "${BRING_EMAIL:?BRING_EMAIL environment secret is required for $ENVIRONMENT_NAME}"
+          : "${BRING_PASSWORD:?BRING_PASSWORD environment secret is required for $ENVIRONMENT_NAME}"
           openai_secret_name='OPENAI_API_KEY'
           openai_credential=""
           if [ "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" = "true" ]; then
@@ -314,6 +331,15 @@ jobs:
                 redditClientId="${REDDIT_CLIENT_ID:-}" \
                 redditOAuthSecret="${REDDIT_CLIENT_SECRET:-}" \
                 redditUserAgent="${REDDIT_USER_AGENT:-}" \
+                bringBaseUrl="${BRING_BASE_URL:-https://api.getbring.com/rest/}" \
+                bringClientApiKey="${BRING_CLIENT_API_KEY:-}" \
+                bringCountry="${BRING_COUNTRY:-AT}" \
+                bringEmail="$BRING_EMAIL" \
+                bringPassword="$BRING_PASSWORD" \
+                bringDefaultListUuid="${BRING_DEFAULT_LIST_UUID:-}" \
+                bringSessionCacheEnabled="${BRING_SESSION_CACHE_ENABLED:-true}" \
+                bringSessionCacheContainer="${BRING_SESSION_CACHE_CONTAINER:-bring-private}" \
+                bringSessionCacheBlob="${BRING_SESSION_CACHE_BLOB:-session-v1.json}" \
             wlhBaseUrl="${WLH_BASE_URL:-}" \
             wlhCategoryBlobContainer="${WLH_CATEGORY_BLOB_CONTAINER:-wlh-reference}" \
             wlhCategoryBlobName="${WLH_CATEGORY_BLOB_NAME:-categories-marketplace.v1.json.gz}" \

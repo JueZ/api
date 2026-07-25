@@ -9,5 +9,6 @@ import './functions/redditThreadOverview.js';
 import './functions/wlhCategories.js';
 import './functions/wlhSearch.js';
 import './functions/wlhOffer.js';
+import './functions/bring.js';
 import './functions/mcp.js';
 import './functions/oauthProtectedResource.js';

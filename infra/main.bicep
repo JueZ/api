@@ -77,6 +77,27 @@ param wlhCategoryBlobContainer string = 'wlh-reference'
 @description('Private blob name for WLH category data.')
 param wlhCategoryBlobName string = 'categories-marketplace.v1.json.gz'
 
+@description('Bring! upstream base URL.')
+param bringBaseUrl string = 'https://api.getbring.com/rest/'
+@description('Unofficial Bring! application/client API key.')
+param bringClientApiKey string = ''
+@description('Bring! client country.')
+param bringCountry string = 'AT'
+@secure()
+@description('Bring! technical account email.')
+param bringEmail string = ''
+@secure()
+@description('Bring! technical account password.')
+param bringPassword string = ''
+@description('Optional default Bring! list UUID.')
+param bringDefaultListUuid string = ''
+@description('Enable durable Bring! authentication-session caching.')
+param bringSessionCacheEnabled string = 'true'
+@description('Private blob container for Bring! session caching.')
+param bringSessionCacheContainer string = 'bring-private'
+@description('Private blob name for Bring! session caching.')
+param bringSessionCacheBlob string = 'session-v1.json'
+
 @secure()
 @description('Optional OpenAI API key used only when Repairable Error Contract LLM-assisted diagnostics are enabled.')
 param openAiCredential string = ''
@@ -272,6 +293,16 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'WLH_CATEGORY_BLOB_NAME'
           value: wlhCategoryBlobName
         }
+        { name: 'BRING_BASE_URL', value: bringBaseUrl }
+        { name: 'BRING_CLIENT_API_KEY', value: bringClientApiKey }
+        { name: 'BRING_COUNTRY', value: bringCountry }
+        { name: 'BRING_EMAIL', value: bringEmail }
+        { name: 'BRING_PASSWORD', value: bringPassword }
+        { name: 'BRING_DEFAULT_LIST_UUID', value: bringDefaultListUuid }
+        { name: 'BRING_SESSION_CACHE_ENABLED', value: bringSessionCacheEnabled }
+        { name: 'BRING_SESSION_CACHE_CONTAINER', value: bringSessionCacheContainer }
+        { name: 'BRING_SESSION_CACHE_BLOB', value: bringSessionCacheBlob }
+        { name: 'BRING_STORAGE_ACCOUNT_NAME', value: storageAccount.name }
 
         {
           name: 'OPENAI_API_KEY'

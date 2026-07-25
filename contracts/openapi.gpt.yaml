@@ -917,6 +917,150 @@ paths:
           description: Reddit rate limited the backend.
         "502":
           description: Reddit dependency failure.
+  /api/bring/lists:
+    get:
+      operationId: bringListLists
+      summary: List Bring! shopping lists
+      description: Protected unofficial Bring! integration. Returns normalized list metadata only; credentials, tokens, account data, and cache locations are never exposed.
+      tags: [Bring]
+      security:
+        - entraOAuth2: [api.access]
+      responses:
+        "200":
+          description: Normalized shopping lists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BringListsResponse" }
+        "401":
+          description: Missing or invalid API OAuth bearer token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "403":
+          description: Authenticated caller is not authorized for Bring operations.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "502":
+          description: Bring authentication, dependency, or undocumented response-shape failure.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
+  /api/bring/lists/{listUuid}/items:
+    parameters:
+      - $ref: "#/components/parameters/BringListUuid"
+    get:
+      operationId: bringGetItems
+      summary: Get Bring! shopping-list items
+      description: Protected unofficial operation returning normalized active and completed items.
+      tags: [Bring]
+      security:
+        - entraOAuth2: [api.access]
+      responses:
+        "200":
+          description: Normalized list items.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BringList" }
+        "401":
+          description: Missing or invalid API OAuth bearer token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "403":
+          description: Authenticated caller is not authorized for Bring operations.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "404":
+          description: Bring list not found.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
+        "502":
+          description: Bring authentication, dependency, or undocumented response-shape failure.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
+    post:
+      operationId: bringAddItems
+      summary: Add a batch of Bring! items
+      description: Adds 1-50 items through an unofficial upstream API. The operation is not idempotent.
+      tags: [Bring]
+      security:
+        - entraOAuth2: [api.access]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BringBatchRequest" }
+      responses:
+        "200":
+          description: Batch accepted by Bring!.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BringMutationResponse" }
+        "400":
+          description: Invalid batch or UUID.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
+        "401":
+          description: Missing or invalid API OAuth bearer token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "403":
+          description: Authenticated caller is not authorized for Bring operations.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "502":
+          description: Bring authentication, dependency, or undocumented response-shape failure.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
+  /api/bring/lists/{listUuid}/items/complete:
+    parameters:
+      - $ref: "#/components/parameters/BringListUuid"
+    post:
+      operationId: bringCompleteItems
+      summary: Complete a batch of Bring! items
+      description: Marks 1-50 items complete through an unofficial, undocumented upstream API.
+      tags: [Bring]
+      security:
+        - entraOAuth2: [api.access]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BringBatchRequest" }
+      responses:
+        "200":
+          description: Batch completion accepted by Bring!.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BringMutationResponse" }
+        "400":
+          description: Invalid batch or UUID.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
+        "401":
+          description: Missing or invalid API OAuth bearer token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "403":
+          description: Authenticated caller is not authorized for Bring operations.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "502":
+          description: Bring authentication, dependency, or undocumented response-shape failure.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
 components:
   securitySchemes:
     entraOAuth2:
@@ -928,7 +1072,81 @@ components:
           tokenUrl: https://login.microsoftonline.com/7ac3dfd6-e810-4693-805a-9535eb3ab166/oauth2/v2.0/token
           scopes:
             api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access: Access protected JueZ API endpoints.
+  parameters:
+    BringListUuid:
+      name: listUuid
+      in: path
+      required: true
+      description: Bring list UUID. HTTP routes require an explicit list; MCP/service callers may omit it to use the configured/account default.
+      schema: { type: string, format: uuid }
   schemas:
+    BringItemInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        specification: { type: string, maxLength: 500 }
+        uuid: { type: string, format: uuid }
+    BringBatchRequest:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: "#/components/schemas/BringItemInput" }
+    BringListSummary:
+      type: object
+      additionalProperties: false
+      required: [uuid, name, isDefault]
+      properties:
+        uuid: { type: string, format: uuid }
+        name: { type: string }
+        theme: { type: string }
+        isDefault: { type: boolean }
+    BringListsResponse:
+      type: object
+      additionalProperties: false
+      required: [source, lists]
+      properties:
+        source: { type: string, const: bring }
+        lists:
+          type: array
+          items: { $ref: "#/components/schemas/BringListSummary" }
+    BringItem:
+      allOf:
+        - $ref: "#/components/schemas/BringItemInput"
+        - type: object
+          required: [status]
+          properties:
+            status: { type: string, enum: [active, completed] }
+    BringList:
+      type: object
+      additionalProperties: false
+      required: [uuid, items]
+      properties:
+        uuid: { type: string, format: uuid }
+        name: { type: string }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/BringItem" }
+    BringMutationResponse:
+      type: object
+      additionalProperties: false
+      required: [source, listUuid, operation, itemCount, items]
+      properties:
+        source: { type: string, const: bring }
+        listUuid: { type: string, format: uuid }
+        operation: { type: string, enum: [add, complete] }
+        itemCount: { type: integer, minimum: 1, maximum: 50 }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: "#/components/schemas/BringItemInput" }
     WlhCategory:
       type: object
       additionalProperties: false

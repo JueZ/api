@@ -247,3 +247,8 @@ Entries are reverse chronological.
 - Context: Angular provides a structured frontend foundation for the catalogue UI and future login flow.
 - Consequences: Frontend auth work should integrate with Angular and be covered by build/type checks.
 - Status: Active.
+# 2026-07-25 — Reuse managed-identity storage for Bring! sessions
+
+- **Decision:** Cache unofficial Bring! authentication sessions in a versioned private blob in the existing deployment storage account, with process-local deduplication and last-write-wins persistence.
+- **Reason:** This avoids repeated technical-account logins without adding paid/always-on infrastructure or storage keys. Cache failures fall back to login and never fail an otherwise successful shopping operation.
+- **Risk:** Bring!'s API is undocumented and may drift. The integration exposes normalized DTOs only and classifies response drift separately so rollback or protocol repair can be performed safely.

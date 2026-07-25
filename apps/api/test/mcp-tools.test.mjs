@@ -8,7 +8,7 @@ const authEnv = {
   MCP_RESOURCE_ORIGIN: 'https://mcp.example.test',
 };
 
-test('MCP initialize and tools/list expose the private read-only tool catalogue', async () => {
+test('MCP initialize and tools/list expose protected Bring reads and controlled writes', async () => {
   await withEnv(authEnv, async () => {
     const initialize = await mcpRequest({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } } });
     assert.equal(initialize.status, 200);
@@ -18,6 +18,10 @@ test('MCP initialize and tools/list expose the private read-only tool catalogue'
     const tools = listed.jsonBody.result.tools;
     const names = tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
+      'bring_add_items',
+      'bring_complete_items',
+      'bring_get_items',
+      'bring_list_lists',
       'health_check',
       'hello_authenticated',
       'reddit_get_thread',
@@ -30,9 +34,9 @@ test('MCP initialize and tools/list expose the private read-only tool catalogue'
     ].sort());
 
     for (const tool of tools) {
-      assert.equal(tool.annotations.readOnlyHint, true, `${tool.name} must be read-only`);
-      assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`);
-      assert.equal(tool.annotations.idempotentHint, true, `${tool.name} must be idempotent`);
+      if (tool.name === 'bring_add_items') assert.deepEqual(tool.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
+      else if (tool.name === 'bring_complete_items') assert.deepEqual(tool.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
+      else { assert.equal(tool.annotations.readOnlyHint, true, `${tool.name} must be read-only`); assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`); assert.equal(tool.annotations.idempotentHint, true, `${tool.name} must be idempotent`); }
       assert.ok(tool.outputSchema, `${tool.name} must expose an output schema`);
       assert.equal(typeof tool._meta['openai/toolInvocation/invoking'], 'string');
       assert.equal(typeof tool._meta['openai/toolInvocation/invoked'], 'string');
@@ -290,6 +294,12 @@ function stubServices(calls = []) {
         calls.push(['children', categoryId]);
         return [{ id: '11', label: 'Bike parts', path: '/bikes/parts', depth: 1, parentId: categoryId, hasChildren: false }];
       },
+    },
+    bring: {
+      listLists: async () => ({ source: 'bring', lists: [{ uuid: '11111111-1111-4111-8111-111111111111', name: 'Home', isDefault: true }] }),
+      getList: async (listUuid) => ({ uuid: listUuid ?? '11111111-1111-4111-8111-111111111111', items: [{ name: 'Milch', status: 'active' }] }),
+      addItems: async (listUuid, items) => ({ source: 'bring', listUuid: listUuid ?? '11111111-1111-4111-8111-111111111111', operation: 'add', itemCount: items.length, items }),
+      completeItems: async (listUuid, items) => ({ source: 'bring', listUuid: listUuid ?? '11111111-1111-4111-8111-111111111111', operation: 'complete', itemCount: items.length, items }),
     },
   };
 }

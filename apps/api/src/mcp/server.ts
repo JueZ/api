@@ -8,11 +8,13 @@ import { createCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
 import { RedditThreadService } from '../shared/reddit/service.js';
 import type { RedditThreadOverviewRequest, RedditThreadRequest } from '../shared/reddit/types.js';
 import { WlhService } from '../shared/wlh/service.js';
+import { BringService } from '../shared/bring/service.js';
 import { authorizeMcpTool, buildMcpWwwAuthenticate, getMcpOAuthScope, mcpAuthErrorResult, safeUser, type McpAuthChallengeError } from './auth.js';
 
 export interface McpGatewayServices {
   reddit: Pick<RedditThreadService, 'fetchThread' | 'fetchThreadOverview'>;
   wlh: Pick<WlhService, 'search' | 'offer' | 'topCategories' | 'children'>;
+  bring: Pick<BringService, 'listLists' | 'getList' | 'addItems' | 'completeItems'>;
 }
 
 export interface McpRequestOptions {
@@ -30,10 +32,11 @@ const maxCategoryMatches = 10;
 const maxCategoryScan = 200;
 
 const serverInstructions = [
-  'This private API catalogue MCP server exposes read-only Reddit and Willhaben tools for the authenticated operator.',
+  'This private API catalogue MCP server exposes read-only Reddit and Willhaben tools plus controlled Bring shopping-list reads and batch writes for the authenticated operator.',
   'For Reddit analysis, call reddit_get_thread_overview first; call reddit_get_thread only when comment bodies or a fuller snapshot are needed.',
   'For a specific Willhaben URL or ad ID, call wlh_get_offer directly. For broad Willhaben searches, call wlh_find_category if the category is unclear, then wlh_search, then wlh_get_offer for selected listings.',
-  'Do not use these tools for unrelated requests such as weather, reminders, public web browsing outside Reddit/Willhaben, or write/destructive actions.',
+  'Bring add and complete operations change the operator shopping list; confirm the intended items and prefer one bounded batch call.',
+  'Do not use these tools for unrelated requests, account management, list sharing/deletion, notifications, or arbitrary upstream calls.',
 ].join('\n');
 
 const redditSortSchema = z.enum(['confidence', 'top', 'new', 'controversial', 'old', 'qa']);
@@ -43,6 +46,8 @@ const wlhSortSchema = z.enum(['relevance', 'price_asc', 'price_desc', 'newest'])
 const noauthSecuritySchemes = [{ type: 'noauth' }];
 const localOnlyAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true };
 const externalReadOnlyAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
+const bringAddAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
+const bringCompleteAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true };
 
 const nonEmptyText = (maxLength: number, description: string) => z.string().trim().min(1).max(maxLength).describe(description);
 const redditPostIdSchema = nonEmptyText(32, 'Reddit post ID/base36 fullname ID. Provide this instead of url; do not provide both.');
@@ -53,6 +58,12 @@ const isoDateLikeSchema = nonEmptyText(40, 'ISO date or datetime lower bound for
 const finiteNumber = (description: string) => z.number().finite().describe(description);
 const nullableNumber = z.number().finite().nullable();
 const healthToolSecurity = toolSecurityWithStatus(noauthSecuritySchemes, 'Checking API…', 'API reachable');
+const bringListUuidSchema = z.string().uuid().describe('Bring list UUID. Omit to use the configured or account default list.').optional();
+const bringItemInputSchema = z.object({ name: nonEmptyText(200, 'Shopping item name.'), specification: z.string().max(500).optional(), uuid: z.string().uuid().optional() }).strict();
+const bringItemsInputSchema = { listUuid: bringListUuidSchema, items: z.array(bringItemInputSchema).min(1).max(50) };
+const bringListsOutputSchema = z.object({ source: z.literal('bring'), lists: z.array(z.object({ uuid: z.string(), name: z.string(), theme: z.string().optional(), isDefault: z.boolean() })) });
+const bringListOutputSchema = z.object({ uuid: z.string(), name: z.string().optional(), items: z.array(z.object({ uuid: z.string().optional(), name: z.string(), specification: z.string().optional(), status: z.enum(['active', 'completed']) })) });
+const bringMutationOutputSchema = z.object({ source: z.literal('bring'), listUuid: z.string(), operation: z.enum(['add', 'complete']), itemCount: z.number(), items: z.array(bringItemInputSchema) });
 
 const categorySchema = z.object({
   id: z.string(),
@@ -278,6 +289,26 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     },
   );
 
+  server.registerTool('bring_list_lists', {
+    title: 'Bring lists', description: 'List the authenticated operator’s normalized Bring shopping lists. This unofficial integration never returns credentials, tokens, or raw account data.', inputSchema: {}, outputSchema: bringListsOutputSchema,
+    annotations: externalReadOnlyAnnotations, ...withToolStatus(protectedToolSecurity, 'Loading Bring lists…', 'Bring lists ready'),
+  }, async () => { const authError = await requireAuth(); if (authError) return authError; return withToolErrorBoundary('bring', async () => { const result = await services.bring.listLists(); return textResult(result, `Found ${result.lists.length} Bring shopping lists.`); }); });
+
+  server.registerTool('bring_get_items', {
+    title: 'Bring list items', description: 'Read active and recently completed items from a Bring shopping list. Omit listUuid to use the default list.', inputSchema: { listUuid: bringListUuidSchema }, outputSchema: bringListOutputSchema,
+    annotations: externalReadOnlyAnnotations, ...withToolStatus(protectedToolSecurity, 'Loading Bring items…', 'Bring items ready'),
+  }, async ({ listUuid }) => { const authError = await requireAuth(); if (authError) return authError; return withToolErrorBoundary('bring', async () => { const result = await services.bring.getList(listUuid); return textResult(result, `Loaded ${result.items.length} Bring items.`); }); });
+
+  server.registerTool('bring_add_items', {
+    title: 'Add Bring items', description: 'Add 1–50 items to a Bring shopping list in one controlled batch. Omit listUuid to use the default list.', inputSchema: bringItemsInputSchema, outputSchema: bringMutationOutputSchema,
+    annotations: bringAddAnnotations, ...withToolStatus(protectedToolSecurity, 'Adding Bring items…', 'Bring items added'),
+  }, async ({ listUuid, items }) => { const authError = await requireAuth(); if (authError) return authError; return withToolErrorBoundary('bring', async () => { const result = await services.bring.addItems(listUuid, items); return textResult(result, `Added ${result.itemCount} Bring items.`); }); });
+
+  server.registerTool('bring_complete_items', {
+    title: 'Complete Bring items', description: 'Mark 1–50 Bring shopping items complete in one destructive batch. Omit listUuid to use the default list.', inputSchema: bringItemsInputSchema, outputSchema: bringMutationOutputSchema,
+    annotations: bringCompleteAnnotations, ...withToolStatus(protectedToolSecurity, 'Completing Bring items…', 'Bring items completed'),
+  }, async ({ listUuid, items }) => { const authError = await requireAuth(); if (authError) return authError; return withToolErrorBoundary('bring', async () => { const result = await services.bring.completeItems(listUuid, items); return textResult(result, `Completed ${result.itemCount} Bring items.`); }); });
+
   server.registerTool(
     'reddit_get_thread',
     {
@@ -502,7 +533,7 @@ type ToolSecurity = {
   securitySchemes: Array<{ type: string; scopes?: string[] }>;
   _meta: Record<string, unknown> & { securitySchemes: Array<{ type: string; scopes?: string[] }> };
 };
-type ToolSource = 'reddit' | 'wlh' | 'mcp';
+type ToolSource = 'reddit' | 'wlh' | 'bring' | 'mcp';
 type SafeToolErrorCode = 'invalid_arguments' | 'upstream_unavailable' | 'upstream_rate_limited' | 'not_found' | 'unsupported_url';
 
 function toolSecurityWithStatus(securitySchemes: ToolSecurity['securitySchemes'], invoking: string, invoked: string): ToolSecurity {
@@ -576,7 +607,7 @@ function safeAuthErrorDescription(auth: Extract<Awaited<ReturnType<typeof author
 }
 
 function defaultServices(): McpGatewayServices {
-  return { reddit: new RedditThreadService(), wlh: new WlhService() };
+  return { reddit: new RedditThreadService(), wlh: new WlhService(), bring: new BringService() };
 }
 
 function textResult(structuredContent: object, text: string): CallToolResult {
