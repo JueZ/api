@@ -16,10 +16,11 @@ test('Bring configuration validates required HTTPS settings without exposing val
 });
 
 test('login uses form encoding for spaces, umlauts and ampersands and normalizes session', async () => {
-  let body = '';
-  const client = new BringClient({ ...cfg, email: 'ä & x@example.test', password: 'p a&ß' }, async (_url, init) => { body = String(init.body); return json(login); });
+  let body = ''; let headers;
+  const client = new BringClient({ ...cfg, email: 'ä & x@example.test', password: 'p a&ß' }, async (_url, init) => { body = String(init.body); headers = new Headers(init.headers); return json(login); });
   const session = await client.login();
   assert.match(body, /%26/); assert.equal(session.accessToken, 'access-secret'); assert.equal(session.defaultListUuid, listUuid);
+  assert.equal(headers.get('X-BRING-CLIENT'), 'android'); assert.equal(headers.get('X-BRING-APPLICATION'), 'bring');
 });
 
 test('plain-text login errors and malformed successful JSON are sanitized', async () => {
@@ -60,9 +61,48 @@ test('cache failures and corrupt payloads are safe', async () => {
   await service.listLists();
 });
 
-test('list loading, default resolution and batch add/complete preserve duplicates and characters', async () => {
-  const calls = []; const service = new BringService({ config: cfg, sessionStore: null, fetchImpl: async (url, init) => { if (String(url).endsWith('bringauth')) return json(login); if (init?.method === 'PUT') { calls.push(JSON.parse(String(init.body))); return json({ ok: true }); } return json({ purchase: [{ name: 'Milch' }], recently: [] }); } });
-  assert.equal((await service.getList()).items[0].name, 'Milch'); const items = [{ name: 'Äpfel & Milch', specification: '2 Liter' }, { name: 'Äpfel & Milch', specification: '1 Liter' }]; await service.addItems(undefined, items); await service.completeItems(undefined, items); await service.removeItems(undefined, items); assert.deepEqual(calls.map((x) => x.operation), ['add', 'complete', 'remove']); assert.equal(calls[0].items.length, 2);
+test('list loading and batch mutations use Bring changes protocol and accept empty 204 responses', async () => {
+  const calls = [];
+  const service = new BringService({
+    config: cfg,
+    sessionStore: null,
+    fetchImpl: async (url, init) => {
+      if (String(url).endsWith('bringauth')) return json(login);
+      if (init?.method === 'PUT') {
+        calls.push(JSON.parse(String(init.body)));
+        return new Response(null, { status: 204 });
+      }
+      return json({ purchase: [{ name: 'Milch' }], recently: [] });
+    },
+  });
+  assert.equal((await service.getList()).items[0].name, 'Milch');
+  const items = [{ name: 'Äpfel & Milch', specification: '2 Liter' }, { name: 'Äpfel & Milch', specification: '1 Liter' }];
+  await service.addItems(undefined, items);
+  await service.completeItems(undefined, items);
+  await service.removeItems(undefined, items);
+  assert.deepEqual(calls.map((payload) => payload.changes[0].operation), ['TO_PURCHASE', 'TO_RECENTLY', 'REMOVE']);
+  assert.deepEqual(calls[0], {
+    changes: [
+      { accuracy: '0.0', altitude: '0.0', latitude: '0.0', longitude: '0.0', itemId: 'Äpfel & Milch', spec: '2 Liter', uuid: null, operation: 'TO_PURCHASE' },
+      { accuracy: '0.0', altitude: '0.0', latitude: '0.0', longitude: '0.0', itemId: 'Äpfel & Milch', spec: '1 Liter', uuid: null, operation: 'TO_PURCHASE' },
+    ],
+    sender: '',
+  });
+});
+
+test('mutation failures retain only bounded sanitized diagnostics', async () => {
+  const client = new BringClient(cfg, async () => new Response('password=private-password access_token=access-secret detail=invalid changes', { status: 400, headers: { 'content-type': 'text/plain' } }));
+  await assert.rejects(
+    client.updateItems({ version: 1, userUuid: 'u', publicUserUuid: 'p', accessToken: 'access-secret', accessTokenExpiresAt: new Date(Date.now() + 3600000).toISOString(), updatedAt: new Date().toISOString() }, listUuid, [{ name: 'Milk' }], 'add'),
+    (error) => {
+      assert.equal(error.diagnostics.upstreamStatus, 400);
+      assert.equal(error.diagnostics.operation, 'add_items');
+      assert.equal(error.diagnostics.path, 'v2/bringlists/{uuid}/items');
+      assert.match(error.diagnostics.responseExcerpt, /\[redacted\]/);
+      assert.doesNotMatch(JSON.stringify(error), /private-password|access-secret/);
+      return true;
+    },
+  );
 });
 
 test('all accessible own and shared lists can be selected by UUID', async () => {
@@ -70,6 +110,13 @@ test('all accessible own and shared lists can be selected by UUID', async () => 
   const service = new BringService({ config: cfg, sessionStore: null, fetchImpl: async (url) => { if (String(url).endsWith('bringauth')) return json(login); if (String(url).includes('/lists') && !String(url).includes('/v2/bringlists/')) return json({ lists: [{ listUuid, name: 'Mine' }, { listUuid: sharedUuid, name: 'Family', isShared: true }] }); return json({ purchase: [{ name: 'Bread' }] }); } });
   const lists = await service.listLists(); assert.deepEqual(lists.lists.map((x) => [x.name, x.shared]), [['Mine', false], ['Family', true]]);
   assert.equal((await service.getList(sharedUuid)).uuid, sharedUuid);
+});
+
+test('current nested Bring list response is normalized without raw account fields', async () => {
+  const service = new BringService({ config: cfg, sessionStore: null, fetchImpl: async (url) => String(url).endsWith('bringauth') ? json(login) : json({ items: { purchase: [{ uuid: listUuid, itemId: 'Milch', specification: '2 Liter' }], recently: [{ itemId: 'Brot' }] }, accountEmail: 'must-not-leak@example.test' }) });
+  const result = await service.getList(listUuid);
+  assert.deepEqual(result.items, [{ uuid: listUuid, name: 'Milch', specification: '2 Liter', status: 'active' }, { name: 'Brot', status: 'completed' }]);
+  assert.doesNotMatch(JSON.stringify(result), /must-not-leak|accountEmail/);
 });
 
 test('item input bounds, lengths, UUIDs and unknown fields fail closed', () => {

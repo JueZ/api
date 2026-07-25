@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { handleMcpHttpRequest } from '../dist/mcp/server.js';
+import { BringUpstreamError } from '../dist/shared/bring/client.js';
 
 const authEnv = {
   AUTH_ENABLED: 'false',
@@ -244,6 +245,22 @@ test('external service exceptions become safe MCP tool errors without sensitive 
     const wlh = await mcpCall('wlh_search', { keyword: 'bike' }, 'Bearer local-dev-token', services);
     assertToolError(wlh, 'upstream_rate_limited', 'wlh');
     assert.doesNotMatch(JSON.stringify(wlh.jsonBody), secretNeedles);
+  });
+});
+
+test('MCP Bring errors preserve safe classifications and upstream status without response content', async () => {
+  const services = stubServices();
+  services.bring.addItems = async () => {
+    throw new BringUpstreamError('Bring dependency request failed.', 502, 'upstream', {
+      operation: 'add_items', method: 'PUT', path: 'v2/bringlists/{uuid}/items', upstreamStatus: 400,
+      responseExcerpt: 'password=SHOULD_NOT_LEAK token=SHOULD_NOT_LEAK',
+    });
+  };
+  await withEnv(authEnv, async () => {
+    const response = await mcpCall('bring_add_items', { listUuid: '22222222-2222-4222-8222-222222222222', items: [{ name: 'Milk' }] }, 'Bearer local-dev-token', services);
+    assertToolError(response, 'bring_upstream_error', 'bring');
+    assert.equal(response.jsonBody.result.structuredContent.upstreamStatus, 400);
+    assert.doesNotMatch(JSON.stringify(response.jsonBody), /SHOULD_NOT_LEAK|responseExcerpt|password|token/i);
   });
 });
 
