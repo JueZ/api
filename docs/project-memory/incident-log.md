@@ -139,3 +139,10 @@ Entries are reverse chronological.
 - Fix: Enable static website hosting before uploading frontend files.
 - Prevention / lesson: Confirm hosting feature prerequisites before artifact upload steps.
 - Links: Related production-failure issue set included issue #28.
+
+## 2026-07-25 — Codex main delivery skipped when workflow-run PR association was empty
+
+- **Symptom:** Bring! PRs #257–#259 merged, but each `Codex Main Delivery` run skipped `run main delivery after Codex auto-merge`; no test or production deployment started from those runs.
+- **Root cause:** The completed `Codex Auto-Merge` `workflow_run` payload contained no `pull_requests[0]`, and `codex-main-delivery.yml` treated the missing PR number as inapplicable instead of resolving the PR from the immutable head SHA.
+- **Recovery:** Dispatched guarded `main` CI for merge `2f888aea0ff622629d723557731ad06ef716d970`; the normal `workflow_run` chain then started Deploy Test and Promote Production. A duplicate manually dispatched Deploy Test run was cancelled after the automatic test run started.
+- **Prevention:** Main delivery now queries GitHub's commit-associated-pulls endpoint when the workflow-run payload omits its PR array, while preserving the existing merged-PR, ancestry, CI, test, production, smoke, telemetry, and runtime-truth gates.
