@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-07-25 unofficial Bring! shopping-list integration
+
+- The private API catalogue now includes OAuth-protected Bring! list reads plus controlled batch add/complete operations over an undocumented upstream API. HTTP routes require explicit list UUIDs; MCP/service calls can use the configured or account-derived default.
+- Authentication uses one process-local session/authentication promise, a 60-second expiry window, one refresh-or-login recovery path, and an optional versioned session blob in the existing private deployment storage account through the Function managed identity. Credentials are GitHub secrets and secure Bicep parameters; tokens and credentials are excluded from normalized responses and logs.
+- Repository deployment variables and secrets are wired through the existing reusable staged deployment workflow. Operational guidance and the unofficial-upstream risk are recorded in `docs/integrations/bring.md`.
+
 ## 2026-06-09 GitHub Actions SHA pinning
 
 - GitHub Actions workflows now pin external action references to full-length commit SHAs instead of mutable version tags, retaining the previous tag only as an inline readability comment.
