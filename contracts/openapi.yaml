@@ -1244,6 +1244,48 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
+  /api/bring/lists/{listUuid}/items/remove:
+    parameters:
+      - $ref: "#/components/parameters/BringListUuid"
+    post:
+      operationId: bringRemoveItems
+      summary: Remove a batch of Bring! items
+      description: Removes 1-50 items from a specific accessible own or shared list through the unofficial upstream API.
+      tags: [Bring]
+      security:
+        - bearerJwt: []
+        - entraOAuth2: [api.access]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BringBatchRequest" }
+      responses:
+        "200":
+          description: Batch removal accepted by Bring!.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BringMutationResponse" }
+        "400":
+          description: Invalid batch or UUID.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
+        "401":
+          description: Missing or invalid API OAuth bearer token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "403":
+          description: Authenticated caller is not authorized for Bring operations.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+        "502":
+          description: Bring authentication, dependency, or undocumented response-shape failure.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
 components:
   securitySchemes:
     bearerJwt:
@@ -1290,12 +1332,13 @@ components:
     BringListSummary:
       type: object
       additionalProperties: false
-      required: [uuid, name, isDefault]
+      required: [uuid, name, isDefault, shared]
       properties:
         uuid: { type: string, format: uuid }
         name: { type: string }
         theme: { type: string }
         isDefault: { type: boolean }
+        shared: { type: boolean, description: True when Bring marks or exposes the list as shared. }
     BringListsResponse:
       type: object
       additionalProperties: false
@@ -1329,7 +1372,7 @@ components:
       properties:
         source: { type: string, const: bring }
         listUuid: { type: string, format: uuid }
-        operation: { type: string, enum: [add, complete] }
+        operation: { type: string, enum: [add, complete, remove] }
         itemCount: { type: integer, minimum: 1, maximum: 50 }
         items:
           type: array

@@ -18,7 +18,7 @@ export class BringClient {
   }
   async getLists(session: BringSession): Promise<unknown> { return this.request(`bringusers/${encodeURIComponent(session.userUuid)}/lists`, {}, session); }
   async getList(session: BringSession, listUuid: string): Promise<unknown> { return this.request(`v2/bringlists/${encodeURIComponent(listUuid)}`, {}, session); }
-  async updateItems(session: BringSession, listUuid: string, items: BringItemInput[], operation: 'add' | 'complete'): Promise<unknown> {
+  async updateItems(session: BringSession, listUuid: string, items: BringItemInput[], operation: 'add' | 'complete' | 'remove'): Promise<unknown> {
     return this.request(`v2/bringlists/${encodeURIComponent(listUuid)}/items`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items, operation }) }, session);
   }
   private async request(path: string, init: RequestInit, session?: BringSession, auth = false): Promise<any> {
@@ -43,4 +43,3 @@ export class BringClient {
 }
 function stringAt(x: any, keys: string[]): string | undefined { for (const k of keys) if (typeof x?.[k] === 'string' && x[k]) return x[k]; return undefined; }
 function numberAt(x: any, keys: string[]): number | undefined { for (const k of keys) { const n = Number(x?.[k]); if (Number.isFinite(n) && n > 0) return n; } return undefined; }
-

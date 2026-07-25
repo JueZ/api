@@ -24,7 +24,6 @@ export interface BringSession {
 }
 
 export interface BringItemInput { name: string; specification?: string; uuid?: string }
-export interface BringListSummary { uuid: string; name: string; theme?: string; isDefault: boolean }
+export interface BringListSummary { uuid: string; name: string; theme?: string; isDefault: boolean; shared: boolean }
 export interface BringItem { uuid?: string; name: string; specification?: string; status: 'active' | 'completed' }
 export interface BringList { uuid: string; name?: string; items: BringItem[] }
-

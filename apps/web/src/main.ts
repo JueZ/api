@@ -85,6 +85,26 @@ const msalClient = createMsalClient(config);
         </div>
       </section>
 
+      <section class="card bring-guide" aria-labelledby="bring-guide-title">
+        <p class="eyebrow">Shopping lists</p>
+        <h2 id="bring-guide-title">Bring! lists and items</h2>
+        <p>
+          Sign in, load every Bring! list available to the technical account, copy the UUID of
+          your own or a shared list, and use that UUID to read or edit exactly that list.
+        </p>
+        <div class="button-row">
+          <a class="button secondary" href="#bringListLists">1. Choose a list</a>
+          <a class="button secondary" href="#bringGetItems">2. View items</a>
+          <a class="button secondary" href="#bringAddItems">3. Add items</a>
+          <a class="button secondary" href="#bringCompleteItems">Complete items</a>
+          <a class="button secondary" href="#bringRemoveItems">Remove items</a>
+        </div>
+        <p class="muted">
+          Item batches are entered as JSON arrays. Creating, deleting, or sharing whole lists is
+          intentionally not supported; the integration edits lists already accessible to the account.
+        </p>
+      </section>
+
       @for (operation of endpoints(); track operation.id) {
         <section class="card endpoint-card" [id]="operation.id" [attr.aria-labelledby]="operation.id + '-title'">
           <div class="endpoint-heading">
@@ -168,6 +188,12 @@ const msalClient = createMsalClient(config);
                   </select>
                 } @else if (field.inputType === 'checkbox') {
                   <input type="checkbox" [checked]="inputValue(operation.id, field.name) === 'true'" (change)="setInputValue(operation.id, field.name, $any($event.target).checked ? 'true' : 'false')" />
+                } @else if (field.inputType === 'textarea') {
+                  <textarea
+                    rows="8"
+                    [value]="inputValue(operation.id, field.name)"
+                    (input)="setInputValue(operation.id, field.name, $any($event.target).value)"
+                  ></textarea>
                 } @else {
                   <input
                     [type]="field.inputType"
