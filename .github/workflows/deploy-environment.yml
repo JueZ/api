@@ -1124,6 +1124,11 @@ jobs:
               echo "Exact frontend build metadata does not match the selected release." >&2
               exit 1
             fi
+            frontend_inventory="$RUNNER_TEMP/frontend-inventory.json"
+            current_blob_names="$RUNNER_TEMP/frontend-current-blob-names.json"
+            stale_blob_plan="$RUNNER_TEMP/frontend-stale-blob-plan.json"
+            stale_blob_lines="$RUNNER_TEMP/frontend-stale-blob-lines.txt"
+            node scripts/frontend-inventory.mjs create "$output_dir" "$frontend_inventory"
             if [ "$ALLOW_ROLLBACK" != "true" ]; then
               node scripts/assert-current-main.mjs
               az storage blob service-properties update \
@@ -1134,6 +1139,28 @@ jobs:
                 -o none
             fi
             # $web is Azure's literal static-site container.
+            # shellcheck disable=SC2016
+            az storage blob list \
+              --auth-mode login \
+              --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
+              --container-name '$web' \
+              --query '[].name' \
+              -o json > "$current_blob_names"
+            node scripts/frontend-inventory.mjs plan-stale \
+              "$frontend_inventory" \
+              "$current_blob_names" \
+              "$stale_blob_plan"
+            jq -r '.[]' "$stale_blob_plan" > "$stale_blob_lines"
+            while IFS= read -r stale_blob; do
+              node scripts/assert-current-main.mjs
+              # shellcheck disable=SC2016
+              az storage blob delete \
+                --auth-mode login \
+                --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
+                --container-name '$web' \
+                --name "$stale_blob" \
+                -o none
+            done < "$stale_blob_lines"
             node scripts/assert-current-main.mjs
             # shellcheck disable=SC2016
             az storage blob upload-batch \
@@ -1142,6 +1169,35 @@ jobs:
               --destination '$web' \
               --source "$output_dir" \
               --overwrite
+
+            deployed_blob_names="$RUNNER_TEMP/frontend-deployed-blob-names.json"
+            verified_blob_names="$RUNNER_TEMP/frontend-verified-blob-names.json"
+            verified_frontend_dir="$(mktemp -d "$RUNNER_TEMP/frontend-verified.XXXXXX")"
+            # shellcheck disable=SC2016
+            az storage blob list \
+              --auth-mode login \
+              --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
+              --container-name '$web' \
+              --query '[].name' \
+              -o json > "$deployed_blob_names"
+            node scripts/frontend-inventory.mjs compare-names "$frontend_inventory" "$deployed_blob_names"
+            # shellcheck disable=SC2016
+            az storage blob download-batch \
+              --auth-mode login \
+              --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
+              --source '$web' \
+              --destination "$verified_frontend_dir" \
+              --overwrite
+            node scripts/frontend-inventory.mjs compare-directory "$frontend_inventory" "$verified_frontend_dir"
+            # A second exact-name read detects additions or deletions during content verification.
+            # shellcheck disable=SC2016
+            az storage blob list \
+              --auth-mode login \
+              --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
+              --container-name '$web' \
+              --query '[].name' \
+              -o json > "$verified_blob_names"
+            node scripts/frontend-inventory.mjs compare-names "$frontend_inventory" "$verified_blob_names"
           else
             echo "No angular.json found; skipping Angular static site deployment."
           fi

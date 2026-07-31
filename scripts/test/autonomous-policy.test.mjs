@@ -222,6 +222,27 @@ test('frontend rendering is finalized, hashed, and preserved before either appli
   assert.doesNotMatch(staticDeployment, /> "\$output_dir\/assets\/build-info\.json"/);
   assert.match(staticDeployment, /Exact frontend release lacks assets\/config\.js/);
   assert.match(staticDeployment, /Exact frontend build metadata does not match the selected release/);
+  assert.match(staticDeployment, /frontend-inventory\.mjs create "\$output_dir" "\$frontend_inventory"/);
+  assert.match(staticDeployment, /frontend-inventory\.mjs plan-stale/);
+  assert.match(
+    staticDeployment,
+    /while IFS= read -r stale_blob; do\n\s+node scripts\/assert-current-main\.mjs[\s\S]*?az storage blob delete/,
+  );
+  assert.doesNotMatch(staticDeployment, /az storage blob delete-batch/);
+  assert.equal(staticDeployment.match(/frontend-inventory\.mjs compare-names/g)?.length, 2);
+  assert.match(staticDeployment, /az storage blob download-batch/);
+  assert.match(staticDeployment, /frontend-inventory\.mjs compare-directory/);
+  const inventoryIndex = staticDeployment.indexOf('frontend-inventory.mjs create');
+  const staleDeleteIndex = staticDeployment.indexOf('az storage blob delete');
+  const uploadIndex = staticDeployment.indexOf('az storage blob upload-batch');
+  const contentVerificationIndex = staticDeployment.indexOf('frontend-inventory.mjs compare-directory');
+  const finalNameVerificationIndex = staticDeployment.lastIndexOf('frontend-inventory.mjs compare-names');
+  assert.ok(
+    inventoryIndex < staleDeleteIndex &&
+      staleDeleteIndex < uploadIndex &&
+      uploadIndex < contentVerificationIndex &&
+      contentVerificationIndex < finalNameVerificationIndex,
+  );
 });
 
 test('policy glob matcher handles recursive and exact AGENTS paths', () => {

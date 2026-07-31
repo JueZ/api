@@ -29,6 +29,7 @@
 - An intentionally failing or pending-check PR must be shown unable to merge.
 - High-risk exact-head independent review and no-bypass branch rules must be verified on GitHub.
 - Exactly one first-attempt CI/test chain must be observed. The exact CI run ID/correlation must remain pinned through test provenance and any later promotion. Function, SBOM, and frontend-source digests must match promotion evidence; each environment-rendered frontend digest must match its manifest, deployment settings, ledger, and preserved production bundle.
+- The fresh workflow repair must prove in test that the active static container contains exactly the approved frontend names and downloaded bytes after stale-blob removal; overwrite-only upload is not accepted as exact-release evidence.
 - Test runtime SHA is proven, but fail-closed auth, authenticated REST/MCP behavior, MCP origin, Bring read-only behavior, telemetry correlation, accepted provenance, storage/RBAC boundaries, and production promotion gates still require test/live evidence.
 
 ## Angular production bundle warning
