@@ -83,6 +83,7 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
   assert.match(mainDeliveryWorkflow, /wait_for_dispatch ci\.yml "\$ci_title" "\$ci_started_at" "\$SOURCE_REF" "CI"/);
   assert.match(mainDeliveryWorkflow, /Dispatch correlation matched more than one/);
   assert.match(mainDeliveryWorkflow, /\.path == \$path/);
+  assert.match(mainDeliveryWorkflow, /\(\.name == \$workflow_name or \.name == \$title\)/);
   assert.match(mainDeliveryWorkflow, /github\.run_attempt == 1/);
   assert.match(mainDeliveryWorkflow, /github\.event\.workflow_run\.run_attempt == 1/);
   assert.match(mainDeliveryWorkflow, /A main-delivery run already consumed trigger/);
@@ -91,7 +92,7 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
   assert.match(mainDeliveryWorkflow, /-f ci_delivery_correlation="\$CI_DELIVERY_CORRELATION"/);
   assert.match(mainDeliveryWorkflow, /Pinned Deploy Test run did not emit matching successful provenance/);
   assert.match(mainDeliveryWorkflow, /Pinned production run did not emit matching successful runtime-truth evidence/);
-  assert.equal(mainDeliveryWorkflow.match(/^\s+assert_current_main$/gm)?.length, 3);
+  assert.equal(mainDeliveryWorkflow.match(/^\s+assert_current_main$/gm)?.length, 4);
 });
 
 test('environment deployment rechecks current main at mutation and acceptance boundaries', () => {
@@ -101,6 +102,7 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.doesNotMatch(deployEnvironmentWorkflow, /runtime-setting-names\.json|runtime-safety-settings\.json/);
   assert.match(deployEnvironmentWorkflow, /actions\/runs\/\$\{CI_RUN_ID\}/);
   assert.match(deployEnvironmentWorkflow, /expected_ci_title="CI \$deployment_ref \$CI_DELIVERY_CORRELATION"/);
+  assert.match(deployEnvironmentWorkflow, /\(\.name == \$workflow_name or \.name == \$title\)/);
   assert.doesNotMatch(deployEnvironmentWorkflow, /actions\/workflows\/ci\.yml\/runs\?branch=main/);
   assert.match(deployEnvironmentWorkflow, /effective_web_api_base_url="\$EFFECTIVE_BASE_URL"/);
   assert.match(deployEnvironmentWorkflow, /name: Checkout current deployment controller/);
@@ -178,6 +180,13 @@ test('rollback changes only accepted application packages and leaves infrastruct
     deployEnvironmentWorkflow,
     /Production promotion and rollback require both Function and frontend packages/,
   );
+  assert.match(deployEnvironmentWorkflow, /name: Verify current generation before evidence publication/);
+  const telemetryIndex = deployEnvironmentWorkflow.indexOf('- name: Run telemetry gate');
+  const finalGenerationIndex = deployEnvironmentWorkflow.indexOf(
+    '- name: Verify current generation before evidence publication',
+  );
+  const ledgerIndex = deployEnvironmentWorkflow.indexOf('- name: Write release ledger');
+  assert.ok(telemetryIndex < finalGenerationIndex && finalGenerationIndex < ledgerIndex);
   const functionIndex = deployEnvironmentWorkflow.indexOf('- name: Package and deploy Azure Functions');
   const staticIndex = deployEnvironmentWorkflow.indexOf('- name: Deploy Angular static site with Azure OIDC');
   const functionDeployment = deployEnvironmentWorkflow.slice(functionIndex, staticIndex);

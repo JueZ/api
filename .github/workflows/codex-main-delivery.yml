@@ -115,18 +115,21 @@ jobs:
 
             for attempt in {1..180}; do
               run_json="$(gh api "repos/$REPOSITORY/actions/runs/$run_id")"
+              # GitHub has exposed either the static workflow name or the
+              # resolved run-name in .name; path and display_title stay exact.
               if ! jq -e \
                 --arg run_id "$run_id" \
                 --arg title "$expected_title" \
                 --arg head "$expected_head" \
                 --arg path "$expected_path" \
                 --arg repository "$REPOSITORY" \
+                --arg workflow_name "$expected_workflow_name" \
                 '(.id | tostring) == $run_id
                   and .event == "workflow_dispatch"
                   and .head_sha == $head
                   and .display_title == $title
                   and .path == $path
-                  and .name == $title
+                  and (.name == $workflow_name or .name == $title)
                   and .repository.full_name == $repository
                   and .head_branch == "main"
                   and .run_attempt == 1' <<<"$run_json" >/dev/null; then
@@ -173,9 +176,12 @@ jobs:
 
           current_delivery_json="$(gh api "repos/$REPOSITORY/actions/runs/$GITHUB_RUN_ID")"
           expected_delivery_title="Deliver trigger $TRIGGER_RUN_ID attempt $TRIGGER_RUN_ATTEMPT"
+          # Accept both documented/observed .name representations while the
+          # immutable path and correlation-bearing display_title remain exact.
           if ! jq -e \
             --arg run_id "$GITHUB_RUN_ID" \
             --arg repository "$REPOSITORY" \
+            --arg workflow_name "Codex Main Delivery" \
             --arg title "$expected_delivery_title" \
             '(.id | tostring) == $run_id
               and .repository.full_name == $repository
@@ -183,7 +189,7 @@ jobs:
               and .event == "workflow_run"
               and .head_branch == "main"
               and .display_title == $title
-              and .name == $title
+              and (.name == $workflow_name or .name == $title)
               and .run_attempt == 1
               and (.status == "queued" or .status == "in_progress")' \
             <<<"$current_delivery_json" >/dev/null; then
@@ -388,6 +394,7 @@ jobs:
             -f ci_run_id="$CI_RUN_ID" \
             -f ci_delivery_correlation="$CI_DELIVERY_CORRELATION"
           wait_for_dispatch promote-production.yml "$production_title" "$production_started_at" "$SOURCE_REF" "Promote Production"
+          assert_current_main
           production_url="$(cat "$RUNNER_TEMP/promote-production.yml.url")"
           production_run_id="$(cat "$RUNNER_TEMP/promote-production.yml.id")"
           production_ledger_dir="$RUNNER_TEMP/production-ledger-$production_correlation"

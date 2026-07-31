@@ -398,8 +398,9 @@ test('runtime truth validates exact deployment workflow run metadata', () => {
     display_title: `Promote Production ${sha} ${ledger.deliveryCorrelation}`,
   };
   assert.deepEqual(validateWorkflowRunMetadata(run, options), []);
+  assert.deepEqual(validateWorkflowRunMetadata({ ...run, name: 'Promote Production' }, options), []);
   assert.ok(validateWorkflowRunMetadata({ ...run, head_sha: 'b'.repeat(40) }, options).length > 0);
-  assert.ok(validateWorkflowRunMetadata({ ...run, name: 'Promote Production' }, options).length > 0);
+  assert.ok(validateWorkflowRunMetadata({ ...run, name: 'unrelated workflow' }, options).length > 0);
   assert.ok(validateWorkflowRunMetadata({ ...run, display_title: 'Promote Production' }, options).length > 0);
   assert.ok(validateWorkflowRunMetadata({ ...run, run_attempt: 2 }, options).length > 0);
 });

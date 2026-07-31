@@ -54,7 +54,9 @@ export function validateWorkflowRunMetadata(run = {}, options = {}) {
   if (String(run.id || '') !== options.runId) errors.push('workflow run ID does not match the requested run');
   if (run.repository?.full_name !== options.repo) errors.push('workflow repository does not match the requested repo');
   if (run.path !== identity.path) errors.push(`workflow path must be ${identity.path}`);
-  if (run.name !== expectedTitle) errors.push(`workflow run name must be ${expectedTitle}`);
+  if (run.name !== identity.name && run.name !== expectedTitle) {
+    errors.push(`workflow run name must be ${identity.name} or ${expectedTitle}`);
+  }
   if (run.event !== 'workflow_dispatch') errors.push('workflow event must be workflow_dispatch');
   if (run.run_attempt !== 1) errors.push('deployment evidence reruns are prohibited; dispatch a new workflow run');
   if (run.conclusion !== 'success') errors.push('workflow conclusion must be success');
