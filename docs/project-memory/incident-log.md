@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-07-31 — Trusted merge controller rejected its own in-progress check state
+
+- Symptom: PR #270 passed every policy-required exact-head CI, Policy Check, CodeQL, and autonomous review check, but controller run `30630495729` rejected the PR because GitHub reported it as `unstable` while the controller's own merge job was in progress.
+- Root cause: the controller required REST `mergeable_state` to equal `clean`. GitHub uses `unstable` for a mergeable pull request with a non-passing commit status, creating a self-gating cycle even after the controller had independently verified all configured required checks.
+- Fix: accept only `clean` or mergeable `unstable` at the final state gate after exact-head required-check and autonomous-review validation. Continue rejecting behind, dirty, blocked, unknown, forked, stale-head, or otherwise non-mergeable pull requests, and rely on GitHub branch protection as the final merge API gate.
+- Status: focused fix and regression tests added to PR #270; exact-head CI/review and bootstrap merge evidence pending.
+
 ## 2026-07-31 — Test AI-native release failed open to the local-development auth principal
 
 - Symptom: `Deploy Test` run `30629930683` deployed exact main commit `4d82ed8491a32440ec5495049ba39e8f73c6bbac`; `/health` returned that SHA, but unauthenticated `GET /api/hello` returned `200` with subject `local-dev-placeholder` instead of the required `401`.

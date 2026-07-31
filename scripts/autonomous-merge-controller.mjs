@@ -88,6 +88,7 @@ export function validateAutonomousReview(review, expectedHeadSha, policy) {
 
 export function evaluatePullRequestState(pullRequest, expectedHeadSha, policy) {
   const errors = [];
+  const allowedMergeableStates = new Set(['clean', 'unstable']);
   if (!isAutomergeCandidate(pullRequest, policy)) errors.push('pull request is not an auto-merge candidate');
   if (pullRequest.state !== 'open') errors.push('pull request is not open');
   if (pullRequest.head?.sha !== expectedHeadSha) errors.push('pull request head changed');
@@ -98,7 +99,11 @@ export function evaluatePullRequestState(pullRequest, expectedHeadSha, policy) {
   if (policy.merge.requireUpToDate && pullRequest.mergeable_state === 'behind') {
     errors.push('pull request branch is behind main');
   }
-  if (pullRequest.mergeable !== true || pullRequest.mergeable_state !== 'clean') {
+  // GitHub reports `unstable` while a mergeable PR has a non-passing status,
+  // including this controller's own in-progress exact-head gate. The gate
+  // independently validates every policy-required check against the exact
+  // head, so `unstable` is safe here; all other non-clean states fail closed.
+  if (pullRequest.mergeable !== true || !allowedMergeableStates.has(pullRequest.mergeable_state)) {
     errors.push(`pull request is not mergeable (${pullRequest.mergeable_state ?? 'unknown'})`);
   }
   return { ok: errors.length === 0, errors };
