@@ -8,14 +8,45 @@ import { createCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
 import { RedditThreadService } from '../shared/reddit/service.js';
 import type { RedditThreadOverviewRequest, RedditThreadRequest } from '../shared/reddit/types.js';
 import { WlhService } from '../shared/wlh/service.js';
-import { BringService } from '../shared/bring/service.js';
 import { BringUpstreamError } from '../shared/bring/client.js';
-import { authorizeMcpTool, buildMcpWwwAuthenticate, getMcpOAuthScope, mcpAuthErrorResult, safeUser, type McpAuthChallengeError } from './auth.js';
+import {
+  BringDisabledError,
+  BringInputError,
+  BringNotFoundError,
+  BringPolicyError,
+  BringVersionConflictError,
+} from '../shared/bring/service.js';
+import {
+  BringConfirmationError,
+  BringIdempotencyConflictError,
+  BringMutationExpiredError,
+  BringMutationOutcomeUnknownError,
+} from '../application/operations/bring/mutations.js';
+import {
+  authorizeMcpTool,
+  buildMcpWwwAuthenticate,
+  getMcpOAuthScope,
+  mcpAuthErrorResult,
+  safeUser,
+  validateMcpRequestOrigin,
+  type McpAuthChallengeError,
+} from './auth.js';
+import { getOperationDefinition, OPERATION_IDS } from '../application/operations/registry.js';
+import type { BringApplicationPort } from '../application/operations/bring/application.js';
+import { createBringApplication } from '../infrastructure/composition/bring.js';
+import type { AuthenticatedPrincipal } from '../application/authorization/types.js';
+import { registerBringTools } from './tools/bring.js';
+import { buildDiagnosticCapsule } from '../shared/errors/diagnosticCapsule.js';
+import {
+  buildDeterministicRepairableProblem,
+  resolveRepairableProblem,
+} from '../shared/errors/repairableErrorService.js';
+import type { RepairableErrorClassification, RepairableProblem } from '../shared/errors/repairableProblem.js';
 
 export interface McpGatewayServices {
   reddit: Pick<RedditThreadService, 'fetchThread' | 'fetchThreadOverview'>;
   wlh: Pick<WlhService, 'search' | 'offer' | 'topCategories' | 'children'>;
-  bring: Pick<BringService, 'listLists' | 'getList' | 'addItems' | 'completeItems' | 'removeItems'>;
+  bring: BringApplicationPort;
 }
 
 export interface McpRequestOptions {
@@ -36,7 +67,8 @@ const serverInstructions = [
   'This private API catalogue MCP server exposes read-only Reddit and Willhaben tools plus controlled Bring shopping-list reads and batch writes for the authenticated operator.',
   'For Reddit analysis, call reddit_get_thread_overview first; call reddit_get_thread only when comment bodies or a fuller snapshot are needed.',
   'For a specific Willhaben URL or ad ID, call wlh_get_offer directly. For broad Willhaben searches, call wlh_find_category if the category is unclear, then wlh_search, then wlh_get_offer for selected listings.',
-  'Bring add and complete operations change the operator shopping list; confirm the intended items and prefer one bounded batch call.',
+  'Bring adds require a unique operationId. Complete and remove must use bring_prepare_item_mutation, obtain explicit user confirmation, and only then call bring_apply_item_mutation with the returned token.',
+  'When a tool fails, read structuredContent.repairable_problem before retrying. Follow caller_instruction and retry_policy.same_request exactly; do not invent arguments after dependency or internal failures.',
   'Do not use these tools for unrelated requests, account management, list sharing/deletion, notifications, or arbitrary upstream calls.',
 ].join('\n');
 
@@ -46,27 +78,34 @@ const wlhDeliverySchema = z.enum(['pickup', 'shipping']);
 const wlhSortSchema = z.enum(['relevance', 'price_asc', 'price_desc', 'newest']);
 const noauthSecuritySchemes = [{ type: 'noauth' }];
 const localOnlyAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true };
-const externalReadOnlyAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
-const bringAddAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
-const bringCompleteAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true };
-const bringRemoveAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true };
-
-const nonEmptyText = (maxLength: number, description: string) => z.string().trim().min(1).max(maxLength).describe(description);
-const redditPostIdSchema = nonEmptyText(32, 'Reddit post ID/base36 fullname ID. Provide this instead of url; do not provide both.');
-const redditUrlSchema = nonEmptyText(2048, 'Reddit post URL or supported reddit.com/redd.it share URL. Provide this instead of postId; do not provide both.');
-const wlhAdIdSchema = nonEmptyText(32, 'Numeric Willhaben advertisement ID. Provide this instead of url; do not provide both.');
+const externalReadOnlyAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
+};
+const nonEmptyText = (maxLength: number, description: string) =>
+  z.string().trim().min(1).max(maxLength).describe(description);
+const redditPostIdSchema = nonEmptyText(
+  32,
+  'Reddit post ID/base36 fullname ID. Provide this instead of url; do not provide both.',
+);
+const redditUrlSchema = nonEmptyText(
+  2048,
+  'Reddit post URL or supported reddit.com/redd.it share URL. Provide this instead of postId; do not provide both.',
+);
+const wlhAdIdSchema = nonEmptyText(
+  32,
+  'Numeric Willhaben advertisement ID. Provide this instead of url; do not provide both.',
+);
 const wlhUrlSchema = nonEmptyText(2048, 'Willhaben listing URL. Provide this instead of adId; do not provide both.');
-const isoDateLikeSchema = nonEmptyText(40, 'ISO date or datetime lower bound for listing recency, for example 2026-06-01 or 2026-06-01T12:30:00Z.');
+const isoDateLikeSchema = nonEmptyText(
+  40,
+  'ISO date or datetime lower bound for listing recency, for example 2026-06-01 or 2026-06-01T12:30:00Z.',
+);
 const finiteNumber = (description: string) => z.number().finite().describe(description);
 const nullableNumber = z.number().finite().nullable();
 const healthToolSecurity = toolSecurityWithStatus(noauthSecuritySchemes, 'Checking API…', 'API reachable');
-const bringListUuidSchema = z.string().uuid().describe('Bring list UUID. Omit to use the configured or account default list.').optional();
-const bringItemInputSchema = z.object({ name: nonEmptyText(200, 'Shopping item name.'), specification: z.string().max(500).optional(), uuid: z.string().uuid().optional() }).strict();
-const bringItemsInputSchema = { listUuid: bringListUuidSchema, items: z.array(bringItemInputSchema).min(1).max(50) };
-const bringListsOutputSchema = z.object({ source: z.literal('bring'), lists: z.array(z.object({ uuid: z.string(), name: z.string(), theme: z.string().optional(), isDefault: z.boolean(), shared: z.boolean() })) });
-const bringListOutputSchema = z.object({ uuid: z.string(), name: z.string().optional(), items: z.array(z.object({ uuid: z.string().optional(), name: z.string(), specification: z.string().optional(), status: z.enum(['active', 'completed']) })) });
-const bringMutationOutputSchema = z.object({ source: z.literal('bring'), listUuid: z.string(), operation: z.enum(['add', 'complete', 'remove']), itemCount: z.number(), items: z.array(bringItemInputSchema) });
-
 const categorySchema = z.object({
   id: z.string(),
   label: z.string(),
@@ -119,7 +158,11 @@ const redditCommentSummarySchema = z.object({
   permalink: z.string().optional(),
   truncated: z.boolean(),
 });
-const redditContinuationSchema = z.object({ parentId: z.string(), childCount: z.number(), depth: z.number().optional() });
+const redditContinuationSchema = z.object({
+  parentId: z.string(),
+  childCount: z.number(),
+  depth: z.number().optional(),
+});
 const redditThreadStatsSchema = z.object({
   commentsReturned: z.number(),
   upstreamCommentsReturned: z.number().optional(),
@@ -144,8 +187,20 @@ const redditOverviewOutputSchema = z.object({
   fetchedAt: z.string().optional(),
   input: z.string().optional(),
   post: redditPostSummarySchema,
-  stats: z.object({ topLevelComments: z.number().optional(), maxDepth: z.number().optional(), deletedCount: z.number().optional(), loadedSnapshotCommentCount: z.number() }),
-  coverage: z.object({ reportedTotal: z.number().optional(), uniqueReturned: z.number().optional(), knownRemaining: z.number().optional(), snapshotComplete: z.boolean().optional() }).optional(),
+  stats: z.object({
+    topLevelComments: z.number().optional(),
+    maxDepth: z.number().optional(),
+    deletedCount: z.number().optional(),
+    loadedSnapshotCommentCount: z.number(),
+  }),
+  coverage: z
+    .object({
+      reportedTotal: z.number().optional(),
+      uniqueReturned: z.number().optional(),
+      knownRemaining: z.number().optional(),
+      snapshotComplete: z.boolean().optional(),
+    })
+    .optional(),
   availableSorts: z.array(redditSortSchema).optional(),
 });
 const wlhListingSchema = z.object({
@@ -200,7 +255,12 @@ const wlhSearchOutputSchema = z.object({
   sourceUrl: z.string().optional(),
   fetchedAt: z.string().optional(),
 });
-const wlhOfferImageSchema = z.object({ id: z.string().optional(), thumb: z.string().optional(), preview: z.string().optional(), full: z.string().optional() });
+const wlhOfferImageSchema = z.object({
+  id: z.string().optional(),
+  thumb: z.string().optional(),
+  preview: z.string().optional(),
+  full: z.string().optional(),
+});
 const wlhOfferOutputSchema = z.object({
   source: z.literal('wlh'),
   id: z.string(),
@@ -215,52 +275,105 @@ const wlhOfferOutputSchema = z.object({
   status: z.string().optional(),
   seller: z.object({ id: z.string().optional(), name: z.string().optional() }).optional(),
   paylivery: z.boolean(),
-  deliveryOptions: z.array(z.object({ carrier: z.string().optional(), parcelSize: z.string().optional(), price: z.unknown().optional(), description: z.string().optional() })),
+  deliveryOptions: z.array(
+    z.object({
+      carrier: z.string().optional(),
+      parcelSize: z.string().optional(),
+      price: z.unknown().optional(),
+      description: z.string().optional(),
+    }),
+  ),
   images: z.array(wlhOfferImageSchema),
   publishedAt: z.string().optional(),
   changedAt: z.string().optional(),
 });
 const wlhCategoriesOutputSchema = z.object({ source: z.literal('wlh'), categories: z.array(categorySchema) });
-const wlhCategoryChildrenOutputSchema = z.object({ source: z.literal('wlh'), categoryId: z.string(), categories: z.array(categorySchema) });
-const wlhFindCategoryOutputSchema = z.object({ source: z.literal('wlh'), query: z.string(), matches: z.array(categorySchema.extend({ score: z.number() })) });
+const wlhCategoryChildrenOutputSchema = z.object({
+  source: z.literal('wlh'),
+  categoryId: z.string(),
+  categories: z.array(categorySchema),
+});
+const wlhFindCategoryOutputSchema = z.object({
+  source: z.literal('wlh'),
+  query: z.string(),
+  matches: z.array(categorySchema.extend({ score: z.number() })),
+});
 
-const wlhSearchInputSchema = z.object({
-  keyword: nonEmptyText(120, 'Search keywords. Omit only when categoryId/categoryPath and filters are enough.').optional(),
-  categoryId: nonEmptyText(40, 'Willhaben category ID from wlh_find_category or category tools. Optional; inferred from keyword/categoryPath when omitted.').optional(),
-  categoryPath: nonEmptyText(200, 'Human-readable category path or category words used to infer a categoryId when categoryId is omitted.').optional(),
-  locationText: nonEmptyText(120, 'Location text such as Wien or Graz. Applied as an MCP post-filter against returned listing location, postcode, and state fields; not sent to WLH.').optional(),
-  postcode: nonEmptyText(16, 'Austrian postcode or short postal prefix. Applied as an MCP post-filter against returned listing postcode; not sent to WLH.').optional(),
-  priceFrom: finiteNumber('Minimum price in EUR. Must be non-negative and no greater than priceTo.').optional(),
-  priceTo: finiteNumber('Maximum price in EUR. Must be non-negative and no less than priceFrom.').optional(),
-  areaId: nonEmptyText(40, 'WLH area/location ID if known.').optional(),
-  paylivery: z.boolean().describe('When true, prefer offers with PayLivery.').optional(),
-  rows: z.number().int().positive().max(100).describe('Maximum rows requested from WLH; max 100.').optional(),
-  page: z.number().int().positive().describe('One-based result page. Defaults to service behavior when omitted.').optional(),
-  condition: wlhConditionSchema.describe('Condition filter: new, like_new, used, or defect.').optional(),
-  delivery: z.array(wlhDeliverySchema).max(2).describe('Delivery preferences: pickup, shipping, or both.').optional(),
-  requiredTerms: z.array(nonEmptyText(60, 'A term that must appear in model-visible search matching.')).max(8).describe('Terms that must appear in a listing. Maximum 8 terms, 60 characters each.').optional(),
-  sort: wlhSortSchema.describe('MCP post-sort for the returned page only. WLH global result ordering is not changed.').optional(),
-  postedSince: isoDateLikeSchema.describe('MCP post-filter against returned listing publishedAt values; not sent to WLH.').optional(),
-  imageRequired: z.boolean().describe('When true, MCP post-filters returned listings to those with imageCount greater than 0; not sent to WLH.').optional(),
-}).strict();
+const wlhSearchInputSchema = z
+  .object({
+    keyword: nonEmptyText(
+      120,
+      'Search keywords. Omit only when categoryId/categoryPath and filters are enough.',
+    ).optional(),
+    categoryId: nonEmptyText(
+      40,
+      'Willhaben category ID from wlh_find_category or category tools. Optional; inferred from keyword/categoryPath when omitted.',
+    ).optional(),
+    categoryPath: nonEmptyText(
+      200,
+      'Human-readable category path or category words used to infer a categoryId when categoryId is omitted.',
+    ).optional(),
+    locationText: nonEmptyText(
+      120,
+      'Location text such as Wien or Graz. Applied as an MCP post-filter against returned listing location, postcode, and state fields; not sent to WLH.',
+    ).optional(),
+    postcode: nonEmptyText(
+      16,
+      'Austrian postcode or short postal prefix. Applied as an MCP post-filter against returned listing postcode; not sent to WLH.',
+    ).optional(),
+    priceFrom: finiteNumber('Minimum price in EUR. Must be non-negative and no greater than priceTo.').optional(),
+    priceTo: finiteNumber('Maximum price in EUR. Must be non-negative and no less than priceFrom.').optional(),
+    areaId: nonEmptyText(40, 'WLH area/location ID if known.').optional(),
+    paylivery: z.boolean().describe('When true, prefer offers with PayLivery.').optional(),
+    rows: z.number().int().positive().max(100).describe('Maximum rows requested from WLH; max 100.').optional(),
+    page: z
+      .number()
+      .int()
+      .positive()
+      .describe('One-based result page. Defaults to service behavior when omitted.')
+      .optional(),
+    condition: wlhConditionSchema.describe('Condition filter: new, like_new, used, or defect.').optional(),
+    delivery: z.array(wlhDeliverySchema).max(2).describe('Delivery preferences: pickup, shipping, or both.').optional(),
+    requiredTerms: z
+      .array(nonEmptyText(60, 'A term that must appear in model-visible search matching.'))
+      .max(8)
+      .describe('Terms that must appear in a listing. Maximum 8 terms, 60 characters each.')
+      .optional(),
+    sort: wlhSortSchema
+      .describe('MCP post-sort for the returned page only. WLH global result ordering is not changed.')
+      .optional(),
+    postedSince: isoDateLikeSchema
+      .describe('MCP post-filter against returned listing publishedAt values; not sent to WLH.')
+      .optional(),
+    imageRequired: z
+      .boolean()
+      .describe(
+        'When true, MCP post-filters returned listings to those with imageCount greater than 0; not sent to WLH.',
+      )
+      .optional(),
+  })
+  .strict();
 
 export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
-  const server = new McpServer({ name: 'api-catalogue-private-mcp', version: MCP_VERSION }, { instructions: serverInstructions });
+  const server = new McpServer(
+    { name: 'api-catalogue-private-mcp', version: MCP_VERSION },
+    { instructions: serverInstructions },
+  );
   const services = options.services ?? defaultServices(options.context);
-  const protectedToolSecurity = createProtectedToolSecurity();
-  async function requireAuth(): Promise<CallToolResult | undefined> {
-    const auth = await authorizeMcpTool(options.authorizationHeader, options.context);
+  async function requirePrincipal(operationId: string): Promise<AuthenticatedPrincipal | CallToolResult> {
+    const auth = await authorizeMcpTool(options.authorizationHeader, options.context, operationId);
     if (!auth.ok) {
-      return mcpAuthorizationFailureResult(auth, options.request);
+      return mcpAuthorizationFailureResult(auth, options.request, operationId);
     }
-    return undefined;
+    return auth.user;
   }
 
   server.registerTool(
     'health_check',
     {
       title: 'Health check',
-      description: 'Use this when you need to verify that the private MCP gateway and API catalogue are reachable. Returns public health/build metadata only; do not use it for private Reddit or Willhaben data.',
+      description:
+        'Use this when you need to verify that the private MCP gateway and API catalogue are reachable. Returns public health/build metadata only; do not use it for private Reddit or Willhaben data.',
       inputSchema: {},
       outputSchema: healthOutputSchema,
       annotations: localOnlyAnnotations,
@@ -277,67 +390,73 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     'hello_authenticated',
     {
       title: 'Hello authenticated',
-      description: 'Use this when you need to verify that ChatGPT OAuth linking works for the protected API. Returns only a safe user shape; do not use it for Reddit or Willhaben content.',
+      description:
+        'Use this when you need to verify that ChatGPT OAuth linking works for the protected API. Returns only a safe user shape; do not use it for Reddit or Willhaben content.',
       inputSchema: {},
       outputSchema: helloOutputSchema,
       annotations: localOnlyAnnotations,
-      ...withToolStatus(protectedToolSecurity, 'Checking OAuth…', 'OAuth verified'),
+      ...withToolStatus(createProtectedToolSecurity(OPERATION_IDS.hello), 'Checking OAuth…', 'OAuth verified'),
     },
     async () => {
-      const auth = await authorizeMcpTool(options.authorizationHeader, options.context);
-      if (!auth.ok) return mcpAuthorizationFailureResult(auth, options.request);
+      const auth = await authorizeMcpTool(options.authorizationHeader, options.context, OPERATION_IDS.hello);
+      if (!auth.ok) return mcpAuthorizationFailureResult(auth, options.request, OPERATION_IDS.hello);
       const structuredContent = createHelloResponse(safeUser(auth.user));
       return textResult(structuredContent, 'OAuth linking succeeded for the private API catalogue.');
     },
   );
 
-  server.registerTool('bring_list_lists', {
-    title: 'Bring lists', description: 'List the authenticated operator’s normalized Bring shopping lists. This unofficial integration never returns credentials, tokens, or raw account data.', inputSchema: {}, outputSchema: bringListsOutputSchema,
-    annotations: externalReadOnlyAnnotations, ...withToolStatus(protectedToolSecurity, 'Loading Bring lists…', 'Bring lists ready'),
-  }, async () => { const authError = await requireAuth(); if (authError) return authError; return withToolErrorBoundary('bring', async () => { const result = await services.bring.listLists(); return textResult(result, `Found ${result.lists.length} Bring shopping lists.`); }); });
-
-  server.registerTool('bring_get_items', {
-    title: 'Bring list items', description: 'Read active and recently completed items from a Bring shopping list. Omit listUuid to use the default list.', inputSchema: { listUuid: bringListUuidSchema }, outputSchema: bringListOutputSchema,
-    annotations: externalReadOnlyAnnotations, ...withToolStatus(protectedToolSecurity, 'Loading Bring items…', 'Bring items ready'),
-  }, async ({ listUuid }) => { const authError = await requireAuth(); if (authError) return authError; return withToolErrorBoundary('bring', async () => { const result = await services.bring.getList(listUuid); return textResult(result, `Loaded ${result.items.length} Bring items.`); }); });
-
-  server.registerTool('bring_add_items', {
-    title: 'Add Bring items', description: 'Add 1–50 items to a Bring shopping list in one controlled batch. Omit listUuid to use the default list.', inputSchema: bringItemsInputSchema, outputSchema: bringMutationOutputSchema,
-    annotations: bringAddAnnotations, ...withToolStatus(protectedToolSecurity, 'Adding Bring items…', 'Bring items added'),
-  }, async ({ listUuid, items }) => { const authError = await requireAuth(); if (authError) return authError; return withToolErrorBoundary('bring', async () => { const result = await services.bring.addItems(listUuid, items); return textResult(result, `Added ${result.itemCount} Bring items.`); }); });
-
-  server.registerTool('bring_complete_items', {
-    title: 'Complete Bring items', description: 'Mark 1–50 Bring shopping items complete in one destructive batch. Omit listUuid to use the default list.', inputSchema: bringItemsInputSchema, outputSchema: bringMutationOutputSchema,
-    annotations: bringCompleteAnnotations, ...withToolStatus(protectedToolSecurity, 'Completing Bring items…', 'Bring items completed'),
-  }, async ({ listUuid, items }) => { const authError = await requireAuth(); if (authError) return authError; return withToolErrorBoundary('bring', async () => { const result = await services.bring.completeItems(listUuid, items); return textResult(result, `Completed ${result.itemCount} Bring items.`); }); });
-
-  server.registerTool('bring_remove_items', {
-    title: 'Remove Bring items', description: 'Remove 1–50 items from a specific accessible Bring shopping list in one destructive batch. This also works for shared lists returned by bring_list_lists. Omit listUuid to use the default list.', inputSchema: bringItemsInputSchema, outputSchema: bringMutationOutputSchema,
-    annotations: bringRemoveAnnotations, ...withToolStatus(protectedToolSecurity, 'Removing Bring items…', 'Bring items removed'),
-  }, async ({ listUuid, items }) => { const authError = await requireAuth(); if (authError) return authError; return withToolErrorBoundary('bring', async () => { const result = await services.bring.removeItems(listUuid, items); return textResult(result, `Removed ${result.itemCount} Bring items.`); }); });
+  registerBringTools(server, {
+    bring: services.bring,
+    invocationId: options.context.invocationId,
+    requirePrincipal,
+    securityForOperations: createProtectedToolSecurityForOperations,
+    run: (operationId, action) => withToolErrorBoundary('bring', operationId, action),
+    invalidArgument: (operationId, message) => invalidArgument(operationId, message),
+  });
 
   server.registerTool(
     'reddit_get_thread',
     {
       title: 'Reddit thread snapshot',
-      description: 'Use this when the user asks for Reddit comment bodies, full thread analysis, source extraction, sentiment, named entities, or representative comments. Prefer reddit_get_thread_overview first unless comments are needed.',
+      description:
+        'Use this when the user asks for Reddit comment bodies, full thread analysis, source extraction, sentiment, named entities, or representative comments. Prefer reddit_get_thread_overview first unless comments are needed.',
       inputSchema: {
         postId: redditPostIdSchema.optional(),
         url: redditUrlSchema.optional(),
-        sort: redditSortSchema.describe('Reddit comment sort. Defaults to the existing service default when omitted.').optional(),
-        maxComments: z.number().int().positive().max(500).describe('Maximum comments requested from the Reddit service; MCP still returns a bounded model-readable subset.').optional(),
-        maxMoreChildrenRequests: z.number().int().min(0).max(500).describe('Maximum Reddit MoreChildren expansion requests. Use 0 to avoid expansion.').optional(),
+        sort: redditSortSchema
+          .describe('Reddit comment sort. Defaults to the existing service default when omitted.')
+          .optional(),
+        maxComments: z
+          .number()
+          .int()
+          .positive()
+          .max(500)
+          .describe(
+            'Maximum comments requested from the Reddit service; MCP still returns a bounded model-readable subset.',
+          )
+          .optional(),
+        maxMoreChildrenRequests: z
+          .number()
+          .int()
+          .min(0)
+          .max(500)
+          .describe('Maximum Reddit MoreChildren expansion requests. Use 0 to avoid expansion.')
+          .optional(),
       },
       outputSchema: redditThreadOutputSchema,
       annotations: externalReadOnlyAnnotations,
-      ...withToolStatus(protectedToolSecurity, 'Reading comments…', 'Reddit thread ready'),
+      ...withToolStatus(
+        createProtectedToolSecurity(OPERATION_IDS.redditThread),
+        'Reading comments…',
+        'Reddit thread ready',
+      ),
     },
     async (args) => {
-      const authError = await requireAuth();
-      if (authError) return authError;
+      const principal = await requirePrincipal(OPERATION_IDS.redditThread);
+      if (isToolErrorResult(principal)) return principal;
       const request = toRedditThreadRequest(args);
       if (isToolErrorResult(request)) return request;
-      return await withToolErrorBoundary('reddit', async () => {
+      return await withToolErrorBoundary('reddit', OPERATION_IDS.redditThread, async () => {
         const response = await services.reddit.fetchThread(request);
         const structuredContent = toMcpRedditThread(response);
         return textResult(structuredContent, summarizeRedditThread(structuredContent));
@@ -349,26 +468,40 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     'reddit_get_thread_overview',
     {
       title: 'Reddit thread overview',
-      description: 'Use this first when the user provides a Reddit post URL or asks what a thread is about. Returns compact post, coverage, and count metadata without full comment bodies; do not use for detailed comment analysis.',
+      description:
+        'Use this first when the user provides a Reddit post URL or asks what a thread is about. Returns compact post, coverage, and count metadata without full comment bodies; do not use for detailed comment analysis.',
       inputSchema: {
         postId: redditPostIdSchema.optional(),
         url: redditUrlSchema.optional(),
         sort: redditSortSchema.describe('Reddit comment sort used for the lightweight overview snapshot.').optional(),
-        maxComments: z.number().int().positive().max(500).describe('Maximum comments requested for overview metadata.').optional(),
+        maxComments: z
+          .number()
+          .int()
+          .positive()
+          .max(500)
+          .describe('Maximum comments requested for overview metadata.')
+          .optional(),
       },
       outputSchema: redditOverviewOutputSchema,
       annotations: externalReadOnlyAnnotations,
-      ...withToolStatus(protectedToolSecurity, 'Reading Reddit…', 'Reddit overview ready'),
+      ...withToolStatus(
+        createProtectedToolSecurity(OPERATION_IDS.redditThreadOverview),
+        'Reading Reddit…',
+        'Reddit overview ready',
+      ),
     },
     async (args) => {
-      const authError = await requireAuth();
-      if (authError) return authError;
+      const principal = await requirePrincipal(OPERATION_IDS.redditThreadOverview);
+      if (isToolErrorResult(principal)) return principal;
       const request = toRedditOverviewRequest(args);
       if (isToolErrorResult(request)) return request;
-      return await withToolErrorBoundary('reddit', async () => {
+      return await withToolErrorBoundary('reddit', OPERATION_IDS.redditThreadOverview, async () => {
         const response = await services.reddit.fetchThreadOverview(request);
         const structuredContent = toMcpRedditOverview(response);
-        return textResult(structuredContent, `Fetched Reddit thread overview ${String(asRecord(structuredContent['post'])['id'] ?? '')}: ${String(asRecord(structuredContent['stats'])['loadedSnapshotCommentCount'] ?? 'unknown')} loaded comments.`);
+        return textResult(
+          structuredContent,
+          `Fetched Reddit thread overview ${String(asRecord(structuredContent['post'])['id'] ?? '')}: ${String(asRecord(structuredContent['stats'])['loadedSnapshotCommentCount'] ?? 'unknown')} loaded comments.`,
+        );
       });
     },
   );
@@ -377,18 +510,38 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     'wlh_find_category',
     {
       title: 'WLH find category',
-      description: 'Use this when the user describes a Willhaben category in natural language and no categoryId is known. Returns likely category IDs for follow-up wlh_search calls; do not use for offer details.',
-      inputSchema: { query: nonEmptyText(120, 'Natural-language Willhaben category description, for example bikes, webcams, or sofas.'), limit: z.number().int().positive().max(maxCategoryMatches).describe('Maximum category matches to return; defaults to 10.').optional() },
+      description:
+        'Use this when the user describes a Willhaben category in natural language and no categoryId is known. Returns likely category IDs for follow-up wlh_search calls; do not use for offer details.',
+      inputSchema: {
+        query: nonEmptyText(
+          120,
+          'Natural-language Willhaben category description, for example bikes, webcams, or sofas.',
+        ),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(maxCategoryMatches)
+          .describe('Maximum category matches to return; defaults to 10.')
+          .optional(),
+      },
       outputSchema: wlhFindCategoryOutputSchema,
       annotations: externalReadOnlyAnnotations,
-      ...withToolStatus(protectedToolSecurity, 'Finding category…', 'Categories found'),
+      ...withToolStatus(
+        createProtectedToolSecurity(OPERATION_IDS.wlhFindCategory),
+        'Finding category…',
+        'Categories found',
+      ),
     },
     async ({ query, limit }) => {
-      const authError = await requireAuth();
-      if (authError) return authError;
-      return await withToolErrorBoundary('wlh', async () => {
+      const principal = await requirePrincipal(OPERATION_IDS.wlhFindCategory);
+      if (isToolErrorResult(principal)) return principal;
+      return await withToolErrorBoundary('wlh', OPERATION_IDS.wlhFindCategory, async () => {
         const matches = await findWlhCategories(services.wlh, query, limit ?? maxCategoryMatches);
-        return textResult({ source: 'wlh', query, matches }, `Found ${matches.length} WLH category matches for "${query}".`);
+        return textResult(
+          { source: 'wlh', query, matches },
+          `Found ${matches.length} WLH category matches for "${query}".`,
+        );
       });
     },
   );
@@ -397,18 +550,23 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     'wlh_search',
     {
       title: 'WLH search',
-      description: 'Use this when the user wants to find Willhaben offers by keyword, price, category, location, condition, PayLivery, delivery preference, recency, image presence, or visible postcode/location text. Use wlh_find_category first when the category is unclear; use wlh_get_offer for a specific listing.',
+      description:
+        'Use this when the user wants to find Willhaben offers by keyword, price, category, location, condition, PayLivery, delivery preference, recency, image presence, or visible postcode/location text. Use wlh_find_category first when the category is unclear; use wlh_get_offer for a specific listing.',
       inputSchema: wlhSearchInputSchema,
       outputSchema: wlhSearchOutputSchema,
       annotations: externalReadOnlyAnnotations,
-      ...withToolStatus(protectedToolSecurity, 'Searching Willhaben…', 'Willhaben results ready'),
+      ...withToolStatus(
+        createProtectedToolSecurity(OPERATION_IDS.wlhSearch),
+        'Searching Willhaben…',
+        'Willhaben results ready',
+      ),
     },
     async (args) => {
-      const authError = await requireAuth();
-      if (authError) return authError;
+      const principal = await requirePrincipal(OPERATION_IDS.wlhSearch);
+      if (isToolErrorResult(principal)) return principal;
       const validationError = validateWlhSearchArgs(args);
       if (validationError) return validationError;
-      return await withToolErrorBoundary('wlh', async () => {
+      return await withToolErrorBoundary('wlh', OPERATION_IDS.wlhSearch, async () => {
         const searchRequest = await toWlhSearchRequest(services.wlh, args);
         const response = await services.wlh.search(searchRequest);
         const structuredContent = toMcpWlhSearch(response, args, searchRequest);
@@ -421,21 +579,25 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     'wlh_get_offer',
     {
       title: 'WLH offer detail',
-      description: 'Use this when the user asks to analyze, price-check, summarize, inspect, or compare a specific Willhaben listing. Accepts either a Willhaben ad ID or URL. Do not use it for broad searches; use wlh_search first.',
+      description:
+        'Use this when the user asks to analyze, price-check, summarize, inspect, or compare a specific Willhaben listing. Accepts either a Willhaben ad ID or URL. Do not use it for broad searches; use wlh_search first.',
       inputSchema: { adId: wlhAdIdSchema.optional(), url: wlhUrlSchema.optional() },
       outputSchema: wlhOfferOutputSchema,
       annotations: externalReadOnlyAnnotations,
-      ...withToolStatus(protectedToolSecurity, 'Loading offer…', 'Offer loaded'),
+      ...withToolStatus(createProtectedToolSecurity(OPERATION_IDS.wlhOffer), 'Loading offer…', 'Offer loaded'),
     },
     async (args) => {
-      const authError = await requireAuth();
-      if (authError) return authError;
+      const principal = await requirePrincipal(OPERATION_IDS.wlhOffer);
+      if (isToolErrorResult(principal)) return principal;
       const adId = extractWlhAdId(args);
       if (isToolErrorResult(adId)) return adId;
-      return await withToolErrorBoundary('wlh', async () => {
+      return await withToolErrorBoundary('wlh', OPERATION_IDS.wlhOffer, async () => {
         const response = await services.wlh.offer(adId);
         const structuredContent = toMcpWlhOffer(response, adId, args.url);
-        return textResult(structuredContent, `Fetched WLH offer ${String(structuredContent['id'])}: ${String(structuredContent['title'] || 'untitled offer')}.`);
+        return textResult(
+          structuredContent,
+          `Fetched WLH offer ${String(structuredContent['id'])}: ${String(structuredContent['title'] || 'untitled offer')}.`,
+        );
       });
     },
   );
@@ -444,17 +606,24 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     'wlh_categories_top',
     {
       title: 'WLH top categories',
-      description: 'Use this when the user wants to browse top-level Willhaben categories. For natural-language category lookup, prefer wlh_find_category.',
+      description:
+        'Use this when the user wants to browse top-level Willhaben categories. For natural-language category lookup, prefer wlh_find_category.',
       inputSchema: {},
       outputSchema: wlhCategoriesOutputSchema,
       annotations: externalReadOnlyAnnotations,
-      ...withToolStatus(protectedToolSecurity, 'Loading categories…', 'Categories ready'),
+      ...withToolStatus(
+        createProtectedToolSecurity(OPERATION_IDS.wlhCategories),
+        'Loading categories…',
+        'Categories ready',
+      ),
     },
     async () => {
-      const authError = await requireAuth();
-      if (authError) return authError;
-      return await withToolErrorBoundary('wlh', async () => {
-        const categories = (await services.wlh.topCategories()).map(toMcpWlhCategory).filter((category) => category.id.length > 0);
+      const principal = await requirePrincipal(OPERATION_IDS.wlhCategories);
+      if (isToolErrorResult(principal)) return principal;
+      return await withToolErrorBoundary('wlh', OPERATION_IDS.wlhCategories, async () => {
+        const categories = (await services.wlh.topCategories())
+          .map(toMcpWlhCategory)
+          .filter((category) => category.id.length > 0);
         const structuredContent = { source: 'wlh', categories };
         return textResult(structuredContent, `Fetched ${categories.length} top WLH categories.`);
       });
@@ -465,17 +634,29 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     'wlh_category_children',
     {
       title: 'WLH category children',
-      description: 'Use this when you already have a Willhaben categoryId and need its child categories before searching. Do not use for offer details.',
-      inputSchema: { categoryId: nonEmptyText(40, 'Willhaben category ID returned by wlh_categories_top, wlh_category_children, or wlh_find_category.') },
+      description:
+        'Use this when you already have a Willhaben categoryId and need its child categories before searching. Do not use for offer details.',
+      inputSchema: {
+        categoryId: nonEmptyText(
+          40,
+          'Willhaben category ID returned by wlh_categories_top, wlh_category_children, or wlh_find_category.',
+        ),
+      },
       outputSchema: wlhCategoryChildrenOutputSchema,
       annotations: externalReadOnlyAnnotations,
-      ...withToolStatus(protectedToolSecurity, 'Loading subcategories…', 'Subcategories ready'),
+      ...withToolStatus(
+        createProtectedToolSecurity(OPERATION_IDS.wlhCategoryChildren),
+        'Loading subcategories…',
+        'Subcategories ready',
+      ),
     },
     async ({ categoryId }) => {
-      const authError = await requireAuth();
-      if (authError) return authError;
-      return await withToolErrorBoundary('wlh', async () => {
-        const categories = (await services.wlh.children(categoryId)).map(toMcpWlhCategory).filter((category) => category.id.length > 0);
+      const principal = await requirePrincipal(OPERATION_IDS.wlhCategoryChildren);
+      if (isToolErrorResult(principal)) return principal;
+      return await withToolErrorBoundary('wlh', OPERATION_IDS.wlhCategoryChildren, async () => {
+        const categories = (await services.wlh.children(categoryId))
+          .map(toMcpWlhCategory)
+          .filter((category) => category.id.length > 0);
         const structuredContent = { source: 'wlh', categoryId, categories };
         return textResult(structuredContent, `Fetched ${categories.length} child WLH categories for ${categoryId}.`);
       });
@@ -485,54 +666,203 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
   return server;
 }
 
-export async function handleMcpHttpRequest(request: HttpRequest, context: InvocationContext, services?: McpGatewayServices): Promise<HttpResponseInit> {
+export async function handleMcpHttpRequest(
+  request: HttpRequest,
+  context: InvocationContext,
+  services?: McpGatewayServices,
+): Promise<HttpResponseInit> {
+  const originValidation = validateMcpRequestOrigin(request);
+  if (!originValidation.ok) {
+    const problem = buildMcpHttpProblem(
+      originValidation.status,
+      'invalid_mcp_origin',
+      originValidation.message,
+      'security_suspicious',
+      context.invocationId,
+    );
+    return {
+      status: originValidation.status,
+      headers: { ...corsHeaders(request), 'Content-Type': 'application/problem+json' },
+      jsonBody: problem,
+    };
+  }
+
   if (request.method === 'OPTIONS') {
     return { status: 204, headers: corsHeaders(request) };
   }
 
   if (request.method === 'GET' && !request.headers.get('authorization')) {
+    const problem = buildMcpHttpProblem(
+      401,
+      'unauthorized',
+      'Authentication is required to open an MCP event stream.',
+      'authorization_context_mismatch',
+      context.invocationId,
+    );
     return {
       status: 401,
       headers: {
         ...corsHeaders(request),
+        'Content-Type': 'application/problem+json',
         'WWW-Authenticate': buildMcpWwwAuthenticate(request, {
           error: 'invalid_token',
           errorDescription: 'Missing bearer token.',
         }),
       },
-      jsonBody: { error: { code: 'unauthorized', message: 'Authentication is required to open an MCP event stream.' } },
+      jsonBody: problem,
     };
   }
 
   const parsedBody = request.method === 'POST' ? await safeReadJson(request) : undefined;
   if (parsedBody === invalidJson) {
+    const problem = buildMcpHttpProblem(
+      400,
+      'invalid_json',
+      'The MCP JSON-RPC request body must be valid JSON.',
+      'caller_contract_violation',
+      context.invocationId,
+    );
     return {
       status: 400,
       headers: { ...corsHeaders(request), 'Content-Type': jsonRpcContentType },
-      jsonBody: { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } },
+      jsonBody: {
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32700, message: 'Parse error', data: { repairable_problem: problem } },
+      },
     };
   }
 
-  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
   const server = createPrivateMcpServer({
     authorizationHeader: request.headers.get('authorization'),
     context,
     request,
     services,
   });
-  await server.connect(transport);
-
+  let connected = false;
   try {
+    await server.connect(transport);
+    connected = true;
     const webRequest = toWebRequest(request, parsedBody === undefined ? undefined : parsedBody);
     const response = await transport.handleRequest(webRequest, parsedBody === undefined ? undefined : { parsedBody });
     return await toHttpResponseInit(response, request);
+  } catch {
+    const deterministic = buildMcpHttpProblem(
+      500,
+      'mcp_gateway_failure',
+      'The MCP gateway could not complete the protocol request.',
+      'diagnostic_uncertain',
+      context.invocationId,
+    );
+    const expected = {
+      operation_id: deterministic.operation_id,
+      diagnostic_id: deterministic.diagnostic_id,
+      status: deterministic.status,
+      allowedRequestFields: [],
+      allowedOperationIds: [deterministic.operation_id],
+    };
+    const capsule = buildDiagnosticCapsule({
+      diagnostic_id: deterministic.diagnostic_id,
+      operation_id: deterministic.operation_id,
+      endpoint: '/mcp',
+      method: request.method,
+      failure_stage: 'internal',
+      http_status: deterministic.status,
+      trace_id: context.invocationId,
+      safe_error: { code: 'mcp_gateway_failure', message: deterministic.detail },
+      contract_summary: { required: [], properties: {} },
+    });
+    const problem = await resolveRepairableProblem({ deterministic, capsule, expected });
+    return {
+      status: problem.status,
+      headers: { ...corsHeaders(request), 'Content-Type': 'application/problem+json' },
+      jsonBody: problem,
+    };
   } finally {
-    await server.close();
+    if (connected) await server.close();
   }
 }
 
-function createProtectedToolSecurity(): { securitySchemes: Array<{ type: 'oauth2'; scopes: string[] }>; _meta: { securitySchemes: Array<{ type: 'oauth2'; scopes: string[] }> } } {
-  const protectedSecuritySchemes = [{ type: 'oauth2' as const, scopes: [getMcpOAuthScope()] }];
+function buildMcpHttpProblem(
+  status: number,
+  code: string,
+  detail: string,
+  classification: RepairableErrorClassification,
+  traceId?: string,
+): RepairableProblem {
+  const callerContract = classification === 'caller_contract_violation';
+  const auth = classification === 'authorization_context_mismatch';
+  const uncertain = classification === 'diagnostic_uncertain';
+  return buildDeterministicRepairableProblem({
+    operationId: 'mcp.gateway',
+    status,
+    endpoint: '/mcp',
+    classification,
+    title: callerContract
+      ? 'Invalid MCP protocol request'
+      : auth
+        ? 'MCP authentication is required'
+        : classification === 'security_suspicious'
+          ? 'MCP request origin is not allowed'
+          : 'MCP gateway failure',
+    detail,
+    callerInstruction: callerContract
+      ? 'Send a valid JSON-RPC request matching the MCP Streamable HTTP protocol and retry.'
+      : auth
+        ? 'Obtain a valid OAuth bearer token for this MCP resource, then retry the same protocol request.'
+        : classification === 'security_suspicious'
+          ? 'Stop and use the configured canonical MCP resource origin. Do not retry with alternate forwarded host or scheme values.'
+          : 'Do not invent protocol fields. Retry later or report the diagnostic ID if the gateway remains unavailable.',
+    safeDebugSummary: `MCP gateway error; code=${code}; http_status=${status}; no request body, headers, credentials, or stack included.`,
+    repairable: callerContract || auth,
+    retryPolicy: {
+      can_retry: callerContract || auth,
+      same_request: false,
+      idempotency_required: false,
+    },
+    traceId,
+    repairPlan: [
+      {
+        action: callerContract || auth ? 'retry_with_modified_request' : 'report_diagnostic_id',
+        reason: callerContract
+          ? 'The protocol body must be valid JSON-RPC.'
+          : auth
+            ? 'The request needs a valid bearer credential.'
+            : 'The request was rejected by the MCP security boundary or failed inside the gateway.',
+      },
+    ],
+    confidence: uncertain ? 0.5 : 0.98,
+    analysisMode: uncertain ? 'fallback' : 'deterministic',
+  });
+}
+
+function createProtectedToolSecurity(operationId: string): {
+  securitySchemes: Array<{ type: 'oauth2'; scopes: string[] }>;
+  _meta: { securitySchemes: Array<{ type: 'oauth2'; scopes: string[] }> };
+} {
+  return createProtectedToolSecurityForOperations([operationId]);
+}
+
+function createProtectedToolSecurityForOperations(operationIds: readonly string[]): {
+  securitySchemes: Array<{ type: 'oauth2'; scopes: string[] }>;
+  _meta: { securitySchemes: Array<{ type: 'oauth2'; scopes: string[] }> };
+} {
+  const scopes: string[] = [];
+  for (const operationId of operationIds) {
+    const operation = getOperationDefinition(operationId);
+    if (!operation.requiredPermission) throw new Error(`Operation ${operationId} is public.`);
+    scopes.push(getMcpOAuthScope(process.env, operation.requiredPermission));
+  }
+  const protectedSecuritySchemes = [
+    {
+      type: 'oauth2' as const,
+      scopes: [...new Set(scopes)],
+    },
+  ];
   return { securitySchemes: protectedSecuritySchemes, _meta: { securitySchemes: protectedSecuritySchemes } };
 }
 
@@ -541,27 +871,87 @@ type ToolSecurity = {
   _meta: Record<string, unknown> & { securitySchemes: Array<{ type: string; scopes?: string[] }> };
 };
 type ToolSource = 'reddit' | 'wlh' | 'bring' | 'mcp';
-type SafeToolErrorCode = 'invalid_arguments' | 'upstream_unavailable' | 'upstream_rate_limited' | 'not_found' | 'unsupported_url' | 'bring_authentication_failed' | 'bring_timeout' | 'bring_invalid_response' | 'bring_upstream_error';
+type SafeToolErrorCode =
+  | 'invalid_arguments'
+  | 'upstream_unavailable'
+  | 'upstream_rate_limited'
+  | 'not_found'
+  | 'unsupported_url'
+  | 'bring_authentication_failed'
+  | 'bring_timeout'
+  | 'bring_invalid_response'
+  | 'bring_upstream_error'
+  | 'policy_denied'
+  | 'idempotency_conflict'
+  | 'confirmation_invalid'
+  | 'confirmation_expired'
+  | 'outcome_unknown';
 
-function toolSecurityWithStatus(securitySchemes: ToolSecurity['securitySchemes'], invoking: string, invoked: string): ToolSecurity {
-  return { securitySchemes, _meta: { securitySchemes, 'openai/toolInvocation/invoking': invoking, 'openai/toolInvocation/invoked': invoked } };
+function toolSecurityWithStatus(
+  securitySchemes: ToolSecurity['securitySchemes'],
+  invoking: string,
+  invoked: string,
+): ToolSecurity {
+  return {
+    securitySchemes,
+    _meta: { securitySchemes, 'openai/toolInvocation/invoking': invoking, 'openai/toolInvocation/invoked': invoked },
+  };
 }
 
 function withToolStatus<T extends ToolSecurity>(security: T, invoking: string, invoked: string): T {
-  return { ...security, _meta: { ...security._meta, 'openai/toolInvocation/invoking': invoking, 'openai/toolInvocation/invoked': invoked } };
+  return {
+    ...security,
+    _meta: { ...security._meta, 'openai/toolInvocation/invoking': invoking, 'openai/toolInvocation/invoked': invoked },
+  };
 }
 
-async function withToolErrorBoundary(source: ToolSource, action: () => Promise<CallToolResult>): Promise<CallToolResult> {
+async function withToolErrorBoundary(
+  source: ToolSource,
+  operationId: string,
+  action: () => Promise<CallToolResult>,
+): Promise<CallToolResult> {
   try {
     return await action();
   } catch (error) {
     const code = classifyToolError(error);
     const upstreamStatus = error instanceof BringUpstreamError ? error.diagnostics?.upstreamStatus : undefined;
-    return safeToolError(code, safeToolErrorMessage(error, source), source, upstreamStatus);
+    const message = safeToolErrorMessage(error, source);
+    const deterministic = buildMcpToolProblem(code, message, operationId, source, upstreamStatus);
+    const operation = getOperationDefinition(operationId);
+    const endpoint = `/mcp#${operation.mcp?.toolName ?? operationId}`;
+    const expected = {
+      operation_id: operationId,
+      diagnostic_id: deterministic.diagnostic_id,
+      status: deterministic.status,
+      allowedRequestFields: [],
+      allowedOperationIds: [operationId],
+    };
+    const capsule = buildDiagnosticCapsule({
+      diagnostic_id: deterministic.diagnostic_id,
+      operation_id: operationId,
+      endpoint,
+      method: 'TOOL',
+      failure_stage: deterministic.classification === 'diagnostic_uncertain' ? 'unknown' : 'dependency',
+      http_status: deterministic.status,
+      trace_id: deterministic.trace_id,
+      safe_error: { code, message, ...(upstreamStatus ? { original_status: upstreamStatus } : {}) },
+      contract_summary: { required: [], properties: {} },
+    });
+    const problem = await resolveRepairableProblem({ deterministic, capsule, expected });
+    return safeToolError(code, message, source, upstreamStatus, problem);
   }
 }
 
 function classifyToolError(error: unknown): SafeToolErrorCode {
+  if (error instanceof BringInputError) return 'invalid_arguments';
+  if (error instanceof BringNotFoundError) return 'not_found';
+  if (error instanceof BringDisabledError || error instanceof BringPolicyError) return 'policy_denied';
+  if (error instanceof BringVersionConflictError || error instanceof BringIdempotencyConflictError) {
+    return 'idempotency_conflict';
+  }
+  if (error instanceof BringMutationExpiredError) return 'confirmation_expired';
+  if (error instanceof BringConfirmationError) return 'confirmation_invalid';
+  if (error instanceof BringMutationOutcomeUnknownError) return 'outcome_unknown';
   if (error instanceof BringUpstreamError) {
     if (error.kind === 'authentication') return 'bring_authentication_failed';
     if (error.kind === 'timeout') return 'bring_timeout';
@@ -574,41 +964,217 @@ function classifyToolError(error: unknown): SafeToolErrorCode {
   const status = numberValue(record['status']) ?? numberValue(record['statusCode']);
   const name = stringValue(record['name']) ?? '';
   const message = typeof record['message'] === 'string' ? record['message'].toLowerCase() : '';
-  if (status === 429 || message.includes('rate-limit') || message.includes('rate limit')) return 'upstream_rate_limited';
+  if (status === 429 || message.includes('rate-limit') || message.includes('rate limit'))
+    return 'upstream_rate_limited';
   if (status === 404 || name.includes('NotFound') || message.includes('not found')) return 'not_found';
   return 'upstream_unavailable';
 }
 
 function safeToolErrorMessage(error: unknown, source: ToolSource): string {
   const code = classifyToolError(error);
+  if (code === 'invalid_arguments') return 'The tool arguments violate the Bring mutation contract.';
+  if (code === 'policy_denied') return 'The requested Bring operation is disabled or the list is not allowlisted.';
+  if (code === 'idempotency_conflict') {
+    return 'The operation ID or expected list version conflicts with durable mutation state.';
+  }
+  if (code === 'confirmation_invalid') return 'The Bring confirmation token does not match this principal or payload.';
+  if (code === 'confirmation_expired')
+    return 'The Bring confirmation expired; prepare the mutation again with a new ID.';
+  if (code === 'outcome_unknown') {
+    return 'Bring may have received the mutation, so automatic replay is blocked. Read the list before deciding what to do.';
+  }
   if (code === 'upstream_rate_limited') return `${source.toUpperCase()} is rate limiting requests. Retry later.`;
   if (code === 'not_found') return `${source.toUpperCase()} resource was not found.`;
-  if (code === 'bring_authentication_failed') return 'Bring account authentication failed; the caller OAuth token remains valid.';
+  if (code === 'bring_authentication_failed')
+    return 'Bring account authentication failed; the caller OAuth token remains valid.';
   if (code === 'bring_timeout') return 'Bring timed out. Retry later.';
   if (code === 'bring_invalid_response') return 'Bring returned an unexpected response format.';
   if (code === 'bring_upstream_error') return 'Bring rejected or failed the upstream operation.';
   return `${source.toUpperCase()} service is temporarily unavailable.`;
 }
 
-function safeToolError(code: SafeToolErrorCode, message: string, source?: ToolSource, upstreamStatus?: number): CallToolResult {
-  return { isError: true, structuredContent: compactRecord({ error: code, source, upstreamStatus }) as Record<string, unknown>, content: [{ type: 'text', text: message }] };
+function safeToolError(
+  code: SafeToolErrorCode,
+  message: string,
+  source?: ToolSource,
+  upstreamStatus?: number,
+  suppliedProblem?: RepairableProblem,
+  operationId = 'mcp.gateway',
+): CallToolResult {
+  const problem = suppliedProblem ?? buildMcpToolProblem(code, message, operationId, source ?? 'mcp', upstreamStatus);
+  return {
+    isError: true,
+    structuredContent: compactRecord({
+      error: code,
+      source,
+      upstreamStatus,
+      repairable_problem: problem,
+    }) as Record<string, unknown>,
+    content: [
+      {
+        type: 'text',
+        text: `${message} ${problem.caller_instruction} Diagnostic ID: ${problem.diagnostic_id}`,
+      },
+    ],
+  };
+}
+
+function buildMcpToolProblem(
+  code: SafeToolErrorCode,
+  message: string,
+  operationId: string,
+  source: ToolSource,
+  upstreamStatus?: number,
+): RepairableProblem {
+  const classification = toolErrorClassification(code);
+  const requestRepairable = [
+    'invalid_arguments',
+    'unsupported_url',
+    'not_found',
+    'idempotency_conflict',
+    'confirmation_invalid',
+    'confirmation_expired',
+  ].includes(code);
+  const retryUnchanged = ['upstream_rate_limited', 'bring_timeout'].includes(code);
+  const canRetry = requestRepairable || retryUnchanged;
+  const instruction = toolCallerInstruction(code, operationId);
+  return buildDeterministicRepairableProblem({
+    operationId,
+    status: toolErrorStatus(code, upstreamStatus),
+    endpoint: `/mcp#${operationId}`,
+    classification,
+    title: toolErrorTitle(code, source),
+    detail: message,
+    callerInstruction: instruction,
+    safeDebugSummary: `Deterministic MCP error; operation_id=${operationId}; source=${source}; code=${code}; no request values, credentials, stack, or upstream body included.`,
+    repairable: requestRepairable,
+    retryPolicy: {
+      can_retry: canRetry,
+      same_request: retryUnchanged,
+      idempotency_required: operationId.startsWith('bring.'),
+      ...(code === 'upstream_rate_limited' ? { retry_after_ms: 30_000 } : {}),
+    },
+    repairPlan: [
+      {
+        action: requestRepairable
+          ? 'retry_with_modified_request'
+          : retryUnchanged
+            ? 'retry_later'
+            : 'report_diagnostic_id',
+        reason: instruction,
+      },
+    ],
+    confidence: classification === 'diagnostic_uncertain' ? 0.5 : 0.94,
+    analysisMode: classification === 'diagnostic_uncertain' ? 'fallback' : 'deterministic',
+  });
+}
+
+function toolErrorClassification(code: SafeToolErrorCode): RepairableErrorClassification {
+  if (code === 'invalid_arguments' || code === 'unsupported_url') return 'caller_contract_violation';
+  if (code === 'not_found') return 'resource_not_found';
+  if (code === 'policy_denied' || code === 'bring_authentication_failed') return 'authorization_context_mismatch';
+  if (code === 'idempotency_conflict' || code === 'confirmation_invalid' || code === 'confirmation_expired')
+    return 'semantic_precondition_missing';
+  if (code === 'upstream_rate_limited' || code === 'bring_timeout') return 'capacity_or_timeout';
+  if (code === 'bring_invalid_response') return 'version_skew';
+  if (code === 'bring_upstream_error' || code === 'outcome_unknown') return 'dependency_failure';
+  return 'diagnostic_uncertain';
+}
+
+function toolErrorStatus(code: SafeToolErrorCode, upstreamStatus?: number): number {
+  if (code === 'invalid_arguments' || code === 'unsupported_url') return 400;
+  if (code === 'policy_denied' || code === 'bring_authentication_failed') return 403;
+  if (code === 'not_found') return 404;
+  if (code === 'confirmation_expired') return 410;
+  if (code === 'idempotency_conflict' || code === 'confirmation_invalid' || code === 'outcome_unknown') return 409;
+  if (code === 'upstream_rate_limited') return 429;
+  if (code === 'bring_timeout') return 504;
+  if (upstreamStatus && upstreamStatus >= 400 && upstreamStatus <= 599) return upstreamStatus;
+  return 502;
+}
+
+function toolErrorTitle(code: SafeToolErrorCode, source: ToolSource): string {
+  if (code === 'invalid_arguments' || code === 'unsupported_url') return 'MCP tool arguments are invalid';
+  if (code === 'not_found') return `${source.toUpperCase()} resource was not found`;
+  if (code === 'policy_denied') return 'MCP operation is denied by policy';
+  if (code === 'upstream_rate_limited') return `${source.toUpperCase()} rate limit reached`;
+  if (code === 'bring_timeout') return 'Bring request timed out';
+  if (code === 'bring_invalid_response') return 'Bring response contract changed';
+  if (code === 'outcome_unknown') return 'Bring mutation outcome is unknown';
+  return `${source.toUpperCase()} operation failed`;
+}
+
+function toolCallerInstruction(code: SafeToolErrorCode, operationId: string): string {
+  if (code === 'invalid_arguments' || code === 'unsupported_url')
+    return `Correct the arguments using the schema for ${operationId}, then retry. Do not invent fields.`;
+  if (code === 'not_found') return 'Verify the visible resource identifier and retry only with a corrected identifier.';
+  if (code === 'policy_denied' || code === 'bring_authentication_failed')
+    return 'Do not mutate tool arguments. Use an authorized identity or stop and report the access requirement.';
+  if (code === 'idempotency_conflict')
+    return 'Read current state, generate a new operationId only for a genuinely new mutation, and do not replay a changed payload under the old ID.';
+  if (code === 'confirmation_invalid' || code === 'confirmation_expired')
+    return 'Prepare the mutation again, obtain explicit confirmation, and apply only the new matching confirmation token.';
+  if (code === 'outcome_unknown')
+    return 'Do not replay automatically. Read the Bring list first, then decide whether a new mutation is needed.';
+  if (code === 'upstream_rate_limited' || code === 'bring_timeout')
+    return 'Retry later with the exact same arguments. Do not mutate parameters to work around the dependency failure.';
+  if (code === 'bring_invalid_response' || code === 'bring_upstream_error')
+    return 'Retry later only when appropriate; do not invent alternative arguments. Report the diagnostic ID if the failure persists.';
+  return 'Do not guess new arguments. Report the diagnostic ID if the operation cannot be retried safely.';
 }
 
 function isToolErrorResult(value: unknown): value is CallToolResult {
   return isRecord(value) && value['isError'] === true;
 }
 
-
-function mcpAuthorizationFailureResult(auth: Extract<Awaited<ReturnType<typeof authorizeMcpTool>>, { ok: false }>, request?: HttpRequest): CallToolResult {
+function mcpAuthorizationFailureResult(
+  auth: Extract<Awaited<ReturnType<typeof authorizeMcpTool>>, { ok: false }>,
+  request: HttpRequest | undefined,
+  operationId: string,
+): CallToolResult {
   const challenge = authChallengeForFailure(auth);
-  return mcpAuthErrorResult(
-    buildMcpWwwAuthenticate(request, challenge),
+  const permission = getOperationDefinition(operationId).requiredPermission;
+  const result = mcpAuthErrorResult(
+    buildMcpWwwAuthenticate(request, { ...challenge, permission }),
     challenge.error,
     challenge.errorDescription,
   );
+  const status = auth.response.status === 403 ? 403 : 401;
+  const problem = buildDeterministicRepairableProblem({
+    operationId,
+    status,
+    endpoint: `/mcp#${getOperationDefinition(operationId).mcp?.toolName ?? operationId}`,
+    classification: 'authorization_context_mismatch',
+    title: status === 401 ? 'MCP authentication is required' : 'MCP tool permission is missing',
+    detail: challenge.errorDescription,
+    callerInstruction:
+      status === 401
+        ? 'Obtain a valid OAuth bearer token for this MCP resource, then retry the tool with the same arguments.'
+        : 'Do not mutate tool arguments. Reauthorize with the required scope or stop and report that permission is missing.',
+    safeDebugSummary: `Deterministic MCP authorization failure for ${operationId}; http_status=${status}; no credential material included.`,
+    repairable: true,
+    retryPolicy: { can_retry: true, same_request: false, idempotency_required: false },
+    repairPlan: [
+      {
+        action: 'retry_with_modified_request',
+        reason: 'The authentication or authorization context must change before the tool can run.',
+      },
+    ],
+  });
+  result.structuredContent = { ...(result.structuredContent ?? {}), repairable_problem: problem };
+  result.content = [
+    {
+      type: 'text',
+      text: `${challenge.errorDescription} ${problem.caller_instruction} Diagnostic ID: ${problem.diagnostic_id}`,
+    },
+  ];
+  return result;
 }
 
-function authChallengeForFailure(auth: Extract<Awaited<ReturnType<typeof authorizeMcpTool>>, { ok: false }>): { error: McpAuthChallengeError; errorDescription: string } {
+function authChallengeForFailure(auth: Extract<Awaited<ReturnType<typeof authorizeMcpTool>>, { ok: false }>): {
+  error: McpAuthChallengeError;
+  errorDescription: string;
+} {
   const status = auth.response.status ?? 401;
   return {
     error: status === 403 ? 'insufficient_scope' : 'invalid_token',
@@ -624,14 +1190,18 @@ function safeAuthErrorDescription(auth: Extract<Awaited<ReturnType<typeof author
       return error['message'];
     }
   }
-  return auth.response.status === 403 ? 'Token is valid but is not authorized for this MCP tool.' : 'Missing, malformed, or invalid bearer token.';
+  return auth.response.status === 403
+    ? 'Token is valid but is not authorized for this MCP tool.'
+    : 'Missing, malformed, or invalid bearer token.';
 }
 
 function defaultServices(context: InvocationContext): McpGatewayServices {
   return {
     reddit: new RedditThreadService(),
     wlh: new WlhService(),
-    bring: new BringService({ warn: (message, details) => context.warn(message, details) }),
+    bring: createBringApplication({
+      warn: (message, details) => context.warn(message, details),
+    }),
   };
 }
 
@@ -639,12 +1209,22 @@ function textResult(structuredContent: object, text: string): CallToolResult {
   return { structuredContent: structuredContent as Record<string, unknown>, content: [{ type: 'text', text }] };
 }
 
-function invalidArgument(message: string, code: SafeToolErrorCode = 'invalid_arguments'): CallToolResult {
-  return safeToolError(code, message, 'mcp');
+function invalidArgument(
+  operationId: string,
+  message: string,
+  code: SafeToolErrorCode = 'invalid_arguments',
+): CallToolResult {
+  return safeToolError(code, message, 'mcp', undefined, undefined, operationId);
 }
 
-function toRedditThreadRequest(args: { postId?: string; url?: string; sort?: string; maxComments?: number; maxMoreChildrenRequests?: number }): RedditThreadRequest | CallToolResult {
-  const source = validateExactlyOneRedditSource(args);
+function toRedditThreadRequest(args: {
+  postId?: string;
+  url?: string;
+  sort?: string;
+  maxComments?: number;
+  maxMoreChildrenRequests?: number;
+}): RedditThreadRequest | CallToolResult {
+  const source = validateExactlyOneRedditSource(args, OPERATION_IDS.redditThread);
   if (isToolErrorResult(source)) return source;
   return compactRecord({
     ...source,
@@ -654,8 +1234,13 @@ function toRedditThreadRequest(args: { postId?: string; url?: string; sort?: str
   }) as RedditThreadRequest;
 }
 
-function toRedditOverviewRequest(args: { postId?: string; url?: string; sort?: string; maxComments?: number }): RedditThreadOverviewRequest | CallToolResult {
-  const source = validateExactlyOneRedditSource(args);
+function toRedditOverviewRequest(args: {
+  postId?: string;
+  url?: string;
+  sort?: string;
+  maxComments?: number;
+}): RedditThreadOverviewRequest | CallToolResult {
+  const source = validateExactlyOneRedditSource(args, OPERATION_IDS.redditThreadOverview);
   if (isToolErrorResult(source)) return source;
   return compactRecord({
     ...source,
@@ -664,16 +1249,28 @@ function toRedditOverviewRequest(args: { postId?: string; url?: string; sort?: s
   }) as RedditThreadOverviewRequest;
 }
 
-function validateExactlyOneRedditSource(args: { postId?: string; url?: string }): { post?: string; url?: string } | CallToolResult {
+function validateExactlyOneRedditSource(
+  args: {
+    postId?: string;
+    url?: string;
+  },
+  operationId: string,
+): { post?: string; url?: string } | CallToolResult {
   const postId = args.postId?.trim();
   const url = args.url?.trim();
-  if (!postId && !url) return invalidArgument('Provide exactly one of postId or url for Reddit tools.');
-  if (postId && url) return invalidArgument('Provide either postId or url for Reddit tools, not both.');
+  if (!postId && !url) return invalidArgument(operationId, 'Provide exactly one of postId or url for Reddit tools.');
+  if (postId && url) return invalidArgument(operationId, 'Provide either postId or url for Reddit tools, not both.');
   if (postId) {
-    if (!/^(?:t3_)?[a-z0-9][a-z0-9_]{1,31}$/i.test(postId)) return invalidArgument('postId must look like a Reddit post ID.');
+    if (!/^(?:t3_)?[a-z0-9][a-z0-9_]{1,31}$/i.test(postId))
+      return invalidArgument(operationId, 'postId must look like a Reddit post ID.');
     return { post: postId };
   }
-  if (url && !isSupportedRedditUrl(url)) return invalidArgument('Unsupported Reddit URL. Use reddit.com, old.reddit.com, np.reddit.com, www.reddit.com, or redd.it.', 'unsupported_url');
+  if (url && !isSupportedRedditUrl(url))
+    return invalidArgument(
+      operationId,
+      'Unsupported Reddit URL. Use reddit.com, old.reddit.com, np.reddit.com, www.reddit.com, or redd.it.',
+      'unsupported_url',
+    );
   return { url };
 }
 
@@ -701,7 +1298,9 @@ function toMcpRedditThread(response: unknown): Record<string, unknown> {
       bodyCharLimit: maxCommentBodyChars,
       modelTruncated,
       truncated: booleanValue(upstreamStats['truncated']),
-      warnings: arrayValue(upstreamStats['warnings']).filter((warning): warning is string => typeof warning === 'string'),
+      warnings: arrayValue(upstreamStats['warnings']).filter(
+        (warning): warning is string => typeof warning === 'string',
+      ),
     }),
   });
 }
@@ -710,7 +1309,9 @@ function toMcpRedditOverview(response: unknown): Record<string, unknown> {
   const record = asRecord(response);
   const stats = asRecord(record['stats']);
   const coverage = compactRecord(asRecord(record['coverage']));
-  const availableSorts = arrayValue(record['availableSorts']).filter((value): value is z.infer<typeof redditSortSchema> => redditSortSchema.safeParse(value).success);
+  const availableSorts = arrayValue(record['availableSorts']).filter(
+    (value): value is z.infer<typeof redditSortSchema> => redditSortSchema.safeParse(value).success,
+  );
   return compactRecord({
     source: 'reddit',
     fetchedAt: stringValue(record['fetchedAt']),
@@ -745,21 +1346,26 @@ function toMcpRedditPost(value: unknown): Record<string, unknown> {
   });
 }
 
-function flattenRedditComments(value: unknown, out: Array<Record<string, unknown>> = []): Array<Record<string, unknown>> {
+function flattenRedditComments(
+  value: unknown,
+  out: Array<Record<string, unknown>> = [],
+): Array<Record<string, unknown>> {
   for (const item of arrayValue(value)) {
     const comment = asRecord(item);
     const body = stringValue(comment['body']) ?? '';
-    out.push(compactRecord({
-      id: stringValue(comment['id']) ?? '',
-      parentId: stringValue(comment['parentId']),
-      author: stringValue(comment['author']),
-      body: truncate(body, maxCommentBodyChars),
-      score: numberValue(comment['score']),
-      depth: numberValue(comment['depth']),
-      createdUtc: numberValue(comment['createdUtc']),
-      permalink: stringValue(comment['permalink']),
-      truncated: body.length > maxCommentBodyChars,
-    }));
+    out.push(
+      compactRecord({
+        id: stringValue(comment['id']) ?? '',
+        parentId: stringValue(comment['parentId']),
+        author: stringValue(comment['author']),
+        body: truncate(body, maxCommentBodyChars),
+        score: numberValue(comment['score']),
+        depth: numberValue(comment['depth']),
+        createdUtc: numberValue(comment['createdUtc']),
+        permalink: stringValue(comment['permalink']),
+        truncated: body.length > maxCommentBodyChars,
+      }),
+    );
     flattenRedditComments(comment['replies'], out);
   }
   return out;
@@ -774,8 +1380,11 @@ function toMcpRedditContinuation(value: unknown): Record<string, unknown> {
   });
 }
 
-async function toWlhSearchRequest(wlh: McpGatewayServices['wlh'], args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const categoryId = stringValue(args['categoryId']) ?? await inferWlhCategoryId(wlh, args);
+async function toWlhSearchRequest(
+  wlh: McpGatewayServices['wlh'],
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const categoryId = stringValue(args['categoryId']) ?? (await inferWlhCategoryId(wlh, args));
   const delivery = arrayValue(args['delivery']).filter((item): item is string => typeof item === 'string');
   const requiredTerms = arrayValue(args['requiredTerms']).filter((item): item is string => typeof item === 'string');
   return compactRecord({
@@ -805,25 +1414,36 @@ async function inferWlhCategoryId(wlh: McpGatewayServices['wlh'], args: Record<s
 function validateWlhSearchArgs(args: Record<string, unknown>): CallToolResult | undefined {
   const priceFrom = numberValue(args['priceFrom']);
   const priceTo = numberValue(args['priceTo']);
-  if (args['priceFrom'] !== undefined && priceFrom === undefined) return invalidArgument('priceFrom must be a finite number.');
-  if (args['priceTo'] !== undefined && priceTo === undefined) return invalidArgument('priceTo must be a finite number.');
-  if (priceFrom !== undefined && priceFrom < 0) return invalidArgument('priceFrom must be non-negative.');
-  if (priceTo !== undefined && priceTo < 0) return invalidArgument('priceTo must be non-negative.');
-  if (priceFrom !== undefined && priceTo !== undefined && priceFrom > priceTo) return invalidArgument('priceFrom must be less than or equal to priceTo.');
+  if (args['priceFrom'] !== undefined && priceFrom === undefined)
+    return invalidArgument(OPERATION_IDS.wlhSearch, 'priceFrom must be a finite number.');
+  if (args['priceTo'] !== undefined && priceTo === undefined)
+    return invalidArgument(OPERATION_IDS.wlhSearch, 'priceTo must be a finite number.');
+  if (priceFrom !== undefined && priceFrom < 0)
+    return invalidArgument(OPERATION_IDS.wlhSearch, 'priceFrom must be non-negative.');
+  if (priceTo !== undefined && priceTo < 0)
+    return invalidArgument(OPERATION_IDS.wlhSearch, 'priceTo must be non-negative.');
+  if (priceFrom !== undefined && priceTo !== undefined && priceFrom > priceTo)
+    return invalidArgument(OPERATION_IDS.wlhSearch, 'priceFrom must be less than or equal to priceTo.');
   const postedSince = stringValue(args['postedSince']);
-  if (args['postedSince'] !== undefined && (!postedSince || !isIsoDateOrDateTime(postedSince))) return invalidArgument('postedSince must be a valid ISO date or ISO datetime.');
+  if (args['postedSince'] !== undefined && (!postedSince || !isIsoDateOrDateTime(postedSince)))
+    return invalidArgument(OPERATION_IDS.wlhSearch, 'postedSince must be a valid ISO date or ISO datetime.');
   return undefined;
 }
 
 function toMcpWlhSearch(response: unknown, query: unknown, searchRequest: unknown): Record<string, unknown> {
   const record = asRecord(response);
-  const rawResults = arrayValue(record['results']).map(toMcpWlhListing).filter((listing) => listing.id.length > 0);
+  const rawResults = arrayValue(record['results'])
+    .map(toMcpWlhListing)
+    .filter((listing) => listing.id.length > 0);
   const postFiltered = applyMcpWlhPostFilters(rawResults, query);
   const results = sortMcpWlhResults(postFiltered, stringValue(asRecord(query)['sort']));
   const category = toMcpWlhCategory(record['category']);
   return compactRecord({
     source: 'wlh',
-    query: toMcpWlhSearchQuery({ ...asRecord(query), categoryId: stringValue(asRecord(searchRequest)['categoryId']) ?? stringValue(asRecord(query)['categoryId']) }),
+    query: toMcpWlhSearchQuery({
+      ...asRecord(query),
+      categoryId: stringValue(asRecord(searchRequest)['categoryId']) ?? stringValue(asRecord(query)['categoryId']),
+    }),
     totalApprox: numberValue(record['rowsFound']) ?? null,
     rowsReturned: numberValue(record['rowsReturned']) ?? rawResults.length,
     filteredRowsReturned: results.length,
@@ -834,7 +1454,6 @@ function toMcpWlhSearch(response: unknown, query: unknown, searchRequest: unknow
     fetchedAt: stringValue(record['fetchedAt']),
   });
 }
-
 
 function toMcpWlhSearchQuery(value: unknown): Record<string, unknown> {
   const query = asRecord(value);
@@ -859,7 +1478,10 @@ function toMcpWlhSearchQuery(value: unknown): Record<string, unknown> {
   });
 }
 
-function applyMcpWlhPostFilters(results: Array<{ id: string; [key: string]: unknown }>, queryValue: unknown): Array<{ id: string; [key: string]: unknown }> {
+function applyMcpWlhPostFilters(
+  results: Array<{ id: string; [key: string]: unknown }>,
+  queryValue: unknown,
+): Array<{ id: string; [key: string]: unknown }> {
   const query = asRecord(queryValue);
   const locationText = normalizeMcpSearchText(stringValue(query['locationText']));
   const postcode = normalizeMcpSearchText(stringValue(query['postcode']));
@@ -867,7 +1489,9 @@ function applyMcpWlhPostFilters(results: Array<{ id: string; [key: string]: unkn
   const imageRequired = booleanValue(query['imageRequired']);
   return results.filter((listing) => {
     if (locationText) {
-      const locationHaystack = normalizeMcpSearchText([listing['location'], listing['postcode'], listing['state']].filter(Boolean).join(' '));
+      const locationHaystack = normalizeMcpSearchText(
+        [listing['location'], listing['postcode'], listing['state']].filter(Boolean).join(' '),
+      );
       if (!locationHaystack.includes(locationText)) return false;
     }
     if (postcode) {
@@ -883,30 +1507,92 @@ function applyMcpWlhPostFilters(results: Array<{ id: string; [key: string]: unkn
   });
 }
 
-function sortMcpWlhResults(results: Array<{ id: string; [key: string]: unknown }>, sort: string | undefined): Array<{ id: string; [key: string]: unknown }> {
+function sortMcpWlhResults(
+  results: Array<{ id: string; [key: string]: unknown }>,
+  sort: string | undefined,
+): Array<{ id: string; [key: string]: unknown }> {
   const sorted = [...results];
-  if (sort === 'price_asc') return sorted.sort((a, b) => nullableSortNumber(a['priceAmount'], Number.POSITIVE_INFINITY) - nullableSortNumber(b['priceAmount'], Number.POSITIVE_INFINITY));
-  if (sort === 'price_desc') return sorted.sort((a, b) => nullableSortNumber(b['priceAmount'], Number.NEGATIVE_INFINITY) - nullableSortNumber(a['priceAmount'], Number.NEGATIVE_INFINITY));
-  if (sort === 'newest') return sorted.sort((a, b) => (dateTimeValue(stringValue(b['publishedAt']))?.getTime() ?? 0) - (dateTimeValue(stringValue(a['publishedAt']))?.getTime() ?? 0));
+  if (sort === 'price_asc')
+    return sorted.sort(
+      (a, b) =>
+        nullableSortNumber(a['priceAmount'], Number.POSITIVE_INFINITY) -
+        nullableSortNumber(b['priceAmount'], Number.POSITIVE_INFINITY),
+    );
+  if (sort === 'price_desc')
+    return sorted.sort(
+      (a, b) =>
+        nullableSortNumber(b['priceAmount'], Number.NEGATIVE_INFINITY) -
+        nullableSortNumber(a['priceAmount'], Number.NEGATIVE_INFINITY),
+    );
+  if (sort === 'newest')
+    return sorted.sort(
+      (a, b) =>
+        (dateTimeValue(stringValue(b['publishedAt']))?.getTime() ?? 0) -
+        (dateTimeValue(stringValue(a['publishedAt']))?.getTime() ?? 0),
+    );
   return sorted;
 }
 
-function describeWlhFilterApplications(queryValue: unknown, searchRequestValue: unknown): Array<Record<string, unknown>> {
+function describeWlhFilterApplications(
+  queryValue: unknown,
+  searchRequestValue: unknown,
+): Array<Record<string, unknown>> {
   const query = asRecord(queryValue);
   const searchRequest = asRecord(searchRequestValue);
   const applications: Array<Record<string, unknown>> = [];
-  const sentFields = ['keyword', 'categoryId', 'priceFrom', 'priceTo', 'areaId', 'paylivery', 'rows', 'page', 'condition', 'delivery'];
+  const sentFields = [
+    'keyword',
+    'categoryId',
+    'priceFrom',
+    'priceTo',
+    'areaId',
+    'paylivery',
+    'rows',
+    'page',
+    'condition',
+    'delivery',
+  ];
   for (const field of sentFields) {
     if (searchRequest[field] !== undefined) applications.push({ field, appliedAs: 'sent_to_wlh', effective: true });
   }
-  if (query['categoryPath'] !== undefined && query['categoryId'] === undefined) applications.push({ field: 'categoryPath', appliedAs: 'category_inference', effective: true, note: `Inferred categoryId ${String(searchRequest['categoryId'] ?? '') || '0'} before calling WLH.` });
-  if (Array.isArray(searchRequest['requiredTerms']) && searchRequest['requiredTerms'].length > 0) applications.push({ field: 'requiredTerms', appliedAs: 'service_post_filter', effective: true, note: 'Filtered by the WLH service against returned listing title/body text before MCP shaping.' });
+  if (query['categoryPath'] !== undefined && query['categoryId'] === undefined)
+    applications.push({
+      field: 'categoryPath',
+      appliedAs: 'category_inference',
+      effective: true,
+      note: `Inferred categoryId ${String(searchRequest['categoryId'] ?? '') || '0'} before calling WLH.`,
+    });
+  if (Array.isArray(searchRequest['requiredTerms']) && searchRequest['requiredTerms'].length > 0)
+    applications.push({
+      field: 'requiredTerms',
+      appliedAs: 'service_post_filter',
+      effective: true,
+      note: 'Filtered by the WLH service against returned listing title/body text before MCP shaping.',
+    });
   for (const field of ['locationText', 'postcode', 'postedSince', 'imageRequired']) {
-    if (query[field] !== undefined) applications.push({ field, appliedAs: 'mcp_post_filter', effective: true, note: 'Applied only to the listings returned by the underlying WLH request.' });
+    if (query[field] !== undefined)
+      applications.push({
+        field,
+        appliedAs: 'mcp_post_filter',
+        effective: true,
+        note: 'Applied only to the listings returned by the underlying WLH request.',
+      });
   }
   const sort = stringValue(query['sort']);
-  if (sort && sort !== 'relevance') applications.push({ field: 'sort', appliedAs: 'mcp_post_sort', effective: true, note: 'Sorted only the listings returned by the underlying WLH request; WLH global result ordering is unchanged.' });
-  if (sort === 'relevance') applications.push({ field: 'sort', appliedAs: 'mcp_post_sort', effective: false, note: 'Relevance is the default WLH order; MCP does not send a sort parameter or reorder the returned page.' });
+  if (sort && sort !== 'relevance')
+    applications.push({
+      field: 'sort',
+      appliedAs: 'mcp_post_sort',
+      effective: true,
+      note: 'Sorted only the listings returned by the underlying WLH request; WLH global result ordering is unchanged.',
+    });
+  if (sort === 'relevance')
+    applications.push({
+      field: 'sort',
+      appliedAs: 'mcp_post_sort',
+      effective: false,
+      note: 'Relevance is the default WLH order; MCP does not send a sort parameter or reorder the returned page.',
+    });
   return applications;
 }
 
@@ -922,7 +1608,9 @@ function dateTimeValue(value: string | undefined): Date | undefined {
 }
 
 function normalizeMcpSearchText(value: unknown): string {
-  return String(value ?? '').trim().toLocaleLowerCase('de-AT');
+  return String(value ?? '')
+    .trim()
+    .toLocaleLowerCase('de-AT');
 }
 
 function toMcpWlhListing(value: unknown): { id: string; [key: string]: unknown } {
@@ -972,7 +1660,11 @@ function dedupeWlhImages(value: unknown): Array<Record<string, unknown>> {
   const byUrl = new Map<string, Record<string, unknown>>();
   for (const image of arrayValue(value)) {
     const record = asRecord(image);
-    const url = stringValue(record['url']) ?? stringValue(record['full']) ?? stringValue(record['preview']) ?? stringValue(record['thumb']);
+    const url =
+      stringValue(record['url']) ??
+      stringValue(record['full']) ??
+      stringValue(record['preview']) ??
+      stringValue(record['thumb']);
     if (!url || byUrl.has(url)) continue;
     byUrl.set(url, compactRecord({ id: stringValue(record['id']), thumb: url, preview: url, full: url }));
   }
@@ -982,27 +1674,39 @@ function dedupeWlhImages(value: unknown): Array<Record<string, unknown>> {
 function extractWlhAdId(args: { adId?: string; url?: string }): string | CallToolResult {
   const adId = args.adId?.trim();
   const url = args.url?.trim();
-  if (!adId && !url) return invalidArgument('Provide exactly one of adId or url for wlh_get_offer.');
-  if (adId && url) return invalidArgument('Provide either adId or url for wlh_get_offer, not both.');
+  if (!adId && !url)
+    return invalidArgument(OPERATION_IDS.wlhOffer, 'Provide exactly one of adId or url for wlh_get_offer.');
+  if (adId && url)
+    return invalidArgument(OPERATION_IDS.wlhOffer, 'Provide either adId or url for wlh_get_offer, not both.');
   if (adId) {
-    if (!/^\d{5,20}$/.test(adId)) return invalidArgument('adId must be a realistic numeric Willhaben advertisement ID.');
+    if (!/^\d{5,20}$/.test(adId))
+      return invalidArgument(OPERATION_IDS.wlhOffer, 'adId must be a realistic numeric Willhaben advertisement ID.');
     return adId;
   }
-  if (!url || !isSupportedWlhUrl(url)) return invalidArgument('Unsupported Willhaben URL. Use a willhaben.at listing URL.', 'unsupported_url');
+  if (!url || !isSupportedWlhUrl(url))
+    return invalidArgument(
+      OPERATION_IDS.wlhOffer,
+      'Unsupported Willhaben URL. Use a willhaben.at listing URL.',
+      'unsupported_url',
+    );
   const parsed = new URL(url);
   const queryAdId = parsed.searchParams.get('adId');
   if (queryAdId?.trim() && /^\d{5,20}$/.test(queryAdId.trim())) return queryAdId.trim();
   const match = parsed.pathname.match(/(?:^|[-/])(\d{5,20})(?:$|[/?#])/);
   if (match?.[1]) return match[1];
-  return invalidArgument('Willhaben URL did not contain a numeric advertisement ID.');
+  return invalidArgument(OPERATION_IDS.wlhOffer, 'Willhaben URL did not contain a numeric advertisement ID.');
 }
 
-async function findWlhCategories(wlh: McpGatewayServices['wlh'], query: string, limit: number): Promise<Array<ReturnType<typeof toMcpWlhCategory> & { score: number }>> {
+async function findWlhCategories(
+  wlh: McpGatewayServices['wlh'],
+  query: string,
+  limit: number,
+): Promise<Array<ReturnType<typeof toMcpWlhCategory> & { score: number }>> {
   const normalizedQuery = normalizeSearchText(query);
   const tokens = normalizedQuery.split(' ').filter(Boolean);
   if (tokens.length === 0) return [];
   const seen = new Set<string>();
-  const queue = [...await wlh.topCategories()];
+  const queue = [...(await wlh.topCategories())];
   const scanned: unknown[] = [];
   while (queue.length > 0 && scanned.length < maxCategoryScan) {
     const category = queue.shift();
@@ -1011,7 +1715,7 @@ async function findWlhCategories(wlh: McpGatewayServices['wlh'], query: string, 
     seen.add(mapped.id);
     scanned.push(category);
     if (mapped.hasChildren) {
-      queue.push(...await wlh.children(mapped.id));
+      queue.push(...(await wlh.children(mapped.id)));
     }
   }
   return scanned
@@ -1035,7 +1739,16 @@ function scoreCategory(category: unknown, tokens: string[], normalizedQuery: str
   return score;
 }
 
-function toMcpWlhCategory(value: unknown): { id: string; label: string; path: string; depth: number; parentId?: string; hitCount?: number; hasChildren: boolean; url?: string } {
+function toMcpWlhCategory(value: unknown): {
+  id: string;
+  label: string;
+  path: string;
+  depth: number;
+  parentId?: string;
+  hitCount?: number;
+  hasChildren: boolean;
+  url?: string;
+} {
   const category = asRecord(value);
   return compactRecord({
     id: stringValue(category['id']) ?? '',
@@ -1046,7 +1759,16 @@ function toMcpWlhCategory(value: unknown): { id: string; label: string; path: st
     hitCount: numberValue(category['hitCount']),
     hasChildren: booleanValue(category['hasChildren']) ?? false,
     url: stringValue(category['url']),
-  }) as { id: string; label: string; path: string; depth: number; parentId?: string; hitCount?: number; hasChildren: boolean; url?: string };
+  }) as {
+    id: string;
+    label: string;
+    path: string;
+    depth: number;
+    parentId?: string;
+    hitCount?: number;
+    hasChildren: boolean;
+    url?: string;
+  };
 }
 
 function summarizeRedditThread(response: Record<string, unknown>): string {
@@ -1088,7 +1810,9 @@ function toWebRequest(request: HttpRequest, parsedBody: unknown): Request {
 
 async function toHttpResponseInit(response: Response, request: HttpRequest): Promise<HttpResponseInit> {
   const headers = corsHeaders(request);
-  response.headers.forEach((value, key) => { headers[key] = value; });
+  response.headers.forEach((value, key) => {
+    headers[key] = value;
+  });
   const contentType = response.headers.get('content-type') ?? '';
   const text = await response.text();
   if (contentType.includes('application/json') && text.length > 0) {
@@ -1153,7 +1877,12 @@ function truncate(value: string, maxChars: number): string {
 }
 
 function normalizeSearchText(value: string): string {
-  return value.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  return value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 function isSupportedRedditUrl(value: string): boolean {

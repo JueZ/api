@@ -1,224 +1,136 @@
 name: Codex Main Delivery
+run-name: Deliver main ${{ github.event.workflow_run.head_sha }}
 
 on:
   workflow_run:
-    workflows: [Codex Auto-Merge]
+    workflows: [CI]
+    branches: [main]
     types: [completed]
 
 permissions:
+  actions: write
   contents: read
   pull-requests: read
-  issues: read
-  actions: write
+
+concurrency:
+  group: main-delivery
+  cancel-in-progress: false
 
 jobs:
-  parse-workflow-run-event:
-    name: parse workflow_run event
-    runs-on: ubuntu-latest
-    outputs:
-      has_pull_request: ${{ steps.workflow-run.outputs.has_pull_request }}
-      pr_number: ${{ steps.workflow-run.outputs.pr_number }}
-      head_sha: ${{ steps.workflow-run.outputs.head_sha }}
-      source_branch: ${{ steps.workflow-run.outputs.source_branch }}
-      workflow_run_id: ${{ steps.workflow-run.outputs.workflow_run_id }}
-      workflow_run_conclusion: ${{ steps.workflow-run.outputs.workflow_run_conclusion }}
-    steps:
-      - name: Parse workflow_run event
-        id: workflow-run
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          event_json="$(jq -c '.' "$GITHUB_EVENT_PATH")"
-          pr_number="$(jq -r '.workflow_run.pull_requests[0].number // ""' <<<"$event_json")"
-          head_sha="$(jq -r '.workflow_run.pull_requests[0].head.sha // .workflow_run.head_sha // ""' <<<"$event_json")"
-          source_branch="$(jq -r '.workflow_run.pull_requests[0].head.ref // .workflow_run.head_branch // ""' <<<"$event_json")"
-          workflow_run_id="$(jq -r '.workflow_run.id // .run_id // ""' <<<"$event_json")"
-          workflow_run_conclusion="$(jq -r '.workflow_run.conclusion // ""' <<<"$event_json")"
-
-          # workflow_run payloads for a completed pull_request workflow can omit pull_requests.
-          # Resolve the associated PR from the immutable head SHA before deciding delivery is inapplicable.
-          if ! [[ "$pr_number" =~ ^[0-9]+$ ]] && [[ "$head_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            associated_pr="$(gh api \
-              -H 'Accept: application/vnd.github+json' \
-              "repos/$GITHUB_REPOSITORY/commits/$head_sha/pulls" \
-              --jq 'map(select(.head.sha == "'"$head_sha"'")) | sort_by(.number) | last // {}')"
-            pr_number="$(jq -r '.number // ""' <<<"$associated_pr")"
-            source_branch="$(jq -r '.head.ref // "'"$source_branch"'"' <<<"$associated_pr")"
-          fi
-
-          if [[ "$pr_number" =~ ^[0-9]+$ ]] && [ "$pr_number" -gt 0 ]; then
-            has_pull_request=true
-          else
-            has_pull_request=false
-            pr_number=""
-          fi
-
-          {
-            echo "has_pull_request=$has_pull_request"
-            echo "pr_number=$pr_number"
-            echo "head_sha=$head_sha"
-            echo "source_branch=$source_branch"
-            echo "workflow_run_id=$workflow_run_id"
-            echo "workflow_run_conclusion=$workflow_run_conclusion"
-          } >> "$GITHUB_OUTPUT"
-
-  run-main-delivery:
-    name: run main delivery after Codex auto-merge
-    needs: parse-workflow-run-event
-    timeout-minutes: 90
+  deliver:
+    name: run main delivery after successful push CI
     if: >-
       ${{
-        github.event_name == 'workflow_run' &&
-        needs.parse-workflow-run-event.outputs.workflow_run_conclusion == 'success' &&
-        needs.parse-workflow-run-event.outputs.has_pull_request == 'true'
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main'
       }}
+    timeout-minutes: 150
     runs-on: ubuntu-latest
-    concurrency:
-      group: codex-main-delivery-${{ needs.parse-workflow-run-event.outputs.pr_number || needs.parse-workflow-run-event.outputs.workflow_run_id }}
-      cancel-in-progress: true
     steps:
-      - name: Checkout default branch
+      - name: Checkout trusted delivery controller
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
           ref: main
           fetch-depth: 0
-      - name: Wait for merged PR and run delivery chain
+          persist-credentials: false
+      - name: Dispatch exactly one test deployment and one production promotion
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ needs.parse-workflow-run-event.outputs.pr_number }}
-          HEAD_SHA: ${{ needs.parse-workflow-run-event.outputs.head_sha }}
-          SOURCE_BRANCH: ${{ needs.parse-workflow-run-event.outputs.source_branch }}
           REPOSITORY: ${{ github.repository }}
+          SOURCE_REF: ${{ github.event.workflow_run.head_sha }}
+          CI_RUN_URL: ${{ github.event.workflow_run.html_url }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ -z "$PR_NUMBER" ]; then
-            echo "No pull request number was parsed from the workflow_run event. No deployment dispatch was started."
+          if ! [[ "$SOURCE_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "CI workflow_run did not provide an immutable source SHA." >&2
+            exit 1
+          fi
+
+          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
+          if ! git merge-base --is-ancestor "$SOURCE_REF" origin/main; then
+            echo "Successful CI source $SOURCE_REF is not in main history." >&2
+            exit 1
+          fi
+
+          associated_pr="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/commits/$SOURCE_REF/pulls" \
+            --jq 'map(select(.merged_at != null and .base.ref == "main")) | sort_by(.merged_at) | last // {}')"
+          skip_autodeploy="$(jq -r '(
+            ([.labels[]?.name] | map(ascii_downcase) | index("skip-autodeploy")) != null
+            or ((.body // "") | test("\\[skip deploy\\]|\\[skip autodeploy\\]"; "i"))
+          )' <<<"$associated_pr")"
+          if [ "$skip_autodeploy" = "true" ]; then
+            echo "The PR associated with $SOURCE_REF explicitly skipped deployment."
             exit 0
           fi
 
-          echo "Main delivery event context: PR #$PR_NUMBER, source branch ${SOURCE_BRANCH:-unknown}, triggering head ${HEAD_SHA:-unknown}."
-
-          wait_for_success() {
+          wait_for_dispatch() {
             local workflow_file="$1"
-            local event_name="$2"
-            local head_sha="$3"
-            local started_at="$4"
+            local expected_title="$2"
+            local started_at="$3"
             local run_json=""
-            local run_id=""
-            local status=""
-            local conclusion=""
-            local url=""
 
-            for attempt in {1..120}; do
-              # A workflow_dispatch can have duplicate runs for the same commit when another
-              # main-delivery attempt overlaps or is cancelled. Prefer any completed success
-              # for the requested commit before treating a later cancelled/failed duplicate
-              # as terminal.
+            for attempt in {1..180}; do
               run_json="$(gh run list \
                 --repo "$REPOSITORY" \
                 --workflow "$workflow_file" \
                 --branch main \
-                --limit 30 \
-                --json databaseId,status,conclusion,headSha,event,createdAt,url \
-                --jq "map(select(.headSha == \"$head_sha\" and .event == \"$event_name\" and ((.createdAt | fromdateiso8601) >= $started_at))) as \$runs | ((\$runs | map(select(.status == \"completed\" and .conclusion == \"success\")) | sort_by(.createdAt) | last) // (\$runs | map(select(.status != \"completed\")) | sort_by(.createdAt) | last) // (\$runs | sort_by(.createdAt) | last) // {})")"
+                --event workflow_dispatch \
+                --limit 50 \
+                --json databaseId,status,conclusion,createdAt,displayTitle,url \
+                --jq "map(select(.displayTitle == \"$expected_title\" and ((.createdAt | fromdateiso8601) >= $started_at))) | sort_by(.createdAt) | last // {}")"
               run_id="$(jq -r '.databaseId // ""' <<<"$run_json")"
               status="$(jq -r '.status // ""' <<<"$run_json")"
               conclusion="$(jq -r '.conclusion // ""' <<<"$run_json")"
               url="$(jq -r '.url // ""' <<<"$run_json")"
 
               if [ -z "$run_id" ]; then
-                echo "Waiting for $workflow_file $event_name run for $head_sha (attempt $attempt/120)."
+                echo "Waiting for $expected_title to start (attempt $attempt/180)."
               elif [ "$status" = "completed" ] && [ "$conclusion" = "success" ]; then
-                echo "$workflow_file succeeded: $url"
                 printf '%s' "$url" > "$RUNNER_TEMP/${workflow_file}.url"
                 return 0
               elif [ "$status" = "completed" ]; then
-                echo "$workflow_file completed with conclusion '$conclusion': $url" >&2
+                echo "$expected_title concluded '$conclusion': $url" >&2
                 return 1
               else
-                echo "Waiting for $workflow_file run $run_id to complete (attempt $attempt/120, status $status): $url"
+                echo "Waiting for $expected_title run $run_id (status $status)."
               fi
               sleep 10
             done
-
-            echo "Timed out waiting for $workflow_file $event_name run for $head_sha." >&2
+            echo "Timed out waiting for $expected_title." >&2
             return 1
           }
 
-          pr_json=""
-          merge_sha=""
-          for attempt in {1..90}; do
-            pr_json="$(gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state,mergedAt,mergeCommit,body,labels,url,headRefName)"
-            state="$(jq -r '.state' <<<"$pr_json")"
-            merge_sha="$(jq -r '.mergeCommit.oid // ""' <<<"$pr_json")"
-            if [ "$state" = "MERGED" ] && [[ "$merge_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
-              break
-            fi
-            echo "Waiting for PR #$PR_NUMBER to finish auto-merge (attempt $attempt/90, state $state)."
-            sleep 10
-          done
-
-          if ! [[ "$merge_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            echo "PR #$PR_NUMBER was not merged by the time the post-auto-merge dispatch window expired. No deployment dispatch was started."
-            exit 0
-          fi
-
-          skip_autodeploy="$(jq -r '(
-            ([.labels[].name] | map(ascii_downcase) | index("skip-autodeploy")) != null
-            or ((.body // "") | test("\\[skip deploy\\]|\\[skip autodeploy\\]"; "i"))
-          )' <<<"$pr_json")"
-          if [ "$skip_autodeploy" = "true" ]; then
-            pr_url="$(jq -r '.url' <<<"$pr_json")"
-            echo "PR #$PR_NUMBER ($pr_url) explicitly requested deployment skip. Main delivery was not started."
-            exit 0
-          fi
-
-          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
-          main_sha="$(git rev-parse origin/main)"
-          if ! git merge-base --is-ancestor "$merge_sha" origin/main; then
-            echo "Merged PR commit $merge_sha is not an ancestor of current origin/main $main_sha. Refusing to dispatch delivery."
-            exit 1
-          fi
-
-          ci_started_at="$(date -u +%s)"
-          echo "Dispatching CI on main at current head $main_sha after Codex PR #$PR_NUMBER merged as $merge_sha."
-          gh workflow run ci.yml --repo "$REPOSITORY" --ref main
-          wait_for_success ci.yml workflow_dispatch "$main_sha" "$ci_started_at"
-          ci_url="$(cat "$RUNNER_TEMP/ci.yml.url")"
-
+          test_title="Deploy Test $SOURCE_REF"
           test_started_at="$(date -u +%s)"
-          echo "Dispatching Deploy Test for $main_sha after successful main CI."
           gh workflow run deploy-test.yml \
             --repo "$REPOSITORY" \
             --ref main \
-            -f commit_sha="$main_sha" \
+            -f commit_sha="$SOURCE_REF" \
             -f deploy_frontend=true \
             -f deploy_functions=true
-          wait_for_success deploy-test.yml workflow_dispatch "$main_sha" "$test_started_at"
+          wait_for_dispatch deploy-test.yml "$test_title" "$test_started_at"
           test_url="$(cat "$RUNNER_TEMP/deploy-test.yml.url")"
 
-          prod_started_at="$(date -u +%s)"
-          echo "Dispatching Promote Production for $main_sha after successful test deployment and smoke tests."
+          production_title="Promote Production $SOURCE_REF"
+          production_started_at="$(date -u +%s)"
           gh workflow run promote-production.yml \
             --repo "$REPOSITORY" \
             --ref main \
-            -f commit_sha="$main_sha" \
+            -f commit_sha="$SOURCE_REF" \
             -f deploy_frontend=true \
             -f deploy_functions=true
-          wait_for_success promote-production.yml workflow_dispatch "$main_sha" "$prod_started_at"
-          prod_url="$(cat "$RUNNER_TEMP/promote-production.yml.url")"
+          wait_for_dispatch promote-production.yml "$production_title" "$production_started_at"
+          production_url="$(cat "$RUNNER_TEMP/promote-production.yml.url")"
 
           {
             echo "### Main delivery completed"
-            echo "- PR: #$PR_NUMBER"
-            echo "- Merge commit: $merge_sha"
-            echo "- Delivered main head: $main_sha"
-            echo "- CI: $ci_url"
+            echo "- Source SHA: $SOURCE_REF"
+            echo "- CI: $CI_RUN_URL"
             echo "- Deploy Test: $test_url"
-            echo "- Promote Production: $prod_url"
+            echo "- Promote Production: $production_url"
           } >> "$GITHUB_STEP_SUMMARY"

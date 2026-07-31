@@ -4,14 +4,17 @@ import { readRuntimeProvenance } from '../dist/shared/runtimeProvenance.js';
 import { sanitizeSmokeRunId } from '../dist/shared/smokeCorrelation.js';
 
 test('readRuntimeProvenance returns safe deployment metadata', () => {
-  const response = readRuntimeProvenance({
-    DEPLOYED_ENVIRONMENT_NAME: 'prod',
-    DEPLOYED_COMMIT_SHA: 'ABCDEFabcdef0123456789abcdef0123456789ab',
-    DEPLOYED_SOURCE_REF: '1111111111111111111111111111111111111111',
-    DEPLOYMENT_RUN_ID: 'run_123:attempt-1',
-    DEPLOYED_AT_UTC: '2026-05-17T12:34:56Z',
-    BUILD_TIMESTAMP_UTC: '2026-05-17T12:00:00Z',
-  }, new Date('2026-05-17T13:00:00.000Z'));
+  const response = readRuntimeProvenance(
+    {
+      DEPLOYED_ENVIRONMENT_NAME: 'prod',
+      DEPLOYED_COMMIT_SHA: 'ABCDEFabcdef0123456789abcdef0123456789ab',
+      DEPLOYED_SOURCE_REF: '1111111111111111111111111111111111111111',
+      DEPLOYMENT_RUN_ID: 'run_123:attempt-1',
+      DEPLOYED_AT_UTC: '2026-05-17T12:34:56Z',
+      BUILD_TIMESTAMP_UTC: '2026-05-17T12:00:00Z',
+    },
+    new Date('2026-05-17T13:00:00.000Z'),
+  );
 
   assert.deepEqual(response, {
     environmentName: 'prod',

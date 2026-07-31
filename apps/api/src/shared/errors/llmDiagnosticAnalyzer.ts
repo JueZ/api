@@ -8,8 +8,9 @@ import {
   type RepairableProblemExpected,
 } from './repairableProblem.js';
 
-const DEFAULT_MODEL = 'gpt-4o-mini';
+const DEFAULT_MODEL = 'gpt-5.6-sol';
 const DEFAULT_TIMEOUT_MS = 2500;
+const MAX_OUTPUT_TOKENS = 1400;
 
 export async function analyzeRepairableErrorWithLlm(args: {
   capsule: DiagnosticCapsule;
@@ -21,9 +22,13 @@ export async function analyzeRepairableErrorWithLlm(args: {
 
   try {
     const openAiApiKey = process.env['OPENAI_API_KEY'];
-    const client = new OpenAI({ ['api' + 'Key']: openAiApiKey, timeout: readTimeoutMs() } as ConstructorParameters<typeof OpenAI>[0]);
+    const client = new OpenAI({ ['api' + 'Key']: openAiApiKey, timeout: readTimeoutMs() } as ConstructorParameters<
+      typeof OpenAI
+    >[0]);
     const response = await client.responses.create({
       model: process.env['REPAIRABLE_ERRORS_LLM_MODEL'] || DEFAULT_MODEL,
+      store: false,
+      max_output_tokens: MAX_OUTPUT_TOKENS,
       input: [
         {
           role: 'system',
@@ -84,17 +89,18 @@ Do not expose internals, secrets, stack traces, raw headers, raw tokens, raw env
 Do not invent request fields outside the contract_summary.
 Do not invent operation IDs outside the allowed operation list: ${allowedOperationIds.join(', ')}.
 Do not suggest changing request parameters when the failure is upstream, dependency, rate-limit, or internal.
-Use repair_patch only when the change is deterministic and mechanically safe.
+Never return repair_patch. Model suggestions are not mechanically verified; use repair_plan instead.
 Use repair_plan when the caller must provide or discover information.
 If evidence is insufficient, use diagnostic_uncertain.
+Set analysis_mode to llm_assisted.
 Keep caller_instruction concise and directly useful for an LLM agent.
 Allowed classifications: caller_contract_violation, semantic_precondition_missing, resource_not_found, authorization_context_mismatch, version_skew, dependency_failure, capacity_or_timeout, service_bug_likely, security_suspicious, diagnostic_uncertain.
 Expected behavior:
 - For invalid JSON or missing/incorrect fields, classify caller_contract_violation.
-- For unresolved Reddit /s/ share URL, classify caller_contract_violation and tell the caller not to retry the same share URL; suggest canonical /comments/<id>, redd.it URL, t3 fullname, or article ID.
-- For Reddit 404, classify resource_not_found.
-- For Reddit 403 inaccessible content, classify authorization_context_mismatch or resource_not_found depending on evidence; avoid leaking private existence.
-- For Reddit 429, classify capacity_or_timeout; retry later with same request.
-- For Reddit upstream 502/5xx, classify dependency_failure unless evidence suggests service_bug_likely.
-- For internal unexpected errors, classify service_bug_likely and tell caller not to invent alternative parameters.`;
+- For a missing prerequisite, use semantic_precondition_missing and name only allowlisted prerequisite operations.
+- For a missing public resource, classify resource_not_found.
+- For inaccessible content, classify authorization_context_mismatch or resource_not_found depending on evidence; avoid leaking private existence.
+- For rate limits and timeouts, classify capacity_or_timeout and preserve the request when same_request is true.
+- For provider or upstream 5xx failures, classify dependency_failure unless sanitized evidence supports service_bug_likely.
+- For internal unexpected errors, classify service_bug_likely and tell the caller not to invent alternative parameters.`;
 }

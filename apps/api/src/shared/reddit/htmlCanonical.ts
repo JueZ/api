@@ -42,7 +42,13 @@ export function extractRedditCanonicalMatchFromHtml(html: string): RedditHtmlCan
   return null;
 }
 
-function firstAttributeMatch(html: string, tagPattern: RegExp, selectorAttribute: string, selectorValue: RegExp, valueAttribute: string): string | null {
+function firstAttributeMatch(
+  html: string,
+  tagPattern: RegExp,
+  selectorAttribute: string,
+  selectorValue: RegExp,
+  valueAttribute: string,
+): string | null {
   for (const match of html.matchAll(tagPattern)) {
     const tag = match[0] ?? '';
     const selector = attributeValue(tag, selectorAttribute);
@@ -60,7 +66,8 @@ function attributeValue(tag: string, name: string): string | null {
 }
 
 function* jsonLdBodies(html: string): Iterable<string> {
-  const pattern = /<script\b[^>]*type\s*=\s*(?:"application\/ld\+json"|'application\/ld\+json'|application\/ld\+json)[^>]*>([\s\S]*?)<\/script>/gi;
+  const pattern =
+    /<script\b[^>]*type\s*=\s*(?:"application\/ld\+json"|'application\/ld\+json'|application\/ld\+json)[^>]*>([\s\S]*?)<\/script>/gi;
   for (const match of html.matchAll(pattern)) {
     yield decodeHtmlEntities(match[1] ?? '');
   }

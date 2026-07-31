@@ -8,8 +8,8 @@ Codex should read project memory at the beginning of non-trivial tasks, especial
 
 Codex should update project memory when meaningful project state changes. Examples include an architecture decision, deployment failure or success, root cause discovery, important workaround, authentication or security behavior change, or changed next milestone.
 
-Keep entries concise and factual. Mark uncertainty clearly. Prefer links to pull requests, issues, or workflow runs over pasted logs.
+Keep active trackers concise and factual. Mark uncertainty clearly. Prefer links to pull requests, issues, or workflow runs over pasted logs. Put resolved or superseded status in the chronological logs/archive rather than leaving it in `current-state.md`, `known-issues.md`, or `next-steps.md`.
 
 Never include secrets, tokens, SAS URLs, connection strings, full environment dumps, full app settings, private keys, or private credentials in project memory.
 
-If `docs/adr/` is added later, use ADRs for formal architecture decisions. Project memory remains lightweight operational memory and current project context.
+Use `docs/adr/` for formal architecture decisions. Project memory remains lightweight operational memory and current project context.

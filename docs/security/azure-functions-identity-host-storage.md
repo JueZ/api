@@ -42,12 +42,12 @@ Primary references:
 
 Use explicit service URIs instead of `AzureWebJobsStorage__accountName` so the template remains independent of hard-coded `core.windows.net` suffixes:
 
-| Setting | Target value |
-| --- | --- |
-| `AzureWebJobsStorage__blobServiceUri` | `https://<storage-account>.blob.<storage-endpoint-suffix>` |
+| Setting                                | Target value                                                |
+| -------------------------------------- | ----------------------------------------------------------- |
+| `AzureWebJobsStorage__blobServiceUri`  | `https://<storage-account>.blob.<storage-endpoint-suffix>`  |
 | `AzureWebJobsStorage__queueServiceUri` | `https://<storage-account>.queue.<storage-endpoint-suffix>` |
 | `AzureWebJobsStorage__tableServiceUri` | `https://<storage-account>.table.<storage-endpoint-suffix>` |
-| `AzureWebJobsStorage__credential` | `managedidentity` |
+| `AzureWebJobsStorage__credential`      | `managedidentity`                                           |
 
 Do not set the legacy `AzureWebJobsStorage` connection string in the target state.
 
@@ -55,10 +55,10 @@ Do not set the legacy `AzureWebJobsStorage` connection string in the target stat
 
 Assign the Function App system-assigned managed identity at storage account scope:
 
-| Role | Role definition ID | Why it is needed |
-| --- | --- | --- |
-| `Storage Blob Data Owner` | `b7e6dc6d-f1e8-4753-8033-0f276bb0955b` | Required by Azure Functions host storage for blob read/write access and host container creation; also covers package blob read access that was previously granted by `Storage Blob Data Reader`. |
-| `Storage Table Data Contributor` | `0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3` | Enables Functions diagnostic events to be written to table storage when startup or host-storage issues occur. |
+| Role                             | Role definition ID                     | Why it is needed                                                                                                                                                                                 |
+| -------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Storage Blob Data Owner`        | `b7e6dc6d-f1e8-4753-8033-0f276bb0955b` | Required by Azure Functions host storage for blob read/write access and host container creation; also covers package blob read access that was previously granted by `Storage Blob Data Reader`. |
+| `Storage Table Data Contributor` | `0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3` | Enables Functions diagnostic events to be written to table storage when startup or host-storage issues occur.                                                                                    |
 
 No `Storage Queue Data Contributor`, `Storage Account Contributor`, or Durable-specific roles are included because the current app has no Blob triggers, Queue triggers, Event Hubs triggers, Timer triggers, or Durable Functions. Add those roles only with a future trigger/binding change that requires them.
 

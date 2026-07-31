@@ -5,7 +5,7 @@
   "description": "v0 Hello World skeleton for the personal API catalogue platform.",
   "type": "module",
   "scripts": {
-    "lint": "npm run type-check",
+    "lint": "eslint apps scripts --max-warnings 0 && prettier --check .",
     "type-check": "tsc -p apps/api/tsconfig.json --noEmit && ng build --configuration development --no-progress",
     "test": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs apps/web/test/*.test.mjs scripts/test/*.test.mjs'",
     "test:api": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs'",
@@ -13,6 +13,7 @@
     "build:web": "ng build --configuration production --no-progress",
     "build:api": "tsc -p apps/api/tsconfig.json",
     "build:functions": "npm run build:api",
+    "build:release": "npm run build && bash scripts/build-release-artifacts.sh",
     "test:ops": "node --test scripts/test/*.test.mjs",
     "ops:smoke": "node scripts/smoke-runtime.mjs",
     "ops:smoke:auth": "node scripts/smoke-auth.mjs",
@@ -21,11 +22,19 @@
     "ops:check-telemetry": "node scripts/check-telemetry.mjs",
     "ops:triage-repair-issues": "node scripts/triage-repair-issues.mjs",
     "ops:policy-guardrails": "node scripts/policy-guardrails.mjs",
+    "ops:validate-autonomous-policy": "node -e \"import('./scripts/lib/autonomous-policy.mjs').then(({ loadAutonomousPolicy }) => { loadAutonomousPolicy(); console.log('Autonomous policy is valid.'); })\"",
     "ops:write-release-ledger": "node scripts/write-release-ledger.mjs",
     "ops:mint-smoke-token": "node scripts/mint-smoke-token.mjs",
     "ops:resolve-reddit-share": "npm run build:api --silent && node scripts/resolve-reddit-share-url.mjs",
-    "ops:check-openapi-drift": "node scripts/check-openapi-route-drift.mjs"
+    "ops:check-openapi-drift": "node scripts/check-openapi-route-drift.mjs",
+    "ops:check-operation-drift": "npm run build:api --silent && node scripts/check-operation-contract-drift.mjs",
+    "ops:check-architecture": "node scripts/check-architecture.mjs",
+    "ops:validate-agent-skills": "node scripts/validate-agent-skills.mjs",
+    "ops:check-lockfile": "node scripts/check-lockfile-policy.mjs",
+    "eval:agents": "npm run build:api --silent && node scripts/run-agent-evals.mjs",
+    "docs:check-operations": "npm run build:api --silent && node scripts/generate-operation-docs.mjs --check"
   },
+  "packageManager": "npm@10.9.8",
   "dependencies": {
     "@angular/common": "21.2.18",
     "@angular/compiler": "21.2.18",
@@ -48,9 +57,14 @@
     "@angular/build": "21.2.19",
     "@angular/cli": "21.2.19",
     "@angular/compiler-cli": "21.2.18",
+    "@eslint/js": "10.0.1",
     "@redocly/cli": "2.40.0",
     "@types/node": "24.10.1",
-    "typescript": "5.9.3"
+    "eslint": "10.8.0",
+    "globals": "17.8.0",
+    "prettier": "3.9.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.65.0"
   },
   "engines": {
     "node": ">=22.0.0"

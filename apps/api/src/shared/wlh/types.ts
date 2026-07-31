@@ -1,3 +1,31 @@
-export interface WlhConfig { baseUrl: string; storageAccountName: string; categoryBlobContainer: string; categoryBlobName: string; categoryFile: string; categoryVersion: string; }
-export interface WlhCategory { id: string; label: string; path: string; depth: number; parentId?: string; hitCount?: number; hasChildren: boolean; url?: string; }
-export interface WlhSearchRequest { keyword?: string; categoryId: string; priceFrom?: number; priceTo?: number; areaId?: string; paylivery?: boolean; rows?: number; page?: number; condition?: 'new'|'like_new'|'used'|'defect'; delivery?: ('pickup'|'shipping')[]; requiredTerms?: string[]; }
+export interface WlhConfig {
+  baseUrl: string;
+  storageAccountName: string;
+  categoryBlobContainer: string;
+  categoryBlobName: string;
+  categoryFile: string;
+  categoryVersion: string;
+}
+export interface WlhCategory {
+  id: string;
+  label: string;
+  path: string;
+  depth: number;
+  parentId?: string;
+  hitCount?: number;
+  hasChildren: boolean;
+  url?: string;
+}
+export interface WlhSearchRequest {
+  keyword?: string;
+  categoryId: string;
+  priceFrom?: number;
+  priceTo?: number;
+  areaId?: string;
+  paylivery?: boolean;
+  rows?: number;
+  page?: number;
+  condition?: 'new' | 'like_new' | 'used' | 'defect';
+  delivery?: ('pickup' | 'shipping')[];
+  requiredTerms?: string[];
+}

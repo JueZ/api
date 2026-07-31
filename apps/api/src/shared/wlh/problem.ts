@@ -10,6 +10,8 @@ import {
   type RepairableProblemExpected,
   type RetryPolicy,
 } from '../errors/repairableProblem.js';
+import { buildDiagnosticCapsule } from '../errors/diagnosticCapsule.js';
+import { resolveRepairableProblem } from '../errors/repairableErrorService.js';
 import { WlhFetchError } from './client.js';
 import { WlhInputError } from './input.js';
 import { WlhNotFoundError } from './service.js';
@@ -34,7 +36,19 @@ export const WLH_ENDPOINTS: Record<WlhOperationId, string> = {
   getWlhOfferImages: '/api/wlh/offers/{adId}/images',
 };
 
-const SEARCH_FIELDS = ['keyword', 'categoryId', 'priceFrom', 'priceTo', 'areaId', 'paylivery', 'rows', 'page', 'condition', 'delivery', 'requiredTerms'];
+const SEARCH_FIELDS = [
+  'keyword',
+  'categoryId',
+  'priceFrom',
+  'priceTo',
+  'areaId',
+  'paylivery',
+  'rows',
+  'page',
+  'condition',
+  'delivery',
+  'requiredTerms',
+];
 const CATEGORY_FIELDS = ['categoryId'];
 const OFFER_FIELDS = ['adId'];
 const NO_REQUEST_FIELDS: string[] = [];
@@ -75,6 +89,49 @@ export function wlhProblemForError(args: {
   });
 }
 
+export async function resolveWlhProblemForError(args: {
+  operationId: WlhOperationId;
+  error: unknown;
+  traceId?: string;
+  body?: unknown;
+}): Promise<RepairableProblem> {
+  const mapped = classifyWlhError(args.error);
+  const deterministic = buildWlhProblem({
+    operationId: args.operationId,
+    traceId: args.traceId,
+    ...mapped,
+  });
+  const allowedRequestFields = allowedFieldsForOperation(args.operationId);
+  const expected = {
+    operation_id: args.operationId,
+    diagnostic_id: deterministic.diagnostic_id,
+    status: deterministic.status,
+    allowedRequestFields,
+    allowedOperationIds: ALL_OPERATION_IDS,
+  };
+  const capsule = buildDiagnosticCapsule({
+    diagnostic_id: deterministic.diagnostic_id,
+    operation_id: args.operationId,
+    endpoint: WLH_ENDPOINTS[args.operationId],
+    method: args.operationId === WLH_OPERATION_IDS.postWlhSearch ? 'POST' : 'GET',
+    failure_stage:
+      deterministic.classification === 'diagnostic_uncertain'
+        ? 'unknown'
+        : deterministic.status >= 500
+          ? 'dependency'
+          : 'business_rule',
+    http_status: deterministic.status,
+    trace_id: args.traceId,
+    safe_error: { code: mapped.failureKind.toUpperCase(), message: deterministic.detail },
+    body: args.body,
+    contract_summary: {
+      required: requiredFieldsForOperation(args.operationId),
+      properties: Object.fromEntries(allowedRequestFields.map((field) => [field, { documented: true }])),
+    },
+  });
+  return resolveRepairableProblem({ deterministic, capsule, expected });
+}
+
 export function buildWlhProblem(input: WlhProblemInput): RepairableProblem {
   const diagnosticId = input.diagnosticId ?? createDiagnosticId();
   const allowedRequestFields = allowedFieldsForOperation(input.operationId);
@@ -93,7 +150,6 @@ export function buildWlhProblem(input: WlhProblemInput): RepairableProblem {
   const detail = detailForFailure(input.failureKind, input.message);
   const callerInstruction = callerInstructionForFailure(input.failureKind, field);
 
-  // WLH REC is deterministic-only for now; LLM-assisted analysis stays disabled until a sanitized shape-only diagnostic capsule exists.
   const candidate: RepairableProblem = {
     type: `https://api.juez.local/problems/wlh/${classification}`,
     title: titleForFailure(input.failureKind),
@@ -115,11 +171,13 @@ export function buildWlhProblem(input: WlhProblemInput): RepairableProblem {
       : {}),
     caller_instruction: callerInstruction,
     safe_debug_summary: safeSummaryForFailure(input.operationId, input.failureKind, expected.status),
-    analysis_mode: 'deterministic',
+    analysis_mode: classification === 'diagnostic_uncertain' ? 'fallback' : 'deterministic',
   };
 
   const validated = validateRepairableProblem(candidate, expected);
-  const sanitized = validated ? sanitizeRepairableProblem(validated, { allowedRequestFields, allowedOperationIds: ALL_OPERATION_IDS }) : null;
+  const sanitized = validated
+    ? sanitizeRepairableProblem(validated, { allowedRequestFields, allowedOperationIds: ALL_OPERATION_IDS })
+    : null;
   if (!sanitized) {
     throw new Error('WLH deterministic repairable problem failed local validation.');
   }
@@ -142,9 +200,12 @@ function classifyWlhError(error: unknown): Omit<WlhProblemInput, 'operationId' |
     return { failureKind: 'category_not_found', status: 404, message: 'Category was not found.', field: 'categoryId' };
   }
   if (error instanceof WlhFetchError) {
-    if (error.status === 429) return { failureKind: 'upstream_rate_limited', status: 429, message: 'WLH rate limit reached.' };
-    if (error.kind === 'parse') return { failureKind: 'upstream_parse_failure', status: 502, message: 'WLH page shape could not be parsed.' };
-    if (error.kind === 'fetch') return { failureKind: 'upstream_fetch_failure', status: 502, message: 'WLH fetch failed.' };
+    if (error.status === 429)
+      return { failureKind: 'upstream_rate_limited', status: 429, message: 'WLH rate limit reached.' };
+    if (error.kind === 'parse')
+      return { failureKind: 'upstream_parse_failure', status: 502, message: 'WLH page shape could not be parsed.' };
+    if (error.kind === 'fetch')
+      return { failureKind: 'upstream_fetch_failure', status: 502, message: 'WLH fetch failed.' };
     return { failureKind: 'upstream_fetch_failure', status: error.status, message: 'WLH upstream request failed.' };
   }
   if (error instanceof SyntaxError) {
@@ -163,10 +224,12 @@ function statusForFailure(kind: WlhFailureKind, status?: number): number {
 }
 
 function classificationForFailure(kind: WlhFailureKind): RepairableErrorClassification {
-  if (kind === 'invalid_json' || kind === 'input_validation' || kind === 'category_not_found') return 'caller_contract_violation';
+  if (kind === 'invalid_json' || kind === 'input_validation' || kind === 'category_not_found')
+    return 'caller_contract_violation';
   if (kind === 'upstream_rate_limited') return 'capacity_or_timeout';
   if (kind === 'upstream_parse_failure') return 'version_skew';
-  if (kind === 'internal_config_failure' || kind === 'internal_failure') return 'internal_error';
+  if (kind === 'internal_config_failure') return 'service_bug_likely';
+  if (kind === 'internal_failure') return 'diagnostic_uncertain';
   return 'dependency_failure';
 }
 
@@ -180,7 +243,7 @@ function retryPolicyForFailure(kind: WlhFailureKind): RetryPolicy {
   if (kind === 'upstream_fetch_failure' || kind === 'upstream_parse_failure') {
     return { can_retry: true, same_request: true, idempotency_required: false };
   }
-  return { can_retry: false, same_request: true };
+  return { can_retry: false, same_request: false };
 }
 
 function repairableForFailure(kind: WlhFailureKind): boolean {
@@ -191,6 +254,7 @@ function confidenceForFailure(kind: WlhFailureKind): number {
   if (kind === 'invalid_json' || kind === 'input_validation') return 0.9;
   if (kind === 'category_not_found' || kind === 'upstream_rate_limited') return 0.84;
   if (kind === 'upstream_parse_failure') return 0.78;
+  if (kind === 'internal_failure') return 0.5;
   return 0.72;
 }
 
@@ -206,47 +270,98 @@ function titleForFailure(kind: WlhFailureKind): string {
 function detailForFailure(kind: WlhFailureKind, message?: string): string {
   if (kind === 'invalid_json') return 'The WLH request body must be valid JSON.';
   if (kind === 'input_validation') return message ?? 'The WLH request did not match the endpoint contract.';
-  if (kind === 'category_not_found') return 'The requested WLH categoryId does not exist in the current category index.';
+  if (kind === 'category_not_found')
+    return 'The requested WLH categoryId does not exist in the current category index.';
   if (kind === 'upstream_rate_limited') return 'WLH asked callers to slow down before retrying.';
-  if (kind === 'upstream_parse_failure') return 'WLH returned a page shape that the deterministic parser does not recognize.';
+  if (kind === 'upstream_parse_failure')
+    return 'WLH returned a page shape that the deterministic parser does not recognize.';
   if (kind === 'upstream_fetch_failure') return 'The API could not fetch the WLH upstream dependency.';
   return 'The API could not complete the WLH request because of an internal failure.';
 }
 
 function callerInstructionForFailure(kind: WlhFailureKind, field?: string): string {
   if (kind === 'invalid_json') return 'Send a syntactically valid JSON request body and retry.';
-  if (kind === 'input_validation') return `Correct the ${field ?? 'WLH request'} field according to the documented schema and retry.`;
-  if (kind === 'category_not_found') return 'Call getWlhCategoriesTop or getWlhCategoryChildren to choose a current categoryId, then retry with that value.';
-  if (kind === 'upstream_rate_limited') return 'Retry later with the same request. Do not change parameters solely to bypass rate limiting.';
-  if (kind === 'upstream_parse_failure') return 'Retry later with the same request; if the problem persists, report the diagnostic_id because the WLH page shape may have changed.';
-  if (kind === 'upstream_fetch_failure') return 'Retry later with the same request. Do not include raw upstream response bodies in client-visible diagnostics.';
+  if (kind === 'input_validation')
+    return `Correct the ${field ?? 'WLH request'} field according to the documented schema and retry.`;
+  if (kind === 'category_not_found')
+    return 'Call getWlhCategoriesTop or getWlhCategoryChildren to choose a current categoryId, then retry with that value.';
+  if (kind === 'upstream_rate_limited')
+    return 'Retry later with the same request. Do not change parameters solely to bypass rate limiting.';
+  if (kind === 'upstream_parse_failure')
+    return 'Retry later with the same request; if the problem persists, report the diagnostic_id because the WLH page shape may have changed.';
+  if (kind === 'upstream_fetch_failure')
+    return 'Retry later with the same request. Do not include raw upstream response bodies in client-visible diagnostics.';
   return 'Do not retry blindly. Report the diagnostic_id to the service owner if this persists.';
 }
 
 function invalidFieldsForFailure(kind: WlhFailureKind, field?: string): InvalidField[] | undefined {
-  if (kind === 'invalid_json') return [{ path: 'categoryId', problem: 'The request body was not valid JSON.', expected: 'JSON object matching WlhSearchRequest' }];
-  if (kind === 'input_validation' && field) return [{ path: field, problem: `The ${field} field is invalid or missing.`, expected: expectedForField(field) }];
-  if (kind === 'category_not_found') return [{ path: 'categoryId', problem: 'The categoryId was not found in the current WLH category index.', expected: 'categoryId from getWlhCategoriesTop or getWlhCategoryChildren' }];
+  if (kind === 'invalid_json')
+    return [
+      {
+        path: 'categoryId',
+        problem: 'The request body was not valid JSON.',
+        expected: 'JSON object matching WlhSearchRequest',
+      },
+    ];
+  if (kind === 'input_validation' && field)
+    return [{ path: field, problem: `The ${field} field is invalid or missing.`, expected: expectedForField(field) }];
+  if (kind === 'category_not_found')
+    return [
+      {
+        path: 'categoryId',
+        problem: 'The categoryId was not found in the current WLH category index.',
+        expected: 'categoryId from getWlhCategoriesTop or getWlhCategoryChildren',
+      },
+    ];
   return undefined;
 }
 
 function repairPlanForFailure(kind: WlhFailureKind, field?: string): RepairPlanStep[] | undefined {
-  if (kind === 'invalid_json') return [{ action: 'retry_with_modified_request', reason: 'The body must parse as JSON before the WLH search contract can be validated.' }];
-  if (kind === 'input_validation') return [{ action: field === 'categoryId' ? 'provide_missing_value' : 'replace_invalid_value', ...(field ? { path: field } : {}), reason: 'The caller supplied a value outside the WLH request contract.' }];
-  if (kind === 'category_not_found') return [{ action: 'call_prerequisite_operation', operation_id: WLH_OPERATION_IDS.getWlhCategoriesTop, path: 'categoryId', reason: 'A current category id is required before searching or reading category children.' }];
-  if (kind === 'upstream_rate_limited') return [{ action: 'retry_later', reason: 'The upstream WLH service is rate limiting requests.' }];
-  if (kind === 'upstream_parse_failure' || kind === 'upstream_fetch_failure') return [{ action: 'retry_later', reason: 'The failure occurred while contacting or parsing the WLH dependency.' }];
+  if (kind === 'invalid_json')
+    return [
+      {
+        action: 'retry_with_modified_request',
+        reason: 'The body must parse as JSON before the WLH search contract can be validated.',
+      },
+    ];
+  if (kind === 'input_validation')
+    return [
+      {
+        action: field === 'categoryId' ? 'provide_missing_value' : 'replace_invalid_value',
+        ...(field ? { path: field } : {}),
+        reason: 'The caller supplied a value outside the WLH request contract.',
+      },
+    ];
+  if (kind === 'category_not_found')
+    return [
+      {
+        action: 'call_prerequisite_operation',
+        operation_id: WLH_OPERATION_IDS.getWlhCategoriesTop,
+        path: 'categoryId',
+        reason: 'A current category id is required before searching or reading category children.',
+      },
+    ];
+  if (kind === 'upstream_rate_limited')
+    return [{ action: 'retry_later', reason: 'The upstream WLH service is rate limiting requests.' }];
+  if (kind === 'upstream_parse_failure' || kind === 'upstream_fetch_failure')
+    return [{ action: 'retry_later', reason: 'The failure occurred while contacting or parsing the WLH dependency.' }];
   return [{ action: 'report_diagnostic_id', reason: 'The failure appears to be inside the API service.' }];
 }
 
 function expectedForField(field: string): string {
   switch (field) {
-    case 'categoryId': return 'non-empty string from the WLH category index';
-    case 'condition': return 'one of new, like_new, used, defect';
-    case 'delivery': return 'array containing pickup and/or shipping';
-    case 'rows': return 'integer from 1 through 100';
-    case 'page': return 'integer greater than or equal to 1';
-    default: return 'valid WLH request field';
+    case 'categoryId':
+      return 'non-empty string from the WLH category index';
+    case 'condition':
+      return 'one of new, like_new, used, defect';
+    case 'delivery':
+      return 'array containing pickup and/or shipping';
+    case 'rows':
+      return 'integer from 1 through 100';
+    case 'page':
+      return 'integer greater than or equal to 1';
+    default:
+      return 'valid WLH request field';
   }
 }
 
@@ -263,7 +378,18 @@ function normalizedField(field: string | undefined, allowedFields: string[], kin
 
 function allowedFieldsForOperation(operationId: WlhOperationId): string[] {
   if (operationId === WLH_OPERATION_IDS.postWlhSearch) return SEARCH_FIELDS;
-  if (operationId === WLH_OPERATION_IDS.getWlhCategory || operationId === WLH_OPERATION_IDS.getWlhCategoryChildren) return CATEGORY_FIELDS;
-  if (operationId === WLH_OPERATION_IDS.getWlhOffer || operationId === WLH_OPERATION_IDS.getWlhOfferImages) return OFFER_FIELDS;
+  if (operationId === WLH_OPERATION_IDS.getWlhCategory || operationId === WLH_OPERATION_IDS.getWlhCategoryChildren)
+    return CATEGORY_FIELDS;
+  if (operationId === WLH_OPERATION_IDS.getWlhOffer || operationId === WLH_OPERATION_IDS.getWlhOfferImages)
+    return OFFER_FIELDS;
   return NO_REQUEST_FIELDS;
+}
+
+function requiredFieldsForOperation(operationId: WlhOperationId): string[] {
+  if (operationId === WLH_OPERATION_IDS.postWlhSearch) return [];
+  if (operationId === WLH_OPERATION_IDS.getWlhCategory || operationId === WLH_OPERATION_IDS.getWlhCategoryChildren)
+    return ['categoryId'];
+  if (operationId === WLH_OPERATION_IDS.getWlhOffer || operationId === WLH_OPERATION_IDS.getWlhOfferImages)
+    return ['adId'];
+  return [];
 }

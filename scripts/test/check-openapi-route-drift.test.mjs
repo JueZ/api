@@ -43,8 +43,6 @@ test('extracts app.http routes and documentable methods from Azure Functions sou
   ]);
 });
 
-
-
 test('excludes intentional non-OpenAPI protocol and metadata routes', () => {
   const source = `
     import { app } from '@azure/functions';
@@ -66,29 +64,28 @@ test('excludes intentional non-OpenAPI protocol and metadata routes', () => {
 });
 
 test('detects duplicate operationIds within a contract', () => {
-  const issues = findDuplicateOperationIds({
-    paths: {
-      '/one': { get: { operationId: 'duplicateId' } },
-      '/two': { post: { operationId: 'duplicateId' } },
+  const issues = findDuplicateOperationIds(
+    {
+      paths: {
+        '/one': { get: { operationId: 'duplicateId' } },
+        '/two': { post: { operationId: 'duplicateId' } },
+      },
     },
-  }, 'test contract');
+    'test contract',
+  );
 
   assert.equal(issues.length, 1);
   assert.match(issues[0], /duplicate operationId 'duplicateId'/);
 });
 
 test('detects implementation routes missing from canonical OpenAPI', () => {
-  const issues = findMissingCanonicalRoutes([
-    { method: 'get', path: '/api/missing', filePath: 'missing.ts' },
-  ], {
+  const issues = findMissingCanonicalRoutes([{ method: 'get', path: '/api/missing', filePath: 'missing.ts' }], {
     paths: {
       '/health': { get: { operationId: 'getHealth' } },
     },
   });
 
-  assert.deepEqual(issues, [
-    'canonical OpenAPI is missing implementation route GET /api/missing from missing.ts.',
-  ]);
+  assert.deepEqual(issues, ['canonical OpenAPI is missing implementation route GET /api/missing from missing.ts.']);
 });
 
 test('detects GPT WLH request and response schemas that are thinner than canonical schemas', () => {
@@ -97,9 +94,11 @@ test('detects GPT WLH request and response schemas that are thinner than canonic
       '/api/wlh/search': {
         post: {
           operationId: 'postWlhSearch',
-          requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/WlhSearchRequest' } } } },
+          requestBody: {
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/WlhSearchRequest' } } },
+          },
           responses: {
-            '200': {
+            200: {
               description: 'Search results',
               content: { 'application/json': { schema: { $ref: '#/components/schemas/WlhSearchResponse' } } },
             },
@@ -114,7 +113,7 @@ test('detects GPT WLH request and response schemas that are thinner than canonic
         post: {
           operationId: 'postWlhSearch',
           requestBody: { content: { 'application/json': { schema: { type: 'object' } } } },
-          responses: { '200': { description: 'OK' } },
+          responses: { 200: { description: 'OK' } },
         },
       },
     },
@@ -128,11 +127,14 @@ test('detects GPT WLH request and response schemas that are thinner than canonic
 });
 
 test('detects stale split-contract references in the GPT Actions contract', () => {
-  const issues = findStaleSplitContractReferences({
-    paths: {
-      '/api/reddit/thread': { post: { operationId: 'redditThread' } },
+  const issues = findStaleSplitContractReferences(
+    {
+      paths: {
+        '/api/reddit/thread': { post: { operationId: 'redditThread' } },
+      },
     },
-  }, 'See contracts/openapi.gpt.reddit.yaml for the old split contract.');
+    'See contracts/openapi.gpt.reddit.yaml for the old split contract.',
+  );
 
   assert.equal(issues.length, 2);
   assert.match(issues[0], /openapi\.gpt\.reddit\.yaml/);

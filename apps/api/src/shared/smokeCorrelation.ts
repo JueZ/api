@@ -6,7 +6,10 @@ const MAX_SMOKE_RUN_ID_LENGTH = 96;
 export function sanitizeSmokeRunId(value: string | undefined | null): string | undefined {
   const normalized = (value ?? '').trim();
   if (!normalized) return undefined;
-  const sanitized = normalized.replace(/[^A-Za-z0-9_.:-]/g, '-').replace(/-+/g, '-').slice(0, MAX_SMOKE_RUN_ID_LENGTH);
+  const sanitized = normalized
+    .replace(/[^A-Za-z0-9_.:-]/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, MAX_SMOKE_RUN_ID_LENGTH);
   return sanitized || undefined;
 }
 

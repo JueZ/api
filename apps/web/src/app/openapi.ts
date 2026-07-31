@@ -30,10 +30,13 @@ export interface OpenApiOperation {
     required?: boolean;
     content?: Record<string, { schema?: OpenApiSchema; examples?: Record<string, { value?: unknown }> }>;
   };
-  responses?: Record<string, {
-    description?: string;
-    content?: Record<string, { schema?: OpenApiSchema; examples?: Record<string, { value?: unknown }> }>;
-  }>;
+  responses?: Record<
+    string,
+    {
+      description?: string;
+      content?: Record<string, { schema?: OpenApiSchema; examples?: Record<string, { value?: unknown }> }>;
+    }
+  >;
   parameters?: Array<{
     name: string;
     in: 'path' | 'query' | 'header' | 'cookie';
@@ -90,6 +93,7 @@ export interface ApiOperationDoc {
   summary: string;
   description: string;
   requiresAuth: boolean;
+  requiredScopes: string[];
   requestRequired: boolean;
   requestContentType: string;
   requestSchemaName: string;
@@ -118,14 +122,17 @@ export function buildApiOperations(document: OpenApiDocument): ApiOperationDoc[]
           const requestSchema = helpers.resolveSchema(requestMedia?.schema);
           const requestExample = firstExample(requestMedia?.examples) ?? helpers.exampleFromSchema(requestSchema);
           const responses = Object.entries(typedOperation.responses ?? {}).map(([status, response]) => {
-            const responseMedia = response.content?.['application/json'] ?? response.content?.['application/problem+json'];
+            const responseMedia =
+              response.content?.['application/json'] ?? response.content?.['application/problem+json'];
             const responseSchema = helpers.resolveSchema(responseMedia?.schema);
             return {
               status,
               description: response.description ?? '',
               schemaName: schemaName(responseMedia?.schema),
               fields: helpers.schemaFields(responseSchema),
-              example: stringifyExample(firstExample(responseMedia?.examples) ?? helpers.exampleFromSchema(responseSchema)),
+              example: stringifyExample(
+                firstExample(responseMedia?.examples) ?? helpers.exampleFromSchema(responseSchema),
+              ),
             };
           });
 
@@ -137,6 +144,7 @@ export function buildApiOperations(document: OpenApiDocument): ApiOperationDoc[]
             summary: typedOperation.summary ?? `${method.toUpperCase()} ${path}`,
             description: normalizeDescription(typedOperation.description),
             requiresAuth: Boolean(typedOperation.security?.length),
+            requiredScopes: operationScopes(typedOperation),
             requestRequired: typedOperation.requestBody?.required === true,
             requestContentType: requestMedia ? 'application/json' : '',
             requestSchemaName: schemaName(requestMedia?.schema),
@@ -154,6 +162,10 @@ export function buildApiOperations(document: OpenApiDocument): ApiOperationDoc[]
         }),
     )
     .sort((left, right) => left.path.localeCompare(right.path) || left.method.localeCompare(right.method));
+}
+
+function operationScopes(operation: OpenApiOperation): string[] {
+  return [...new Set((operation.security ?? []).flatMap((requirement) => Object.values(requirement).flat()))];
 }
 
 function createSchemaHelpers(document: OpenApiDocument) {

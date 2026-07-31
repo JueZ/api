@@ -17,7 +17,8 @@ export type RedditShareResolution =
       contentType?: string | null;
     }
   | {
-      status: 'blocked_by_reddit_web' | 'unresolved' | 'invalid_redirect' | 'unsafe_redirect' | 'max_redirects_exceeded';
+      status:
+        'blocked_by_reddit_web' | 'unresolved' | 'invalid_redirect' | 'unsafe_redirect' | 'max_redirects_exceeded';
       originalUrl: string;
       finalUrl?: string;
       redirectChain: string[];
@@ -33,16 +34,25 @@ export interface ResolveRedditShareUrlOptions {
 
 const BLOCKED_STATUSES = new Set([403, 429]);
 
-export async function resolveRedditShareUrl(inputUrl: string, options: ResolveRedditShareUrlOptions): Promise<RedditShareResolution> {
+export async function resolveRedditShareUrl(
+  inputUrl: string,
+  options: ResolveRedditShareUrlOptions,
+): Promise<RedditShareResolution> {
   const originalUrl = inputUrl.trim();
   if (!isRedditShareUrl(originalUrl)) {
     throw new RedditInputError('post URL must be a supported Reddit /s/ share URL.', 'INVALID_REDDIT_INPUT', inputUrl);
   }
 
   const redirect = await options.resolveRedirect(originalUrl);
-  const redirectChain = stripQueriesFromUrls(redirect.redirectChain.length > 0 ? redirect.redirectChain : [originalUrl]);
+  const redirectChain = stripQueriesFromUrls(
+    redirect.redirectChain.length > 0 ? redirect.redirectChain : [originalUrl],
+  );
 
-  if (redirect.status === 'unsafe_redirect' || redirect.status === 'invalid_redirect' || redirect.status === 'max_redirects_exceeded') {
+  if (
+    redirect.status === 'unsafe_redirect' ||
+    redirect.status === 'invalid_redirect' ||
+    redirect.status === 'max_redirects_exceeded'
+  ) {
     return {
       status: redirect.status,
       originalUrl,
@@ -58,13 +68,29 @@ export async function resolveRedditShareUrl(inputUrl: string, options: ResolveRe
   const finalUrl = redirect.finalUrl;
   const normalized = parseDirectRedditPostInput(finalUrl);
   if (normalized && !isRedditShareUrl(finalUrl) && normalized.canonicalUrl) {
-    return resolvedShare({ originalUrl, finalUrl, cleanCanonicalUrl: normalized.canonicalUrl, redirectChain, source: 'web_redirect', httpStatus: redirect.httpStatus, contentType: redirect.contentType });
+    return resolvedShare({
+      originalUrl,
+      finalUrl,
+      cleanCanonicalUrl: normalized.canonicalUrl,
+      redirectChain,
+      source: 'web_redirect',
+      httpStatus: redirect.httpStatus,
+      contentType: redirect.contentType,
+    });
   }
 
   if (isHtmlContentType(redirect.contentType) && redirect.bodyText) {
     const extracted = extractRedditCanonicalMatchFromHtml(redirect.bodyText);
     if (extracted) {
-      return resolvedShare({ originalUrl, finalUrl, cleanCanonicalUrl: extracted.url, redirectChain, source: extracted.source, httpStatus: redirect.httpStatus, contentType: redirect.contentType });
+      return resolvedShare({
+        originalUrl,
+        finalUrl,
+        cleanCanonicalUrl: extracted.url,
+        redirectChain,
+        source: extracted.source,
+        httpStatus: redirect.httpStatus,
+        contentType: redirect.contentType,
+      });
     }
   }
 
@@ -83,7 +109,6 @@ export async function resolveRedditShareUrl(inputUrl: string, options: ResolveRe
   };
 }
 
-
 function resolvedShare(args: {
   originalUrl: string;
   finalUrl: string;
@@ -95,7 +120,11 @@ function resolvedShare(args: {
 }): Extract<RedditShareResolution, { status: 'resolved' }> {
   const normalized = parseDirectRedditPostInput(args.cleanCanonicalUrl);
   if (!normalized?.canonicalUrl) {
-    throw new RedditInputError('Extracted Reddit canonical URL did not contain a valid article ID.', 'UNRESOLVED_REDDIT_SHARE_URL', args.originalUrl);
+    throw new RedditInputError(
+      'Extracted Reddit canonical URL did not contain a valid article ID.',
+      'UNRESOLVED_REDDIT_SHARE_URL',
+      args.originalUrl,
+    );
   }
   return {
     status: 'resolved',

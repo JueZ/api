@@ -7,7 +7,8 @@ export function buildInitialBody(operation: ApiOperationDoc): OperationFormValue
   const example = operation.requestExample ? parseJsonOrText(operation.requestExample) : {};
   return Object.fromEntries(
     [...operation.parameterFields, ...operation.requestFields].map((field) => {
-      const exampleValue = typeof example === 'object' && example !== null ? (example as JsonObject)[field.name] : undefined;
+      const exampleValue =
+        typeof example === 'object' && example !== null ? (example as JsonObject)[field.name] : undefined;
       const value = exampleValue ?? field.defaultValue ?? '';
       return [field.name, value === undefined || value === null ? '' : String(value)];
     }),

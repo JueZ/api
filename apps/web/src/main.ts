@@ -19,6 +19,14 @@ const OPENAPI_ASSET_URL = 'assets/openapi.yaml';
 const config = readRuntimeConfig();
 const msalClient = createMsalClient(config);
 
+interface PendingBringConfirmation {
+  operationId: string;
+  operation: 'complete' | 'remove';
+  listPseudonym: string;
+  itemCount: number;
+  expiresAt: string;
+}
+
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -27,9 +35,7 @@ const msalClient = createMsalClient(config);
       <section class="hero">
         <p class="eyebrow">Personal API catalogue</p>
         <h1 id="project-title">JueZ API Catalogue</h1>
-        <p class="lede">
-          A thin, serverless v0 foundation for publishing personal API integrations.
-        </p>
+        <p class="lede">A thin, serverless v0 foundation for publishing personal API integrations.</p>
       </section>
 
       <section class="card" aria-labelledby="auth-title">
@@ -58,22 +64,19 @@ const msalClient = createMsalClient(config);
           </button>
         </div>
         @if (!canUseAuth()) {
-          <p class="muted">
-            Auth UI is disabled until non-secret Microsoft Entra runtime config is supplied.
-          </p>
+          <p class="muted">Auth UI is disabled until non-secret Microsoft Entra runtime config is supplied.</p>
         }
       </section>
 
       <section class="card catalogue-card" aria-labelledby="catalogue-title">
         <h2 id="catalogue-title">API catalogue</h2>
         <p>
-          This interactive catalogue is generated from the OpenAPI {{ openApiVersion() }} contract.
-          It shows the expected payload fields, response objects, examples, and lets you call each
-          endpoint from the browser.
+          This interactive catalogue is generated from the OpenAPI {{ openApiVersion() }} contract. It shows the
+          expected payload fields, response objects, examples, and lets you call each endpoint from the browser.
         </p>
         <p class="muted">
-          This endpoint now requires a valid OAuth/OIDC access token with the configured API
-          scope or role and a server-side allowlisted user identifier.
+          This endpoint now requires a valid OAuth/OIDC access token with the configured API scope or role and a
+          server-side allowlisted user identifier.
         </p>
         @if (catalogueError()) {
           <pre class="api-error" role="alert">{{ catalogueError() }}</pre>
@@ -89,34 +92,50 @@ const msalClient = createMsalClient(config);
         <p class="eyebrow">Shopping lists</p>
         <h2 id="bring-guide-title">Bring! lists and items</h2>
         <p>
-          Sign in, load every Bring! list available to the technical account, copy the UUID of
-          your own or a shared list, and use that UUID to read or edit exactly that list.
+          Sign in, choose an explicitly allowlisted list, and read its current version. Adds use a caller-generated
+          operation UUID. Complete and remove are always prepared first and applied only after a separate confirmation.
         </p>
         <div class="button-row">
           <a class="button secondary" href="#bringListLists">1. Choose a list</a>
           <a class="button secondary" href="#bringGetItems">2. View items</a>
           <a class="button secondary" href="#bringAddItems">3. Add items</a>
-          <a class="button secondary" href="#bringCompleteItems">Complete items</a>
-          <a class="button secondary" href="#bringRemoveItems">Remove items</a>
+          <a class="button secondary" href="#bringPrepareItemMutation">4. Prepare complete/remove</a>
+          <a class="button secondary" href="#bringApplyItemMutation">5. Confirm and apply</a>
         </div>
         <p class="muted">
-          Item batches are entered as JSON arrays. Creating, deleting, or sharing whole lists is
-          intentionally not supported; the integration edits lists already accessible to the account.
+          Production writes are denied for shared or unlisted lists. Test is read-only. Creating, deleting, or sharing
+          whole lists is intentionally unsupported.
         </p>
+        @if (pendingBringConfirmation(); as pending) {
+          <div class="caller-instruction" role="status">
+            <strong>Prepared {{ pending.operation }} operation</strong>
+            <p>
+              {{ pending.itemCount }} item(s) on list {{ pending.listPseudonym }}. Confirmation expires
+              {{ pending.expiresAt }}. The apply form has been populated; review it before confirming.
+            </p>
+            <a class="button secondary" href="#bringApplyItemMutation">Review confirmation</a>
+          </div>
+        }
       </section>
 
       @for (operation of endpoints(); track operation.id) {
         <section class="card endpoint-card" [id]="operation.id" [attr.aria-labelledby]="operation.id + '-title'">
           <div class="endpoint-heading">
-            <span class="method-badge" [class]="'method-badge ' + operation.method">{{ operation.method.toUpperCase() }}</span>
+            <span class="method-badge" [class]="'method-badge ' + operation.method">{{
+              operation.method.toUpperCase()
+            }}</span>
             <code class="endpoint-path">{{ operation.path }}</code>
             <span class="tag-badge">{{ operation.tag }}</span>
-            <a class="anchor-link" [href]="'#' + operation.id" [attr.aria-label]="'Link to ' + operation.summary">#{{ operation.id }}</a>
+            <a class="anchor-link" [href]="'#' + operation.id" [attr.aria-label]="'Link to ' + operation.summary"
+              >#{{ operation.id }}</a
+            >
           </div>
           <h2 [id]="operation.id + '-title'">{{ operation.summary }}</h2>
           <p>{{ operation.description }}</p>
           <p class="status" [class.good]="!operation.requiresAuth" [class.warn]="operation.requiresAuth">
-            {{ operation.requiresAuth ? 'Requires Microsoft Entra bearer token with the configured API scope and allowlisted user.' : 'Public endpoint; no bearer token required.' }}
+            {{
+              operation.requiresAuth ? operationScopeMessage(operation) : 'Public endpoint; no bearer token required.'
+            }}
           </p>
 
           @if (operation.parameterFields.length) {
@@ -127,10 +146,16 @@ const msalClient = createMsalClient(config);
                   <div class="field-row" role="row">
                     <div role="cell">
                       <strong>{{ field.name }}</strong>
-                      @if (field.required) { <span class="required">required</span> }
+                      @if (field.required) {
+                        <span class="required">required</span>
+                      }
                     </div>
-                    <div role="cell"><code>{{ field.parameterIn }}</code></div>
-                    <div role="cell"><code>{{ field.type }}</code></div>
+                    <div role="cell">
+                      <code>{{ field.parameterIn }}</code>
+                    </div>
+                    <div role="cell">
+                      <code>{{ field.type }}</code>
+                    </div>
                     <div role="cell">{{ field.description }}</div>
                   </div>
                 }
@@ -140,16 +165,25 @@ const msalClient = createMsalClient(config);
 
           @if (operation.requestFields.length) {
             <div class="docs-panel">
-              <h3>Request body: <code>{{ operation.requestSchemaName }}</code></h3>
-              <p class="muted">Content type: {{ operation.requestContentType }}{{ operation.requestRequired ? '; required' : '; optional' }}</p>
+              <h3>
+                Request body: <code>{{ operation.requestSchemaName }}</code>
+              </h3>
+              <p class="muted">
+                Content type: {{ operation.requestContentType
+                }}{{ operation.requestRequired ? '; required' : '; optional' }}
+              </p>
               <div class="field-table" role="table" [attr.aria-label]="operation.summary + ' request fields'">
                 @for (field of operation.requestFields; track field.name) {
                   <div class="field-row" role="row">
                     <div role="cell">
                       <strong>{{ field.name }}</strong>
-                      @if (field.required) { <span class="required">required</span> }
+                      @if (field.required) {
+                        <span class="required">required</span>
+                      }
                     </div>
-                    <div role="cell"><code>{{ field.type }}</code></div>
+                    <div role="cell">
+                      <code>{{ field.type }}</code>
+                    </div>
                     <div role="cell">{{ field.description }}</div>
                     <div role="cell" class="muted">{{ field.constraints }}</div>
                   </div>
@@ -168,7 +202,12 @@ const msalClient = createMsalClient(config);
             <h3>Try this endpoint</h3>
             @for (field of operation.parameterFields; track field.name) {
               <label class="field">
-                <span>{{ field.name }} ({{ field.parameterIn }}) @if (field.required) { <em>(required)</em> }</span>
+                <span
+                  >{{ field.name }} ({{ field.parameterIn }})
+                  @if (field.required) {
+                    <em>(required)</em>
+                  }
+                </span>
                 <input
                   [type]="field.inputType"
                   [value]="inputValue(operation.id, field.name)"
@@ -179,15 +218,27 @@ const msalClient = createMsalClient(config);
             }
             @for (field of operation.requestFields; track field.name) {
               <label class="field">
-                <span>{{ field.name }} @if (field.required) { <em>(required)</em> }</span>
+                <span
+                  >{{ field.name }}
+                  @if (field.required) {
+                    <em>(required)</em>
+                  }
+                </span>
                 @if (field.enumValues.length) {
-                  <select [value]="inputValue(operation.id, field.name)" (change)="setInputValue(operation.id, field.name, $any($event.target).value)">
+                  <select
+                    [value]="inputValue(operation.id, field.name)"
+                    (change)="setInputValue(operation.id, field.name, $any($event.target).value)"
+                  >
                     @for (value of field.enumValues; track value) {
                       <option [value]="value">{{ value }}</option>
                     }
                   </select>
                 } @else if (field.inputType === 'checkbox') {
-                  <input type="checkbox" [checked]="inputValue(operation.id, field.name) === 'true'" (change)="setInputValue(operation.id, field.name, $any($event.target).checked ? 'true' : 'false')" />
+                  <input
+                    type="checkbox"
+                    [checked]="inputValue(operation.id, field.name) === 'true'"
+                    (change)="setInputValue(operation.id, field.name, $any($event.target).checked ? 'true' : 'false')"
+                  />
                 } @else if (field.inputType === 'textarea') {
                   <textarea
                     rows="8"
@@ -207,12 +258,14 @@ const msalClient = createMsalClient(config);
               </label>
             }
             <div class="button-row">
-              <button class="button" type="submit" [disabled]="isOperationLoading(operation.id) || (operation.requiresAuth && !canUseAuth())">
-                {{ isOperationLoading(operation.id) ? 'Calling…' : 'Send ' + operation.method.toUpperCase() + ' ' + operation.path }}
+              <button
+                class="button"
+                type="submit"
+                [disabled]="isOperationLoading(operation.id) || (operation.requiresAuth && !canUseAuth())"
+              >
+                {{ isOperationLoading(operation.id) ? 'Calling…' : operationButtonLabel(operation) }}
               </button>
-              <button class="button secondary" type="button" (click)="copyCurl(operation)">
-                Copy as curl
-              </button>
+              <button class="button secondary" type="button" (click)="copyCurl(operation)">Copy as curl</button>
             </div>
             @if (copyStatus(operation.id)) {
               <p class="muted">{{ copyStatus(operation.id) }}</p>
@@ -247,7 +300,9 @@ const msalClient = createMsalClient(config);
                 <pre class="api-result">{{ problem.repairPlan }}</pre>
               }
               @if (problem.diagnosticId) {
-                <p><strong>diagnostic_id:</strong> <code>{{ problem.diagnosticId }}</code></p>
+                <p>
+                  <strong>diagnostic_id:</strong> <code>{{ problem.diagnosticId }}</code>
+                </p>
               }
             </section>
           } @else if (operationError(operation.id)) {
@@ -261,21 +316,36 @@ const msalClient = createMsalClient(config);
             <h3>Responses</h3>
             @for (response of operation.responses; track response.status) {
               <details class="response-detail" [open]="response.status.startsWith('2')">
-                <summary><strong>{{ response.status }}</strong> — {{ response.description }}</summary>
+                <summary>
+                  <strong>{{ response.status }}</strong> — {{ response.description }}
+                </summary>
                 @if (response.schemaName) {
-                  <p>Returns <code>{{ response.schemaName }}</code>.</p>
+                  <p>
+                    Returns <code>{{ response.schemaName }}</code
+                    >.
+                  </p>
                 }
                 @if (response.fields.length) {
-                  <div class="field-table" role="table" [attr.aria-label]="operation.summary + ' response ' + response.status + ' fields'">
+                  <div
+                    class="field-table"
+                    role="table"
+                    [attr.aria-label]="operation.summary + ' response ' + response.status + ' fields'"
+                  >
                     @for (field of response.fields; track field.name) {
                       <div class="field-row" role="row">
                         <div role="cell">
                           <strong>{{ field.name }}</strong>
-                          @if (field.required) { <span class="required">required</span> }
+                          @if (field.required) {
+                            <span class="required">required</span>
+                          }
                         </div>
-                        <div role="cell"><code>{{ field.type }}</code></div>
+                        <div role="cell">
+                          <code>{{ field.type }}</code>
+                        </div>
                         <div role="cell">{{ field.description }}</div>
-                        <div role="cell" class="muted">{{ field.example ? 'Example: ' + field.example : field.constraints }}</div>
+                        <div role="cell" class="muted">
+                          {{ field.example ? 'Example: ' + field.example : field.constraints }}
+                        </div>
                       </div>
                     }
                   </div>
@@ -292,15 +362,22 @@ const msalClient = createMsalClient(config);
               <h3>Object schemas used by this API</h3>
               @for (schema of operation.schemas; track schema.name) {
                 <details class="schema-detail">
-                  <summary><code>{{ schema.name }}</code>{{ schema.description ? ' — ' + schema.description : '' }}</summary>
+                  <summary>
+                    <code>{{ schema.name }}</code
+                    >{{ schema.description ? ' — ' + schema.description : '' }}
+                  </summary>
                   <div class="field-table" role="table" [attr.aria-label]="schema.name + ' fields'">
                     @for (field of schema.fields; track field.name) {
                       <div class="field-row" role="row">
                         <div role="cell">
                           <strong>{{ field.name }}</strong>
-                          @if (field.required) { <span class="required">required</span> }
+                          @if (field.required) {
+                            <span class="required">required</span>
+                          }
                         </div>
-                        <div role="cell"><code>{{ field.type }}</code></div>
+                        <div role="cell">
+                          <code>{{ field.type }}</code>
+                        </div>
                         <div role="cell">{{ field.description }}</div>
                         <div role="cell" class="muted">{{ field.constraints }}</div>
                       </div>
@@ -314,8 +391,8 @@ const msalClient = createMsalClient(config);
       }
 
       <aside class="notice" role="note">
-        <strong>/health</strong> remains public. Protected APIs require server-side JWT validation
-        when <code>AUTH_ENABLED=true</code>; the OpenAPI explorer adds the bearer token only after sign-in.
+        <strong>/health</strong> remains public. Protected APIs require server-side JWT validation when
+        <code>AUTH_ENABLED=true</code>; the OpenAPI explorer adds the bearer token only after sign-in.
       </aside>
     </main>
   `,
@@ -331,6 +408,7 @@ export class AppComponent {
   protected readonly operationErrors = signal<Record<string, string>>({});
   protected readonly operationProblems = signal<Record<string, SafeProblemView | null>>({});
   protected readonly copyStatuses = signal<Record<string, string>>({});
+  protected readonly pendingBringConfirmation = signal<PendingBringConfirmation | null>(null);
   protected readonly canUseAuth = computed(() => Boolean(msalClient && config.authApiScope));
   protected readonly isSignedIn = computed(() => this.activeAccount() !== null);
   protected readonly statusMessage = computed(() => {
@@ -360,9 +438,12 @@ export class AppComponent {
       const openApiDocument = parseOpenApiDocument(await response.text());
       const operations = buildApiOperations(openApiDocument);
       this.endpoints.set(operations);
-      this.formValues.set(Object.fromEntries(
-        operations.map((operation) => [operation.id, buildInitialBody(operation)]),
-      ) as Record<string, Record<string, string>>);
+      this.formValues.set(
+        Object.fromEntries(operations.map((operation) => [operation.id, buildInitialBody(operation)])) as Record<
+          string,
+          Record<string, string>
+        >,
+      );
       this.openApiVersion.set(openApiDocument.info.version);
       this.catalogueError.set(null);
     } catch (error) {
@@ -438,7 +519,27 @@ export class AppComponent {
     return match ? Number(match[1]) : null;
   }
 
+  operationScopeMessage(operation: ApiOperationDoc): string {
+    const scopes = operation.requiredScopes.length
+      ? operation.requiredScopes.join(' or ')
+      : 'the configured API permission';
+    return `Requires Microsoft Entra bearer token with ${scopes} and an allowlisted principal.`;
+  }
+
+  operationButtonLabel(operation: ApiOperationDoc): string {
+    if (operation.id === 'bringApplyItemMutation') {
+      return 'Confirm and apply prepared mutation';
+    }
+    return `Send ${operation.method.toUpperCase()} ${operation.path}`;
+  }
+
   async tryOperation(operation: ApiOperationDoc): Promise<void> {
+    if (
+      operation.id === 'bringApplyItemMutation' &&
+      !window.confirm('Apply this prepared Bring! complete/remove mutation now?')
+    ) {
+      return;
+    }
     this.setOperationLoading(operation.id, true);
     this.clearOperationMessages(operation.id);
 
@@ -454,7 +555,11 @@ export class AppComponent {
           throw new Error('Sign in before calling the protected API.');
         }
 
-        accessToken = await acquireAccessToken({ msalClient, account, scope: config.authApiScope });
+        accessToken = await acquireAccessToken({
+          msalClient,
+          account,
+          scope: resolveOperationScope(operation, config.authApiScope),
+        });
       }
 
       const values = this.formValues()[operation.id] ?? {};
@@ -480,6 +585,12 @@ export class AppComponent {
         ...current,
         [operation.id]: formattedBody,
       }));
+      if (operation.id === 'bringPrepareItemMutation') {
+        this.captureBringConfirmation(responseBody);
+      } else if (operation.id === 'bringApplyItemMutation') {
+        this.pendingBringConfirmation.set(null);
+        this.setInputValue('bringApplyItemMutation', 'confirmationToken', '');
+      }
     } catch (error) {
       this.operationErrors.update((current) => ({
         ...current,
@@ -488,6 +599,45 @@ export class AppComponent {
     } finally {
       this.setOperationLoading(operation.id, false);
     }
+  }
+
+  private captureBringConfirmation(responseBody: unknown): void {
+    if (!isRecord(responseBody)) return;
+    const operation = responseBody['operation'];
+    const operationId = responseBody['operationId'];
+    const confirmationToken = responseBody['confirmationToken'];
+    const listPseudonym = responseBody['listPseudonym'];
+    const itemCount = responseBody['itemCount'];
+    const expiresAt = responseBody['expiresAt'];
+    const listUuid = this.inputValue('bringPrepareItemMutation', 'listUuid');
+    if (
+      (operation !== 'complete' && operation !== 'remove') ||
+      typeof operationId !== 'string' ||
+      typeof confirmationToken !== 'string' ||
+      typeof listPseudonym !== 'string' ||
+      typeof itemCount !== 'number' ||
+      typeof expiresAt !== 'string' ||
+      !listUuid
+    ) {
+      return;
+    }
+
+    this.formValues.update((current) => ({
+      ...current,
+      bringApplyItemMutation: {
+        ...(current['bringApplyItemMutation'] ?? {}),
+        listUuid,
+        operationId,
+        confirmationToken,
+      },
+    }));
+    this.pendingBringConfirmation.set({
+      operation,
+      operationId,
+      listPseudonym,
+      itemCount,
+      expiresAt,
+    });
   }
 
   async copyCurl(operation: ApiOperationDoc): Promise<void> {
@@ -542,4 +692,18 @@ if (!isEmbeddedFrame()) {
 
 function isEmbeddedFrame(): boolean {
   return window.self !== window.top;
+}
+
+function resolveOperationScope(operation: ApiOperationDoc, configuredScope: string): string {
+  const requiredScope = operation.requiredScopes[0];
+  if (!requiredScope) return configuredScope;
+  if (requiredScope.startsWith('api://') || requiredScope.startsWith('https://')) {
+    return requiredScope;
+  }
+  const separator = configuredScope.lastIndexOf('/');
+  return separator > 'api://'.length ? `${configuredScope.slice(0, separator + 1)}${requiredScope}` : requiredScope;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -14,7 +14,11 @@ const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
 export function readRuntimeProvenance(env: NodeJS.ProcessEnv = process.env, now: Date = new Date()): RuntimeProvenance {
   const fallbackTimestamp = now.toISOString();
-  const environmentName = normalizeEnvironmentName(env['DEPLOYED_ENVIRONMENT_NAME'] ?? env['ENVIRONMENT_NAME'] ?? (env['AZURE_FUNCTIONS_ENVIRONMENT'] ? 'unknown' : 'local'));
+  const environmentName = normalizeEnvironmentName(
+    env['DEPLOYED_ENVIRONMENT_NAME'] ??
+      env['ENVIRONMENT_NAME'] ??
+      (env['AZURE_FUNCTIONS_ENVIRONMENT'] ? 'unknown' : 'local'),
+  );
   const deployedCommitSha = normalizeSha(env['DEPLOYED_COMMIT_SHA']);
   const deployedSourceRef = normalizeSha(env['DEPLOYED_SOURCE_REF']) || deployedCommitSha || 'unknown';
 
@@ -30,7 +34,9 @@ export function readRuntimeProvenance(env: NodeJS.ProcessEnv = process.env, now:
 
 function normalizeEnvironmentName(value: string | undefined): RuntimeEnvironmentName {
   const normalized = (value ?? '').trim().toLowerCase();
-  return KNOWN_ENVIRONMENTS.has(normalized as RuntimeEnvironmentName) ? (normalized as RuntimeEnvironmentName) : 'unknown';
+  return KNOWN_ENVIRONMENTS.has(normalized as RuntimeEnvironmentName)
+    ? (normalized as RuntimeEnvironmentName)
+    : 'unknown';
 }
 
 function normalizeSha(value: string | undefined): string {

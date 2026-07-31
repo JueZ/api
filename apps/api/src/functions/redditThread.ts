@@ -1,32 +1,43 @@
 import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
 import { logSmokeRunId } from '../shared/smokeCorrelation.js';
 import { analyzeRepairableErrorWithLlm } from '../shared/errors/llmDiagnosticAnalyzer.js';
-import { buildRedditDiagnosticCapsule, getTraceIdFromRequestOrContext, type DiagnosticCapsule } from '../shared/errors/diagnosticCapsule.js';
+import { resolveRepairableProblem } from '../shared/errors/repairableErrorService.js';
+import {
+  buildRedditDiagnosticCapsule,
+  getTraceIdFromRequestOrContext,
+  type DiagnosticCapsule,
+} from '../shared/errors/diagnosticCapsule.js';
 import {
   buildFallbackRepairableProblem,
   createDiagnosticId,
-  sanitizeRepairableProblem,
-  validateRepairableProblem,
   type RepairableProblem,
   type RepairableProblemExpected,
 } from '../shared/errors/repairableProblem.js';
 import { mapRedditError, RedditThreadService } from '../shared/reddit/service.js';
 import type { RedditThreadRequest } from '../shared/reddit/types.js';
-import { authorizeRequest } from '../shared/security/auth.js';
+import { authorizeRequestForOperation } from '../shared/security/auth.js';
+import { OPERATION_IDS } from '../application/operations/registry.js';
 import { createCorsHeaders, withCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
 
 const OPERATION_ID = 'postRedditThread';
 const ENDPOINT = '/api/reddit/thread';
-const ALLOWED_REQUEST_FIELDS = ['post', 'sort', 'maxComments', 'maxMoreChildrenRequests', 'url', 'redditUrl', 'reddit_url', 'threadUrl', 'thread_url'];
+const ALLOWED_REQUEST_FIELDS = [
+  'post',
+  'sort',
+  'maxComments',
+  'maxMoreChildrenRequests',
+  'url',
+  'redditUrl',
+  'reddit_url',
+  'threadUrl',
+  'thread_url',
+];
 const ALLOWED_OPERATION_IDS = [OPERATION_ID];
 
 let redditThreadService = new RedditThreadService();
 let repairableErrorAnalyzer = analyzeRepairableErrorWithLlm;
 
-export async function redditThreadHandler(
-  request: HttpRequest,
-  context: InvocationContext,
-): Promise<HttpResponseInit> {
+export async function redditThreadHandler(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   logSmokeRunId(request, context, 'redditThread');
 
   if (request.method === 'OPTIONS') {
@@ -36,7 +47,7 @@ export async function redditThreadHandler(
     };
   }
 
-  const authorization = await authorizeRequest(request, context);
+  const authorization = await authorizeRequestForOperation(request, context, OPERATION_IDS.redditThread);
   if (!authorization.ok) {
     return withCors(authorization.response, request);
   }
@@ -60,10 +71,13 @@ export async function redditThreadHandler(
 
   try {
     const response = await redditThreadService.fetchThread(body);
-    return withCors({
-      status: 200,
-      jsonBody: response,
-    }, request);
+    return withCors(
+      {
+        status: 200,
+        jsonBody: response,
+      },
+      request,
+    );
   } catch (error) {
     const mapped = mapRedditError(error);
     const diagnosticId = createDiagnosticId();
@@ -138,14 +152,7 @@ async function problemForRedditError(args: {
     allowedOperationIds: ALLOWED_OPERATION_IDS,
   };
 
-  const analyzed = await repairableErrorAnalyzer({ capsule, expected });
-  const validated = validateRepairableProblem(analyzed, expected);
-  const sanitized = validated
-    ? sanitizeRepairableProblem(validated, { allowedRequestFields: ALLOWED_REQUEST_FIELDS, allowedOperationIds: ALLOWED_OPERATION_IDS })
-    : null;
-  if (sanitized) return sanitized;
-
-  return buildFallbackRepairableProblem({
+  const deterministic = buildFallbackRepairableProblem({
     operation_id: OPERATION_ID,
     diagnostic_id: args.diagnosticId,
     status: args.status,
@@ -155,14 +162,18 @@ async function problemForRedditError(args: {
     failure_stage: args.failureStage,
     error_kind: args.errorKind,
   });
+  return resolveRepairableProblem({ deterministic, capsule, expected, analyzer: repairableErrorAnalyzer });
 }
 
 function problemResponse(problem: RepairableProblem, request: HttpRequest): HttpResponseInit {
-  return withCors({
-    status: problem.status,
-    headers: { 'Content-Type': 'application/problem+json' },
-    jsonBody: problem,
-  }, request);
+  return withCors(
+    {
+      status: problem.status,
+      headers: { 'Content-Type': 'application/problem+json' },
+      jsonBody: problem,
+    },
+    request,
+  );
 }
 
 function failureStageForStatus(status: number): DiagnosticCapsule['failure_stage'] {

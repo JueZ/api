@@ -32,11 +32,11 @@ Complete repository-changing work through the required autonomous delivery loop 
 
 1. Verify branch and working tree state:
 
-    ```bash
-    git branch --show-current
-    git status --short
-    git log -1 --oneline
-    ```
+   ```bash
+   git branch --show-current
+   git status --short
+   git log -1 --oneline
+   ```
 
    If on `main`, create or switch to a non-`main` branch before committing.
 
@@ -44,74 +44,74 @@ Complete repository-changing work through the required autonomous delivery loop 
 
    Common examples:
 
-    ```bash
-    npm run type-check
-    npm test
-    npm run test:api
-    npm run build
-    npm run ops:policy-guardrails
-    ```
+   ```bash
+   npm run type-check
+   npm test
+   npm run test:api
+   npm run build
+   npm run ops:policy-guardrails
+   ```
 
    If a command cannot run because credentials, network, tools, or environment variables are unavailable, record it as blocked or skipped with the reason. Do not treat skipped checks as passing.
 
 3. Commit the change if it is not already committed:
 
-    ```bash
-    git status --short
-    git add <changed-files>
-    git commit -m "<concise task summary>"
-    git log -1 --oneline
-    ```
+   ```bash
+   git status --short
+   git add <changed-files>
+   git commit -m "<concise task summary>"
+   git log -1 --oneline
+   ```
 
 4. Run mandatory PR preflight and safe recovery:
 
-    ```bash
-    git remote -v
-    gh auth status
-    gh repo view JueZ/api
-    gh auth setup-git --hostname github.com
-    ```
+   ```bash
+   git remote -v
+   gh auth status
+   gh repo view JueZ/api
+   gh auth setup-git --hostname github.com
+   ```
 
    If `origin` is missing, add it:
 
-    ```bash
-    git remote add origin https://github.com/JueZ/api.git
-    ```
+   ```bash
+   git remote add origin https://github.com/JueZ/api.git
+   ```
 
    If `origin` points to the wrong repository, fix it:
 
-    ```bash
-    git remote set-url origin https://github.com/JueZ/api.git
-    ```
+   ```bash
+   git remote set-url origin https://github.com/JueZ/api.git
+   ```
 
 5. Push the current non-`main` branch with upstream tracking:
 
-    ```bash
-    git push -u origin "$(git branch --show-current)"
-    ```
+   ```bash
+   git push -u origin "$(git branch --show-current)"
+   ```
 
 6. Create or update the pull request explicitly against the repository:
 
-    ```bash
-    gh pr view --repo JueZ/api || gh pr create --repo JueZ/api --fill
-    ```
+   ```bash
+   gh pr view --repo JueZ/api || gh pr create --repo JueZ/api --fill
+   ```
 
 7. Collect autonomous-delivery status evidence:
 
-    ```bash
-    gh pr view --repo JueZ/api --json url,state,isDraft,mergeStateStatus,autoMergeRequest,headRefName,headRefOid,baseRefName,labels
-    gh pr checks --repo JueZ/api --watch
-    gh run list --repo JueZ/api --limit 20
-    ```
+   ```bash
+   gh pr view --repo JueZ/api --json url,state,isDraft,mergeStateStatus,autoMergeRequest,headRefName,headRefOid,baseRefName,labels
+   gh pr checks --repo JueZ/api --watch
+   gh run list --repo JueZ/api --limit 20
+   ```
 
 8. For Codex PRs, monitor the relevant delivery checks and workflows:
 
-    - `enable auto-merge`
-    - `run main delivery after Codex auto-merge`
-    - `CI`
-    - `Policy Check`
-    - `Deploy Test`
-    - `Promote Production`
+   - `enable auto-merge`
+   - `run main delivery after Codex auto-merge`
+   - `CI`
+   - `Policy Check`
+   - `Deploy Test`
+   - `Promote Production`
 
 9. If checks fail, apply the smallest safe fix and repeat at most 2 repair attempts for the same failing area.
 

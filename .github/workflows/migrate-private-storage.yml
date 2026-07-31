@@ -1,0 +1,167 @@
+name: Private Storage Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub environment whose Azure OIDC identity/variables authorize the copy.
+        required: true
+        type: choice
+        options:
+          - test
+          - production
+      source_storage_account:
+        description: Existing account containing the WLH reference blob.
+        required: true
+        type: string
+      target_storage_account:
+        description: New private integration storage account.
+        required: true
+        type: string
+      container:
+        description: Source and target private container name.
+        required: true
+        default: wlh-reference
+        type: string
+      blob_name:
+        description: Source and target WLH reference blob name.
+        required: true
+        default: categories-marketplace.v1.json.gz
+        type: string
+      expected_sha256:
+        description: Lowercase SHA-256 digest independently calculated for the source blob.
+        required: true
+        type: string
+      confirmation:
+        description: Enter MIGRATE_WLH_REFERENCE to authorize this one-blob copy.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: private-storage-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: migrate verified WLH reference blob
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ inputs.environment }}
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - name: Validate bounded migration request
+        shell: bash
+        env:
+          SOURCE_ACCOUNT: ${{ inputs.source_storage_account }}
+          TARGET_ACCOUNT: ${{ inputs.target_storage_account }}
+          CONTAINER: ${{ inputs.container }}
+          BLOB_NAME: ${{ inputs.blob_name }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [ "$CONFIRMATION" = "MIGRATE_WLH_REFERENCE" ] || {
+            echo "Explicit migration confirmation did not match." >&2
+            exit 1
+          }
+          for account in "$SOURCE_ACCOUNT" "$TARGET_ACCOUNT"; do
+            [[ "$account" =~ ^[a-z0-9]{3,24}$ ]] || {
+              echo "Storage account names must be lowercase alphanumeric." >&2
+              exit 1
+            }
+          done
+          [ "$SOURCE_ACCOUNT" != "$TARGET_ACCOUNT" ] || {
+            echo "Source and target accounts must differ." >&2
+            exit 1
+          }
+          [[ "$CONTAINER" =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]] || {
+            echo "Container name is invalid." >&2
+            exit 1
+          }
+          [[ "$BLOB_NAME" =~ ^[A-Za-z0-9._/-]{1,256}$ ]] || {
+            echo "Blob name is invalid." >&2
+            exit 1
+          }
+          [[ "$EXPECTED_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "expected_sha256 must be a lowercase SHA-256 digest." >&2
+            exit 1
+          }
+      - name: Azure login with GitHub OIDC
+        uses: azure/login@2dd0bbf4064d5a1812889dc200bb8eed2597f82a # tag=v3
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Copy one digest-verified reference blob
+        shell: bash
+        env:
+          SOURCE_ACCOUNT: ${{ inputs.source_storage_account }}
+          TARGET_ACCOUNT: ${{ inputs.target_storage_account }}
+          CONTAINER: ${{ inputs.container }}
+          BLOB_NAME: ${{ inputs.blob_name }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+        run: |
+          set -euo pipefail
+          migration_dir="$(mktemp -d)"
+          cleanup() {
+            rm -rf "$migration_dir"
+          }
+          trap cleanup EXIT
+          source_file="$migration_dir/source.bin"
+          target_file="$migration_dir/target.bin"
+
+          az storage blob download \
+            --auth-mode login \
+            --account-name "$SOURCE_ACCOUNT" \
+            --container-name "$CONTAINER" \
+            --name "$BLOB_NAME" \
+            --file "$source_file" \
+            --overwrite true \
+            -o none
+          source_digest="$(sha256sum "$source_file" | awk '{print $1}')"
+          [ "$source_digest" = "$EXPECTED_SHA256" ] || {
+            echo "Source blob digest does not match the approved digest." >&2
+            exit 1
+          }
+
+          target_exists="$(az storage blob exists \
+            --auth-mode login \
+            --account-name "$TARGET_ACCOUNT" \
+            --container-name "$CONTAINER" \
+            --name "$BLOB_NAME" \
+            --query exists \
+            -o tsv)"
+          if [ "$target_exists" = "true" ]; then
+            az storage blob download \
+              --auth-mode login \
+              --account-name "$TARGET_ACCOUNT" \
+              --container-name "$CONTAINER" \
+              --name "$BLOB_NAME" \
+              --file "$target_file" \
+              --overwrite true \
+              -o none
+            target_digest="$(sha256sum "$target_file" | awk '{print $1}')"
+            [ "$target_digest" = "$EXPECTED_SHA256" ] || {
+              echo "Target exists with a different digest; refusing to overwrite." >&2
+              exit 1
+            }
+            echo "Target already contains the approved blob digest."
+            exit 0
+          fi
+
+          az storage blob upload \
+            --auth-mode login \
+            --account-name "$TARGET_ACCOUNT" \
+            --container-name "$CONTAINER" \
+            --name "$BLOB_NAME" \
+            --file "$source_file" \
+            --overwrite false \
+            -o none
+          echo "Migrated one WLH reference blob with verified digest $EXPECTED_SHA256."

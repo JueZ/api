@@ -3,8 +3,23 @@ import type { ParsedRedditPostInput, RedditSort } from './types.js';
 const VALID_SORTS = new Set<RedditSort>(['confidence', 'top', 'new', 'controversial', 'old', 'qa']);
 const ARTICLE_ID_PATTERN = /^[a-z0-9][a-z0-9_]{1,12}$/i;
 const COMMENT_ID_PATTERN = /^[a-z0-9][a-z0-9_]{1,12}$/i;
-const SUPPORTED_REDDIT_HOSTNAMES = new Set(['reddit.com', 'www.reddit.com', 'old.reddit.com', 'new.reddit.com', 'np.reddit.com', 'm.reddit.com', 'redd.it']);
-const REDDIT_WEB_HOSTNAMES = new Set(['reddit.com', 'www.reddit.com', 'old.reddit.com', 'new.reddit.com', 'np.reddit.com', 'm.reddit.com']);
+const SUPPORTED_REDDIT_HOSTNAMES = new Set([
+  'reddit.com',
+  'www.reddit.com',
+  'old.reddit.com',
+  'new.reddit.com',
+  'np.reddit.com',
+  'm.reddit.com',
+  'redd.it',
+]);
+const REDDIT_WEB_HOSTNAMES = new Set([
+  'reddit.com',
+  'www.reddit.com',
+  'old.reddit.com',
+  'new.reddit.com',
+  'np.reddit.com',
+  'm.reddit.com',
+]);
 
 export interface NormalizedRedditPost {
   post_id: string;
@@ -25,7 +40,10 @@ export interface RedditRedirectResolution {
 
 export type RedditRedirectResolver = (inputUrl: string) => Promise<string | RedditRedirectResolution>;
 
-export async function normalizeRedditPostInput(input: string, resolveRedirect?: RedditRedirectResolver): Promise<NormalizedRedditPost> {
+export async function normalizeRedditPostInput(
+  input: string,
+  resolveRedirect?: RedditRedirectResolver,
+): Promise<NormalizedRedditPost> {
   if (typeof input !== 'string' || input.trim().length === 0) {
     throw new RedditInputError('post must be a non-empty string.');
   }
@@ -46,7 +64,10 @@ export async function normalizeRedditPostInput(input: string, resolveRedirect?: 
     }
     const resolution = await resolveRedirect(trimmed);
     const finalUrl = typeof resolution === 'string' ? resolution : resolution.finalUrl;
-    const redirectChain = typeof resolution === 'string' ? [trimmed, finalUrl] : [trimmed, ...(resolution.redirectChain ?? []), resolution.finalUrl];
+    const redirectChain =
+      typeof resolution === 'string'
+        ? [trimmed, finalUrl]
+        : [trimmed, ...(resolution.redirectChain ?? []), resolution.finalUrl];
     const normalized = parseDirectRedditPostInput(finalUrl);
     if (!normalized || isRedditShareUrl(finalUrl)) {
       throw unresolvedRedditShareUrlError(trimmed);
@@ -203,7 +224,8 @@ export function parseDirectRedditPostInput(input: string): NormalizedRedditPost 
     throw new RedditInputError('post URL must contain a valid Reddit article ID.');
   }
 
-  const subreddit = commentsIndex >= 2 && parts[commentsIndex - 2]?.toLowerCase() === 'r' ? parts[commentsIndex - 1] : undefined;
+  const subreddit =
+    commentsIndex >= 2 && parts[commentsIndex - 2]?.toLowerCase() === 'r' ? parts[commentsIndex - 1] : undefined;
   const possibleCommentId = parts[commentsIndex + 3];
   const commentId = possibleCommentId && COMMENT_ID_PATTERN.test(possibleCommentId) ? possibleCommentId : undefined;
 

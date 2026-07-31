@@ -173,7 +173,9 @@ export class RedditOAuthClient {
         const finalUrl = response.url || url.toString();
         const finalValidation = safeValidateRedirectUrl(finalUrl);
         const contentType = response.headers.get('content-type');
-        const bodyText = shouldReadRedirectBody(contentType) ? await readBoundedText(response, MAX_REDIRECT_BODY_BYTES) : undefined;
+        const bodyText = shouldReadRedirectBody(contentType)
+          ? await readBoundedText(response, MAX_REDIRECT_BODY_BYTES)
+          : undefined;
         if (!finalValidation.ok) {
           return {
             status: finalValidation.status,
@@ -195,7 +197,10 @@ export class RedditOAuthClient {
           redirectChain,
           httpStatus: response.status,
           contentType,
-          safeReason: response.status >= 400 ? `Reddit web returned HTTP ${response.status}.` : 'Reddit web redirect resolution completed.',
+          safeReason:
+            response.status >= 400
+              ? `Reddit web returned HTTP ${response.status}.`
+              : 'Reddit web redirect resolution completed.',
           retryable: response.status === 429 || response.status >= 500,
           bodyText,
         };
@@ -204,7 +209,9 @@ export class RedditOAuthClient {
       const location = response.headers.get('location');
       if (!location) {
         const contentType = response.headers.get('content-type');
-        const bodyText = shouldReadRedirectBody(contentType) ? await readBoundedText(response, MAX_REDIRECT_BODY_BYTES) : undefined;
+        const bodyText = shouldReadRedirectBody(contentType)
+          ? await readBoundedText(response, MAX_REDIRECT_BODY_BYTES)
+          : undefined;
         return {
           status: 'completed',
           finalUrl: url.toString(),
@@ -244,7 +251,11 @@ export class RedditOAuthClient {
     };
   }
 
-  async getJson<T>(path: string, query: Record<string, string | number | undefined> = {}, context: { input?: string; normalizedPostId?: string } = {}): Promise<RedditHttpResult<T>> {
+  async getJson<T>(
+    path: string,
+    query: Record<string, string | number | undefined> = {},
+    context: { input?: string; normalizedPostId?: string } = {},
+  ): Promise<RedditHttpResult<T>> {
     const tokenValue = await this.getAccessToken();
     const url = new URL(path, API_BASE_URL);
     for (const [key, value] of Object.entries(query)) {
@@ -306,7 +317,6 @@ export class RedditOAuthClient {
     }
   }
 }
-
 
 function shouldReadRedirectBody(contentType: string | null): boolean {
   const normalized = contentType?.toLowerCase() ?? '';
@@ -417,8 +427,9 @@ function validateRedirectUrl(value: string): URL {
   return url;
 }
 
-
-function safeValidateRedirectUrl(value: string): { ok: true; url: URL } | { ok: false; status: 'invalid_redirect' | 'unsafe_redirect'; safeReason: string } {
+function safeValidateRedirectUrl(
+  value: string,
+): { ok: true; url: URL } | { ok: false; status: 'invalid_redirect' | 'unsafe_redirect'; safeReason: string } {
   let url: URL;
   try {
     url = new URL(value);
@@ -429,7 +440,11 @@ function safeValidateRedirectUrl(value: string): { ok: true; url: URL } | { ok: 
     return { ok: false, status: 'unsafe_redirect', safeReason: 'Reddit redirect target must use HTTPS.' };
   }
   if (!isSupportedRedditHost(url.hostname)) {
-    return { ok: false, status: 'unsafe_redirect', safeReason: 'Reddit redirect target host is not an allowed Reddit host.' };
+    return {
+      ok: false,
+      status: 'unsafe_redirect',
+      safeReason: 'Reddit redirect target host is not an allowed Reddit host.',
+    };
   }
   return { ok: true, url };
 }
@@ -437,7 +452,10 @@ function safeValidateRedirectUrl(value: string): { ok: true; url: URL } | { ok: 
 function redactPreview(text: string): string {
   return text
     .slice(0, 500)
-    .replace(/(access_token|refresh_token|id_token|authorization|cookie|set-cookie)(["'\s:=]+)([^"'\s&<>]+)/gi, '$1$2[REDACTED]')
+    .replace(
+      /(access_token|refresh_token|id_token|authorization|cookie|set-cookie)(["'\s:=]+)([^"'\s&<>]+)/gi,
+      '$1$2[REDACTED]',
+    )
     .replace(/Bearer\s+[A-Za-z0-9._~+\-/]+=*/gi, 'Bearer [REDACTED]');
 }
 

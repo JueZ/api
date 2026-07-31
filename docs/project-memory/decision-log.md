@@ -1,5 +1,28 @@
 # Decision log
 
+## 2026-07-31 — Use deterministic-first REC across REST and the bundled MCP server
+
+- Decision: Every service-generated failure uses REC. Predefined deterministic mappings run first; only `diagnostic_uncertain` sanitized capsules may use the OpenAI Responses API, and model output must pass schema and policy gates.
+- Decision: Keep one repository `OPENAI_API_KEY` for test and production deployment configuration, with Key Vault references and no secret value in repository memory.
+- Decision: MCP retains one server and exposes REC at `structuredContent.repairable_problem`; model-generated JSON Patch is rejected unless a future deterministic verifier is added.
+- Status: Implemented locally; PR and test-only rollout authorized. Production rollout is not authorized for this delivery.
+- Reference: `docs/adr/0005-deterministic-first-repairable-errors.md`.
+
+## 2026-07-31 — Keep one bundled MCP gateway
+
+- Decision: Health, authentication, Reddit, Willhaben, and Bring tools remain bundled behind one `/mcp` route and one `McpServer` instance. Registration helpers must not create additional servers or endpoints.
+- Status: Enforced in the local working tree; not committed, merged, or deployed.
+- Reference: `docs/adr/0004-single-bundled-mcp-gateway.md`.
+
+## 2026-07-30 — AI-native authorization, delivery, and Bring safety model
+
+- Decision: Use deterministic exact-head policy plus independent AI review for high-risk changes without a routine human approval requirement.
+- Decision: Replace generic `api.access` authorization with operation permissions: `catalogue.read`, `reddit.read`, `wlh.read`, `bring.read`, `bring.write`, `bring.complete`, and `bring.remove`.
+- Decision: Keep the current Bring technical account; make test structurally read-only; permit production writes only to explicit own-list UUIDs; require durable idempotency for add and two-phase confirmation for complete/remove.
+- Decision: Split Azure storage trust boundaries, use Key Vault references and managed identities, and promote immutable test-proven artifacts to production.
+- Status: Implemented only in the local working tree; not committed, merged, configured, or deployed.
+- References: `docs/adr/0001-autonomous-high-risk-review.md`, `docs/adr/0002-bring-environment-policy.md`, `docs/adr/0003-storage-secrets-and-artifacts.md`.
+
 ## 2026-06-09 — Identity-based Azure Functions host storage
 
 - Decision: Migrate `AzureWebJobsStorage` in `infra/main.bicep` from an account-key connection string to identity-based host storage using the Function App system-assigned managed identity.

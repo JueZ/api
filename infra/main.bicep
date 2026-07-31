@@ -1,139 +1,595 @@
 targetScope = 'resourceGroup'
 
-@description('Azure region for all v0 resources. Keep westeurope for the production resource group.')
+@description('Azure region for all low-cost v0 resources.')
 @allowed([
   'westeurope'
 ])
 param location string = 'westeurope'
 
-@description('Short environment name used in resource names and tags.')
+@description('Explicit deployment environment. There is deliberately no production default.')
 @allowed([
   'test'
   'prod'
 ])
-param environmentName string = 'prod'
+param environmentName string
 
 @description('Workload name used in resource names and tags.')
 param workloadName string = 'api-catalogue'
 
-@description('Enable application-level OAuth/OIDC/JWT authentication for protected API routes. Production must use true.')
-param authEnabled string = 'false'
+@description('Application-level OAuth/OIDC/JWT authentication. Test and production require true.')
+@allowed([
+  true
+])
+param authEnabled bool
 
-@description('Comma-separated OIDC issuer URLs used for JWT issuer validation. When oidcJwksUri is empty, each issuer uses its own OpenID discovery JWKS URI.')
-param oidcIssuer string = ''
+@description('Comma-separated exact OIDC issuer URLs.')
+param oidcIssuer string
 
-@description('Expected JWT audience, usually the API application ID URI or client ID.')
-param oidcAudience string = ''
+@description('Expected JWT audience.')
+param oidcAudience string
 
 @description('Optional explicit JWKS URI. Leave empty to use issuer discovery.')
 param oidcJwksUri string = ''
 
-@description('Comma-separated scopes or app roles required by protected API routes.')
-param oidcRequiredScopes string = 'api.access'
+@description('Comma-separated delegated scopes/application roles recognized by the operation policy.')
+param oidcRequiredScopes string = 'catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove'
 
 @description('Comma-separated allowed Microsoft Entra user object IDs.')
-param oidcAllowedObjectIds string = ''
+param oidcAllowedObjectIds string
 
-@description('Comma-separated allowed subjects used only as fallback when oid is absent.')
+@description('Comma-separated allowed subjects used only when oid is absent.')
 param oidcAllowedSubjects string = ''
 
-@description('Comma-separated allowed Microsoft Entra service-principal object IDs for app-only OAuth client-credentials tokens.')
+@description('Comma-separated allowed service-principal object IDs.')
 param oidcAllowedAppObjectIds string = ''
 
-@description('Comma-separated allowed Microsoft Entra application/client IDs for app-only OAuth client-credentials tokens.')
+@description('Comma-separated allowed application/client IDs for service tokens.')
 param oidcAllowedClientIds string = ''
 
-@description('Optional comma-separated allowed OAuth client application IDs for delegated/user tokens. Leave empty to preserve existing delegated-token behavior.')
+@description('Comma-separated allowed OAuth client IDs for delegated user tokens.')
 param oidcAllowedDelegatedClientIds string = ''
 
-@description('Optional comma-separated allowed tenant IDs.')
-param oidcAllowedTenants string = ''
+@description('Comma-separated allowed tenant IDs.')
+param oidcAllowedTenants string
 
-@description('Enable sanitized authentication diagnostics without logging tokens or claims.')
-param authDebug string = 'false'
+@description('Enable sanitized auth diagnostics without logging tokens or claims.')
+param authDebug bool = false
 
+@description('Exact browser origins allowed to call REST endpoints.')
+param apiCorsAllowedOrigins string
 
-@description('Reddit OAuth client ID for app-only API access.')
-param redditClientId string = ''
+@description('Canonical public HTTPS origin of the MCP gateway.')
+param mcpResourceOrigin string
+
+@description('Comma-separated exact HTTPS browser origins allowed to call MCP.')
+param mcpAllowedOrigins string
+
+@description('Object ID of the environment-specific GitHub Actions OIDC deployment service principal.')
+param deploymentPrincipalObjectId string
+
+@description('Operator email for Azure Monitor and budget notifications.')
+param operatorAlertEmail string
+
+@description('Monthly resource-group budget. Test uses EUR 10 and production EUR 15, for EUR 25 combined.')
+param monthlyBudgetEur int = environmentName == 'prod' ? 15 : 10
+
+@description('Budget start on the first day of the current month.')
+param budgetStartDate string = utcNow('yyyy-MM-01T00:00:00Z')
+
+@description('Reddit OAuth client ID.')
+param redditClientId string
 
 @secure()
-@description('Reddit OAuth client secret for app-only API access.')
-param redditOAuthSecret string = ''
+@description('Reddit OAuth client secret; stored in Key Vault and referenced by the Function App.')
+param redditOAuthSecret string
 
-@description('Reddit API User-Agent sent on every Reddit request.')
-param redditUserAgent string = ''
-
-@description('Comma-separated browser origins allowed to call the Function App API. Needed because Azure Functions handles CORS preflight before app code.')
-param apiCorsAllowedOrigins string = ''
-
+@description('Reddit API User-Agent.')
+param redditUserAgent string
 
 @secure()
-@description('WLH upstream base URL.')
-param wlhBaseUrl string = ''
+@description('WLH upstream base URL; stored in Key Vault because the existing integration treats it as sensitive.')
+param wlhBaseUrl string
 
-@description('Private blob container for WLH reference data.')
+@description('Private WLH reference-data container.')
 param wlhCategoryBlobContainer string = 'wlh-reference'
 
-@description('Private blob name for WLH category data.')
+@description('WLH category-data blob name.')
 param wlhCategoryBlobName string = 'categories-marketplace.v1.json.gz'
 
-@description('Bring! upstream base URL.')
+@description('Enable the unofficial Bring integration.')
+param bringEnabled bool = false
+
+@description('Enable idempotent Bring add operations. Test must remain false.')
+param bringAddEnabled bool = false
+
+@description('Enable confirmed Bring complete/remove operations. Test must remain false.')
+param bringDestructiveEnabled bool = false
+
+@description('Bring upstream base URL.')
 param bringBaseUrl string = 'https://api.getbring.com/rest/'
-@description('Unofficial Bring! application/client API key.')
-param bringClientApiKey string = ''
-@description('Bring! client country.')
+
+@secure()
+@description('Unofficial Bring client API key.')
+param bringClientApiKey string
+
+@description('Bring client country.')
 param bringCountry string = 'AT'
+
 @secure()
-@description('Bring! technical account email.')
-param bringEmail string = ''
+@description('Bring technical account email. Test may reuse production only while all test writes remain disabled.')
+param bringEmail string
+
 @secure()
-@description('Bring! technical account password.')
-param bringPassword string = ''
-@description('Optional default Bring! list UUID.')
+@description('Bring technical account password.')
+param bringPassword string
+
+@description('SHA-256 fingerprint of the expected Bring account email.')
+param bringExpectedAccountFingerprint string
+
+@description('Optional default readable Bring list UUID.')
 param bringDefaultListUuid string = ''
-@description('Enable durable Bring! authentication-session caching.')
-param bringSessionCacheEnabled string = 'true'
-@description('Private blob container for Bring! session caching.')
+
+@description('Comma-separated Bring list UUIDs that this environment may read.')
+param bringReadableListUuids string
+
+@description('Comma-separated own-list UUIDs that production may write. Shared/unlisted lists are denied in application policy.')
+param bringWritableListUuids string = ''
+
+@description('Enable durable Bring authentication-session caching.')
+param bringSessionCacheEnabled bool = true
+
+@description('Private Bring session container.')
 param bringSessionCacheContainer string = 'bring-private'
-@description('Private blob name for Bring! session caching.')
+
+@description('Private Bring session blob.')
 param bringSessionCacheBlob string = 'session-v1.json'
 
+@description('Private Bring mutation replay container.')
+param bringMutationContainer string = 'bring-mutations'
+
+@description('Private Bring audit container.')
+param bringAuditContainer string = 'bring-audit'
+
 @secure()
-@description('Optional OpenAI API key used only when Repairable Error Contract LLM-assisted diagnostics are enabled.')
+@description('At least 32 bytes used for confirmation tokens and pseudonyms.')
+param bringConfirmationHmacKey string
+
+@secure()
+@description('Base64-encoded 32-byte AES key for prepared mutation payloads.')
+param bringMutationEncryptionKey string
+
+@secure()
+@description('Optional OpenAI API key for sanitized repairable-error analysis.')
 param openAiCredential string = ''
 
-@description('Enable optional Repairable Error Contract LLM-assisted diagnostics. Keep false unless OPENAI_API_KEY is configured.')
-param repairableErrorsLlmEnabled string = 'false'
+@description('Enable optional LLM-assisted repairable-error analysis.')
+param repairableErrorsLlmEnabled bool = false
 
-@description('OpenAI model used for optional Repairable Error Contract LLM-assisted diagnostics.')
+@description('OpenAI model for repairable-error analysis.')
 param repairableErrorsLlmModel string = ''
+
+var validatedCorsOrigins = !empty(apiCorsAllowedOrigins) && !contains(apiCorsAllowedOrigins, '*')
+  ? apiCorsAllowedOrigins
+  : fail('API CORS origins must be non-empty and must not contain a wildcard.')
+var validatedMcpOrigin = startsWith(mcpResourceOrigin, 'https://') && !endsWith(mcpResourceOrigin, '/')
+  ? mcpResourceOrigin
+  : fail('MCP_RESOURCE_ORIGIN must be one canonical HTTPS origin without a trailing slash.')
+var validatedMcpAllowedOrigins = !empty(mcpAllowedOrigins) && !contains(mcpAllowedOrigins, '*')
+  ? mcpAllowedOrigins
+  : fail('MCP allowed origins must be non-empty exact origins without a wildcard.')
+var validatedOidcIssuer = !empty(oidcIssuer) ? oidcIssuer : fail('OIDC issuer is required.')
+var validatedOidcAudience = !empty(oidcAudience) ? oidcAudience : fail('OIDC audience is required.')
+var validatedOidcObjectIds = !empty(oidcAllowedObjectIds) ? oidcAllowedObjectIds : fail('At least one OIDC user object ID is required.')
+var validatedOidcTenants = !empty(oidcAllowedTenants) ? oidcAllowedTenants : fail('At least one OIDC tenant is required.')
+var validatedBringAddEnabled = !bringEnabled && bringAddEnabled
+  ? fail('Bring add operations require bringEnabled=true.')
+  : environmentName == 'test' && bringAddEnabled
+    ? fail('Bring add operations are prohibited in test.')
+    : bringAddEnabled
+var validatedBringDestructiveEnabled = !bringEnabled && bringDestructiveEnabled
+  ? fail('Destructive Bring operations require bringEnabled=true.')
+  : environmentName == 'test' && bringDestructiveEnabled
+    ? fail('Destructive Bring operations are prohibited in test.')
+    : bringDestructiveEnabled
+var validatedBringReadableLists = bringEnabled && empty(bringReadableListUuids)
+  ? fail('Enabled Bring integration requires a readable-list allowlist.')
+  : bringReadableListUuids
+var validatedBringWritableLists = (validatedBringAddEnabled || validatedBringDestructiveEnabled) && empty(bringWritableListUuids)
+  ? fail('Enabled Bring writes require an explicit writable-list allowlist.')
+  : bringWritableListUuids
+var validatedBringFingerprint = bringEnabled && empty(bringExpectedAccountFingerprint)
+  ? fail('Enabled Bring integration requires an expected account fingerprint.')
+  : bringExpectedAccountFingerprint
+var validatedBudgetAmount = ((environmentName == 'test' && monthlyBudgetEur == 10) || (environmentName == 'prod' && monthlyBudgetEur == 15))
+  ? monthlyBudgetEur
+  : fail('Budget split must remain EUR 10 for test and EUR 15 for production.')
 
 var nameSuffix = uniqueString(resourceGroup().id, workloadName, environmentName)
 var normalizedWorkload = replace(workloadName, '-', '')
-var storageAccountName = take('st${normalizedWorkload}${environmentName}${nameSuffix}', 24)
+var hostStorageName = take('st${normalizedWorkload}${environmentName}h${nameSuffix}', 24)
+var releaseStorageName = take('st${normalizedWorkload}${environmentName}r${nameSuffix}', 24)
+var staticStorageName = take('st${normalizedWorkload}${environmentName}w${nameSuffix}', 24)
+var privateStorageName = take('st${normalizedWorkload}${environmentName}p${nameSuffix}', 24)
 var functionAppName = 'func-${workloadName}-${environmentName}-${nameSuffix}'
 var hostingPlanName = 'plan-${workloadName}-${environmentName}-${nameSuffix}'
 var appInsightsName = 'appi-${workloadName}-${environmentName}-${nameSuffix}'
+var keyVaultName = take('kv-${normalizedWorkload}-${environmentName}-${nameSuffix}', 24)
+var actionGroupName = 'ag-${workloadName}-${environmentName}'
 var tags = {
   workload: workloadName
   environment: environmentName
   costProfile: 'serverless-consumption'
-  region: location
+  dataBoundary: environmentName
+  managedBy: 'bicep'
 }
-var apiCorsAllowedOriginList = empty(apiCorsAllowedOrigins) ? [] : split(apiCorsAllowedOrigins, ',')
+var apiCorsAllowedOriginList = split(validatedCorsOrigins, ',')
+var storageNetworkPolicy = {
+  bypass: 'AzureServices'
+  defaultAction: 'Allow'
+}
+var storageProperties = {
+  accessTier: 'Hot'
+  allowBlobPublicAccess: false
+  allowCrossTenantReplication: false
+  allowSharedKeyAccess: false
+  defaultToOAuthAuthentication: true
+  minimumTlsVersion: 'TLS1_2'
+  networkAcls: storageNetworkPolicy
+  publicNetworkAccess: 'Enabled'
+  supportsHttpsTrafficOnly: true
+}
 
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
-  name: storageAccountName
+resource hostStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: hostStorageName
   location: location
   sku: {
     name: 'Standard_LRS'
   }
   kind: 'StorageV2'
-  tags: tags
+  tags: union(tags, { purpose: 'function-host' })
+  properties: storageProperties
+}
+
+resource releaseStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: releaseStorageName
+  location: location
+  sku: {
+    name: 'Standard_LRS'
+  }
+  kind: 'StorageV2'
+  tags: union(tags, { purpose: 'immutable-release-packages' })
+  properties: storageProperties
+}
+
+resource staticStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: staticStorageName
+  location: location
+  sku: {
+    name: 'Standard_LRS'
+  }
+  kind: 'StorageV2'
+  tags: union(tags, { purpose: 'public-static-site' })
+  properties: storageProperties
+}
+
+resource privateStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: privateStorageName
+  location: location
+  sku: {
+    name: 'Standard_LRS'
+  }
+  kind: 'StorageV2'
+  tags: union(tags, { purpose: 'private-integration-state' })
+  properties: storageProperties
+}
+
+resource hostBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: hostStorage
+  name: 'default'
   properties: {
-    allowBlobPublicAccess: false
-    minimumTlsVersion: 'TLS1_2'
-    supportsHttpsTrafficOnly: true
+    deleteRetentionPolicy: {
+      enabled: true
+      days: 7
+    }
+    containerDeleteRetentionPolicy: {
+      enabled: true
+      days: 7
+    }
+  }
+}
+
+resource releaseBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: releaseStorage
+  name: 'default'
+  properties: {
+    isVersioningEnabled: true
+    deleteRetentionPolicy: {
+      enabled: true
+      days: 14
+    }
+    containerDeleteRetentionPolicy: {
+      enabled: true
+      days: 14
+    }
+  }
+}
+
+resource staticBlobService 'Microsoft.Storage/storageAccounts/blobServices@2025-08-01' = {
+  parent: staticStorage
+  name: 'default'
+  properties: {
+    staticWebsite: {
+      enabled: true
+      indexDocument: 'index.html'
+      errorDocument404Path: 'index.html'
+    }
+    deleteRetentionPolicy: {
+      enabled: true
+      days: 7
+    }
+  }
+}
+
+resource privateBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: privateStorage
+  name: 'default'
+  properties: {
+    isVersioningEnabled: true
+    deleteRetentionPolicy: {
+      enabled: true
+      days: 30
+    }
+    containerDeleteRetentionPolicy: {
+      enabled: true
+      days: 30
+    }
+  }
+}
+
+resource releaseContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: releaseBlobService
+  name: 'function-releases'
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+resource wlhReferenceContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: privateBlobService
+  name: wlhCategoryBlobContainer
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+resource bringSessionContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: privateBlobService
+  name: bringSessionCacheContainer
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+resource bringMutationStoreContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: privateBlobService
+  name: bringMutationContainer
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+resource bringAuditStoreContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: privateBlobService
+  name: bringAuditContainer
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+resource staticWebContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
+  parent: staticBlobService
+  name: '$web'
+}
+
+resource releaseLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05-01' = {
+  parent: releaseStorage
+  name: 'default'
+  properties: {
+    policy: {
+      rules: [
+        {
+          name: 'expire-old-release-packages'
+          enabled: true
+          type: 'Lifecycle'
+          definition: {
+            actions: {
+              baseBlob: {
+                delete: {
+                  daysAfterModificationGreaterThan: 180
+                }
+              }
+              version: {
+                delete: {
+                  daysAfterCreationGreaterThan: 30
+                }
+              }
+            }
+            filters: {
+              blobTypes: [
+                'blockBlob'
+              ]
+              prefixMatch: [
+                'function-releases/'
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+
+resource privateLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05-01' = {
+  parent: privateStorage
+  name: 'default'
+  properties: {
+    policy: {
+      rules: [
+        {
+          name: 'expire-bring-replay-records'
+          enabled: true
+          type: 'Lifecycle'
+          definition: {
+            actions: {
+              baseBlob: {
+                delete: {
+                  daysAfterModificationGreaterThan: 35
+                }
+              }
+              version: {
+                delete: {
+                  daysAfterCreationGreaterThan: 35
+                }
+              }
+            }
+            filters: {
+              blobTypes: [
+                'blockBlob'
+              ]
+              prefixMatch: [
+                '${bringMutationContainer}/operations/'
+              ]
+            }
+          }
+        }
+        {
+          name: 'retain-bring-audit-for-one-year'
+          enabled: true
+          type: 'Lifecycle'
+          definition: {
+            actions: {
+              baseBlob: {
+                delete: {
+                  daysAfterModificationGreaterThan: 365
+                }
+              }
+            }
+            filters: {
+              blobTypes: [
+                'blockBlob'
+              ]
+              prefixMatch: [
+                '${bringAuditContainer}/events/'
+              ]
+            }
+          }
+        }
+        {
+          name: 'expire-private-blob-versions'
+          enabled: true
+          type: 'Lifecycle'
+          definition: {
+            actions: {
+              version: {
+                delete: {
+                  daysAfterCreationGreaterThan: 30
+                }
+              }
+            }
+            filters: {
+              blobTypes: [
+                'blockBlob'
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+  name: keyVaultName
+  location: location
+  tags: union(tags, { purpose: 'provider-secrets' })
+  properties: {
+    tenantId: subscription().tenantId
+    sku: {
+      family: 'A'
+      name: 'standard'
+    }
+    enableRbacAuthorization: true
+    enablePurgeProtection: true
+    softDeleteRetentionInDays: 90
+    publicNetworkAccess: 'Enabled'
+    networkAcls: {
+      bypass: 'AzureServices'
+      defaultAction: 'Allow'
+    }
+  }
+}
+
+resource redditSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'reddit-client-secret'
+  properties: {
+    value: redditOAuthSecret
+  }
+}
+
+resource wlhBaseUrlSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'wlh-base-url'
+  properties: {
+    value: wlhBaseUrl
+  }
+}
+
+resource bringClientApiKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'bring-client-api-key'
+  properties: {
+    value: bringClientApiKey
+  }
+}
+
+resource bringEmailSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'bring-email'
+  properties: {
+    value: bringEmail
+  }
+}
+
+resource bringPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'bring-password'
+  properties: {
+    value: bringPassword
+  }
+}
+
+resource bringConfirmationKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'bring-confirmation-hmac-key'
+  properties: {
+    value: bringConfirmationHmacKey
+  }
+}
+
+resource bringEncryptionKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'bring-mutation-encryption-key'
+  properties: {
+    value: bringMutationEncryptionKey
+  }
+}
+
+resource openAiSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (repairableErrorsLlmEnabled) {
+  parent: keyVault
+  name: 'openai-api-key'
+  properties: {
+    value: openAiCredential
   }
 }
 
@@ -144,6 +600,10 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   tags: tags
   properties: {
     Application_Type: 'web'
+    RetentionInDays: 90
+    SamplingPercentage: 100
+    publicNetworkAccessForIngestion: 'Enabled'
+    publicNetworkAccessForQuery: 'Enabled'
   }
 }
 
@@ -172,175 +632,382 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
   properties: {
     serverFarmId: hostingPlan.id
     httpsOnly: true
+    publicNetworkAccess: 'Enabled'
     siteConfig: {
       linuxFxVersion: 'NODE|22'
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
+      http20Enabled: true
+      minimumElasticInstanceCount: 0
       cors: {
         allowedOrigins: apiCorsAllowedOriginList
         supportCredentials: false
       }
       appSettings: [
-        {
-          name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
-          value: appInsights.properties.ConnectionString
-        }
-        {
-          name: 'AzureWebJobsStorage__blobServiceUri'
-          value: 'https://${storageAccount.name}.blob.${environment().suffixes.storage}'
-        }
-        {
-          name: 'AzureWebJobsStorage__queueServiceUri'
-          value: 'https://${storageAccount.name}.queue.${environment().suffixes.storage}'
-        }
-        {
-          name: 'AzureWebJobsStorage__tableServiceUri'
-          value: 'https://${storageAccount.name}.table.${environment().suffixes.storage}'
-        }
-        {
-          name: 'AzureWebJobsStorage__credential'
-          value: 'managedidentity'
-        }
-        {
-          name: 'FUNCTIONS_EXTENSION_VERSION'
-          value: '~4'
-        }
-        {
-          name: 'FUNCTIONS_WORKER_RUNTIME'
-          value: 'node'
-        }
-
-        {
-          name: 'AUTH_ENABLED'
-          value: authEnabled
-        }
-        {
-          name: 'OIDC_ISSUER'
-          value: oidcIssuer
-        }
-        {
-          name: 'OIDC_AUDIENCE'
-          value: oidcAudience
-        }
-        {
-          name: 'OIDC_JWKS_URI'
-          value: oidcJwksUri
-        }
-        {
-          name: 'OIDC_REQUIRED_SCOPES'
-          value: oidcRequiredScopes
-        }
-        {
-          name: 'OIDC_ALLOWED_OBJECT_IDS'
-          value: oidcAllowedObjectIds
-        }
-        {
-          name: 'OIDC_ALLOWED_SUBJECTS'
-          value: oidcAllowedSubjects
-        }
-        {
-          name: 'OIDC_ALLOWED_APP_OBJECT_IDS'
-          value: oidcAllowedAppObjectIds
-        }
-        {
-          name: 'OIDC_ALLOWED_CLIENT_IDS'
-          value: oidcAllowedClientIds
-        }
-        {
-          name: 'OIDC_ALLOWED_DELEGATED_CLIENT_IDS'
-          value: oidcAllowedDelegatedClientIds
-        }
-        {
-          name: 'OIDC_ALLOWED_TENANTS'
-          value: oidcAllowedTenants
-        }
-        {
-          name: 'AUTH_DEBUG'
-          value: authDebug
-        }
-
-        {
-          name: 'API_CORS_ALLOWED_ORIGINS'
-          value: apiCorsAllowedOrigins
-        }
-
-        {
-          name: 'REDDIT_CLIENT_ID'
-          value: redditClientId
-        }
-        {
-          name: 'REDDIT_CLIENT_SECRET'
-          value: redditOAuthSecret
-        }
-        {
-          name: 'REDDIT_USER_AGENT'
-          value: redditUserAgent
-        }
-
-        {
-          name: 'WLH_BASE_URL'
-          value: wlhBaseUrl
-        }
-        {
-          name: 'WLH_STORAGE_ACCOUNT_NAME'
-          value: storageAccount.name
-        }
-        {
-          name: 'WLH_CATEGORY_BLOB_CONTAINER'
-          value: wlhCategoryBlobContainer
-        }
-        {
-          name: 'WLH_CATEGORY_BLOB_NAME'
-          value: wlhCategoryBlobName
-        }
+        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsights.properties.ConnectionString }
+        { name: 'AzureWebJobsStorage__blobServiceUri', value: 'https://${hostStorage.name}.blob.${environment().suffixes.storage}' }
+        { name: 'AzureWebJobsStorage__queueServiceUri', value: 'https://${hostStorage.name}.queue.${environment().suffixes.storage}' }
+        { name: 'AzureWebJobsStorage__tableServiceUri', value: 'https://${hostStorage.name}.table.${environment().suffixes.storage}' }
+        { name: 'AzureWebJobsStorage__credential', value: 'managedidentity' }
+        { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
+        { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'node' }
+        { name: 'DEPLOYED_ENVIRONMENT_NAME', value: environmentName }
+        { name: 'AUTH_ENABLED', value: string(authEnabled) }
+        { name: 'OIDC_ISSUER', value: validatedOidcIssuer }
+        { name: 'OIDC_AUDIENCE', value: validatedOidcAudience }
+        { name: 'OIDC_JWKS_URI', value: oidcJwksUri }
+        { name: 'OIDC_REQUIRED_SCOPES', value: oidcRequiredScopes }
+        { name: 'OIDC_ALLOWED_OBJECT_IDS', value: validatedOidcObjectIds }
+        { name: 'OIDC_ALLOWED_SUBJECTS', value: oidcAllowedSubjects }
+        { name: 'OIDC_ALLOWED_APP_OBJECT_IDS', value: oidcAllowedAppObjectIds }
+        { name: 'OIDC_ALLOWED_CLIENT_IDS', value: oidcAllowedClientIds }
+        { name: 'OIDC_ALLOWED_DELEGATED_CLIENT_IDS', value: oidcAllowedDelegatedClientIds }
+        { name: 'OIDC_ALLOWED_TENANTS', value: validatedOidcTenants }
+        { name: 'AUTH_DEBUG', value: string(authDebug) }
+        { name: 'API_CORS_ALLOWED_ORIGINS', value: validatedCorsOrigins }
+        { name: 'MCP_RESOURCE_ORIGIN', value: validatedMcpOrigin }
+        { name: 'MCP_ALLOWED_ORIGINS', value: validatedMcpAllowedOrigins }
+        { name: 'REDDIT_CLIENT_ID', value: redditClientId }
+        { name: 'REDDIT_CLIENT_SECRET', value: '@Microsoft.KeyVault(SecretUri=${redditSecret.properties.secretUriWithVersion})' }
+        { name: 'REDDIT_USER_AGENT', value: redditUserAgent }
+        { name: 'WLH_BASE_URL', value: '@Microsoft.KeyVault(SecretUri=${wlhBaseUrlSecret.properties.secretUriWithVersion})' }
+        { name: 'WLH_STORAGE_ACCOUNT_NAME', value: privateStorage.name }
+        { name: 'WLH_CATEGORY_BLOB_CONTAINER', value: wlhCategoryBlobContainer }
+        { name: 'WLH_CATEGORY_BLOB_NAME', value: wlhCategoryBlobName }
+        { name: 'BRING_ENABLED', value: string(bringEnabled) }
+        { name: 'BRING_ADD_ENABLED', value: string(validatedBringAddEnabled) }
+        { name: 'BRING_DESTRUCTIVE_ENABLED', value: string(validatedBringDestructiveEnabled) }
         { name: 'BRING_BASE_URL', value: bringBaseUrl }
-        { name: 'BRING_CLIENT_API_KEY', value: bringClientApiKey }
+        { name: 'BRING_CLIENT_API_KEY', value: '@Microsoft.KeyVault(SecretUri=${bringClientApiKeySecret.properties.secretUriWithVersion})' }
         { name: 'BRING_COUNTRY', value: bringCountry }
-        { name: 'BRING_EMAIL', value: bringEmail }
-        { name: 'BRING_PASSWORD', value: bringPassword }
+        { name: 'BRING_EMAIL', value: '@Microsoft.KeyVault(SecretUri=${bringEmailSecret.properties.secretUriWithVersion})' }
+        { name: 'BRING_PASSWORD', value: '@Microsoft.KeyVault(SecretUri=${bringPasswordSecret.properties.secretUriWithVersion})' }
+        { name: 'BRING_EXPECTED_ACCOUNT_FINGERPRINT', value: validatedBringFingerprint }
         { name: 'BRING_DEFAULT_LIST_UUID', value: bringDefaultListUuid }
-        { name: 'BRING_SESSION_CACHE_ENABLED', value: bringSessionCacheEnabled }
+        { name: 'BRING_READABLE_LIST_UUIDS', value: validatedBringReadableLists }
+        { name: 'BRING_WRITABLE_LIST_UUIDS', value: validatedBringWritableLists }
+        { name: 'BRING_SESSION_CACHE_ENABLED', value: string(bringSessionCacheEnabled) }
         { name: 'BRING_SESSION_CACHE_CONTAINER', value: bringSessionCacheContainer }
         { name: 'BRING_SESSION_CACHE_BLOB', value: bringSessionCacheBlob }
-        { name: 'BRING_STORAGE_ACCOUNT_NAME', value: storageAccount.name }
-
-        {
-          name: 'OPENAI_API_KEY'
-          value: openAiCredential
-        }
-        {
-          name: 'REPAIRABLE_ERRORS_LLM_ENABLED'
-          value: repairableErrorsLlmEnabled
-        }
-        {
-          name: 'REPAIRABLE_ERRORS_LLM_MODEL'
-          value: repairableErrorsLlmModel
-        }
+        { name: 'BRING_MUTATION_CONTAINER', value: bringMutationContainer }
+        { name: 'BRING_AUDIT_CONTAINER', value: bringAuditContainer }
+        { name: 'BRING_STORAGE_ACCOUNT_NAME', value: privateStorage.name }
+        { name: 'BRING_CONFIRMATION_HMAC_KEY', value: '@Microsoft.KeyVault(SecretUri=${bringConfirmationKeySecret.properties.secretUriWithVersion})' }
+        { name: 'BRING_MUTATION_ENCRYPTION_KEY', value: '@Microsoft.KeyVault(SecretUri=${bringEncryptionKeySecret.properties.secretUriWithVersion})' }
+        { name: 'OPENAI_API_KEY', value: repairableErrorsLlmEnabled ? '@Microsoft.KeyVault(SecretUri=${openAiSecret!.properties.secretUriWithVersion})' : '' }
+        { name: 'REPAIRABLE_ERRORS_LLM_ENABLED', value: string(repairableErrorsLlmEnabled) }
+        { name: 'REPAIRABLE_ERRORS_LLM_MODEL', value: repairableErrorsLlmModel }
       ]
     }
   }
 }
 
-resource functionHostStorageBlobOwnerRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storageAccount.id, functionApp.id, 'Storage Blob Data Owner')
-  scope: storageAccount
+var storageBlobDataOwnerRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
+var storageBlobDataContributorRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+var storageBlobDataReaderRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')
+var storageQueueDataContributorRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '974c5e8b-45b9-4653-ba55-5f855dd0fb88')
+var storageTableDataContributorRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')
+var keyVaultSecretsUserRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
+
+resource functionHostBlobRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(hostStorage.id, functionApp.id, 'host-blob-owner')
+  scope: hostStorage
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
+    roleDefinitionId: storageBlobDataOwnerRole
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
 }
 
-resource functionHostStorageTableContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storageAccount.id, functionApp.id, 'Storage Table Data Contributor')
-  scope: storageAccount
+resource functionHostQueueRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(hostStorage.id, functionApp.id, 'host-queue-contributor')
+  scope: hostStorage
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')
+    roleDefinitionId: storageQueueDataContributorRole
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
+  }
+}
+
+resource functionHostTableRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(hostStorage.id, functionApp.id, 'host-table-contributor')
+  scope: hostStorage
+  properties: {
+    roleDefinitionId: storageTableDataContributorRole
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource functionReleaseReaderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(releaseContainer.id, functionApp.id, 'release-reader')
+  scope: releaseContainer
+  properties: {
+    roleDefinitionId: storageBlobDataReaderRole
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource functionWlhReaderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(wlhReferenceContainer.id, functionApp.id, 'wlh-reader')
+  scope: wlhReferenceContainer
+  properties: {
+    roleDefinitionId: storageBlobDataReaderRole
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource functionBringSessionRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(bringSessionContainer.id, functionApp.id, 'bring-session-contributor')
+  scope: bringSessionContainer
+  properties: {
+    roleDefinitionId: storageBlobDataContributorRole
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource functionBringMutationRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(bringMutationStoreContainer.id, functionApp.id, 'bring-mutation-contributor')
+  scope: bringMutationStoreContainer
+  properties: {
+    roleDefinitionId: storageBlobDataContributorRole
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource functionBringAuditRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(bringAuditStoreContainer.id, functionApp.id, 'bring-audit-contributor')
+  scope: bringAuditStoreContainer
+  properties: {
+    roleDefinitionId: storageBlobDataContributorRole
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource functionKeyVaultRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(keyVault.id, functionApp.id, 'key-vault-secrets-user')
+  scope: keyVault
+  properties: {
+    roleDefinitionId: keyVaultSecretsUserRole
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource deploymentReleaseWriterRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(releaseContainer.id, deploymentPrincipalObjectId, 'deployment-release-writer')
+  scope: releaseContainer
+  properties: {
+    roleDefinitionId: storageBlobDataContributorRole
+    principalId: deploymentPrincipalObjectId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource deploymentStaticWriterRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(staticWebContainer.id, deploymentPrincipalObjectId, 'deployment-static-writer')
+  scope: staticWebContainer
+  properties: {
+    roleDefinitionId: storageBlobDataContributorRole
+    principalId: deploymentPrincipalObjectId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource deploymentWlhWriterRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(wlhReferenceContainer.id, deploymentPrincipalObjectId, 'deployment-wlh-writer')
+  scope: wlhReferenceContainer
+  properties: {
+    roleDefinitionId: storageBlobDataContributorRole
+    principalId: deploymentPrincipalObjectId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
+  name: actionGroupName
+  location: 'global'
+  tags: tags
+  properties: {
+    groupShortName: take('juez${environmentName}', 12)
+    enabled: true
+    emailReceivers: [
+      {
+        name: 'operator'
+        emailAddress: operatorAlertEmail
+        useCommonAlertSchema: true
+      }
+    ]
+  }
+}
+
+resource budget 'Microsoft.Consumption/budgets@2024-08-01' = {
+  name: 'budget-${workloadName}-${environmentName}'
+  properties: {
+    amount: validatedBudgetAmount
+    category: 'Cost'
+    timeGrain: 'Monthly'
+    timePeriod: {
+      startDate: budgetStartDate
+    }
+    notifications: {
+      actual80: {
+        enabled: true
+        operator: 'GreaterThanOrEqualTo'
+        threshold: 80
+        thresholdType: 'Actual'
+        contactEmails: [
+          operatorAlertEmail
+        ]
+        contactGroups: [
+          actionGroup.id
+        ]
+        contactRoles: []
+      }
+      forecast100: {
+        enabled: true
+        operator: 'GreaterThanOrEqualTo'
+        threshold: 100
+        thresholdType: 'Forecasted'
+        contactEmails: [
+          operatorAlertEmail
+        ]
+        contactGroups: [
+          actionGroup.id
+        ]
+        contactRoles: []
+      }
+    }
+  }
+}
+
+resource functionFailureAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {
+  name: 'alert-${workloadName}-${environmentName}-function-5xx'
+  location: location
+  kind: 'LogAlert'
+  tags: tags
+  properties: {
+    displayName: '${workloadName} ${environmentName} Function 5xx'
+    description: 'More than five server failures in fifteen minutes.'
+    enabled: true
+    severity: 1
+    evaluationFrequency: 'PT5M'
+    windowSize: 'PT15M'
+    scopes: [
+      appInsights.id
+    ]
+    autoMitigate: true
+    skipQueryValidation: true
+    criteria: {
+      allOf: [
+        {
+          query: 'requests | where resultCode startswith "5"'
+          timeAggregation: 'Count'
+          operator: 'GreaterThan'
+          threshold: 5
+          failingPeriods: {
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
+          }
+        }
+      ]
+    }
+    actions: {
+      actionGroups: [
+        actionGroup.id
+      ]
+    }
+  }
+}
+
+resource authFailureAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {
+  name: 'alert-${workloadName}-${environmentName}-auth-spike'
+  location: location
+  kind: 'LogAlert'
+  tags: tags
+  properties: {
+    displayName: '${workloadName} ${environmentName} OAuth 401/403 spike'
+    description: 'More than twenty authentication or authorization failures in fifteen minutes.'
+    enabled: true
+    severity: 2
+    evaluationFrequency: 'PT5M'
+    windowSize: 'PT15M'
+    scopes: [
+      appInsights.id
+    ]
+    autoMitigate: true
+    skipQueryValidation: true
+    criteria: {
+      allOf: [
+        {
+          query: 'requests | where resultCode in ("401", "403")'
+          timeAggregation: 'Count'
+          operator: 'GreaterThan'
+          threshold: 20
+          failingPeriods: {
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
+          }
+        }
+      ]
+    }
+    actions: {
+      actionGroups: [
+        actionGroup.id
+      ]
+    }
+  }
+}
+
+resource bringProtocolAlert 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {
+  name: 'alert-${workloadName}-${environmentName}-bring-protocol'
+  location: location
+  kind: 'LogAlert'
+  tags: tags
+  properties: {
+    displayName: '${workloadName} ${environmentName} Bring auth/protocol failure'
+    description: 'Bring authentication or undocumented-protocol version skew was observed.'
+    enabled: true
+    severity: 1
+    evaluationFrequency: 'PT5M'
+    windowSize: 'PT15M'
+    scopes: [
+      appInsights.id
+    ]
+    autoMitigate: true
+    skipQueryValidation: true
+    criteria: {
+      allOf: [
+        {
+          query: 'traces | where message == "Bring upstream request failed." | where tostring(customDimensions.error_kind) in ("authentication", "version_skew")'
+          timeAggregation: 'Count'
+          operator: 'GreaterThan'
+          threshold: 0
+          failingPeriods: {
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
+          }
+        }
+      ]
+    }
+    actions: {
+      actionGroups: [
+        actionGroup.id
+      ]
+    }
   }
 }
 
 output functionAppResourceName string = functionApp.name
-output storageAccountResourceName string = storageAccount.name
+output hostStorageAccountResourceName string = hostStorage.name
+output releaseStorageAccountResourceName string = releaseStorage.name
+output staticWebStorageAccountResourceName string = staticStorage.name
+output privateStorageAccountResourceName string = privateStorage.name
 output applicationInsightsResourceName string = appInsights.name
+output keyVaultResourceName string = keyVault.name
+output monthlyBudgetEur int = validatedBudgetAmount

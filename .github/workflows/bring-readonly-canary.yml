@@ -1,0 +1,71 @@
+name: Bring Read-Only Canary
+
+on:
+  schedule:
+    - cron: '43 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: bring-readonly-canary
+  cancel-in-progress: false
+
+jobs:
+  read-contract:
+    name: read-only Bring contract canary
+    if: vars.BRING_READ_CANARY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: test
+    env:
+      ENVIRONMENT_NAME: test
+      SERVICE_AUTH_PREFIX: BRING_CANARY
+      REQUIRE_AUTH_SMOKE: 'true'
+      BRING_CANARY_SERVICE_AUTH_CLIENT_ID: ${{ vars.BRING_CANARY_SERVICE_AUTH_CLIENT_ID }}
+      BRING_CANARY_SERVICE_AUTH_TENANT_ID: ${{ vars.BRING_CANARY_SERVICE_AUTH_TENANT_ID }}
+      BRING_CANARY_SERVICE_AUTH_SCOPE: ${{ vars.BRING_CANARY_SERVICE_AUTH_SCOPE }}
+      BRING_CANARY_BASE_URL: ${{ vars.BRING_CANARY_BASE_URL }}
+      BRING_CANARY_LIST_UUID: ${{ vars.BRING_CANARY_LIST_UUID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        with:
+          node-version: '22'
+      - name: Mint short-lived read-only service token
+        run: node scripts/mint-smoke-token.mjs
+      - name: Validate sanitized read contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${BRING_CANARY_BASE_URL:?BRING_CANARY_BASE_URL is required}"
+          : "${BRING_CANARY_LIST_UUID:?BRING_CANARY_LIST_UUID is required}"
+          if ! [[ "$BRING_CANARY_BASE_URL" =~ ^https://[^/]+$ ]]; then
+            echo "BRING_CANARY_BASE_URL must be a canonical HTTPS origin." >&2
+            exit 1
+          fi
+          if ! [[ "$BRING_CANARY_LIST_UUID" =~ ^[0-9a-fA-F-]{36}$ ]]; then
+            echo "BRING_CANARY_LIST_UUID must be a UUID." >&2
+            exit 1
+          fi
+
+          lists_file="$RUNNER_TEMP/bring-lists.json"
+          items_file="$RUNNER_TEMP/bring-items.json"
+          curl --fail-with-body --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer $AUTH_ACCESS_TOKEN" \
+            "$BRING_CANARY_BASE_URL/api/bring/lists" >"$lists_file"
+          curl --fail-with-body --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer $AUTH_ACCESS_TOKEN" \
+            "$BRING_CANARY_BASE_URL/api/bring/lists/$BRING_CANARY_LIST_UUID/items" >"$items_file"
+
+          jq -e '.source == "bring" and (.lists | type == "array")' "$lists_file" >/dev/null
+          jq -e '
+            (.uuid | type == "string")
+            and (.version | test("^[0-9a-f]{64}$"))
+            and (.items | type == "array")
+          ' "$items_file" >/dev/null
+          echo "Bring read-only canary passed. No mutation endpoint was called."

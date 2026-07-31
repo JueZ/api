@@ -35,9 +35,13 @@ async function withEnv(values, fn) {
 }
 
 test('createCorsHeaders reflects configured allowed origins and adds Vary', () => {
-  const headers = createCorsHeaders(request('OPTIONS', allowedOrigin), { methods: ['GET', 'OPTIONS'] }, {
-    API_CORS_ALLOWED_ORIGINS: `${allowedOrigin}, https://admin.example.test`,
-  });
+  const headers = createCorsHeaders(
+    request('OPTIONS', allowedOrigin),
+    { methods: ['GET', 'OPTIONS'] },
+    {
+      API_CORS_ALLOWED_ORIGINS: `${allowedOrigin}, https://admin.example.test`,
+    },
+  );
 
   assert.equal(headers['Access-Control-Allow-Origin'], allowedOrigin);
   assert.equal(headers.Vary, 'Origin');
@@ -45,9 +49,13 @@ test('createCorsHeaders reflects configured allowed origins and adds Vary', () =
 });
 
 test('createCorsHeaders omits Access-Control-Allow-Origin for disallowed origins', () => {
-  const headers = createCorsHeaders(request('OPTIONS', evilOrigin), { methods: ['GET', 'OPTIONS'] }, {
-    API_CORS_ALLOWED_ORIGINS: allowedOrigin,
-  });
+  const headers = createCorsHeaders(
+    request('OPTIONS', evilOrigin),
+    { methods: ['GET', 'OPTIONS'] },
+    {
+      API_CORS_ALLOWED_ORIGINS: allowedOrigin,
+    },
+  );
 
   assert.equal(headers['Access-Control-Allow-Origin'], undefined);
   assert.equal(headers['Access-Control-Allow-Headers'], 'Authorization, Content-Type');
