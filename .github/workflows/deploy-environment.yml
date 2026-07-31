@@ -1127,12 +1127,24 @@ jobs:
                 --overwrite false \
                 -o none
             fi
+            release_version_id="$(az storage blob show \
+              --auth-mode login \
+              --account-name "$EFFECTIVE_RELEASE_STORAGE_ACCOUNT" \
+              --container-name "$release_container" \
+              --name "$release_blob" \
+              --query versionId \
+              -o tsv)"
+            if [ -z "$release_version_id" ]; then
+              echo "Release storage did not return an immutable version ID for the Function package." >&2
+              exit 1
+            fi
             verified_package="$RUNNER_TEMP/verified-functionapp.zip"
             az storage blob download \
               --auth-mode login \
               --account-name "$EFFECTIVE_RELEASE_STORAGE_ACCOUNT" \
               --container-name "$release_container" \
               --name "$release_blob" \
+              --version-id "$release_version_id" \
               --file "$verified_package" \
               --overwrite true \
               -o none
@@ -1142,7 +1154,8 @@ jobs:
               exit 1
             fi
 
-            package_url="https://$EFFECTIVE_RELEASE_STORAGE_ACCOUNT.blob.core.windows.net/$release_container/$release_blob"
+            encoded_release_version_id="$(node --input-type=module --eval 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$release_version_id")"
+            package_url="https://$EFFECTIVE_RELEASE_STORAGE_ACCOUNT.blob.core.windows.net/$release_container/$release_blob?versionid=$encoded_release_version_id"
             deployed_at_utc="${EFFECTIVE_DEPLOYED_AT_UTC:-${DEPLOYED_AT_UTC:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}}"
             package_settings=(
               "WEBSITE_RUN_FROM_PACKAGE=$package_url"
@@ -1166,6 +1179,19 @@ jobs:
               --name "$EFFECTIVE_FUNCTIONAPP_NAME" \
               --settings "${package_settings[@]}" \
               -o none
+            settings_url="https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$EFFECTIVE_FUNCTIONAPP_NAME/config/appsettings/list?api-version=2023-12-01"
+            if ! az rest \
+              --method post \
+              --url "$settings_url" \
+              --body '{}' \
+              --output json \
+              | jq -e \
+                --arg package_url "$package_url" \
+                '.properties.WEBSITE_RUN_FROM_PACKAGE == $package_url and .properties.WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID == "SystemAssigned"' \
+                >/dev/null; then
+              echo "Function App did not retain the exact immutable package-version pointer." >&2
+              exit 1
+            fi
             function_app_id="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$EFFECTIVE_FUNCTIONAPP_NAME"
             node scripts/assert-current-main.mjs
             az rest \
@@ -1215,6 +1241,7 @@ jobs:
               exit 1
             fi
             frontend_inventory="$RUNNER_TEMP/frontend-inventory.json"
+            non_entrypoint_inventory="$RUNNER_TEMP/frontend-non-entrypoint-inventory.json"
             current_blob_names="$RUNNER_TEMP/frontend-current-blob-names.json"
             stale_blob_plan="$RUNNER_TEMP/frontend-stale-blob-plan.json"
             stale_blob_lines="$RUNNER_TEMP/frontend-stale-blob-lines.txt"
@@ -1228,6 +1255,68 @@ jobs:
                 --index-document index.html \
                 -o none
             fi
+
+            verify_expected_frontend_content() {
+              local expected_inventory="$1"
+              local verified_directory="$2"
+              local expected_blob_lines="$3"
+              mkdir -p "$verified_directory"
+              jq -r '.files[].name' "$expected_inventory" > "$expected_blob_lines"
+              while IFS= read -r expected_blob; do
+                local verified_file="$verified_directory/$expected_blob"
+                mkdir -p -- "$(dirname -- "$verified_file")"
+                # shellcheck disable=SC2016
+                az storage blob download \
+                  --auth-mode login \
+                  --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
+                  --container-name '$web' \
+                  --name "$expected_blob" \
+                  --file "$verified_file" \
+                  --overwrite true \
+                  -o none
+              done < "$expected_blob_lines"
+              node scripts/frontend-inventory.mjs compare-directory "$expected_inventory" "$verified_directory"
+            }
+
+            # Keep the previously active entrypoint intact until every replacement dependency is uploaded and verified.
+            entrypoint_file="$RUNNER_TEMP/frontend-entrypoint.html"
+            mv "$output_dir/index.html" "$entrypoint_file"
+            node scripts/frontend-inventory.mjs create "$output_dir" "$non_entrypoint_inventory"
+            node scripts/assert-current-main.mjs
+            # shellcheck disable=SC2016
+            az storage blob upload-batch \
+              --auth-mode login \
+              --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
+              --destination '$web' \
+              --source "$output_dir" \
+              --overwrite \
+              -o none
+            verified_non_entrypoint_dir="$(mktemp -d "$RUNNER_TEMP/frontend-non-entrypoint-verified.XXXXXX")"
+            verify_expected_frontend_content \
+              "$non_entrypoint_inventory" \
+              "$verified_non_entrypoint_dir" \
+              "$RUNNER_TEMP/frontend-non-entrypoint-lines.txt"
+
+            mv "$entrypoint_file" "$output_dir/index.html"
+            node scripts/assert-current-main.mjs
+            # shellcheck disable=SC2016
+            az storage blob upload \
+              --auth-mode login \
+              --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
+              --container-name '$web' \
+              --name index.html \
+              --file "$output_dir/index.html" \
+              --content-type 'text/html; charset=utf-8' \
+              --content-cache-control no-cache \
+              --overwrite true \
+              -o none
+            verified_expected_dir="$(mktemp -d "$RUNNER_TEMP/frontend-expected-verified.XXXXXX")"
+            verify_expected_frontend_content \
+              "$frontend_inventory" \
+              "$verified_expected_dir" \
+              "$RUNNER_TEMP/frontend-expected-lines.txt"
+
+            # Only after the complete replacement is live and content-verified may stale blobs be removed.
             # $web is Azure's literal static-site container.
             # shellcheck disable=SC2016
             az storage blob list \
@@ -1251,14 +1340,6 @@ jobs:
                 --name "$stale_blob" \
                 -o none
             done < "$stale_blob_lines"
-            node scripts/assert-current-main.mjs
-            # shellcheck disable=SC2016
-            az storage blob upload-batch \
-              --auth-mode login \
-              --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
-              --destination '$web' \
-              --source "$output_dir" \
-              --overwrite
 
             deployed_blob_names="$RUNNER_TEMP/frontend-deployed-blob-names.json"
             verified_blob_names="$RUNNER_TEMP/frontend-verified-blob-names.json"

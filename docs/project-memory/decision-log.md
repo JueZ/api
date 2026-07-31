@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-07-31 — Pin immutable Function versions and activate the frontend entrypoint last
+
+- Decision: A digest-addressed Function blob name is insufficient by itself. Resolve its Azure Blob version ID, download and hash that exact immutable version, put the encoded `versionid` in `WEBSITE_RUN_FROM_PACKAGE`, and verify the exact setting through the management plane before restart.
+- Decision: Do not delete from the active static site before a complete replacement is available. Upload and verify all non-entrypoint files while the prior `index.html` remains active; upload `index.html` last; verify every expected byte; then delete only inventory-proven stale blobs and require a final exact name/content match.
+- Rationale: Azure blob versions are immutable, while a current blob URL can be rebound by overwrite. Activation-last frontend deployment prevents an upload failure from first removing dependencies required by the previously active site.
+- Status: Implemented on the fresh successor after PR #279 exhausted its two high-risk review attempts; fresh remote validation and test-only deployment remain pending.
+
 ## 2026-07-31 — Bind deployment evidence to one attempt and preserve exact rendered packages
 
 - Decision: Deployment workflows accept only workflow attempt 1. A failed deployment must be diagnosed and newly dispatched with a new opaque correlation; GitHub reruns are rejected before Azure mutation.

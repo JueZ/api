@@ -42,6 +42,7 @@ const runtimeSettingsPolicy = readFileSync(
   new URL('../validate-deployed-runtime-settings.mjs', import.meta.url),
   'utf8',
 );
+const mainBicep = readFileSync(new URL('../../infra/main.bicep', import.meta.url), 'utf8');
 
 function pullRequest(overrides = {}) {
   return {
@@ -184,6 +185,18 @@ test('rollback changes only accepted application packages and leaves infrastruct
     deployEnvironmentWorkflow,
     /Rollback requires the accepted digest-addressed Function package to already exist/,
   );
+  const functionIndex = deployEnvironmentWorkflow.indexOf('- name: Package and deploy Azure Functions');
+  const staticIndex = deployEnvironmentWorkflow.indexOf('- name: Deploy Angular static site with Azure OIDC');
+  const functionDeployment = deployEnvironmentWorkflow.slice(functionIndex, staticIndex);
+  assert.match(mainBicep, /resource releaseBlobService[\s\S]*?isVersioningEnabled: true/);
+  assert.match(functionDeployment, /--query versionId/);
+  assert.match(functionDeployment, /--version-id "\$release_version_id"/);
+  assert.match(functionDeployment, /\?versionid=\$encoded_release_version_id/);
+  assert.match(functionDeployment, /Function App did not retain the exact immutable package-version pointer/);
+  assert.ok(
+    functionDeployment.indexOf('--version-id "$release_version_id"') <
+      functionDeployment.indexOf('WEBSITE_RUN_FROM_PACKAGE=$package_url'),
+  );
   assert.match(runtimeSettingsPolicy, /required managed setting is missing/);
   assert.match(runtimeSettingsPolicy, /unmanaged app setting is present/);
   assert.match(
@@ -197,9 +210,6 @@ test('rollback changes only accepted application packages and leaves infrastruct
   );
   const ledgerIndex = deployEnvironmentWorkflow.indexOf('- name: Write release ledger');
   assert.ok(telemetryIndex < finalGenerationIndex && finalGenerationIndex < ledgerIndex);
-  const functionIndex = deployEnvironmentWorkflow.indexOf('- name: Package and deploy Azure Functions');
-  const staticIndex = deployEnvironmentWorkflow.indexOf('- name: Deploy Angular static site with Azure OIDC');
-  const functionDeployment = deployEnvironmentWorkflow.slice(functionIndex, staticIndex);
   assert.equal(functionDeployment.match(/DEPLOYED_ENVIRONMENT_NAME=/g)?.length, 1);
   assert.match(
     functionDeployment,
@@ -240,18 +250,31 @@ test('frontend rendering is finalized, hashed, and preserved before either appli
   );
   assert.doesNotMatch(staticDeployment, /az storage blob delete-batch/);
   assert.equal(staticDeployment.match(/frontend-inventory\.mjs compare-names/g)?.length, 2);
+  assert.equal(staticDeployment.match(/frontend-inventory\.mjs compare-directory/g)?.length, 2);
+  assert.equal(staticDeployment.match(/verify_expected_frontend_content \\/g)?.length, 2);
   assert.match(staticDeployment, /az storage blob download-batch/);
-  assert.match(staticDeployment, /frontend-inventory\.mjs compare-directory/);
+  assert.match(staticDeployment, /mv "\$output_dir\/index\.html" "\$entrypoint_file"/);
+  assert.match(staticDeployment, /--name index\.html/);
+  assert.match(staticDeployment, /--content-cache-control no-cache/);
   const inventoryIndex = staticDeployment.indexOf('frontend-inventory.mjs create');
-  const staleDeleteIndex = staticDeployment.indexOf('az storage blob delete');
   const uploadIndex = staticDeployment.indexOf('az storage blob upload-batch');
-  const contentVerificationIndex = staticDeployment.indexOf('frontend-inventory.mjs compare-directory');
+  const dependencyVerificationIndex = staticDeployment.indexOf('verify_expected_frontend_content \\', uploadIndex);
+  const entrypointUploadIndex = staticDeployment.indexOf('--name index.html');
+  const completeReplacementVerificationIndex = staticDeployment.indexOf(
+    'verify_expected_frontend_content \\',
+    dependencyVerificationIndex + 1,
+  );
+  const staleDeleteIndex = staticDeployment.indexOf('az storage blob delete');
+  const finalContentVerificationIndex = staticDeployment.lastIndexOf('frontend-inventory.mjs compare-directory');
   const finalNameVerificationIndex = staticDeployment.lastIndexOf('frontend-inventory.mjs compare-names');
   assert.ok(
-    inventoryIndex < staleDeleteIndex &&
-      staleDeleteIndex < uploadIndex &&
-      uploadIndex < contentVerificationIndex &&
-      contentVerificationIndex < finalNameVerificationIndex,
+    inventoryIndex < uploadIndex &&
+      uploadIndex < dependencyVerificationIndex &&
+      dependencyVerificationIndex < entrypointUploadIndex &&
+      entrypointUploadIndex < completeReplacementVerificationIndex &&
+      completeReplacementVerificationIndex < staleDeleteIndex &&
+      staleDeleteIndex < finalContentVerificationIndex &&
+      finalContentVerificationIndex < finalNameVerificationIndex,
   );
 });
 
