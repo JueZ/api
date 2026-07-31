@@ -1,5 +1,12 @@
 # Deployment log
 
+## 2026-07-31 — Merge-controller self-gating fix reached main without deployment
+
+- PR #270 fixed the trusted controller's treatment of GitHub's mergeable `unstable` state while retaining exact-head required-check, review, conflict, freshness, fork, and branch-protection gates.
+- Exact head `83fdd6314b91be3588debc8fc191089a8ac79431` passed PR CI, Policy Check, CodeQL, and an independent high-risk model review. Because the old controller on `main` could not execute its own fix, the reviewed SHA was squash-merged through the same pinned bootstrap procedure used for the original controller; merge commit `5026003ca62ce49c16e76d1dbc57a36a0d56e04c` resulted.
+- Main CI run `30630948880`, Policy Check run `30630948846`, and CodeQL run `30630948886` passed. Main delivery run `30631074332` honored `[skip autodeploy]`; neither test nor production deployment was dispatched.
+- This follow-up project-memory update is the first low-risk end-to-end auto-merge canary using the corrected controller.
+
 ## 2026-07-31 — AI-native remediation merged; test deployment rejected by auth smoke
 
 - PR #264 merged as `4d82ed8491a32440ec5495049ba39e8f73c6bbac` after exact-head CI, Policy Check, and CodeQL passed. Main CI run `30629053731`, Policy Check run `30629053800`, and CodeQL run `30629053791` passed.
