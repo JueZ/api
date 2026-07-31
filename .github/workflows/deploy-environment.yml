@@ -794,8 +794,8 @@ jobs:
               --index-document index.html \
               -o none
             # $web is Azure's literal static-site container.
-            # shellcheck disable=SC2016
             node scripts/assert-current-main.mjs
+            # shellcheck disable=SC2016
             az storage blob upload-batch \
               --auth-mode login \
               --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
