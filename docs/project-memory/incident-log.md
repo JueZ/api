@@ -1,5 +1,13 @@
 # Incident log
 
+## 2026-07-31 — ARM boolean string casing blocked runtime-policy acceptance
+
+- Symptom: test-only run `30651053281` passed the nested Bicep deployment but the complete runtime-settings validator rejected `AUTH_ENABLED`, `AUTH_DEBUG`, the four Bring boolean flags, and `REPAIRABLE_ERRORS_LLM_ENABLED`.
+- Root cause: Bicep used `string(bool)` for those seven Function App settings. ARM materialized title-cased `True`/`False`, but Node configuration and the fail-closed validator require exact lowercase `true`/`false` strings.
+- Safety impact: the mismatch was detected before Function/frontend package activation, runtime smoke, telemetry acceptance, or provenance publication. Exact secret-reference identities—including `OPENAI_API_KEY`—matched without reading secret values. Production was not dispatched.
+- Repair: use `toLower(string(bool))` for all seven settings and statically reject any regression to the unnormalized form.
+- Status: local repair pending PR gates and a fresh test-only deployment.
+
 ## 2026-07-31 — Test auth failure exposed bootstrap, settings, placeholder, and deployment-generation gaps
 
 - Symptom: test run `30629930683` deployed exact commit `4d82ed8491a32440ec5495049ba39e8f73c6bbac`, but protected `GET /api/hello` returned the local-development principal. Follow-up inspection also found `https://null` in two non-secret test environment variables and a deployment-generation race between the controller's main-head check and downstream Azure mutations.
