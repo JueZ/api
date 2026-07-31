@@ -38,7 +38,7 @@
   "dependencies": {
     "@angular/common": "21.2.18",
     "@angular/compiler": "21.2.18",
-    "@angular/core": "21.2.18",
+    "@angular/core": "22.0.8",
     "@angular/platform-browser": "21.2.18",
     "@azure/functions": "4.14.0",
     "@azure/identity": "^4.13.1",
