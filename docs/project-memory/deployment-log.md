@@ -1,5 +1,12 @@
 # Deployment log
 
+## 2026-07-31 — First repaired test deployment stopped at an ARM settings cycle
+
+- PR #280 exact head `14a91c960a634b4a9a60796a393eabf1cfa2aeb1` passed CI run `30649467367`, Policy Check `30649467617`, CodeQL `30649470184`, and independent review/merge run `30649464758`, then squash-merged as `8d6c69c34fb411021c3c9a7b61a72421a482e007`.
+- Main-delivery run `30649984641` dispatched and accepted exact first-attempt main CI `30650008794`, then honored `[skip autodeploy]`; no automatic test or production deployment ran.
+- Manual test-only run `30650254586` validated the exact main/CI/correlation and immutable release bundle, then ARM rejected Bicep with `InvalidTemplate` because the parent template both listed and directly wrote the Function `appsettings` child resource. No Function or frontend package mutation ran; production was not dispatched.
+- Repair: retain the parent read of release-owned settings but reconcile the complete settings object through a secure nested Bicep module, removing the same-template resource cycle while keeping secret-bearing module parameters out of deployment history.
+
 ## 2026-07-31 — Corrected controller canary merged; post-merge handoff missing
 
 - PR #271 was automatically squash-merged by corrected controller run `30631182158` after all exact-head required checks and low-risk autonomous review passed. Merge commit `d49833bb119001d930e00cd5400ba7d1badb7550` is the first end-to-end proof that the `unstable` self-gating fix works.

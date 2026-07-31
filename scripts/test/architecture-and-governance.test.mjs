@@ -45,13 +45,21 @@ test('Azure Functions loads the fail-closed composition root before registering 
   const apiPackage = JSON.parse(readFileSync(new URL('../../apps/api/package.json', import.meta.url), 'utf8'));
   const compositionRoot = readFileSync(new URL('../../apps/api/src/index.ts', import.meta.url), 'utf8');
   const infrastructure = readFileSync(new URL('../../infra/main.bicep', import.meta.url), 'utf8');
+  const functionAppSettingsModule = readFileSync(
+    new URL('../../infra/modules/function-app-settings.bicep', import.meta.url),
+    'utf8',
+  );
   assert.equal(apiPackage.main, 'dist/index.js');
   assert.ok(
     compositionRoot.indexOf('assertRuntimeSafety();') < compositionRoot.indexOf("import('./functions/health.js')"),
   );
-  assert.match(infrastructure, /resource functionAppSettings 'Microsoft\.Web\/sites\/config@[^']+' = \{/);
+  assert.match(infrastructure, /module functionAppSettings '\.\/modules\/function-app-settings\.bicep' = \{/);
+  assert.doesNotMatch(infrastructure, /resource functionAppSettings 'Microsoft\.Web\/sites\/config/);
   assert.match(infrastructure, /list\('\$\{functionApp\.id\}\/config\/appsettings'/);
-  assert.match(infrastructure, /properties: union\(preservedFunctionReleaseSettings, \{/);
+  assert.match(infrastructure, /appSettings: union\(preservedFunctionReleaseSettings, \{/);
+  assert.match(functionAppSettingsModule, /@secure\(\)\s+@description[\s\S]*?param appSettings object/);
+  assert.match(functionAppSettingsModule, /resource appSettingsResource 'Microsoft\.Web\/sites\/config@[^']+' = \{/);
+  assert.match(functionAppSettingsModule, /properties: appSettings/);
   for (const setting of [
     'WEBSITE_RUN_FROM_PACKAGE',
     'DEPLOYED_COMMIT_SHA',

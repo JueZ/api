@@ -685,67 +685,70 @@ var preservedFunctionReleaseSettings = union(
     : {}
 )
 
-// App settings are a first-class child resource so an infrastructure update
-// deterministically reconciles safety configuration without deleting the
-// separately owned immutable release settings above.
-resource functionAppSettings 'Microsoft.Web/sites/config@2023-12-01' = {
-  parent: functionApp
-  name: 'appsettings'
-  properties: union(preservedFunctionReleaseSettings, {
-    APPLICATIONINSIGHTS_CONNECTION_STRING: appInsights.properties.ConnectionString
-    AzureWebJobsStorage__blobServiceUri: 'https://${hostStorage.name}.blob.${environment().suffixes.storage}'
-    AzureWebJobsStorage__queueServiceUri: 'https://${hostStorage.name}.queue.${environment().suffixes.storage}'
-    AzureWebJobsStorage__tableServiceUri: 'https://${hostStorage.name}.table.${environment().suffixes.storage}'
-    AzureWebJobsStorage__credential: 'managedidentity'
-    FUNCTIONS_EXTENSION_VERSION: '~4'
-    FUNCTIONS_WORKER_RUNTIME: 'node'
-    DEPLOYED_ENVIRONMENT_NAME: environmentName
-    AUTH_ENABLED: string(authEnabled)
-    OIDC_ISSUER: validatedOidcIssuer
-    OIDC_AUDIENCE: validatedOidcAudience
-    OIDC_JWKS_URI: oidcJwksUri
-    OIDC_REQUIRED_SCOPES: oidcRequiredScopes
-    OIDC_ALLOWED_OBJECT_IDS: validatedOidcObjectIds
-    OIDC_ALLOWED_SUBJECTS: oidcAllowedSubjects
-    OIDC_ALLOWED_APP_OBJECT_IDS: oidcAllowedAppObjectIds
-    OIDC_ALLOWED_CLIENT_IDS: oidcAllowedClientIds
-    OIDC_ALLOWED_DELEGATED_CLIENT_IDS: oidcAllowedDelegatedClientIds
-    OIDC_ALLOWED_TENANTS: validatedOidcTenants
-    AUTH_DEBUG: string(authDebug)
-    API_CORS_ALLOWED_ORIGINS: validatedCorsOrigins
-    MCP_RESOURCE_ORIGIN: validatedMcpOrigin
-    MCP_ALLOWED_ORIGINS: validatedMcpAllowedOrigins
-    REDDIT_CLIENT_ID: redditClientId
-    REDDIT_CLIENT_SECRET: '@Microsoft.KeyVault(SecretUri=${redditSecret.properties.secretUriWithVersion})'
-    REDDIT_USER_AGENT: redditUserAgent
-    WLH_BASE_URL: '@Microsoft.KeyVault(SecretUri=${wlhBaseUrlSecret.properties.secretUriWithVersion})'
-    WLH_STORAGE_ACCOUNT_NAME: privateStorage.name
-    WLH_CATEGORY_BLOB_CONTAINER: wlhCategoryBlobContainer
-    WLH_CATEGORY_BLOB_NAME: wlhCategoryBlobName
-    BRING_ENABLED: string(bringEnabled)
-    BRING_ADD_ENABLED: string(validatedBringAddEnabled)
-    BRING_DESTRUCTIVE_ENABLED: string(validatedBringDestructiveEnabled)
-    BRING_BASE_URL: bringBaseUrl
-    BRING_CLIENT_API_KEY: '@Microsoft.KeyVault(SecretUri=${bringClientApiKeySecret.properties.secretUriWithVersion})'
-    BRING_COUNTRY: bringCountry
-    BRING_EMAIL: '@Microsoft.KeyVault(SecretUri=${bringEmailSecret.properties.secretUriWithVersion})'
-    BRING_PASSWORD: '@Microsoft.KeyVault(SecretUri=${bringPasswordSecret.properties.secretUriWithVersion})'
-    BRING_EXPECTED_ACCOUNT_FINGERPRINT: validatedBringFingerprint
-    BRING_DEFAULT_LIST_UUID: bringDefaultListUuid
-    BRING_READABLE_LIST_UUIDS: validatedBringReadableLists
-    BRING_WRITABLE_LIST_UUIDS: validatedBringWritableLists
-    BRING_SESSION_CACHE_ENABLED: string(bringSessionCacheEnabled)
-    BRING_SESSION_CACHE_CONTAINER: bringSessionCacheContainer
-    BRING_SESSION_CACHE_BLOB: bringSessionCacheBlob
-    BRING_MUTATION_CONTAINER: bringMutationContainer
-    BRING_AUDIT_CONTAINER: bringAuditContainer
-    BRING_STORAGE_ACCOUNT_NAME: privateStorage.name
-    BRING_CONFIRMATION_HMAC_KEY: '@Microsoft.KeyVault(SecretUri=${bringConfirmationKeySecret.properties.secretUriWithVersion})'
-    BRING_MUTATION_ENCRYPTION_KEY: '@Microsoft.KeyVault(SecretUri=${bringEncryptionKeySecret.properties.secretUriWithVersion})'
-    OPENAI_API_KEY: repairableErrorsLlmEnabled ? '@Microsoft.KeyVault(SecretUri=${openAiSecret!.properties.secretUriWithVersion})' : ''
-    REPAIRABLE_ERRORS_LLM_ENABLED: string(repairableErrorsLlmEnabled)
-    REPAIRABLE_ERRORS_LLM_MODEL: repairableErrorsLlmModel
-  })
+// Reconcile settings through a nested deployment. Reading and writing the same
+// appsettings resource in one ARM template creates a resource-level cycle;
+// this boundary lets the parent read release-owned keys after the Function App
+// exists and passes only the complete secure settings object to the child.
+module functionAppSettings './modules/function-app-settings.bicep' = {
+  name: 'function-app-settings-${environmentName}'
+  params: {
+    functionAppName: functionApp.name
+    appSettings: union(preservedFunctionReleaseSettings, {
+      APPLICATIONINSIGHTS_CONNECTION_STRING: appInsights.properties.ConnectionString
+      AzureWebJobsStorage__blobServiceUri: 'https://${hostStorage.name}.blob.${environment().suffixes.storage}'
+      AzureWebJobsStorage__queueServiceUri: 'https://${hostStorage.name}.queue.${environment().suffixes.storage}'
+      AzureWebJobsStorage__tableServiceUri: 'https://${hostStorage.name}.table.${environment().suffixes.storage}'
+      AzureWebJobsStorage__credential: 'managedidentity'
+      FUNCTIONS_EXTENSION_VERSION: '~4'
+      FUNCTIONS_WORKER_RUNTIME: 'node'
+      DEPLOYED_ENVIRONMENT_NAME: environmentName
+      AUTH_ENABLED: string(authEnabled)
+      OIDC_ISSUER: validatedOidcIssuer
+      OIDC_AUDIENCE: validatedOidcAudience
+      OIDC_JWKS_URI: oidcJwksUri
+      OIDC_REQUIRED_SCOPES: oidcRequiredScopes
+      OIDC_ALLOWED_OBJECT_IDS: validatedOidcObjectIds
+      OIDC_ALLOWED_SUBJECTS: oidcAllowedSubjects
+      OIDC_ALLOWED_APP_OBJECT_IDS: oidcAllowedAppObjectIds
+      OIDC_ALLOWED_CLIENT_IDS: oidcAllowedClientIds
+      OIDC_ALLOWED_DELEGATED_CLIENT_IDS: oidcAllowedDelegatedClientIds
+      OIDC_ALLOWED_TENANTS: validatedOidcTenants
+      AUTH_DEBUG: string(authDebug)
+      API_CORS_ALLOWED_ORIGINS: validatedCorsOrigins
+      MCP_RESOURCE_ORIGIN: validatedMcpOrigin
+      MCP_ALLOWED_ORIGINS: validatedMcpAllowedOrigins
+      REDDIT_CLIENT_ID: redditClientId
+      REDDIT_CLIENT_SECRET: '@Microsoft.KeyVault(SecretUri=${redditSecret.properties.secretUriWithVersion})'
+      REDDIT_USER_AGENT: redditUserAgent
+      WLH_BASE_URL: '@Microsoft.KeyVault(SecretUri=${wlhBaseUrlSecret.properties.secretUriWithVersion})'
+      WLH_STORAGE_ACCOUNT_NAME: privateStorage.name
+      WLH_CATEGORY_BLOB_CONTAINER: wlhCategoryBlobContainer
+      WLH_CATEGORY_BLOB_NAME: wlhCategoryBlobName
+      BRING_ENABLED: string(bringEnabled)
+      BRING_ADD_ENABLED: string(validatedBringAddEnabled)
+      BRING_DESTRUCTIVE_ENABLED: string(validatedBringDestructiveEnabled)
+      BRING_BASE_URL: bringBaseUrl
+      BRING_CLIENT_API_KEY: '@Microsoft.KeyVault(SecretUri=${bringClientApiKeySecret.properties.secretUriWithVersion})'
+      BRING_COUNTRY: bringCountry
+      BRING_EMAIL: '@Microsoft.KeyVault(SecretUri=${bringEmailSecret.properties.secretUriWithVersion})'
+      BRING_PASSWORD: '@Microsoft.KeyVault(SecretUri=${bringPasswordSecret.properties.secretUriWithVersion})'
+      BRING_EXPECTED_ACCOUNT_FINGERPRINT: validatedBringFingerprint
+      BRING_DEFAULT_LIST_UUID: bringDefaultListUuid
+      BRING_READABLE_LIST_UUIDS: validatedBringReadableLists
+      BRING_WRITABLE_LIST_UUIDS: validatedBringWritableLists
+      BRING_SESSION_CACHE_ENABLED: string(bringSessionCacheEnabled)
+      BRING_SESSION_CACHE_CONTAINER: bringSessionCacheContainer
+      BRING_SESSION_CACHE_BLOB: bringSessionCacheBlob
+      BRING_MUTATION_CONTAINER: bringMutationContainer
+      BRING_AUDIT_CONTAINER: bringAuditContainer
+      BRING_STORAGE_ACCOUNT_NAME: privateStorage.name
+      BRING_CONFIRMATION_HMAC_KEY: '@Microsoft.KeyVault(SecretUri=${bringConfirmationKeySecret.properties.secretUriWithVersion})'
+      BRING_MUTATION_ENCRYPTION_KEY: '@Microsoft.KeyVault(SecretUri=${bringEncryptionKeySecret.properties.secretUriWithVersion})'
+      OPENAI_API_KEY: repairableErrorsLlmEnabled ? '@Microsoft.KeyVault(SecretUri=${openAiSecret!.properties.secretUriWithVersion})' : ''
+      REPAIRABLE_ERRORS_LLM_ENABLED: string(repairableErrorsLlmEnabled)
+      REPAIRABLE_ERRORS_LLM_MODEL: repairableErrorsLlmModel
+    })
+  }
 }
 
 var storageBlobDataOwnerRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
