@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-07-31 — Autonomous review crashed on empty structured output
+
+- Symptom: PR #272 exact-head run `30632059074` reached the OpenAI Responses API with the configured repository secret, but the high-risk review returned no aggregated `output_text`; the controller attempted `JSON.parse('')`, so the review job failed without its required evidence artifact.
+- Classification: this was not a missing-key, authentication, or quota failure. The request completed without a surfaced API error, but the response did not contain a usable structured decision.
+- Fix: retry an empty or invalid structured response once with a larger output-token allowance, then fail closed with a sanitized rejection artifact if neither bounded attempt yields a valid exact-head decision. Raw model output and error messages are never persisted.
+- Status: repair included in PR #272; live validation requires an approved exact-head artifact and successful trusted-controller merge.
+
 ## 2026-07-31 — Corrected auto-merge had no post-merge main CI handoff
 
 - Symptom: the corrected trusted controller automatically merged canary PR #271 as `d49833bb119001d930e00cd5400ba7d1badb7550`, but no main CI or `Codex Main Delivery` run started.
