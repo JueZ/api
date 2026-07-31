@@ -1,5 +1,11 @@
 # Decision log
 
+## 2026-07-31 — Validate Entra identifiers as GUIDs, not versioned UUIDs
+
+- Decision: Validate `OIDC_ALLOWED_OBJECT_IDS` and `OIDC_ALLOWED_TENANTS` with the Microsoft GUID shape only. Retain the stricter RFC-versioned UUID pattern for Bring list identifiers.
+- Rationale: Microsoft Entra `oid` and `tid` claims are GUID strings and are not promised to carry RFC UUID version/variant marker bits. Test startup telemetry from run `30651802409` proved that applying the Bring UUID constraint to an existing Entra object ID rejected an otherwise exact, deployment-verified configuration.
+- Status: Implemented locally with a non-versioned-GUID regression test. Fresh PR and test-only validation remain required; production remains untouched.
+
 ## 2026-07-31 — Normalize boolean Function settings to lowercase strings
 
 - Decision: Every Bicep boolean written to Function App settings must use `toLower(string(value))`; direct `string(bool)` conversions are prohibited by architecture regression coverage.

@@ -7,8 +7,9 @@
 - The focused repair loads `dist/index.js`, executes `assertRuntimeSafety()` before registration, and independently rejects disabled authentication outside local development. Local regression coverage passes; live test deployment still must prove the behavior.
 - The first fresh live attempt, run `30650254586`, stopped before package deployment on an ARM circular dependency caused by listing and directly writing Function `appsettings` in one template. The follow-up secure nested-module boundary builds locally but still requires PR gates and a newly dispatched test run.
 - PR #281 merged that nested-module repair, and test run `30651053281` proved the ARM cycle resolved. The next fail-closed gate found that all seven `string(bool)` app settings were title-cased by ARM instead of matching the runtime's lowercase contract. The focused normalization repair still requires PR gates and a fresh test-only run.
+- PR #282 merged the lowercase repair, and test run `30651802409` passed the complete settings gate and both package deployments. Function startup then failed closed because Entra GUIDs were incorrectly constrained to RFC-versioned UUIDs. The focused GUID/UUID separation still requires PR gates and a fresh test-only run.
 - Test environment origin placeholders were corrected to the exact Function origin without reading or changing secrets. Infrastructure and workflow validation now reject `https://null` and the test frontend derives its API base from the deployed Function output.
-- Authenticated smoke, telemetry correlation, and accepted test provenance remain pending until the boolean-normalization repair merges and deploys. Production must not be promoted from this release.
+- Authenticated smoke, telemetry correlation, and accepted test provenance remain pending until the Entra GUID validation repair merges and deploys. Production must not be promoted from this release.
 
 ## Granular Entra configuration and new test SPA redirect need privileged verification
 

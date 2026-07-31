@@ -1,5 +1,13 @@
 # Incident log
 
+## 2026-07-31 — Entra GUID was rejected as a non-versioned UUID at Function startup
+
+- Symptom: test-only run `30651802409` passed infrastructure, complete settings reconciliation, immutable Function activation, and frontend activation, but every Function route returned `404`. Application Insights recorded the fail-closed entry-point error `OIDC_ALLOWED_OBJECT_IDS must contain at least one valid user object ID in test`.
+- Root cause: runtime safety reused an RFC-versioned UUID regex for both Bring list UUIDs and Microsoft Entra object/tenant GUIDs. One valid configured Entra object GUID does not encode an RFC version marker, so the worker rejected the full configuration before registering routes.
+- Safety impact: the host served no application route; smoke, authenticated checks, telemetry acceptance, and provenance did not pass. No secret value was read. Production was not dispatched.
+- Repair: add a GUID-only shape for Entra `oid`/`tid` allowlists, retain strict UUID validation for Bring list IDs, and cover a syntactically valid non-versioned GUID.
+- Status: local repair pending PR gates and a fresh test-only deployment.
+
 ## 2026-07-31 — ARM boolean string casing blocked runtime-policy acceptance
 
 - Symptom: test-only run `30651053281` passed the nested Bicep deployment but the complete runtime-settings validator rejected `AUTH_ENABLED`, `AUTH_DEBUG`, the four Bring boolean flags, and `REPAIRABLE_ERRORS_LLM_ENABLED`.
