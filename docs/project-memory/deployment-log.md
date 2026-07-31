@@ -1,5 +1,13 @@
 # Deployment log
 
+## 2026-07-31 — Lowercase settings passed; Entra GUID startup check failed closed
+
+- PR #282 exact head `7c637f8b29caddc81eef1946f6208d90751f0b24` passed CI run `30651446037`, Policy Check `30651446063`, CodeQL `30651446510`, and first-attempt independent review/merge run `30651447011`, then squash-merged as `a1d2249c9b8b997229158220b3ac38751f1da668`.
+- Main-delivery run `30651610027` accepted exact main CI `30651633388` and honored `[skip autodeploy]`.
+- Manual test-only run `30651802409` passed Bicep and the complete runtime-settings policy, proving the lowercase boolean repair and exact Key Vault references. It deployed the immutable Function and activation-last frontend packages, then the Function entry point failed closed because runtime startup incorrectly required every Entra object ID to have RFC UUID version/variant marker bits.
+- The workflow did not accept runtime smoke, telemetry, or provenance. Production was not dispatched.
+- Repair: validate Entra object/tenant identifiers as GUID-shaped strings while keeping strict UUID validation for Bring list identifiers.
+
 ## 2026-07-31 — Nested settings deployment passed; boolean policy check failed closed
 
 - PR #281 exact head `73b88f1d6f2cebf5a66dc4d34e9d7f5cd707e1d3` passed exact-head CI, Policy Check, CodeQL, and independent review, then squash-merged as `48591c487b319fe1a4fffe274750cb79c9828341`.

@@ -26,6 +26,17 @@ test('deployed runtime safety accepts complete exact test configuration', () => 
   assert.deepEqual(validateRuntimeSafety(validTestEnvironment), []);
 });
 
+test('deployed runtime safety accepts Entra GUIDs without RFC UUID version markers', () => {
+  assert.deepEqual(
+    validateRuntimeSafety({
+      ...validTestEnvironment,
+      OIDC_ALLOWED_OBJECT_IDS: '00000000-0000-0000-0000-000000000001',
+      OIDC_ALLOWED_TENANTS: 'aaaaaaaa-0000-0000-0000-000000000002',
+    }),
+    [],
+  );
+});
+
 test('deployed runtime safety rejects incomplete auth and non-canonical origins', () => {
   const problems = validateRuntimeSafety({
     ...validTestEnvironment,

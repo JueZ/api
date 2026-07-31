@@ -15,6 +15,7 @@ const canonicalPermissions = [
   'bring.complete',
   'bring.remove',
 ] as const;
+const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function getDeployedEnvironmentName(env: NodeJS.ProcessEnv = process.env): DeployedEnvironmentName {
@@ -46,11 +47,11 @@ export function validateRuntimeSafety(env: NodeJS.ProcessEnv = process.env): str
     problems.push(`OIDC_REQUIRED_SCOPES must include every canonical operation permission in ${environment}`);
   }
   const allowedObjectIds = parseCsv(env['OIDC_ALLOWED_OBJECT_IDS']);
-  if (allowedObjectIds.length === 0 || allowedObjectIds.some((value) => !uuidPattern.test(value))) {
+  if (allowedObjectIds.length === 0 || allowedObjectIds.some((value) => !guidPattern.test(value))) {
     problems.push(`OIDC_ALLOWED_OBJECT_IDS must contain at least one valid user object ID in ${environment}`);
   }
   const allowedTenants = parseCsv(env['OIDC_ALLOWED_TENANTS']);
-  if (allowedTenants.length === 0 || allowedTenants.some((value) => !uuidPattern.test(value))) {
+  if (allowedTenants.length === 0 || allowedTenants.some((value) => !guidPattern.test(value))) {
     problems.push(`OIDC_ALLOWED_TENANTS must contain at least one valid tenant ID in ${environment}`);
   }
 
