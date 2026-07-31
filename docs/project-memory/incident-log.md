@@ -4,8 +4,8 @@
 
 - Symptom: the corrected trusted controller automatically merged canary PR #271 as `d49833bb119001d930e00cd5400ba7d1badb7550`, but no main CI or `Codex Main Delivery` run started.
 - Root cause: GitHub-token merges do not create ordinary push-triggered workflow runs. The redesigned `Codex Main Delivery` subscribed only to completed `CI` runs and the trusted auto-merge workflow no longer had the required post-merge handoff, so there was no event capable of starting main CI.
-- Fix: subscribe the sole main-delivery controller to successful `Codex Auto-Merge` completions as well as successful push CI. Resolve and verify the exact reviewed PR head and merge SHA, require that SHA to be current `main`, explicitly dispatch and wait for CI with that exact `headSha`, and only then evaluate deployment skip or dispatch the staged test/production workflows.
-- Safety: auto-merge review/check gates remain unchanged; ambiguous or advanced main heads fail closed; workflow-dispatched CI cannot recursively deliver because the CI-triggered path accepts only `push` events.
+- Fix: subscribe the sole main-delivery controller to successful `Codex Auto-Merge` completions as well as successful push CI. Read the approved reviewed-head SHA from the exact trusted auto-merge run's artifact, bind it to the merged PR and merge SHA, require that SHA to be current `main`, explicitly dispatch and wait for CI with that exact `headSha`, and only then evaluate deployment skip or dispatch the staged test/production workflows.
+- Safety: auto-merge review/check gates remain unchanged; ambiguous or advanced main heads fail closed; current main is revalidated after CI and again after test before production; workflow-dispatched CI cannot recursively deliver because the CI-triggered path accepts only `push` events.
 - Status: repair included in the PR containing this entry; successful delivery requires the post-merge job named `run main delivery after Codex auto-merge` to pass on the exact merge SHA.
 
 ## 2026-07-31 — Trusted merge controller rejected its own in-progress check state

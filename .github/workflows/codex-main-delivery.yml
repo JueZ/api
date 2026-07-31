@@ -53,6 +53,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           TRIGGER_WORKFLOW: ${{ github.event.workflow_run.name }}
           TRIGGER_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
           TRIGGER_RUN_URL: ${{ github.event.workflow_run.html_url }}
         shell: bash
         run: |
@@ -125,6 +126,16 @@ jobs:
             return 1
           }
 
+          assert_current_main() {
+            local main_sha=""
+            git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
+            main_sha="$(git rev-parse origin/main)"
+            if [ "$main_sha" != "$SOURCE_REF" ]; then
+              echo "Delivery source $SOURCE_REF is not the current main head $main_sha; refusing a stale delivery." >&2
+              return 1
+            fi
+          }
+
           if ! [[ "$TRIGGER_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
             echo "Triggering workflow did not provide an immutable source SHA." >&2
             exit 1
@@ -133,16 +144,37 @@ jobs:
           SOURCE_REF="$TRIGGER_HEAD_SHA"
           CI_RUN_URL="$TRIGGER_RUN_URL"
           associated_pr=""
-          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
 
           if [ "$TRIGGER_WORKFLOW" = "Codex Auto-Merge" ]; then
+            if ! [[ "$TRIGGER_RUN_ID" =~ ^[0-9]+$ ]]; then
+              echo "Auto-merge workflow did not provide a valid run ID." >&2
+              exit 1
+            fi
+
+            review_directory="$RUNNER_TEMP/post-merge-review"
+            gh run download "$TRIGGER_RUN_ID" \
+              --repo "$REPOSITORY" \
+              --pattern 'autonomous-review-*' \
+              --dir "$review_directory"
+            mapfile -t review_files < <(find "$review_directory" -type f -name autonomous-review.json -print)
+            if [ "${#review_files[@]}" -ne 1 ]; then
+              echo "Expected exactly one trusted autonomous-review artifact for run $TRIGGER_RUN_ID." >&2
+              exit 1
+            fi
+            review_decision="$(jq -r '.decision // ""' "${review_files[0]}")"
+            reviewed_head="$(jq -r '.reviewedHeadSha // ""' "${review_files[0]}")"
+            if [ "$review_decision" != "approve" ] || ! [[ "$reviewed_head" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              echo "Trusted auto-merge artifact does not contain an approved full reviewed head SHA." >&2
+              exit 1
+            fi
+
             pr_number="$(jq -r '.workflow_run.pull_requests[0].number // ""' "$GITHUB_EVENT_PATH")"
             if ! [[ "$pr_number" =~ ^[0-9]+$ ]]; then
               pulls_json="$(gh api \
                 -H 'Accept: application/vnd.github+json' \
-                "repos/$REPOSITORY/commits/$TRIGGER_HEAD_SHA/pulls")"
+                "repos/$REPOSITORY/commits/$reviewed_head/pulls")"
               pr_number="$(jq -r \
-                --arg head "$TRIGGER_HEAD_SHA" \
+                --arg head "$reviewed_head" \
                 'map(select(.head.sha == $head and .base.ref == "main")) | sort_by(.number) | last.number // ""' \
                 <<<"$pulls_json")"
             fi
@@ -156,36 +188,31 @@ jobs:
               "repos/$REPOSITORY/pulls/$pr_number")"
             merged="$(jq -r '.merged' <<<"$associated_pr")"
             state="$(jq -r '.state' <<<"$associated_pr")"
-            reviewed_head="$(jq -r '.head.sha // ""' <<<"$associated_pr")"
+            pr_head="$(jq -r '.head.sha // ""' <<<"$associated_pr")"
             base_ref="$(jq -r '.base.ref // ""' <<<"$associated_pr")"
             SOURCE_REF="$(jq -r '.merge_commit_sha // ""' <<<"$associated_pr")"
             if [ "$merged" != "true" ] || [ "$state" != "closed" ] ||
-               [ "$reviewed_head" != "$TRIGGER_HEAD_SHA" ] || [ "$base_ref" != "main" ] ||
+               [ "$pr_head" != "$reviewed_head" ] || [ "$base_ref" != "main" ] ||
                ! [[ "$SOURCE_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
               echo "Completed auto-merge run does not prove an exact-head merge into main." >&2
               exit 1
             fi
 
-            main_sha="$(git rev-parse origin/main)"
-            if [ "$main_sha" != "$SOURCE_REF" ]; then
-              echo "Merged source $SOURCE_REF is not the current main head $main_sha; refusing an ambiguous delivery." >&2
-              exit 1
-            fi
-
+            assert_current_main
             ci_started_at="$(date -u +%s)"
             gh workflow run ci.yml --repo "$REPOSITORY" --ref main
             wait_for_dispatch ci.yml "" "$ci_started_at" "$SOURCE_REF"
             CI_RUN_URL="$(cat "$RUNNER_TEMP/ci.yml.url")"
           else
-            if ! git merge-base --is-ancestor "$SOURCE_REF" origin/main; then
-              echo "Successful CI source $SOURCE_REF is not in main history." >&2
-              exit 1
-            fi
             associated_pr="$(gh api \
               -H 'Accept: application/vnd.github+json' \
               "repos/$REPOSITORY/commits/$SOURCE_REF/pulls" \
               --jq 'map(select(.merged_at != null and .base.ref == "main")) | sort_by(.merged_at) | last // {}')"
           fi
+
+          # CI can take long enough for main to advance. Never deploy a source
+          # that stopped being the current generation while checks were running.
+          assert_current_main
 
           skip_autodeploy="$(jq -r '(
             ([.labels[]?.name] | map(ascii_downcase) | index("skip-autodeploy")) != null
@@ -207,6 +234,9 @@ jobs:
           wait_for_dispatch deploy-test.yml "$test_title" "$test_started_at" ""
           test_url="$(cat "$RUNNER_TEMP/deploy-test.yml.url")"
 
+          # Production must not follow a successful older test generation after
+          # another change has reached main.
+          assert_current_main
           production_title="Promote Production $SOURCE_REF"
           production_started_at="$(date -u +%s)"
           gh workflow run promote-production.yml \
