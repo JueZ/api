@@ -80,7 +80,7 @@ gh workflow run promote-production.yml \
 
 ### Rolling back production
 
-Rollback redeploys only the preserved immutable Function/frontend bundle from an exact previously accepted production release. Current `main` remains authoritative for the workflow controller and validation rules, while rollback leaves Bicep, identity, storage policy, and safety settings unchanged. It switches only the existing digest-addressed Function package and uploads the preserved rendered frontend bytes unchanged. Supply the full source SHA, exact first-attempt successful `Promote Production` run ID, and that run's delivery correlation.
+Rollback redeploys both preserved immutable Function/frontend packages from an exact previously accepted production release. Current `main` remains authoritative for the workflow controller and validation rules, while rollback leaves Bicep, identity, storage policy, and safety settings unchanged. Before mutation it validates the existing safety settings and complete rendered frontend read-only; it then switches only the existing digest-addressed Function package/provenance and uploads the preserved frontend bytes unchanged. Supply the full source SHA, exact first-attempt successful `Promote Production` run ID, and that run's delivery correlation.
 
 ```bash
 gh workflow run rollback-production.yml \

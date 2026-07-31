@@ -297,8 +297,6 @@ jobs:
             --repo "$REPOSITORY" \
             --ref main \
             -f commit_sha="$SOURCE_REF" \
-            -f deploy_frontend=true \
-            -f deploy_functions=true \
             -f delivery_correlation="$production_correlation" \
             -f test_delivery_correlation="$test_correlation" \
             -f test_run_id="$test_run_id"

@@ -328,6 +328,12 @@ jobs:
             fi
           fi
 
+          if [ "$ENVIRONMENT_NAME" = "prod" ] &&
+             { [ "$DEPLOY_FRONTEND" != "true" ] || [ "$DEPLOY_FUNCTIONS" != "true" ]; }; then
+            echo "Production promotion and rollback require both Function and frontend packages." >&2
+            exit 1
+          fi
+
           if [ "$ENVIRONMENT_NAME" = "prod" ]; then
             if [ "$ALLOW_ROLLBACK" != "true" ]; then
               : "${PRODUCTION_BASE_URL:?PRODUCTION_BASE_URL is required for monotonic production validation}"
@@ -903,6 +909,52 @@ jobs:
             echo "- Application Insights: ${effective_app_insights:-<not resolved>}"
             echo "- Frontend URL: ${effective_frontend_url:-<not resolved>}"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Validate existing runtime safety settings for package-only rollback
+        if: ${{ inputs.deployFunctions && inputs.allowRollback }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${EFFECTIVE_FUNCTIONAPP_NAME:?Function App name is required to validate rollback safety settings}"
+          settings_file="$RUNNER_TEMP/rollback-runtime-safety-settings.json"
+          az rest \
+            --method post \
+            --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$EFFECTIVE_FUNCTIONAPP_NAME/config/appsettings/list?api-version=2023-12-01" \
+            --body '{}' \
+            --query 'properties.{AUTH_ENABLED:AUTH_ENABLED,DEPLOYED_ENVIRONMENT_NAME:DEPLOYED_ENVIRONMENT_NAME,OIDC_ISSUER:OIDC_ISSUER,OIDC_AUDIENCE:OIDC_AUDIENCE,OIDC_REQUIRED_SCOPES:OIDC_REQUIRED_SCOPES,OIDC_ALLOWED_OBJECT_IDS:OIDC_ALLOWED_OBJECT_IDS,OIDC_ALLOWED_TENANTS:OIDC_ALLOWED_TENANTS,MCP_RESOURCE_ORIGIN:MCP_RESOURCE_ORIGIN,MCP_ALLOWED_ORIGINS:MCP_ALLOWED_ORIGINS,BRING_ENABLED:BRING_ENABLED,BRING_ADD_ENABLED:BRING_ADD_ENABLED,BRING_DESTRUCTIVE_ENABLED:BRING_DESTRUCTIVE_ENABLED,REPAIRABLE_ERRORS_LLM_ENABLED:REPAIRABLE_ERRORS_LLM_ENABLED,REPAIRABLE_ERRORS_LLM_MODEL:REPAIRABLE_ERRORS_LLM_MODEL}' \
+            --output json > "$settings_file"
+          if ! jq -e \
+            --arg environmentName "$ENVIRONMENT_NAME" \
+            --arg oidcIssuer "$OIDC_ISSUER" \
+            --arg oidcAudience "$OIDC_AUDIENCE" \
+            --arg oidcRequiredScopes "$OIDC_REQUIRED_SCOPES" \
+            --arg oidcAllowedObjectIds "$OIDC_ALLOWED_OBJECT_IDS" \
+            --arg oidcAllowedTenants "$OIDC_ALLOWED_TENANTS" \
+            --arg mcpResourceOrigin "$MCP_RESOURCE_ORIGIN" \
+            --arg mcpAllowedOrigins "$MCP_ALLOWED_ORIGINS" \
+            --arg bringEnabled "$BRING_ENABLED" \
+            --arg bringAddEnabled "$BRING_ADD_ENABLED" \
+            --arg bringDestructiveEnabled "$BRING_DESTRUCTIVE_ENABLED" \
+            --arg repairableErrorsLlmEnabled "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" \
+            --arg repairableErrorsLlmModel "${REPAIRABLE_ERRORS_LLM_MODEL:-}" \
+            '.AUTH_ENABLED == "true"
+              and .DEPLOYED_ENVIRONMENT_NAME == $environmentName
+              and .OIDC_ISSUER == $oidcIssuer
+              and .OIDC_AUDIENCE == $oidcAudience
+              and .OIDC_REQUIRED_SCOPES == $oidcRequiredScopes
+              and .OIDC_ALLOWED_OBJECT_IDS == $oidcAllowedObjectIds
+              and .OIDC_ALLOWED_TENANTS == $oidcAllowedTenants
+              and .MCP_RESOURCE_ORIGIN == $mcpResourceOrigin
+              and .MCP_ALLOWED_ORIGINS == $mcpAllowedOrigins
+              and .BRING_ENABLED == $bringEnabled
+              and .BRING_ADD_ENABLED == $bringAddEnabled
+              and .BRING_DESTRUCTIVE_ENABLED == $bringDestructiveEnabled
+              and .REPAIRABLE_ERRORS_LLM_ENABLED == $repairableErrorsLlmEnabled
+              and .REPAIRABLE_ERRORS_LLM_MODEL == $repairableErrorsLlmModel' \
+            "$settings_file" >/dev/null; then
+            echo "Package-only rollback cannot repair or reconcile mismatched runtime safety settings." >&2
+            exit 1
+          fi
+          echo "Existing production runtime safety settings match the current rollback policy."
       - name: Verify private WLH reference data is present
         if: ${{ inputs.deployFunctions }}
         shell: bash
@@ -931,6 +983,18 @@ jobs:
           [ -f "$frontend_archive" ] || { echo "Frontend release archive is missing." >&2; exit 1; }
 
           if [ "$ALLOW_ROLLBACK" = "true" ]; then
+            validation_dir="$(mktemp -d "$RUNNER_TEMP/frontend-rollback-validate.XXXXXX")"
+            tar -xzf "$frontend_archive" -C "$validation_dir"
+            [ -f "$validation_dir/index.html" ] || { echo "Accepted rollback frontend lacks index.html." >&2; exit 1; }
+            [ -f "$validation_dir/assets/config.js" ] || { echo "Accepted rollback frontend lacks assets/config.js." >&2; exit 1; }
+            [ -f "$validation_dir/assets/build-info.json" ] || { echo "Accepted rollback frontend lacks assets/build-info.json." >&2; exit 1; }
+            if ! jq -e \
+              --arg source_ref "${SOURCE_REF:-${GITHUB_SHA}}" \
+              '.deployedCommitSha == ($source_ref | ascii_downcase) and .environmentName == "prod"' \
+              "$validation_dir/assets/build-info.json" >/dev/null; then
+              echo "Accepted rollback frontend metadata does not match the selected production release." >&2
+              exit 1
+            fi
             echo "Rollback preserves the previously accepted production frontend archive byte-for-byte."
             exit 0
           fi
@@ -1037,23 +1101,27 @@ jobs:
 
             package_url="https://$EFFECTIVE_RELEASE_STORAGE_ACCOUNT.blob.core.windows.net/$release_container/$release_blob"
             deployed_at_utc="${EFFECTIVE_DEPLOYED_AT_UTC:-${DEPLOYED_AT_UTC:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}}"
+            package_settings=(
+              "WEBSITE_RUN_FROM_PACKAGE=$package_url"
+              "WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID=SystemAssigned"
+              "DEPLOYED_COMMIT_SHA=${SOURCE_REF:-${GITHUB_SHA}}"
+              "DEPLOYED_SOURCE_REF=${SOURCE_REF:-${GITHUB_SHA}}"
+              "DEPLOYMENT_RUN_ID=$GITHUB_RUN_ID"
+              "DEPLOYED_AT_UTC=$deployed_at_utc"
+              "BUILD_TIMESTAMP_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+              "RELEASE_FUNCTION_SHA256=$FUNCTION_ARTIFACT_SHA256"
+              "RELEASE_FRONTEND_SHA256=$FRONTEND_ARTIFACT_SHA256"
+              "RELEASE_SBOM_SHA256=$SBOM_SHA256"
+            )
+            if [ "$ALLOW_ROLLBACK" != "true" ]; then
+              package_settings+=("DEPLOYED_ENVIRONMENT_NAME=$ENVIRONMENT_NAME")
+            fi
 
             node scripts/assert-current-main.mjs
             az functionapp config appsettings set \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --name "$EFFECTIVE_FUNCTIONAPP_NAME" \
-              --settings \
-                WEBSITE_RUN_FROM_PACKAGE="$package_url" \
-                WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID=SystemAssigned \
-                DEPLOYED_COMMIT_SHA="${SOURCE_REF:-${GITHUB_SHA}}" \
-                DEPLOYED_SOURCE_REF="${SOURCE_REF:-${GITHUB_SHA}}" \
-                DEPLOYMENT_RUN_ID="$GITHUB_RUN_ID" \
-                DEPLOYED_ENVIRONMENT_NAME="$ENVIRONMENT_NAME" \
-                DEPLOYED_AT_UTC="$deployed_at_utc" \
-                BUILD_TIMESTAMP_UTC="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-                RELEASE_FUNCTION_SHA256="$FUNCTION_ARTIFACT_SHA256" \
-                RELEASE_FRONTEND_SHA256="$FRONTEND_ARTIFACT_SHA256" \
-                RELEASE_SBOM_SHA256="$SBOM_SHA256" \
+              --settings "${package_settings[@]}" \
               -o none
             function_app_id="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$EFFECTIVE_FUNCTIONAPP_NAME"
             node scripts/assert-current-main.mjs

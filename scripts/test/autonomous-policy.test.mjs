@@ -124,6 +124,9 @@ test('environment deployment rechecks current main at mutation and acceptance bo
     assert.match(workflow, /controllerRef: \$\{\{ github\.sha \}\}/);
     assert.match(workflow, /controllerWorkflowSha: \$\{\{ github\.workflow_sha \}\}/);
   }
+  assert.doesNotMatch(promoteProductionWorkflow, /inputs\.deploy_frontend|inputs\.deploy_functions/);
+  assert.match(promoteProductionWorkflow, /deployFrontend: true/);
+  assert.match(promoteProductionWorkflow, /deployFunctions: true/);
 });
 
 test('rollback changes only accepted application packages and leaves infrastructure configuration unchanged', () => {
@@ -151,6 +154,26 @@ test('rollback changes only accepted application packages and leaves infrastruct
     deployEnvironmentWorkflow,
     /Rollback requires the accepted digest-addressed Function package to already exist/,
   );
+  assert.match(
+    deployEnvironmentWorkflow,
+    /- name: Validate existing runtime safety settings for package-only rollback\n\s+if: \$\{\{ inputs\.deployFunctions && inputs\.allowRollback \}\}/,
+  );
+  assert.match(
+    deployEnvironmentWorkflow,
+    /Package-only rollback cannot repair or reconcile mismatched runtime safety settings/,
+  );
+  assert.match(
+    deployEnvironmentWorkflow,
+    /Production promotion and rollback require both Function and frontend packages/,
+  );
+  const functionIndex = deployEnvironmentWorkflow.indexOf('- name: Package and deploy Azure Functions');
+  const staticIndex = deployEnvironmentWorkflow.indexOf('- name: Deploy Angular static site with Azure OIDC');
+  const functionDeployment = deployEnvironmentWorkflow.slice(functionIndex, staticIndex);
+  assert.equal(functionDeployment.match(/DEPLOYED_ENVIRONMENT_NAME=/g)?.length, 1);
+  assert.match(
+    functionDeployment,
+    /if \[ "\$ALLOW_ROLLBACK" != "true" \]; then\n\s+package_settings\+=\("DEPLOYED_ENVIRONMENT_NAME=\$ENVIRONMENT_NAME"\)/,
+  );
 });
 
 test('frontend rendering is finalized, hashed, and preserved before either application package is deployed', () => {
@@ -166,6 +189,10 @@ test('frontend rendering is finalized, hashed, and preserved before either appli
   assert.match(
     deployEnvironmentWorkflow,
     /Rollback preserves the previously accepted production frontend archive byte-for-byte/,
+  );
+  assert.match(
+    deployEnvironmentWorkflow,
+    /Accepted rollback frontend metadata does not match the selected production release/,
   );
   assert.match(deployEnvironmentWorkflow, /sha256sum functionapp\.zip frontend\.tar\.gz sbom\.cdx\.json > SHA256SUMS/);
   assert.match(deployEnvironmentWorkflow, /release-manifest-rendered\.json/);

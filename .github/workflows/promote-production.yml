@@ -8,16 +8,6 @@ on:
         description: Immutable 40-character commit SHA from main to promote. Defaults to the selected ref SHA.
         required: false
         type: string
-      deploy_frontend:
-        description: Deploy Angular static files.
-        required: false
-        default: true
-        type: boolean
-      deploy_functions:
-        description: Deploy Azure Functions package.
-        required: false
-        default: true
-        type: boolean
       delivery_correlation:
         description: Unique delivery-controller correlation value.
         required: false
@@ -58,8 +48,8 @@ jobs:
       environmentName: prod
       azureResourceGroup: rg-api-prod
       githubEnvironment: production
-      deployFrontend: ${{ inputs.deploy_frontend }}
-      deployFunctions: ${{ inputs.deploy_functions }}
+      deployFrontend: true
+      deployFunctions: true
       sourceRef: ${{ inputs.commit_sha || github.sha }}
       controllerRef: ${{ github.sha }}
       controllerWorkflowSha: ${{ github.workflow_sha }}

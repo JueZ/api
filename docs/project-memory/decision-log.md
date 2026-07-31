@@ -5,7 +5,7 @@
 - Decision: Deployment workflows accept only workflow attempt 1. A failed deployment must be diagnosed and newly dispatched with a new opaque correlation; GitHub reruns are rejected before Azure mutation.
 - Decision: Correlation is part of release-ledger, test-provenance, and accepted-production-bundle artifact names. Consumers also validate the exact run identity, source SHA, title, embedded run ID, and embedded correlation.
 - Decision: Test provenance separately records the immutable CI frontend-source digest and the environment-rendered frontend digest. Production promotes the exact Function, SBOM, and frontend-source digests, then hashes its own rendered archive before either Function or static deployment. The exact rendered production bundle is preserved for rollback.
-- Decision: Production rollback is strictly package-only. Current `main` supplies controller/validation code, existing resources are discovered read-only, Bicep and safety-setting reconciliation are skipped, release blobs cannot be created, and the preserved frontend is uploaded unchanged.
+- Decision: Production promotion and rollback must deploy both Function and frontend packages. Rollback is strictly package-only. Current `main` supplies controller/validation code; existing resources, safety settings, and the complete rendered frontend are validated read-only before mutation; Bicep and safety-setting reconciliation are skipped; release blobs cannot be created; and the preserved frontend is uploaded unchanged.
 - Status: Implemented on the fresh successor branch after PR #276 exhausted its two high-risk review attempts; fresh remote validation and test-only deployment remain pending.
 
 ## 2026-07-31 — Use deterministic-first REC across REST and the bundled MCP server
