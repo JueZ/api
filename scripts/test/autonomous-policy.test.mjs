@@ -25,6 +25,10 @@ const mainDeliveryWorkflow = readFileSync(
   new URL('../../.github/workflows/codex-main-delivery.yml', import.meta.url),
   'utf8',
 );
+const deployEnvironmentWorkflow = readFileSync(
+  new URL('../../.github/workflows/deploy-environment.yml', import.meta.url),
+  'utf8',
+);
 
 function pullRequest(overrides = {}) {
   return {
@@ -65,6 +69,13 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
   assert.match(mainDeliveryWorkflow, /gh workflow run ci\.yml --repo "\$REPOSITORY" --ref main/);
   assert.match(mainDeliveryWorkflow, /wait_for_dispatch ci\.yml "" "\$ci_started_at" "\$SOURCE_REF"/);
   assert.equal(mainDeliveryWorkflow.match(/^\s+assert_current_main$/gm)?.length, 3);
+});
+
+test('environment deployment rechecks current main at mutation and acceptance boundaries', () => {
+  assert.ok((deployEnvironmentWorkflow.match(/node scripts\/assert-current-main\.mjs/g) ?? []).length >= 9);
+  assert.match(deployEnvironmentWorkflow, /name: Verify deployed runtime safety settings/);
+  assert.match(deployEnvironmentWorkflow, /\.AUTH_ENABLED == "true"/);
+  assert.match(deployEnvironmentWorkflow, /effective_web_api_base_url="\$EFFECTIVE_BASE_URL"/);
 });
 
 test('policy glob matcher handles recursive and exact AGENTS paths', () => {

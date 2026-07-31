@@ -162,6 +162,8 @@ jobs:
       BRING_AUDIT_CONTAINER: ${{ vars.BRING_AUDIT_CONTAINER }}
       DEPLOYED_AT_UTC: ${{ github.event.head_commit.timestamp || '' }}
       DEPLOYMENT_RUN_ID: ${{ github.run_id }}
+      GH_TOKEN: ${{ github.token }}
+      ALLOW_ROLLBACK: ${{ inputs.allowRollback }}
       APPLICATIONINSIGHTS_NAME: ${{ vars.APPLICATIONINSIGHTS_NAME }}
       TEST_SERVICE_AUTH_CLIENT_ID: ${{ vars.TEST_SERVICE_AUTH_CLIENT_ID }}
       TEST_SERVICE_AUTH_TENANT_ID: ${{ vars.TEST_SERVICE_AUTH_TENANT_ID }}
@@ -307,7 +309,7 @@ jobs:
             const isExactHttpsOrigin = (value) => {
               try {
                 const parsed = new URL(value);
-                return parsed.protocol === "https:" && parsed.origin === value;
+                return parsed.protocol === "https:" && parsed.origin === value && parsed.hostname !== "null";
               } catch {
                 return false;
               }
@@ -454,6 +456,7 @@ jobs:
               monthly_budget_eur=15
             fi
 
+            node scripts/assert-current-main.mjs
             deployment_outputs=$(az deployment group create \
               --name "main-${ENVIRONMENT_NAME}" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -517,6 +520,53 @@ jobs:
           else
             echo "No infra/main.bicep found; skipping infrastructure deployment."
           fi
+      - name: Verify deployed runtime safety settings
+        if: ${{ inputs.deployFunctions }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          function_app_name="${{ steps.infra.outputs.function_app_name }}"
+          : "${function_app_name:?Function App name is required to verify runtime settings}"
+          settings_file="$RUNNER_TEMP/runtime-safety-settings.json"
+          az rest \
+            --method post \
+            --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$function_app_name/config/appsettings/list?api-version=2023-12-01" \
+            --body '{}' \
+            --query 'properties.{AUTH_ENABLED:AUTH_ENABLED,DEPLOYED_ENVIRONMENT_NAME:DEPLOYED_ENVIRONMENT_NAME,OIDC_ISSUER:OIDC_ISSUER,OIDC_AUDIENCE:OIDC_AUDIENCE,OIDC_REQUIRED_SCOPES:OIDC_REQUIRED_SCOPES,OIDC_ALLOWED_OBJECT_IDS:OIDC_ALLOWED_OBJECT_IDS,OIDC_ALLOWED_TENANTS:OIDC_ALLOWED_TENANTS,MCP_RESOURCE_ORIGIN:MCP_RESOURCE_ORIGIN,MCP_ALLOWED_ORIGINS:MCP_ALLOWED_ORIGINS,BRING_ENABLED:BRING_ENABLED,BRING_ADD_ENABLED:BRING_ADD_ENABLED,BRING_DESTRUCTIVE_ENABLED:BRING_DESTRUCTIVE_ENABLED,REPAIRABLE_ERRORS_LLM_ENABLED:REPAIRABLE_ERRORS_LLM_ENABLED,REPAIRABLE_ERRORS_LLM_MODEL:REPAIRABLE_ERRORS_LLM_MODEL}' \
+            --output json > "$settings_file"
+          if ! jq -e \
+            --arg environmentName "$ENVIRONMENT_NAME" \
+            --arg oidcIssuer "$OIDC_ISSUER" \
+            --arg oidcAudience "$OIDC_AUDIENCE" \
+            --arg oidcRequiredScopes "$OIDC_REQUIRED_SCOPES" \
+            --arg oidcAllowedObjectIds "$OIDC_ALLOWED_OBJECT_IDS" \
+            --arg oidcAllowedTenants "$OIDC_ALLOWED_TENANTS" \
+            --arg mcpResourceOrigin "$MCP_RESOURCE_ORIGIN" \
+            --arg mcpAllowedOrigins "$MCP_ALLOWED_ORIGINS" \
+            --arg bringEnabled "$BRING_ENABLED" \
+            --arg bringAddEnabled "$BRING_ADD_ENABLED" \
+            --arg bringDestructiveEnabled "$BRING_DESTRUCTIVE_ENABLED" \
+            --arg repairableErrorsLlmEnabled "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" \
+            --arg repairableErrorsLlmModel "${REPAIRABLE_ERRORS_LLM_MODEL:-}" \
+            '.AUTH_ENABLED == "true"
+              and .DEPLOYED_ENVIRONMENT_NAME == $environmentName
+              and .OIDC_ISSUER == $oidcIssuer
+              and .OIDC_AUDIENCE == $oidcAudience
+              and .OIDC_REQUIRED_SCOPES == $oidcRequiredScopes
+              and .OIDC_ALLOWED_OBJECT_IDS == $oidcAllowedObjectIds
+              and .OIDC_ALLOWED_TENANTS == $oidcAllowedTenants
+              and .MCP_RESOURCE_ORIGIN == $mcpResourceOrigin
+              and .MCP_ALLOWED_ORIGINS == $mcpAllowedOrigins
+              and .BRING_ENABLED == $bringEnabled
+              and .BRING_ADD_ENABLED == $bringAddEnabled
+              and .BRING_DESTRUCTIVE_ENABLED == $bringDestructiveEnabled
+              and .REPAIRABLE_ERRORS_LLM_ENABLED == $repairableErrorsLlmEnabled
+              and .REPAIRABLE_ERRORS_LLM_MODEL == $repairableErrorsLlmModel' \
+            "$settings_file" >/dev/null; then
+            echo "Effective Function App safety settings do not match the approved deployment inputs." >&2
+            exit 1
+          fi
+          echo "Effective Function App safety settings match the approved deployment inputs."
       - name: Resolve runtime settings
         id: resolve
         shell: bash
@@ -624,6 +674,7 @@ jobs:
             release_container="function-releases"
             release_blob="functionapp-${FUNCTION_ARTIFACT_SHA256}.zip"
 
+            node scripts/assert-current-main.mjs
             az storage container create \
               --auth-mode login \
               --account-name "$EFFECTIVE_RELEASE_STORAGE_ACCOUNT" \
@@ -638,6 +689,7 @@ jobs:
               --query exists \
               -o tsv)"
             if [ "$blob_exists" != "true" ]; then
+              node scripts/assert-current-main.mjs
               az storage blob upload \
                 --auth-mode login \
                 --account-name "$EFFECTIVE_RELEASE_STORAGE_ACCOUNT" \
@@ -665,6 +717,7 @@ jobs:
             package_url="https://$EFFECTIVE_RELEASE_STORAGE_ACCOUNT.blob.core.windows.net/$release_container/$release_blob"
             deployed_at_utc="${DEPLOYED_AT_UTC:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
 
+            node scripts/assert-current-main.mjs
             az functionapp config appsettings set \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --name "$EFFECTIVE_FUNCTIONAPP_NAME" \
@@ -682,12 +735,14 @@ jobs:
                 RELEASE_SBOM_SHA256="$SBOM_SHA256" \
               -o none
             function_app_id="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$EFFECTIVE_FUNCTIONAPP_NAME"
+            node scripts/assert-current-main.mjs
             az rest \
               --method post \
               --url "https://management.azure.com${function_app_id}/restart?api-version=2023-12-01" \
               --body '{}' \
               -o none
             for attempt in {1..12}; do
+              node scripts/assert-current-main.mjs
               if az rest \
                 --method post \
                 --url "https://management.azure.com${function_app_id}/syncfunctiontriggers?api-version=2023-12-01" \
@@ -723,7 +778,7 @@ jobs:
               effective_web_redirect_uri="${WEB_AUTH_REDIRECT_URI:-}"
               : "${effective_web_redirect_uri:?WEB_AUTH_REDIRECT_URI is required for production frontend auth}"
             else
-              effective_web_api_base_url="${TEST_WEB_API_BASE_URL:-$EFFECTIVE_BASE_URL}"
+              effective_web_api_base_url="$EFFECTIVE_BASE_URL"
               effective_web_redirect_uri="${TEST_WEB_AUTH_REDIRECT_URI:-}"
             fi
             export EFFECTIVE_WEB_API_BASE_URL="$effective_web_api_base_url"
@@ -731,6 +786,7 @@ jobs:
             export EFFECTIVE_DEPLOYED_AT_UTC="${DEPLOYED_AT_UTC:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
             node --input-type=module --eval "const config={authEnabled:process.env.WEB_AUTH_ENABLED==='true',authClientId:process.env.WEB_AUTH_CLIENT_ID||'',authAuthority:process.env.WEB_AUTH_AUTHORITY||'',authRedirectUri:process.env.EFFECTIVE_WEB_REDIRECT_URI||'',authApiScope:process.env.WEB_AUTH_API_SCOPE||'',apiBaseUrl:process.env.EFFECTIVE_WEB_API_BASE_URL||'',deployedCommitSha:(process.env.SOURCE_REF||process.env.GITHUB_SHA||'').toLowerCase(),environmentName:process.env.ENVIRONMENT_NAME||'unknown',deploymentRunId:process.env.GITHUB_RUN_ID||'unknown',deployedAtUtc:process.env.EFFECTIVE_DEPLOYED_AT_UTC||'unknown'}; process.stdout.write('window.API_CATALOGUE_CONFIG = '+JSON.stringify(config)+';\n');" > "$output_dir/assets/config.js"
             jq -n --arg deployedCommitSha "${SOURCE_REF:-${GITHUB_SHA}}" --arg environmentName "$ENVIRONMENT_NAME" --arg deploymentRunId "$GITHUB_RUN_ID" --arg deployedAtUtc "$EFFECTIVE_DEPLOYED_AT_UTC" '{service:"api-catalogue-web", deployedCommitSha:($deployedCommitSha|ascii_downcase), environmentName:$environmentName, deploymentRunId:$deploymentRunId, deployedAtUtc:$deployedAtUtc}' > "$output_dir/assets/build-info.json"
+            node scripts/assert-current-main.mjs
             az storage blob service-properties update \
               --auth-mode login \
               --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
@@ -739,6 +795,7 @@ jobs:
               -o none
             # $web is Azure's literal static-site container.
             # shellcheck disable=SC2016
+            node scripts/assert-current-main.mjs
             az storage blob upload-batch \
               --auth-mode login \
               --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
@@ -748,6 +805,9 @@ jobs:
           else
             echo "No angular.json found; skipping Angular static site deployment."
           fi
+      - name: Verify current generation before runtime acceptance
+        shell: bash
+        run: node scripts/assert-current-main.mjs
       - name: Run runtime smoke tests
         shell: bash
         run: |

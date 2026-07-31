@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-07-31 — Test auth failure exposed bootstrap, settings, placeholder, and deployment-generation gaps
+
+- Symptom: test run `30629930683` deployed exact commit `4d82ed8491a32440ec5495049ba39e8f73c6bbac`, but protected `GET /api/hello` returned the local-development principal. Follow-up inspection also found `https://null` in two non-secret test environment variables and a deployment-generation race between the controller's main-head check and downstream Azure mutations.
+- Root causes: Azure Functions loaded `dist/functions/*.js` directly and bypassed the safety composition root; disabled auth unconditionally produced a local principal; app settings were not independently reconciled and verified; placeholder HTTPS origins passed syntactic validation; and downstream writes did not revalidate that their source was still current `main`.
+- Repair: load `dist/index.js`, fail closed on disabled auth outside local, manage Function settings as an explicit child resource, compare only approved non-secret safety fields after deployment, reject the placeholder origin, derive the test web API base from the deployed Function, and recheck current `main` immediately before every Azure mutation and runtime acceptance.
+- Validation status: local lint, type check, policy guardrails, Bicep build, production web/API builds, targeted regressions, and all 252 tests pass. Release packaging reached the archive step but the local host lacks `zip`; GitHub CI and a fresh exact-SHA test deployment still must prove packaging and live acceptance. Production remains unchanged.
+
 ## 2026-07-31 — Autonomous review crashed on empty structured output
 
 - Symptom: PR #272 exact-head run `30632059074` reached the OpenAI Responses API with the configured repository secret, but the high-risk review returned no aggregated `output_text`; the controller attempted `JSON.parse('')`, so the review job failed without its required evidence artifact.
