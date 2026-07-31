@@ -273,6 +273,107 @@ test('authenticated smoke retries transient health and protected endpoint 404s a
   }
 });
 
+test('authenticated smoke reports only API-validated REC permission evidence for authorization failures', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === '/health') {
+        return new Response(
+          JSON.stringify({ status: 'ok', environmentName: 'test', deployedCommitSha: 'c'.repeat(40) }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (path === '/api/hello') {
+        return new Response(
+          JSON.stringify({
+            status: 403,
+            classification: 'authorization_context_mismatch',
+            detail: 'Required permission is missing: catalogue.read.',
+            repairable: true,
+            retry_policy: { can_retry: true, same_request: false },
+          }),
+          { status: 403, headers: { 'content-type': 'application/problem+json' } },
+        );
+      }
+      throw new Error(`unexpected URL ${url}`);
+    };
+
+    const { result, exitCode } = await runAuthenticatedSmoke({
+      env: {
+        API_BASE_URL: 'https://api.example.test',
+        AUTH_ACCESS_TOKEN: 'opaque-token-never-emitted',
+        ENVIRONMENT_NAME: 'test',
+        EXPECTED_DEPLOYED_COMMIT_SHA: 'c'.repeat(40),
+        SMOKE_RUN_ID: 'smoke-auth-denied',
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.equal(result.status, 'failed');
+    assert.deepEqual(
+      result.checks.find((check) => check.name === 'authenticated-hello-authorization'),
+      {
+        name: 'authenticated-hello-authorization',
+        status: 'failed',
+        statusCode: 403,
+        evidenceFormat: 'api_verified_permission_denial',
+        classification: 'authorization_context_mismatch',
+        requiredPermission: 'catalogue.read',
+      },
+    );
+    assert.equal(JSON.stringify(result).includes('opaque-token-never-emitted'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('authenticated smoke does not validate incomplete authorization REC metadata', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === '/health') {
+        return new Response(JSON.stringify({ status: 'ok', environmentName: 'test' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (path === '/api/hello') {
+        return new Response(JSON.stringify({ classification: 'authorization_context_mismatch', repairable: true }), {
+          status: 403,
+          headers: { 'content-type': 'application/problem+json' },
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    };
+
+    const { result, exitCode } = await runAuthenticatedSmoke({
+      env: {
+        API_BASE_URL: 'https://api.example.test',
+        AUTH_ACCESS_TOKEN: 'opaque-token-never-emitted',
+        ENVIRONMENT_NAME: 'test',
+        SMOKE_RUN_ID: 'smoke-invalid-rec',
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.deepEqual(
+      result.checks.find((check) => check.name === 'authenticated-hello-authorization'),
+      {
+        name: 'authenticated-hello-authorization',
+        status: 'failed',
+        statusCode: 403,
+        evidenceFormat: 'unusable',
+        classification: undefined,
+        requiredPermission: undefined,
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('authenticated share URL smoke passes only when expected post id matches', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];

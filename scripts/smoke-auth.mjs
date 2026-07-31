@@ -1,8 +1,54 @@
 #!/usr/bin/env node
 import { getSmokeRunId, requireUrl, fetchJson, assertEqual, safeSummary } from './lib/smoke-utils.mjs';
 
+const KNOWN_PERMISSIONS = new Set([
+  'catalogue.read',
+  'reddit.read',
+  'wlh.read',
+  'bring.read',
+  'bring.write',
+  'bring.complete',
+  'bring.remove',
+]);
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function summarizeAuthorizationProblem(statusCode, problem) {
+  if (!problem || typeof problem !== 'object' || Array.isArray(problem)) {
+    return { statusCode, evidenceFormat: 'unusable' };
+  }
+
+  const requiredPermissionMatch =
+    typeof problem.detail === 'string'
+      ? /Required permission is missing: ([A-Za-z0-9_:-]+(?:\.[A-Za-z0-9_:-]+)*)\.?/.exec(problem.detail)
+      : null;
+  const requiredPermission =
+    requiredPermissionMatch && KNOWN_PERMISSIONS.has(requiredPermissionMatch[1])
+      ? requiredPermissionMatch[1]
+      : undefined;
+  const retryPolicy = problem.retry_policy;
+  const retryPolicyValid =
+    retryPolicy !== null &&
+    typeof retryPolicy === 'object' &&
+    !Array.isArray(retryPolicy) &&
+    retryPolicy.can_retry === true &&
+    retryPolicy.same_request === false;
+  const permissionEvidenceValid =
+    statusCode === 403 &&
+    problem.status === 403 &&
+    problem.classification === 'authorization_context_mismatch' &&
+    problem.repairable === true &&
+    retryPolicyValid &&
+    requiredPermission !== undefined;
+
+  return {
+    statusCode,
+    evidenceFormat: permissionEvidenceValid ? 'api_verified_permission_denial' : 'unusable',
+    classification: permissionEvidenceValid ? 'authorization_context_mismatch' : undefined,
+    requiredPermission: permissionEvidenceValid ? requiredPermission : undefined,
+  };
 }
 
 export async function runAuthenticatedSmoke({ env = process.env } = {}) {
@@ -78,6 +124,13 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
         label: 'authenticated /api/hello',
       },
     );
+    if (hello.response.status === 401 || hello.response.status === 403) {
+      record(
+        'authenticated-hello-authorization',
+        'failed',
+        summarizeAuthorizationProblem(hello.response.status, hello.json),
+      );
+    }
     assertEqual('authenticated /api/hello status', hello.response.status, 200);
     assertEqual('authenticated /api/hello authenticated flag', hello.json?.authenticated, true);
     record('authenticated-hello', 'passed');
