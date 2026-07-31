@@ -1,5 +1,13 @@
 # Decision log
 
+## 2026-07-31 — Bound paid autonomous review before any model call
+
+- Decision: Wait for all free exact-head CI, Policy Check, and CodeQL requirements before independent AI review. Use only `gpt-5.6-luna` with low reasoning, at most 100,000 diff bytes, 2,000 output tokens, one call, and a conservative $0.12 per-head pre-call ceiling.
+- Decision: Record the request ceiling and sanitized response token usage in the review artifact. Fail closed without controller or SDK retries. Require an explicit live-API environment gate so local and ordinary test execution cannot spend against a present key.
+- Context: 23 autonomous-review runs invoked `gpt-5.6-sol` on 2026-07-31 and produced at least 25 API requests; repeated high-reasoning review, not `npm test`, caused the unexpected account spend.
+- Consequences: Batch locally validated changes before pushing. An over-budget or oversized high-risk change cannot merge until its review payload is reduced while retaining the single bundled MCP server. Runtime REC permits only Luna and falls back deterministically above a 24,000-byte sanitized capsule or on any model/configuration failure. The Platform project hard spend limit remains the monthly account-level backstop.
+- Status: Implemented on PR #286 branch; shared future-deployment variable `REPAIRABLE_ERRORS_LLM_MODEL=gpt-5.6-luna` applied without reading or changing the API key; remote gates pending.
+
 ## 2026-07-31 — Preserve workflow-bound OIDC and repair only existing test federation
 
 - Decision: Keep GitHub's repository/environment/`job_workflow_ref` OIDC subject and rebind only the two existing test federated credentials to that exact subject. Do not restore the broader legacy subject.

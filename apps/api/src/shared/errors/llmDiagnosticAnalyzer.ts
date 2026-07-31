@@ -8,9 +8,10 @@ import {
   type RepairableProblemExpected,
 } from './repairableProblem.js';
 
-const DEFAULT_MODEL = 'gpt-5.6-sol';
+const DEFAULT_MODEL = 'gpt-5.6-luna';
 const DEFAULT_TIMEOUT_MS = 2500;
-const MAX_OUTPUT_TOKENS = 1400;
+const MAX_INPUT_BYTES = 24_000;
+const MAX_OUTPUT_TOKENS = 700;
 
 export async function analyzeRepairableErrorWithLlm(args: {
   capsule: DiagnosticCapsule;
@@ -19,14 +20,21 @@ export async function analyzeRepairableErrorWithLlm(args: {
   if (!llmEnabled()) return null;
   if (!process.env['OPENAI_API_KEY']) return null;
   if (!sampledIn()) return null;
+  const model = approvedModel();
+  if (!model) return null;
+  const capsuleJson = JSON.stringify(args.capsule);
+  if (Buffer.byteLength(capsuleJson) > MAX_INPUT_BYTES) return null;
 
   try {
     const openAiApiKey = process.env['OPENAI_API_KEY'];
-    const client = new OpenAI({ ['api' + 'Key']: openAiApiKey, timeout: readTimeoutMs() } as ConstructorParameters<
-      typeof OpenAI
-    >[0]);
+    const client = new OpenAI({
+      ['api' + 'Key']: openAiApiKey,
+      timeout: readTimeoutMs(),
+      maxRetries: 0,
+    } as ConstructorParameters<typeof OpenAI>[0]);
     const response = await client.responses.create({
-      model: process.env['REPAIRABLE_ERRORS_LLM_MODEL'] || DEFAULT_MODEL,
+      model,
+      reasoning: { effort: 'low' },
       store: false,
       max_output_tokens: MAX_OUTPUT_TOKENS,
       input: [
@@ -36,10 +44,11 @@ export async function analyzeRepairableErrorWithLlm(args: {
         },
         {
           role: 'user',
-          content: `DiagnosticCapsule JSON:\n${JSON.stringify(args.capsule)}`,
+          content: `DiagnosticCapsule JSON:\n${capsuleJson}`,
         },
       ],
       text: {
+        verbosity: 'low',
         format: {
           type: 'json_schema',
           name: 'repairable_problem',
@@ -63,6 +72,11 @@ export async function analyzeRepairableErrorWithLlm(args: {
 
 function llmEnabled(): boolean {
   return process.env['REPAIRABLE_ERRORS_LLM_ENABLED'] === 'true';
+}
+
+function approvedModel(): string | null {
+  const configured = process.env['REPAIRABLE_ERRORS_LLM_MODEL'] || DEFAULT_MODEL;
+  return configured === DEFAULT_MODEL ? configured : null;
 }
 
 function readTimeoutMs(): number {

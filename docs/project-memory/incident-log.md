@@ -1,5 +1,13 @@
 # Incident log
 
+## 2026-07-31 — Repeated high-cost autonomous review exhausted OpenAI credits
+
+- Symptom: The operator observed approximately $9 of OpenAI API spend during delivery testing and the final PR review failed with `credit_balance_exhausted` despite ordinary repository tests passing.
+- Evidence: 23 same-day `Codex Auto-Merge` artifacts report `modelInvoked=true` with `gpt-5.6-sol`; two final artifacts explicitly report two request attempts, establishing at least 25 paid Responses API requests. The trusted controller allowed two attempts with 6,000 then 12,000 output tokens, high reasoning, and up to 1.5 MB of diff. Local/API tests use mocks and made no live OpenAI request.
+- Root cause: Each pushed high-risk exact head started paid review immediately, including heads that had not yet passed deterministic checks, and model-output/API failures automatically doubled the request. The model and token/diff bounds were unsuitable for frequent delivery checks.
+- Repair: Gate paid review behind free exact-head checks; use Luna/low reasoning; allow one call with SDK retries disabled, 100 KB diff, 2,000 output tokens, and a conservative $0.12 pre-call ceiling; record sanitized usage; require explicit live enablement. Runtime REC now permits only Luna/low, caps sanitized input at 24 KB and output at 700 tokens, disables SDK retries, and preserves deterministic-first fallback.
+- Status: Local repair validated; PR gates pending. Repository Actions remain disabled until the complete change is pushed once.
+
 ## 2026-07-31 — Disabled Actions and legacy FIC subjects blocked test recovery
 
 - Symptom: run `30663819848` remained queued with zero jobs after a test dispatch while repository Actions was disabled. After Actions was restored, the replacement run instantiated but Azure login failed with `AADSTS700213` because GitHub emitted the strengthened workflow-bound subject and the Azure test credentials still trusted the former environment-only subject.

@@ -109,9 +109,11 @@ riskClasses:
 autonomousReview:
   checkName: Autonomous review complete
   requiredForHighRisk: true
-  model: gpt-5.6-sol
-  reasoningEffort: high
-  maxDiffBytes: 1500000
+  model: gpt-5.6-luna
+  reasoningEffort: low
+  maxDiffBytes: 100000
+  maxOutputTokens: 2000
+  maxEstimatedCostUsd: 0.12
   store: false
   humanApprovalRequired: false
   rejectSeverities:

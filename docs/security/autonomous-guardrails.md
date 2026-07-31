@@ -10,7 +10,7 @@ Autonomous delivery is allowed only when controls fail closed.
 - Required checks must have the canonical name and expected GitHub App.
 - Forks, stale/behind heads, conflicts, blocked labels, and admin bypass are denied.
 
-High-risk paths are classified by `.github/autonomous-policy.yml` and require independent structured AI review. The review uses the repository OpenAI secret, configured model/reasoning, `store=false`, sanitized bounded diff input, and a schema-bound decision. Critical/high findings fail. No routine human approval is required.
+High-risk paths are classified by `.github/autonomous-policy.yml` and require independent structured AI review. Free exact-head CI, Policy Check, and CodeQL gates pass before a paid request is allowed. The review uses the repository OpenAI secret only when the workflow explicitly enables live review, `gpt-5.6-luna` with low reasoning, `store=false`, sanitized bounded diff input, one call with SDK retries disabled, a 2,000-token output cap, and a conservative $0.12 pre-call ceiling. Usage and the ceiling are recorded without prompt contents or secrets. Critical/high findings fail; unavailable, incomplete, malformed, oversized, or over-budget review fails closed without an automatic paid retry. No routine human approval is required.
 
 ## Required defenses
 

@@ -12,9 +12,11 @@ import {
   validateAutonomousPolicy,
 } from '../lib/autonomous-policy.mjs';
 import {
+  calculateReviewBudget,
   evaluatePullRequestState,
   evaluateRequiredChecks,
   mergeGateDecision,
+  runRequiredCheckPreflight,
   runReview,
   validateAutonomousReview,
 } from '../autonomous-merge-controller.mjs';
@@ -25,6 +27,11 @@ const mainDeliveryWorkflow = readFileSync(
   new URL('../../.github/workflows/codex-main-delivery.yml', import.meta.url),
   'utf8',
 );
+const codexAutomergeWorkflow = readFileSync(
+  new URL('../../.github/workflows/codex-automerge.yml', import.meta.url),
+  'utf8',
+);
+const autonomousControllerSource = readFileSync(new URL('../autonomous-merge-controller.mjs', import.meta.url), 'utf8');
 const deployEnvironmentWorkflow = readFileSync(
   new URL('../../.github/workflows/deploy-environment.yml', import.meta.url),
   'utf8',
@@ -72,7 +79,15 @@ test('canonical autonomous policy is internally valid', () => {
   assert.deepEqual(validateAutonomousPolicy(policy), []);
   assert.equal(policy.merge.allowAdminBypass, false);
   assert.equal(policy.autonomousReview.humanApprovalRequired, false);
-  assert.ok(policy.autonomousReview.maxDiffBytes >= 1_200_000);
+  assert.equal(policy.autonomousReview.model, 'gpt-5.6-luna');
+  assert.equal(policy.autonomousReview.reasoningEffort, 'low');
+  assert.equal(policy.autonomousReview.maxDiffBytes, 100_000);
+  assert.equal(policy.autonomousReview.maxOutputTokens, 2_000);
+  assert.equal(policy.autonomousReview.maxEstimatedCostUsd, 0.12);
+  assert.match(codexAutomergeWorkflow, /Wait for free deterministic exact-head checks/);
+  assert.match(codexAutomergeWorkflow, /AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'/);
+  assert.doesNotMatch(codexAutomergeWorkflow, /labeled, unlabeled/);
+  assert.match(autonomousControllerSource, /maxRetries: 0/);
 });
 
 test('Codex auto-merge completion dispatches exact main CI through one delivery controller', () => {
@@ -376,8 +391,8 @@ test('autonomous review rechecks the mutable pull-request head after loading fil
   );
 });
 
-test('high-risk autonomous review retries an empty response with a larger output budget', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-retry-'));
+test('high-risk autonomous review uses one cost-bounded call and records sanitized usage', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-bounded-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const requests = [];
   const github = {
@@ -395,17 +410,16 @@ test('high-risk autonomous review retries an empty response with a larger output
     responses: {
       async create(request) {
         requests.push(request);
-        if (requests.length === 1) {
-          return {
-            id: 'resp_incomplete',
-            status: 'incomplete',
-            incomplete_details: { reason: 'max_output_tokens' },
-            output_text: '',
-          };
-        }
         return {
           id: 'resp_complete',
           status: 'completed',
+          usage: {
+            input_tokens: 750,
+            input_tokens_details: { cached_tokens: 100 },
+            output_tokens: 250,
+            output_tokens_details: { reasoning_tokens: 100 },
+            total_tokens: 1000,
+          },
           output_text: JSON.stringify({
             decision: 'approve',
             reviewedHeadSha: headSha,
@@ -431,13 +445,24 @@ test('high-risk autonomous review retries an empty response with a larger output
 
   assert.equal(review.decision, 'approve');
   assert.equal(review.responseId, 'resp_complete');
-  assert.deepEqual(
-    requests.map((request) => request.max_output_tokens),
-    [6000, 12000],
-  );
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].model, 'gpt-5.6-luna');
+  assert.deepEqual(requests[0].reasoning, { effort: 'low' });
+  assert.equal(requests[0].text.verbosity, 'low');
+  assert.equal(requests[0].max_output_tokens, 2000);
+  assert.equal(review.reviewBudget.apiCallLimit, 1);
+  assert.ok(review.reviewBudget.estimatedMaximumCostUsd <= policy.autonomousReview.maxEstimatedCostUsd);
+  assert.deepEqual(review.modelUsage, {
+    inputTokens: 750,
+    cachedInputTokens: 100,
+    outputTokens: 250,
+    reasoningTokens: 100,
+    totalTokens: 1000,
+    estimatedUpperBoundCostUsd: 0.00225,
+  });
 });
 
-test('high-risk autonomous review does not accept structured output from an incomplete response', async (context) => {
+test('high-risk autonomous review does not retry or accept an incomplete response', async (context) => {
   const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-incomplete-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const requests = [];
@@ -462,36 +487,35 @@ test('high-risk autonomous review does not accept structured output from an inco
     responses: {
       async create(request) {
         requests.push(request);
-        return requests.length === 1
-          ? {
-              id: 'resp_incomplete',
-              status: 'incomplete',
-              incomplete_details: { reason: 'max_output_tokens' },
-              output_text: approvedOutput,
-            }
-          : { id: 'resp_complete', status: 'completed', output_text: approvedOutput };
+        return {
+          id: 'resp_incomplete',
+          status: 'incomplete',
+          incomplete_details: { reason: 'max_output_tokens' },
+          output_text: approvedOutput,
+        };
       },
     },
   };
 
-  const review = await runReview(
-    {
-      repository: 'JueZ/api',
-      prNumber: 1,
-      headSha,
-      reviewFile: join(directory, 'review.json'),
-    },
-    policy,
-    github,
-    client,
+  await assert.rejects(
+    runReview(
+      {
+        repository: 'JueZ/api',
+        prNumber: 1,
+        headSha,
+        reviewFile: join(directory, 'review.json'),
+      },
+      policy,
+      github,
+      client,
+    ),
+    /Autonomous review unavailable: incomplete_response/,
   );
 
-  assert.equal(review.decision, 'approve');
-  assert.equal(review.responseId, 'resp_complete');
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 1);
 });
 
-test('high-risk autonomous review retries a structurally invalid decision', async (context) => {
+test('high-risk autonomous review fails closed after one structurally invalid decision', async (context) => {
   const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-invalid-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   let attempts = 0;
@@ -517,31 +541,29 @@ test('high-risk autonomous review retries a structurally invalid decision', asyn
             decision: 'approve',
             reviewedHeadSha: headSha,
             summary: 'Review result.',
-            findings:
-              attempts === 1
-                ? [{ severity: 'high', title: 'Blocked', evidence: 'Unsafe.', remediation: 'Repair it.' }]
-                : [],
+            findings: [{ severity: 'high', title: 'Blocked', evidence: 'Unsafe.', remediation: 'Repair it.' }],
           }),
         };
       },
     },
   };
 
-  const review = await runReview(
-    {
-      repository: 'JueZ/api',
-      prNumber: 1,
-      headSha,
-      reviewFile: join(directory, 'review.json'),
-    },
-    policy,
-    github,
-    client,
+  await assert.rejects(
+    runReview(
+      {
+        repository: 'JueZ/api',
+        prNumber: 1,
+        headSha,
+        reviewFile: join(directory, 'review.json'),
+      },
+      policy,
+      github,
+      client,
+    ),
+    /Autonomous review unavailable: invalid_review_decision/,
   );
 
-  assert.equal(review.decision, 'approve');
-  assert.equal(review.responseId, 'resp_2');
-  assert.equal(attempts, 2);
+  assert.equal(attempts, 1);
 });
 
 test('persistent empty model output fails closed with sanitized review evidence', async (context) => {
@@ -591,9 +613,90 @@ test('persistent empty model output fails closed with sanitized review evidence'
   assert.equal(review.decision, 'reject');
   assert.equal(review.reviewedHeadSha, headSha);
   assert.equal(review.modelFailure.kind, 'empty_output');
-  assert.equal(review.modelFailure.attempts, 2);
+  assert.equal(review.modelFailure.attempts, 1);
   assert.equal(review.modelFailure.incompleteReason, 'max_output_tokens');
   assert.equal(review.findings[0].severity, 'high');
+});
+
+test('autonomous review cost ceiling blocks before any API request', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-cost-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const reviewFile = join(directory, 'review.json');
+  let attempts = 0;
+  const github = {
+    async getPullRequest() {
+      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
+    },
+    async getPullRequestFiles() {
+      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
+    },
+    async getPullRequestDiff() {
+      return 'diff --git a/example b/example';
+    },
+  };
+  const client = {
+    responses: {
+      async create() {
+        attempts += 1;
+      },
+    },
+  };
+  const strictCostPolicy = {
+    ...policy,
+    autonomousReview: { ...policy.autonomousReview, maxEstimatedCostUsd: 0.000001 },
+  };
+
+  await assert.rejects(
+    runReview({ repository: 'JueZ/api', prNumber: 1, headSha, reviewFile }, strictCostPolicy, github, client),
+    /cost_ceiling_exceeded/,
+  );
+
+  const review = JSON.parse(await readFile(reviewFile, 'utf8'));
+  assert.equal(attempts, 0);
+  assert.equal(review.modelInvoked, false);
+  assert.equal(review.reviewBudget.status, 'blocked_before_api');
+});
+
+test('paid review preflight excludes its own check and requires every free exact-head check', async () => {
+  const requiredWithoutReview = policy.requiredChecks.filter(
+    (required) => required.name !== policy.autonomousReview.checkName,
+  );
+  const github = {
+    async getPullRequest() {
+      return pullRequest();
+    },
+    async getCheckRuns() {
+      return successfulChecks().filter((check) => check.name !== policy.autonomousReview.checkName);
+    },
+  };
+
+  const result = await runRequiredCheckPreflight(
+    { prNumber: 1, headSha, waitSeconds: 0, pollSeconds: 0 },
+    policy,
+    github,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.passed.length, requiredWithoutReview.length);
+
+  github.getCheckRuns = async () =>
+    successfulChecks()
+      .filter((check) => check.name !== policy.autonomousReview.checkName)
+      .map((check) => (check.name === 'lint' ? { ...check, conclusion: 'failure' } : check));
+  await assert.rejects(
+    runRequiredCheckPreflight({ prNumber: 1, headSha, waitSeconds: 0, pollSeconds: 0 }, policy, github),
+    /lint: failure/,
+  );
+});
+
+test('review budget uses conservative byte-token accounting and a one-call cap', () => {
+  const budget = calculateReviewBudget(
+    { input: [{ role: 'user', content: 'small diff' }], text: { verbosity: 'low' } },
+    policy,
+  );
+  assert.equal(budget.apiCallLimit, 1);
+  assert.equal(budget.maximumOutputTokens, 2000);
+  assert.ok(budget.estimatedMaximumInputTokens > budget.serializedInputBytes);
+  assert.ok(budget.estimatedMaximumCostUsd < 0.12);
 });
 
 test('pull request state rejects forks, stale heads, and behind branches', () => {

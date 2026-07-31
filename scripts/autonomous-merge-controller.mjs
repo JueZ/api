@@ -3,7 +3,14 @@ import { createHash } from 'node:crypto';
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import process from 'node:process';
 import OpenAI from 'openai';
-import { classifyRisk, isAutomergeCandidate, loadAutonomousPolicy } from './lib/autonomous-policy.mjs';
+import {
+  AUTONOMOUS_REVIEW_MODEL_PRICING,
+  classifyRisk,
+  isAutomergeCandidate,
+  loadAutonomousPolicy,
+} from './lib/autonomous-policy.mjs';
+
+const REVIEW_INPUT_TOKEN_OVERHEAD = 4096;
 
 const reviewSchema = {
   type: 'object',
@@ -138,6 +145,9 @@ export async function runReview(options, policy, github, openAIClient) {
     return review;
   }
 
+  if (!openAIClient && process.env.AUTONOMOUS_REVIEW_LIVE_API_ENABLED !== 'true') {
+    throw new Error('Live autonomous review is disabled unless AUTONOMOUS_REVIEW_LIVE_API_ENABLED=true.');
+  }
   if (!openAIClient && !process.env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required for high-risk autonomous review.');
   }
@@ -151,14 +161,14 @@ export async function runReview(options, policy, github, openAIClient) {
     );
   }
 
-  const client = openAIClient ?? new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const client = openAIClient ?? new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 120_000 });
   const request = {
     model: policy.autonomousReview.model,
     reasoning: { effort: policy.autonomousReview.reasoningEffort },
     store: policy.autonomousReview.store,
     safety_identifier: safetyIdentifier(options.repository, options.prNumber),
     text: {
-      verbosity: 'medium',
+      verbosity: 'low',
       format: {
         type: 'json_schema',
         name: 'autonomous_repository_review',
@@ -205,47 +215,66 @@ export async function runReview(options, policy, github, openAIClient) {
     ],
   };
 
-  const outputTokenLimits = [6000, 12000];
+  const reviewBudget = calculateReviewBudget(request, policy);
+  if (reviewBudget.estimatedMaximumCostUsd > policy.autonomousReview.maxEstimatedCostUsd) {
+    const review = {
+      decision: 'reject',
+      reviewedHeadSha: options.headSha,
+      summary:
+        'Independent review was blocked before the OpenAI API call because its conservative cost ceiling was exceeded.',
+      findings: [
+        {
+          severity: 'high',
+          title: 'Autonomous review cost ceiling exceeded',
+          evidence: `The bounded request estimate was $${reviewBudget.estimatedMaximumCostUsd.toFixed(6)}, above the configured $${policy.autonomousReview.maxEstimatedCostUsd.toFixed(2)} ceiling.`,
+          remediation:
+            'Reduce the review payload while keeping required bundled services intact, then retry the exact head.',
+        },
+      ],
+      risk,
+      modelInvoked: false,
+      model: policy.autonomousReview.model,
+      reviewBudget: { ...reviewBudget, status: 'blocked_before_api' },
+    };
+    await publishReview(review, options);
+    throw new Error('Autonomous review blocked before API call: cost_ceiling_exceeded.');
+  }
+
   let parsed;
   let response;
   let modelFailure;
-  for (const [attemptIndex, maxOutputTokens] of outputTokenLimits.entries()) {
-    try {
-      response = await client.responses.create({
-        ...request,
-        max_output_tokens: maxOutputTokens,
-      });
-      const outputText = typeof response.output_text === 'string' ? response.output_text.trim() : '';
-      if (!outputText) {
-        modelFailure = summarizeModelFailure(response, 'empty_output', attemptIndex + 1);
-        continue;
-      }
+  try {
+    response = await client.responses.create({
+      ...request,
+      max_output_tokens: policy.autonomousReview.maxOutputTokens,
+    });
+    const outputText = typeof response.output_text === 'string' ? response.output_text.trim() : '';
+    if (!outputText) {
+      modelFailure = summarizeModelFailure(response, 'empty_output', 1);
+    } else if (response.status !== 'completed') {
+      modelFailure = summarizeModelFailure(response, 'incomplete_response', 1);
+    } else {
       try {
         const candidate = JSON.parse(outputText);
-        if (response.status !== 'completed') {
-          modelFailure = summarizeModelFailure(response, 'incomplete_response', attemptIndex + 1);
-          continue;
-        }
         const validationErrors = validateReviewPayload(candidate, options.headSha, policy);
         if (validationErrors.length > 0) {
-          modelFailure = summarizeModelFailure(response, 'invalid_review_decision', attemptIndex + 1);
-          continue;
+          modelFailure = summarizeModelFailure(response, 'invalid_review_decision', 1);
+        } else {
+          parsed = candidate;
         }
-        parsed = candidate;
-        break;
       } catch {
-        modelFailure = summarizeModelFailure(response, 'invalid_structured_output', attemptIndex + 1);
+        modelFailure = summarizeModelFailure(response, 'invalid_structured_output', 1);
       }
-    } catch (error) {
-      modelFailure = summarizeModelFailure(error, 'request_error', attemptIndex + 1);
     }
+  } catch (error) {
+    modelFailure = summarizeModelFailure(error, 'request_error', 1);
   }
 
   if (!parsed) {
     const review = {
       decision: 'reject',
       reviewedHeadSha: options.headSha,
-      summary: 'Independent model review did not return a usable structured decision after two bounded attempts.',
+      summary: 'Independent model review did not return a usable structured decision from its single bounded API call.',
       findings: [
         {
           severity: 'high',
@@ -259,6 +288,8 @@ export async function runReview(options, policy, github, openAIClient) {
       model: policy.autonomousReview.model,
       responseId: modelFailure?.responseId,
       modelFailure,
+      reviewBudget: { ...reviewBudget, status: 'consumed' },
+      modelUsage: summarizeModelUsage(response, policy),
     };
     await publishReview(review, options);
     throw new Error(`Autonomous review unavailable: ${modelFailure?.kind ?? 'unknown_failure'}.`);
@@ -270,6 +301,8 @@ export async function runReview(options, policy, github, openAIClient) {
     modelInvoked: true,
     model: policy.autonomousReview.model,
     responseId: response.id,
+    reviewBudget: { ...reviewBudget, status: 'consumed' },
+    modelUsage: summarizeModelUsage(response, policy),
   };
   const validation = validateAutonomousReview(review, options.headSha, policy);
   if (!validation.ok) {
@@ -281,6 +314,40 @@ export async function runReview(options, policy, github, openAIClient) {
     throw new Error(`Autonomous review rejected the pull request: ${review.summary}`);
   }
   return review;
+}
+
+export async function runRequiredCheckPreflight(options, policy, github) {
+  const requiredChecks = policy.requiredChecks.filter(
+    (required) => required.name !== policy.autonomousReview.checkName,
+  );
+  const deadline = Date.now() + options.waitSeconds * 1000;
+  let evaluation;
+
+  do {
+    const pullRequest = await github.getPullRequest(options.prNumber);
+    assertExpectedHead(pullRequest, options.headSha);
+    const pullRequestState = evaluatePullRequestState(pullRequest, options.headSha, policy);
+    if (!pullRequestState.ok) {
+      throw new Error(
+        `Autonomous review preflight rejected the pull request:\n- ${pullRequestState.errors.join('\n- ')}`,
+      );
+    }
+
+    evaluation = evaluateRequiredChecks(await github.getCheckRuns(options.headSha), options.headSha, requiredChecks);
+    if (evaluation.failures.length > 0 || evaluation.pending.length === 0) break;
+    await delay(options.pollSeconds * 1000);
+  } while (Date.now() < deadline);
+
+  if (!evaluation?.ok) {
+    const errors = [
+      ...(evaluation?.failures ?? []).map((failure) => `${failure.check}: ${failure.reason}`),
+      ...(evaluation?.pending ?? []).map((pending) => `${pending.check}: ${pending.reason}`),
+    ];
+    throw new Error(
+      `Paid autonomous review is blocked until deterministic exact-head checks pass:\n- ${errors.join('\n- ')}`,
+    );
+  }
+  return evaluation;
 }
 
 async function runGate(options, policy, github) {
@@ -412,7 +479,9 @@ function parseOptions(argv) {
   const repository = values.get('--repository') ?? process.env.GITHUB_REPOSITORY;
   const prNumber = Number(values.get('--pr') ?? process.env.PR_NUMBER);
   const headSha = values.get('--head-sha') ?? process.env.HEAD_SHA;
-  if (!['review', 'gate'].includes(command)) throw new Error('command must be review or gate');
+  if (!['preflight', 'review', 'gate'].includes(command)) {
+    throw new Error('command must be preflight, review, or gate');
+  }
   if (!repository) throw new Error('--repository is required');
   if (!Number.isInteger(prNumber) || prNumber < 1) throw new Error('--pr must be a positive integer');
   if (!/^[0-9a-f]{40}$/i.test(headSha ?? '')) throw new Error('--head-sha must be a full commit SHA');
@@ -436,6 +505,69 @@ function assertExpectedHead(pullRequest, expectedHeadSha) {
 
 function safetyIdentifier(repository, prNumber) {
   return createHash('sha256').update(`${repository}:pull:${prNumber}`).digest('hex');
+}
+
+export function calculateReviewBudget(request, policy) {
+  const pricing = AUTONOMOUS_REVIEW_MODEL_PRICING[policy.autonomousReview.model];
+  if (!pricing) throw new Error(`No approved pricing is configured for ${policy.autonomousReview.model}.`);
+  const serializedInputBytes = Buffer.byteLength(JSON.stringify({ input: request.input, text: request.text }));
+  const estimatedMaximumInputTokens = serializedInputBytes + REVIEW_INPUT_TOKEN_OVERHEAD;
+  const maximumOutputTokens = policy.autonomousReview.maxOutputTokens;
+  const estimatedMaximumCostUsd = ceilUsd(
+    (estimatedMaximumInputTokens * pricing.inputUsdPerMillionTokens +
+      maximumOutputTokens * pricing.outputUsdPerMillionTokens) /
+      1_000_000,
+  );
+  return {
+    model: policy.autonomousReview.model,
+    serializedInputBytes,
+    inputTokenOverhead: REVIEW_INPUT_TOKEN_OVERHEAD,
+    estimatedMaximumInputTokens,
+    maximumOutputTokens,
+    inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
+    estimatedMaximumCostUsd,
+    configuredCostCeilingUsd: policy.autonomousReview.maxEstimatedCostUsd,
+    apiCallLimit: 1,
+  };
+}
+
+function summarizeModelUsage(response, policy) {
+  const usage = response?.usage;
+  if (!usage || typeof usage !== 'object') return undefined;
+  const inputTokens = safeNonNegativeInteger(usage.input_tokens);
+  const cachedInputTokens = safeNonNegativeInteger(usage.input_tokens_details?.cached_tokens);
+  const outputTokens = safeNonNegativeInteger(usage.output_tokens);
+  const reasoningTokens = safeNonNegativeInteger(usage.output_tokens_details?.reasoning_tokens);
+  const totalTokens = safeNonNegativeInteger(usage.total_tokens);
+  const pricing = AUTONOMOUS_REVIEW_MODEL_PRICING[policy.autonomousReview.model];
+  const estimatedUpperBoundCostUsd =
+    pricing && inputTokens !== undefined && outputTokens !== undefined
+      ? roundUsd(
+          (inputTokens * pricing.inputUsdPerMillionTokens + outputTokens * pricing.outputUsdPerMillionTokens) /
+            1_000_000,
+        )
+      : undefined;
+  return {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+    ...(estimatedUpperBoundCostUsd !== undefined ? { estimatedUpperBoundCostUsd } : {}),
+  };
+}
+
+function safeNonNegativeInteger(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function roundUsd(value) {
+  return Number(value.toFixed(6));
+}
+
+function ceilUsd(value) {
+  return Math.ceil(value * 1_000_000) / 1_000_000;
 }
 
 function summarizeModelFailure(value, kind, attempts) {
@@ -509,6 +641,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const policy = loadAutonomousPolicy();
   const github = createGithubClient(options.repository, process.env.GH_TOKEN);
   const result =
-    options.command === 'review' ? await runReview(options, policy, github) : await runGate(options, policy, github);
+    options.command === 'preflight'
+      ? await runRequiredCheckPreflight(options, policy, github)
+      : options.command === 'review'
+        ? await runReview(options, policy, github)
+        : await runGate(options, policy, github);
   console.log(JSON.stringify(result, null, 2));
 }

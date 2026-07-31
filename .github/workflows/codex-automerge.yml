@@ -3,7 +3,7 @@ name: Codex Auto-Merge
 on:
   pull_request_target:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -92,7 +92,7 @@ jobs:
     name: perform autonomous review
     needs: resolve
     if: needs.resolve.outputs.eligible == 'true'
-    timeout-minutes: 30
+    timeout-minutes: 75
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -117,11 +117,24 @@ jobs:
       - name: Install trusted controller dependencies
         shell: bash
         run: npm ci --ignore-scripts
+      - name: Wait for free deterministic exact-head checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/autonomous-merge-controller.mjs preflight \
+            --repository "${{ github.repository }}" \
+            --pr "${{ needs.resolve.outputs.pr_number }}" \
+            --head-sha "${{ needs.resolve.outputs.head_sha }}" \
+            --wait-seconds 3600 \
+            --poll-seconds 15
       - name: Run deterministic classification and independent review
         id: review
         env:
           GH_TOKEN: ${{ github.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'
         shell: bash
         run: |
           set -euo pipefail
