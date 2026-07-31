@@ -1,5 +1,13 @@
 # Deployment log
 
+## 2026-07-31 — Nested settings deployment passed; boolean policy check failed closed
+
+- PR #281 exact head `73b88f1d6f2cebf5a66dc4d34e9d7f5cd707e1d3` passed exact-head CI, Policy Check, CodeQL, and independent review, then squash-merged as `48591c487b319fe1a4fffe274750cb79c9828341`.
+- Main-delivery run `30650853708` accepted exact main CI run `30650872623` and honored `[skip autodeploy]`; no automatic environment deployment ran.
+- Manual test-only run `30651053281` passed the repaired nested Bicep deployment, resolving the preceding ARM cycle. It then failed the complete runtime-settings gate because the seven Bicep boolean conversions were persisted as title-cased strings rather than the exact lowercase strings required by application policy.
+- No Function or frontend package was activated after the failed gate. The OpenAI credential was present through its exact versioned Key Vault reference; its value was never read or emitted. Production was not dispatched.
+- Repair: normalize every boolean app setting with `toLower(string(value))` and enforce the mapping in architecture tests before a fresh exact-main test-only deployment.
+
 ## 2026-07-31 — First repaired test deployment stopped at an ARM settings cycle
 
 - PR #280 exact head `14a91c960a634b4a9a60796a393eabf1cfa2aeb1` passed CI run `30649467367`, Policy Check `30649467617`, CodeQL `30649470184`, and independent review/merge run `30649464758`, then squash-merged as `8d6c69c34fb411021c3c9a7b61a72421a482e007`.

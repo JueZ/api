@@ -702,7 +702,9 @@ module functionAppSettings './modules/function-app-settings.bicep' = {
       FUNCTIONS_EXTENSION_VERSION: '~4'
       FUNCTIONS_WORKER_RUNTIME: 'node'
       DEPLOYED_ENVIRONMENT_NAME: environmentName
-      AUTH_ENABLED: string(authEnabled)
+      // ARM string(bool) produces title-cased text. Function settings are
+      // case-sensitive strings, so normalize every boolean setting explicitly.
+      AUTH_ENABLED: toLower(string(authEnabled))
       OIDC_ISSUER: validatedOidcIssuer
       OIDC_AUDIENCE: validatedOidcAudience
       OIDC_JWKS_URI: oidcJwksUri
@@ -713,7 +715,7 @@ module functionAppSettings './modules/function-app-settings.bicep' = {
       OIDC_ALLOWED_CLIENT_IDS: oidcAllowedClientIds
       OIDC_ALLOWED_DELEGATED_CLIENT_IDS: oidcAllowedDelegatedClientIds
       OIDC_ALLOWED_TENANTS: validatedOidcTenants
-      AUTH_DEBUG: string(authDebug)
+      AUTH_DEBUG: toLower(string(authDebug))
       API_CORS_ALLOWED_ORIGINS: validatedCorsOrigins
       MCP_RESOURCE_ORIGIN: validatedMcpOrigin
       MCP_ALLOWED_ORIGINS: validatedMcpAllowedOrigins
@@ -724,9 +726,9 @@ module functionAppSettings './modules/function-app-settings.bicep' = {
       WLH_STORAGE_ACCOUNT_NAME: privateStorage.name
       WLH_CATEGORY_BLOB_CONTAINER: wlhCategoryBlobContainer
       WLH_CATEGORY_BLOB_NAME: wlhCategoryBlobName
-      BRING_ENABLED: string(bringEnabled)
-      BRING_ADD_ENABLED: string(validatedBringAddEnabled)
-      BRING_DESTRUCTIVE_ENABLED: string(validatedBringDestructiveEnabled)
+      BRING_ENABLED: toLower(string(bringEnabled))
+      BRING_ADD_ENABLED: toLower(string(validatedBringAddEnabled))
+      BRING_DESTRUCTIVE_ENABLED: toLower(string(validatedBringDestructiveEnabled))
       BRING_BASE_URL: bringBaseUrl
       BRING_CLIENT_API_KEY: '@Microsoft.KeyVault(SecretUri=${bringClientApiKeySecret.properties.secretUriWithVersion})'
       BRING_COUNTRY: bringCountry
@@ -736,7 +738,7 @@ module functionAppSettings './modules/function-app-settings.bicep' = {
       BRING_DEFAULT_LIST_UUID: bringDefaultListUuid
       BRING_READABLE_LIST_UUIDS: validatedBringReadableLists
       BRING_WRITABLE_LIST_UUIDS: validatedBringWritableLists
-      BRING_SESSION_CACHE_ENABLED: string(bringSessionCacheEnabled)
+      BRING_SESSION_CACHE_ENABLED: toLower(string(bringSessionCacheEnabled))
       BRING_SESSION_CACHE_CONTAINER: bringSessionCacheContainer
       BRING_SESSION_CACHE_BLOB: bringSessionCacheBlob
       BRING_MUTATION_CONTAINER: bringMutationContainer
@@ -745,7 +747,7 @@ module functionAppSettings './modules/function-app-settings.bicep' = {
       BRING_CONFIRMATION_HMAC_KEY: '@Microsoft.KeyVault(SecretUri=${bringConfirmationKeySecret.properties.secretUriWithVersion})'
       BRING_MUTATION_ENCRYPTION_KEY: '@Microsoft.KeyVault(SecretUri=${bringEncryptionKeySecret.properties.secretUriWithVersion})'
       OPENAI_API_KEY: repairableErrorsLlmEnabled ? '@Microsoft.KeyVault(SecretUri=${openAiSecret!.properties.secretUriWithVersion})' : ''
-      REPAIRABLE_ERRORS_LLM_ENABLED: string(repairableErrorsLlmEnabled)
+      REPAIRABLE_ERRORS_LLM_ENABLED: toLower(string(repairableErrorsLlmEnabled))
       REPAIRABLE_ERRORS_LLM_MODEL: repairableErrorsLlmModel
     })
   }

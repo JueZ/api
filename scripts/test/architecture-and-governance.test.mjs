@@ -61,6 +61,21 @@ test('Azure Functions loads the fail-closed composition root before registering 
   assert.match(functionAppSettingsModule, /resource appSettingsResource 'Microsoft\.Web\/sites\/config@[^']+' = \{/);
   assert.match(functionAppSettingsModule, /properties: appSettings/);
   for (const setting of [
+    ['AUTH_ENABLED', 'authEnabled'],
+    ['AUTH_DEBUG', 'authDebug'],
+    ['BRING_ENABLED', 'bringEnabled'],
+    ['BRING_ADD_ENABLED', 'validatedBringAddEnabled'],
+    ['BRING_DESTRUCTIVE_ENABLED', 'validatedBringDestructiveEnabled'],
+    ['BRING_SESSION_CACHE_ENABLED', 'bringSessionCacheEnabled'],
+    ['REPAIRABLE_ERRORS_LLM_ENABLED', 'repairableErrorsLlmEnabled'],
+  ]) {
+    assert.match(infrastructure, new RegExp(`${setting[0]}: toLower\\(string\\(${setting[1]}\\)\\)`));
+  }
+  assert.doesNotMatch(
+    infrastructure,
+    /(?:AUTH_ENABLED|AUTH_DEBUG|BRING_ENABLED|BRING_ADD_ENABLED|BRING_DESTRUCTIVE_ENABLED|BRING_SESSION_CACHE_ENABLED|REPAIRABLE_ERRORS_LLM_ENABLED): string\(/,
+  );
+  for (const setting of [
     'WEBSITE_RUN_FROM_PACKAGE',
     'DEPLOYED_COMMIT_SHA',
     'DEPLOYED_SOURCE_REF',

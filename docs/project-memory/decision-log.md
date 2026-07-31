@@ -1,5 +1,11 @@
 # Decision log
 
+## 2026-07-31 — Normalize boolean Function settings to lowercase strings
+
+- Decision: Every Bicep boolean written to Function App settings must use `toLower(string(value))`; direct `string(bool)` conversions are prohibited by architecture regression coverage.
+- Rationale: ARM persisted `string(bool)` as title-cased `True`/`False`, while the Node runtime and deployment safety policy intentionally require exact lowercase `true`/`false`. Test run `30651053281` proved that only the seven boolean-derived settings diverged; all non-boolean settings and exact Key Vault reference identities matched.
+- Status: Implemented after the repaired nested settings deployment passed Bicep but failed closed before package activation. Fresh PR and test-only validation remain required; production remains untouched.
+
 ## 2026-07-31 — Reconcile preserved Function settings through a secure nested deployment
 
 - Decision: Keep the parent-template read and strict allowlist of release-owned Function settings, but move the complete `Microsoft.Web/sites/config` write into a local nested Bicep module with a `secureObject` parameter.
