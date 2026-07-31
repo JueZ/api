@@ -94,6 +94,7 @@ test('branch-protection bootstrap is rendered from canonical required checks', (
   assert.equal(protection.allow_force_pushes, false);
   assert.equal(protection.allow_deletions, false);
   assert.equal(protection.required_linear_history, true);
+  assert.equal(protection.required_conversation_resolution, true);
 });
 
 test('Codex auto-merge completion dispatches exact main CI through one delivery controller', () => {

@@ -19,7 +19,7 @@ export function renderBranchProtection(policy = loadAutonomousPolicy()) {
     allow_force_pushes: false,
     allow_deletions: false,
     block_creations: false,
-    required_conversation_resolution: false,
+    required_conversation_resolution: true,
     lock_branch: false,
     allow_fork_syncing: true,
   };
