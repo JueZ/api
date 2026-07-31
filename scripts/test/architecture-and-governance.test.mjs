@@ -50,6 +50,18 @@ test('Azure Functions loads the fail-closed composition root before registering 
     compositionRoot.indexOf('assertRuntimeSafety();') < compositionRoot.indexOf("import('./functions/health.js')"),
   );
   assert.match(infrastructure, /resource functionAppSettings 'Microsoft\.Web\/sites\/config@[^']+' = \{/);
+  assert.match(infrastructure, /list\('\$\{functionApp\.id\}\/config\/appsettings'/);
+  assert.match(infrastructure, /properties: union\(preservedFunctionReleaseSettings, \{/);
+  for (const setting of [
+    'WEBSITE_RUN_FROM_PACKAGE',
+    'DEPLOYED_COMMIT_SHA',
+    'DEPLOYED_SOURCE_REF',
+    'RELEASE_FUNCTION_SHA256',
+    'RELEASE_FRONTEND_SHA256',
+    'RELEASE_SBOM_SHA256',
+  ]) {
+    assert.match(infrastructure, new RegExp(`contains\\(existingFunctionAppSettings, '${setting}'\\)`));
+  }
   assert.doesNotMatch(infrastructure, /siteConfig:\s*\{[\s\S]*?appSettings:\s*\[/);
 });
 

@@ -1,4 +1,5 @@
 name: Rollback Production
+run-name: Rollback Production ${{ inputs.commit_sha }} rollback-${{ github.run_id }}-${{ github.run_attempt }}
 
 on:
   workflow_dispatch:
@@ -40,3 +41,4 @@ jobs:
       sourceRef: ${{ inputs.commit_sha }}
       updateProductionVariables: true
       allowRollback: true
+      deliveryCorrelation: rollback-${{ github.run_id }}-${{ github.run_attempt }}

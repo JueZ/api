@@ -45,6 +45,10 @@ on:
         required: false
         default: false
         type: boolean
+      deliveryCorrelation:
+        description: Unique value binding this deployment to one workflow dispatch and release ledger.
+        required: true
+        type: string
     secrets:
       REDDIT_CLIENT_SECRET:
         description: Reddit OAuth client secret for app-only API access.
@@ -113,6 +117,7 @@ jobs:
       DEPLOY_FRONTEND: ${{ inputs.deployFrontend }}
       DEPLOY_FUNCTIONS: ${{ inputs.deployFunctions }}
       SOURCE_REF: ${{ inputs.sourceRef }}
+      DELIVERY_CORRELATION: ${{ inputs.deliveryCorrelation }}
       AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
       AZURE_STATIC_WEB_STORAGE_ACCOUNT: ${{ vars.AZURE_STATIC_WEB_STORAGE_ACCOUNT }}
       PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
@@ -163,7 +168,14 @@ jobs:
       DEPLOYED_AT_UTC: ${{ github.event.head_commit.timestamp || '' }}
       DEPLOYMENT_RUN_ID: ${{ github.run_id }}
       GH_TOKEN: ${{ github.token }}
-      ALLOW_ROLLBACK: ${{ inputs.allowRollback }}
+      ROLLBACK_REQUESTED: ${{ inputs.allowRollback }}
+      ALLOW_ROLLBACK: >-
+        ${{
+          inputs.allowRollback &&
+          github.workflow_ref == format('{0}/.github/workflows/rollback-production.yml@refs/heads/main', github.repository) &&
+          github.ref == 'refs/heads/main' &&
+          github.event_name == 'workflow_dispatch'
+        }}
       APPLICATIONINSIGHTS_NAME: ${{ vars.APPLICATIONINSIGHTS_NAME }}
       TEST_SERVICE_AUTH_CLIENT_ID: ${{ vars.TEST_SERVICE_AUTH_CLIENT_ID }}
       TEST_SERVICE_AUTH_TENANT_ID: ${{ vars.TEST_SERVICE_AUTH_TENANT_ID }}
@@ -209,8 +221,12 @@ jobs:
             exit 1
           fi
           echo "ci_run_id=$ci_run_id" >> "$GITHUB_OUTPUT"
+          if [ "$ROLLBACK_REQUESTED" = "true" ] && [ "$ALLOW_ROLLBACK" != "true" ]; then
+            echo "Rollback is permitted only from rollback-production.yml on main." >&2
+            exit 1
+          fi
           if [ "$ENVIRONMENT_NAME" = "prod" ]; then
-            if [ "${{ inputs.allowRollback }}" != "true" ]; then
+            if [ "$ALLOW_ROLLBACK" != "true" ]; then
               : "${PRODUCTION_BASE_URL:?PRODUCTION_BASE_URL is required for monotonic production validation}"
               current_health="$(curl --fail --show-error --silent --max-time 20 "${PRODUCTION_BASE_URL%/}/health")"
               current_source_ref="$(jq -r '.deployedSourceRef // .deployedCommitSha // ""' <<<"$current_health")"
@@ -239,9 +255,15 @@ jobs:
                 provenance_file="$provenance_dir/deploy-test-provenance.json"
                 if [ -f "$provenance_file" ] && jq -e \
                   --arg source_ref "$deployment_ref" \
+                  --arg test_run_id "$test_run_id" \
+                  --arg repository "$GITHUB_REPOSITORY" \
                   '.environmentName == "test"
                     and .sourceRef == $source_ref
                     and .resolvedHead == $source_ref
+                    and .runId == $test_run_id
+                    and .workflow == "Deploy Test"
+                    and .repository == $repository
+                    and (.deliveryCorrelation | test("^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$"))
                     and .deployFrontend == "true"
                     and .deployFunctions == "true"
                     and .eventName == "workflow_dispatch"
@@ -265,6 +287,9 @@ jobs:
               exit 1
             fi
             echo "Validated Deploy Test provenance from run $valid_test_run_id for production sourceRef $deployment_ref."
+            if [ "$ALLOW_ROLLBACK" = "true" ]; then
+              echo "ROLLBACK_PROVENANCE_VERIFIED=true" >> "$GITHUB_ENV"
+            fi
           fi
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
@@ -283,6 +308,10 @@ jobs:
             test|prod) ;;
             *) echo "environmentName must be test or prod." >&2; exit 1 ;;
           esac
+          if [[ ! "$DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]; then
+            echo "deliveryCorrelation must be an opaque 8-128 character identifier." >&2
+            exit 1
+          fi
           if [ "$ENVIRONMENT_NAME" = "prod" ] && [ "${DEPLOY_PRODUCTION_ENABLED:-false}" != "true" ]; then
             echo "DEPLOY_PRODUCTION_ENABLED must be true for production deployment." >&2
             exit 1
@@ -954,6 +983,7 @@ jobs:
             --arg repository "$GITHUB_REPOSITORY" \
             --arg runId "$GITHUB_RUN_ID" \
             --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg deliveryCorrelation "$DELIVERY_CORRELATION" \
             --arg functionappSha256 "$FUNCTION_ARTIFACT_SHA256" \
             --arg frontendSha256 "$FRONTEND_ARTIFACT_SHA256" \
             --arg sbomSha256 "$SBOM_SHA256" \
@@ -970,6 +1000,7 @@ jobs:
               repository: $repository,
               runId: $runId,
               runAttempt: $runAttempt,
+              deliveryCorrelation: $deliveryCorrelation,
               artifacts: {
                 functionappSha256: $functionappSha256,
                 frontendSha256: $frontendSha256,

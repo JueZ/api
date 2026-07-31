@@ -1,5 +1,5 @@
 name: Promote Production
-run-name: Promote Production ${{ inputs.commit_sha || github.sha }}
+run-name: Promote Production ${{ inputs.commit_sha || github.sha }} ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
 
 on:
   workflow_dispatch:
@@ -18,6 +18,10 @@ on:
         required: false
         default: true
         type: boolean
+      delivery_correlation:
+        description: Unique delivery-controller correlation value.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -50,3 +54,4 @@ jobs:
       deployFunctions: ${{ inputs.deploy_functions }}
       sourceRef: ${{ inputs.commit_sha || github.sha }}
       updateProductionVariables: true
+      deliveryCorrelation: ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
