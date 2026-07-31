@@ -21,6 +21,7 @@ function parseArgs(argv = process.argv.slice(2), env = process.env) {
     environment,
     apiBaseUrl: args.apiBaseUrl || env.API_BASE_URL || '',
     expectedSha: String(args.expectedSha || env.EXPECTED_DEPLOYED_COMMIT_SHA || '').toLowerCase(),
+    expectedDeliveryCorrelation: args.deliveryCorrelation || env.EXPECTED_DELIVERY_CORRELATION || '',
     repo: args.repo || env.GITHUB_REPOSITORY || 'JueZ/api',
     workflow: args.workflow || (environment === 'prod' ? 'promote-production.yml' : 'deploy-test.yml'),
     runId: args.runId || '',
@@ -58,6 +59,7 @@ export function summarizeLedger(ledger) {
     workflowRunId: ledger.workflowRunId,
     deployedCommit: ledger.deployedCommit,
     sourceRef: ledger.sourceRef,
+    deliveryCorrelation: ledger.deliveryCorrelation,
     smokeRunId: ledger.smokeRunId,
     smokeResultsStatus: ledger.smokeResults?.status,
     authenticatedSmokeResultsStatus: ledger.authenticatedSmokeResults?.status,
@@ -88,6 +90,9 @@ export function decideRuntimeTruth({ live = {}, ledger = null, options = {}, led
         failures.push(`ledger environment expected ${options.environment}, got ${ledger.environment}`);
       if (options.expectedSha && ledger.deployedCommit !== options.expectedSha)
         failures.push(`ledger deployedCommit expected ${options.expectedSha}, got ${ledger.deployedCommit}`);
+      if (options.expectedDeliveryCorrelation && ledger.deliveryCorrelation !== options.expectedDeliveryCorrelation) {
+        failures.push('ledger deliveryCorrelation does not match the expected workflow dispatch');
+      }
       if (
         live.runtime?.deployedCommitSha &&
         ledger.deployedCommit &&
@@ -126,43 +131,16 @@ export async function checkLiveRuntime(options) {
   }
 }
 
-async function latestRunIdForLedger(options, spawn) {
-  if (options.runId) return options.runId;
-  const runs = JSON.parse(
-    runGh(
-      [
-        'run',
-        'list',
-        '--repo',
-        options.repo,
-        '--workflow',
-        options.workflow,
-        '--branch',
-        'main',
-        '--status',
-        'success',
-        '--limit',
-        '30',
-        '--json',
-        'databaseId,headSha,conclusion,status',
-      ],
-      spawn,
-    ),
-  );
-  const run = runs.find(
-    (candidate) => !options.expectedSha || String(candidate.headSha).toLowerCase() === options.expectedSha,
-  );
-  if (!run)
-    throw new Error(
-      `No successful ${options.workflow} run found${options.expectedSha ? ` for ${options.expectedSha}` : ''}.`,
-    );
-  return String(run.databaseId);
-}
-
 export async function loadLedger(options, spawn = spawnSync) {
   if (!options.includeLedger) return { ledger: null, artifactName: '', runId: '' };
   if (!ghAvailable(spawn)) throw new Error('gh CLI is unavailable; ledger mode requires GitHub CLI.');
-  const runId = await latestRunIdForLedger(options, spawn);
+  if (!/^\d+$/.test(options.runId || '')) {
+    throw new Error('Ledger mode requires the exact workflow run ID via --run-id.');
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/.test(options.expectedDeliveryCorrelation || '')) {
+    throw new Error('Ledger mode requires the exact workflow delivery correlation via --delivery-correlation.');
+  }
+  const runId = options.runId;
   const artifactName = `release-ledger-${options.environment}-${options.expectedSha}`;
   const artifactDir = options.artifactDir || (await mkdtemp(join(tmpdir(), 'runtime-truth-ledger-')));
   if (!existsSync(artifactDir)) throw new Error(`artifact directory does not exist: ${artifactDir}`);
@@ -184,7 +162,9 @@ export async function runRuntimeTruth({ argv = process.argv.slice(2), env = proc
     try {
       ledgerInfo = await loadLedger(options, spawn);
       ledger = ledgerInfo.ledger;
-      ledgerErrors = validateReleaseLedger(ledger);
+      ledgerErrors = validateReleaseLedger(ledger, {
+        expectedDeliveryCorrelation: options.expectedDeliveryCorrelation,
+      });
     } catch (error) {
       ledgerLoadError = error instanceof Error ? error.message : String(error);
     }
@@ -200,6 +180,7 @@ export async function runRuntimeTruth({ argv = process.argv.slice(2), env = proc
     checkedAt: new Date().toISOString(),
     environment: options.environment || undefined,
     expectedSha: options.expectedSha || undefined,
+    expectedDeliveryCorrelation: options.expectedDeliveryCorrelation || undefined,
     live,
     ledger: ledger ? summarizeLedger(ledger) : undefined,
     ledgerArtifact: ledgerInfo.artifactName,

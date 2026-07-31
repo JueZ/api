@@ -8,6 +8,14 @@ on:
         description: Previous immutable 40-character commit SHA from main to redeploy to production.
         required: true
         type: string
+      release_run_id:
+        description: Exact prior successful Promote Production workflow run ID for this release.
+        required: true
+        type: string
+      release_delivery_correlation:
+        description: Exact delivery correlation recorded by that prior production release.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -42,3 +50,5 @@ jobs:
       updateProductionVariables: true
       allowRollback: true
       deliveryCorrelation: rollback-${{ github.run_id }}-${{ github.run_attempt }}
+      rollbackReleaseRunId: ${{ inputs.release_run_id }}
+      rollbackReleaseCorrelation: ${{ inputs.release_delivery_correlation }}

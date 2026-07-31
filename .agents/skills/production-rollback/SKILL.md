@@ -12,6 +12,8 @@ Use this skill for JueZ/api production rollback requests.
 - Use the GitHub Actions `Rollback Production` workflow; do not invent a separate production deployment path.
 - Roll back only to a full 40-character known-good commit SHA from `main`.
 - The rollback source commit must have passed the repository deployment provenance gates required by the workflow.
+- Supply the exact prior successful `Promote Production` run ID and delivery correlation whose accepted release ledger matches the rollback SHA and artifact digests.
+- Current `main` remains authoritative for Bicep, identity, storage policy, and safety settings. Rollback may switch only to the ledger-bound historical Function/frontend artifacts.
 - `DEPLOY_PRODUCTION_ENABLED=true` is required for production rollback deployment.
 - Do not enable `DEPLOY_PRODUCTION_ENABLED=true` unless the operator/user explicitly requests enabling production deployment and the guardrails, approval posture, and risk are documented.
 - Do not print secrets, tokens, connection strings, SAS URLs, or full environment dumps.
@@ -37,7 +39,7 @@ gh variable get DEPLOY_PRODUCTION_ENABLED --repo JueZ/api
 
 If `DEPLOY_PRODUCTION_ENABLED` is not `true`, report rollback as blocked. Do not set it to `true` unless the operator/user explicitly requests enabling production deployment and the guardrails, approval posture, and risk are documented.
 
-Identify a previous known-good full 40-character commit SHA from `main`. Useful evidence sources include:
+Identify a previous known-good full 40-character commit SHA from `main`, its exact successful `Promote Production` run ID, and the delivery correlation in that run title/ledger. Useful evidence sources include:
 
 ```bash
 gh run list --repo JueZ/api --workflow promote-production.yml --branch main --limit 20
@@ -49,13 +51,15 @@ Do not roll back to an ambiguous short SHA if the workflow requires a full SHA.
 
 ## Standard rollback command
 
-Replace `<previous-good-commit-sha>` with a full 40-character known-good commit SHA from `main`:
+Replace all placeholders with evidence from the same previously accepted production release:
 
 ```bash
 gh workflow run rollback-production.yml \
   --ref main \
   --repo JueZ/api \
-  -f commit_sha=<previous-good-commit-sha>
+  -f commit_sha=<previous-good-commit-sha> \
+  -f release_run_id=<previous-good-promote-production-run-id> \
+  -f release_delivery_correlation=<previous-good-release-correlation>
 ```
 
 Watch the run:

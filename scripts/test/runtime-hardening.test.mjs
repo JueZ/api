@@ -191,6 +191,39 @@ test('repair decision closes production issue with valid later production ledger
   assert.equal(decision.action, 'close');
 });
 
+test('repair decision requires ledger identity to match the inspected production run', () => {
+  const decision = decideRepairIssueAction(
+    { title: 'Production smoke failed', body: '' },
+    {
+      productionVerification: {
+        ledger,
+        workflowRunId: '456',
+        expectedDeliveryCorrelation: 'delivery-other123',
+        workflowConclusion: 'success',
+        validationErrors: [],
+      },
+    },
+  );
+  assert.equal(decision.action, 'comment');
+});
+
+test('repair decision requires ledger source to match the inspected production run head', () => {
+  const decision = decideRepairIssueAction(
+    { title: 'Production smoke failed', body: '' },
+    {
+      productionVerification: {
+        ledger,
+        workflowRunId: ledger.workflowRunId,
+        workflowHeadSha: 'b'.repeat(40),
+        expectedDeliveryCorrelation: ledger.deliveryCorrelation,
+        workflowConclusion: 'success',
+        validationErrors: [],
+      },
+    },
+  );
+  assert.equal(decision.action, 'comment');
+});
+
 test('repair decision leaves production issue open when auth smoke is blocked or failed', () => {
   const blockedLedger = { ...ledger, authenticatedSmokeResults: { status: 'blocked_auth_smoke' } };
   const decision = decideRepairIssueAction(
@@ -254,6 +287,21 @@ test('runtime truth decision detects live health mismatch', () => {
     },
     ledger,
     options: { includeLedger: true, environment: 'prod', expectedSha: sha },
+    ledgerErrors: [],
+  });
+  assert.equal(decision.status, 'failed');
+});
+
+test('runtime truth decision rejects a ledger from another dispatch correlation', () => {
+  const decision = decideRuntimeTruth({
+    live: { status: 'passed', runtime: { environmentName: 'prod', deployedCommitSha: sha } },
+    ledger,
+    options: {
+      includeLedger: true,
+      environment: 'prod',
+      expectedSha: sha,
+      expectedDeliveryCorrelation: 'delivery-other123',
+    },
     ledgerErrors: [],
   });
   assert.equal(decision.status, 'failed');

@@ -54,6 +54,17 @@ async function authorize(authorization, payload, overrides = {}, policy) {
   );
 }
 
+async function withDeployedEnvironment(environment, action) {
+  const previous = process.env.DEPLOYED_ENVIRONMENT_NAME;
+  process.env.DEPLOYED_ENVIRONMENT_NAME = environment;
+  try {
+    return await action();
+  } finally {
+    if (previous === undefined) delete process.env.DEPLOYED_ENVIRONMENT_NAME;
+    else process.env.DEPLOYED_ENVIRONMENT_NAME = previous;
+  }
+}
+
 test('missing Authorization header returns 401', async () => {
   const result = await authorize(undefined, {});
 
@@ -63,16 +74,18 @@ test('missing Authorization header returns 401', async () => {
 });
 
 test('disabled authentication fails closed outside local development', async () => {
-  const result = await authorizeRequest(
-    requestWithAuthorization(undefined),
-    context(),
-    { ...baseConfig, enabled: false },
-    await verifierReturning({}),
-    {
-      permission: 'catalogue.read',
-      allowedTokenTypes: ['user', 'service'],
-      environment: 'test',
-    },
+  const result = await withDeployedEnvironment('test', async () =>
+    authorizeRequest(
+      requestWithAuthorization(undefined),
+      context(),
+      { ...baseConfig, enabled: false },
+      await verifierReturning({}),
+      {
+        permission: 'catalogue.read',
+        allowedTokenTypes: ['user', 'service'],
+        environment: 'local',
+      },
+    ),
   );
 
   assert.equal(result.ok, false);
@@ -81,16 +94,18 @@ test('disabled authentication fails closed outside local development', async () 
 });
 
 test('disabled authentication retains the local development principal only in local', async () => {
-  const result = await authorizeRequest(
-    requestWithAuthorization(undefined),
-    context(),
-    { ...baseConfig, enabled: false },
-    await verifierReturning({}),
-    {
-      permission: 'catalogue.read',
-      allowedTokenTypes: ['user', 'service'],
-      environment: 'local',
-    },
+  const result = await withDeployedEnvironment('local', async () =>
+    authorizeRequest(
+      requestWithAuthorization(undefined),
+      context(),
+      { ...baseConfig, enabled: false },
+      await verifierReturning({}),
+      {
+        permission: 'catalogue.read',
+        allowedTokenTypes: ['user', 'service'],
+        environment: 'test',
+      },
+    ),
   );
 
   assert.equal(result.ok, true);

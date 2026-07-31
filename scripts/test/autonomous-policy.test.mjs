@@ -80,8 +80,16 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.match(deployEnvironmentWorkflow, /name: Verify deployed runtime safety settings/);
   assert.match(deployEnvironmentWorkflow, /\.AUTH_ENABLED == "true"/);
   assert.match(deployEnvironmentWorkflow, /effective_web_api_base_url="\$EFFECTIVE_BASE_URL"/);
-  assert.match(deployEnvironmentWorkflow, /ROLLBACK_PROVENANCE_VERIFIED=true/);
+  assert.match(deployEnvironmentWorkflow, /name: Checkout current deployment controller/);
+  assert.match(deployEnvironmentWorkflow, /Historical production ledger is missing exact successful release evidence/);
+  assert.match(
+    deployEnvironmentWorkflow,
+    /EXPECTED_DELIVERY_CORRELATION="\$ROLLBACK_RELEASE_CORRELATION"[\s\\]+node scripts\/validate-release-ledger\.mjs/,
+  );
+  assert.match(deployEnvironmentWorkflow, /\.deliveryCorrelation == \$correlation/);
+  assert.doesNotMatch(deployEnvironmentWorkflow, /ROLLBACK_PROVENANCE_VERIFIED/);
   assert.match(deployEnvironmentWorkflow, /deliveryCorrelation: \$deliveryCorrelation/);
+  assert.match(mainDeliveryWorkflow, /-f test_delivery_correlation="\$test_correlation"/);
 });
 
 test('policy glob matcher handles recursive and exact AGENTS paths', () => {

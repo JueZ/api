@@ -73,18 +73,21 @@ gh workflow run deploy-test.yml \
 gh workflow run promote-production.yml \
   --ref main \
   --repo JueZ/api \
-  -f commit_sha=<commit-sha>
+  -f commit_sha=<commit-sha> \
+  -f test_delivery_correlation=<exact-successful-deploy-test-correlation>
 ```
 
 ### Rolling back production
 
-Rollback is intentionally simple: redeploy a previous known-good commit with `Rollback Production`. This reuses the same deployment path as promotion and runs production smoke tests before updating production variables.
+Rollback redeploys only the immutable Function/frontend artifacts from an exact previously accepted production release. Current `main` remains authoritative for Bicep, identity, storage policy, and security settings. Supply the full source SHA, exact successful `Promote Production` run ID, and that run's delivery correlation.
 
 ```bash
 gh workflow run rollback-production.yml \
   --ref main \
   --repo JueZ/api \
-  -f commit_sha=<previous-good-commit-sha>
+  -f commit_sha=<previous-good-commit-sha> \
+  -f release_run_id=<previous-good-promote-production-run-id> \
+  -f release_delivery_correlation=<previous-good-release-correlation>
 ```
 
 This is enough for a small personal project because it proves the exact commit in a separate Azure resource group before production without adding always-on services or expensive routing infrastructure. Blue/green and canary deployments are overkill for v0. Azure Functions deployment slots could be a later hardening upgrade, but this task deliberately keeps the current low-cost consumption-style model and does not switch to a more expensive plan for slots.

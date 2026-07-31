@@ -3,7 +3,7 @@
 ## Current delivery boundary
 
 - PR #264 is merged and its exact commit was deployed to test, but runtime acceptance failed on the unauthenticated auth gate after the two permitted deployment repair attempts.
-- The focused runtime/bootstrap/settings repair starts a fresh bounded PR and deployment cycle. PR #272 exhausted its two high-risk review repair attempts and must be superseded rather than amended again.
+- Bootstrap PR #274 repaired the trusted reviewer. Focused runtime/bootstrap/settings PR #275 supersedes exhausted PRs #272/#273 and is using its first bounded high-risk review repair attempt.
 - Production deployment is not authorized for this rollout and remains blocked.
 - Do not change or reveal the shared repository `OPENAI_API_KEY`; verify only that deployment wiring and secret references succeed.
 

@@ -39,4 +39,4 @@ Before the first split-storage cutover, copy existing WLH reference/session data
 7. Promote the identical test-proven digests.
 8. Verify production runtime truth and keep the release ledger.
 
-Normal promotion uses `Codex Main Delivery`; rollback uses only `rollback-production.yml` with a known-good full `main` SHA. Never deploy production from a local shell.
+Normal promotion uses `Codex Main Delivery`; rollback uses only `rollback-production.yml` with a known-good full `main` SHA plus the exact successful production run ID and delivery correlation for its accepted ledger. A rollback applies current-main infrastructure/security configuration and switches only to the digest-matched historical Function/frontend artifacts. Never deploy production from a local shell.

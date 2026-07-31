@@ -23,8 +23,8 @@ npm run ops:runtime-truth -- --environment prod --api-base-url https://func-api-
 Ledger mode additionally finds or downloads `release-ledger-<environment>-<sha>` from the relevant workflow run, validates the ledger, and compares live `/health` with the ledger commit:
 
 ```bash
-npm run ops:runtime-truth -- --environment prod --api-base-url https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net --expected-sha <sha> --include-ledger=true --repo JueZ/api
-npm run ops:runtime-truth -- --environment test --api-base-url https://func-api-catalogue-test-iwt54bovfzvrc.azurewebsites.net --expected-sha <sha> --include-ledger=true --repo JueZ/api
+npm run ops:runtime-truth -- --environment prod --api-base-url https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net --expected-sha <sha> --include-ledger=true --repo JueZ/api --run-id <exact-promote-run-id> --delivery-correlation <exact-correlation>
+npm run ops:runtime-truth -- --environment test --api-base-url https://func-api-catalogue-test-iwt54bovfzvrc.azurewebsites.net --expected-sha <sha> --include-ledger=true --repo JueZ/api --run-id <exact-deploy-test-run-id> --delivery-correlation <exact-correlation>
 ```
 
 Exit codes are `0` for verified, `1` for mismatch or failed smoke/telemetry evidence, and `2` for blocked or missing required evidence such as an unavailable GitHub CLI or missing release-ledger artifact.

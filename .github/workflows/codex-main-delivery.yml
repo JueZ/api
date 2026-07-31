@@ -299,7 +299,8 @@ jobs:
             -f commit_sha="$SOURCE_REF" \
             -f deploy_frontend=true \
             -f deploy_functions=true \
-            -f delivery_correlation="$production_correlation"
+            -f delivery_correlation="$production_correlation" \
+            -f test_delivery_correlation="$test_correlation"
           wait_for_dispatch promote-production.yml "$production_title" "$production_started_at" "$SOURCE_REF" "Promote Production"
           production_url="$(cat "$RUNNER_TEMP/promote-production.yml.url")"
           production_run_id="$(cat "$RUNNER_TEMP/promote-production.yml.id")"
