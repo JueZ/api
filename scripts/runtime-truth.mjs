@@ -56,6 +56,7 @@ export function validateWorkflowRunMetadata(run = {}, options = {}) {
   if (run.path !== identity.path) errors.push(`workflow path must be ${identity.path}`);
   if (run.name !== identity.name) errors.push(`workflow name must be ${identity.name}`);
   if (run.event !== 'workflow_dispatch') errors.push('workflow event must be workflow_dispatch');
+  if (run.run_attempt !== 1) errors.push('deployment evidence reruns are prohibited; dispatch a new workflow run');
   if (run.conclusion !== 'success') errors.push('workflow conclusion must be success');
   if (run.head_branch !== 'main') errors.push('workflow head branch must be main');
   if (String(run.head_sha || '').toLowerCase() !== options.expectedSha) {
@@ -179,7 +180,7 @@ export async function loadLedger(options, spawn = spawnSync) {
   const runMetadata = JSON.parse(runGh(['api', `repos/${options.repo}/actions/runs/${runId}`], spawn));
   const runErrors = validateWorkflowRunMetadata(runMetadata, options);
   if (runErrors.length > 0) throw new Error(`Workflow run identity rejected: ${runErrors.join('; ')}`);
-  const artifactName = `release-ledger-${options.environment}-${options.expectedSha}`;
+  const artifactName = `release-ledger-${options.environment}-${options.expectedSha}-${options.expectedDeliveryCorrelation}`;
   const artifactDir = options.artifactDir || (await mkdtemp(join(tmpdir(), 'runtime-truth-ledger-')));
   if (!existsSync(artifactDir)) throw new Error(`artifact directory does not exist: ${artifactDir}`);
   runGh(['run', 'download', runId, '--repo', options.repo, '--name', artifactName, '--dir', artifactDir], spawn);

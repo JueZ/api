@@ -108,12 +108,72 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.doesNotMatch(deployEnvironmentWorkflow, /successful_test_run_ids/);
   assert.doesNotMatch(deployEnvironmentWorkflow, /ROLLBACK_PROVENANCE_VERIFIED/);
   assert.match(deployEnvironmentWorkflow, /deliveryCorrelation: \$deliveryCorrelation/);
+  assert.match(deployEnvironmentWorkflow, /\[ "\$GITHUB_RUN_ATTEMPT" != "1" \]/);
+  assert.match(deployEnvironmentWorkflow, /\.run_attempt == 1/);
+  assert.match(deployEnvironmentWorkflow, /\.runAttempt == "1"/);
+  assert.ok(
+    deployEnvironmentWorkflow.includes(
+      'name: release-ledger-${{ inputs.environmentName }}-${{ inputs.sourceRef || github.sha }}-${{ inputs.deliveryCorrelation }}',
+    ),
+  );
+  assert.ok(mainDeliveryWorkflow.includes('--name "deploy-test-provenance-$SOURCE_REF-$test_correlation"'));
+  assert.ok(mainDeliveryWorkflow.includes('--name "release-ledger-prod-$SOURCE_REF-$production_correlation"'));
   assert.match(mainDeliveryWorkflow, /-f test_delivery_correlation="\$test_correlation"/);
   assert.match(mainDeliveryWorkflow, /-f test_run_id="\$test_run_id"/);
   for (const workflow of [deployTestWorkflow, promoteProductionWorkflow, rollbackProductionWorkflow]) {
     assert.match(workflow, /controllerRef: \$\{\{ github\.sha \}\}/);
     assert.match(workflow, /controllerWorkflowSha: \$\{\{ github\.workflow_sha \}\}/);
   }
+});
+
+test('rollback changes only accepted application packages and leaves infrastructure configuration unchanged', () => {
+  assert.match(
+    deployEnvironmentWorkflow,
+    /- name: Deploy Bicep infrastructure\n\s+if: \$\{\{ !inputs\.allowRollback \}\}/,
+  );
+  assert.match(
+    deployEnvironmentWorkflow,
+    /- name: Verify deployed runtime safety settings\n\s+if: \$\{\{ inputs\.deployFunctions && !inputs\.allowRollback \}\}/,
+  );
+  assert.match(deployEnvironmentWorkflow, /resolve_storage_by_purpose immutable-release-packages/);
+  assert.match(deployEnvironmentWorkflow, /resolve_storage_by_purpose public-static-site/);
+  assert.match(deployEnvironmentWorkflow, /resolve_storage_by_purpose private-integration-state/);
+  assert.match(deployEnvironmentWorkflow, /resolve_storage_by_purpose function-host/);
+  assert.match(
+    deployEnvironmentWorkflow,
+    /if \[ "\$ALLOW_ROLLBACK" != "true" \]; then[\s\S]*?az storage container create/,
+  );
+  assert.match(
+    deployEnvironmentWorkflow,
+    /if \[ "\$ALLOW_ROLLBACK" != "true" \]; then[\s\S]*?az storage blob service-properties update/,
+  );
+  assert.match(
+    deployEnvironmentWorkflow,
+    /Rollback requires the accepted digest-addressed Function package to already exist/,
+  );
+});
+
+test('frontend rendering is finalized, hashed, and preserved before either application package is deployed', () => {
+  const prepareIndex = deployEnvironmentWorkflow.indexOf('- name: Prepare exact deployable frontend bundle');
+  const functionIndex = deployEnvironmentWorkflow.indexOf('- name: Package and deploy Azure Functions');
+  const staticIndex = deployEnvironmentWorkflow.indexOf('- name: Deploy Angular static site with Azure OIDC');
+  const acceptanceIndex = deployEnvironmentWorkflow.indexOf(
+    '- name: Verify current generation before runtime acceptance',
+  );
+  assert.ok(prepareIndex > 0 && prepareIndex < functionIndex && functionIndex < staticIndex);
+  assert.match(deployEnvironmentWorkflow, /FRONTEND_SOURCE_ARTIFACT_SHA256=\$frontend_digest/);
+  assert.match(deployEnvironmentWorkflow, /sourceFrontendSha256: \$sourceFrontendSha256/);
+  assert.match(
+    deployEnvironmentWorkflow,
+    /Rollback preserves the previously accepted production frontend archive byte-for-byte/,
+  );
+  assert.match(deployEnvironmentWorkflow, /sha256sum functionapp\.zip frontend\.tar\.gz sbom\.cdx\.json > SHA256SUMS/);
+  assert.match(deployEnvironmentWorkflow, /release-manifest-rendered\.json/);
+  const staticDeployment = deployEnvironmentWorkflow.slice(staticIndex, acceptanceIndex);
+  assert.doesNotMatch(staticDeployment, /API_CATALOGUE_CONFIG/);
+  assert.doesNotMatch(staticDeployment, /> "\$output_dir\/assets\/build-info\.json"/);
+  assert.match(staticDeployment, /Exact frontend release lacks assets\/config\.js/);
+  assert.match(staticDeployment, /Exact frontend build metadata does not match the selected release/);
 });
 
 test('policy glob matcher handles recursive and exact AGENTS paths', () => {

@@ -242,6 +242,7 @@ jobs:
           fi
           if [[ ! "$controller_ref" =~ ^[0-9a-f]{40}$ ]] ||
              [[ ! "$CONTROLLER_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+             [ "$GITHUB_RUN_ATTEMPT" != "1" ] ||
              [ "$controller_ref" != "$CONTROLLER_WORKFLOW_SHA" ] ||
              [ "$controller_ref" != "$GITHUB_SHA" ] ||
              [ "$controller_ref" != "$checked_out_controller" ]; then
@@ -275,6 +276,7 @@ jobs:
               and .path == $path
               and .name == $name
               and .display_title == $title
+              and .run_attempt == 1
               and (.status == "queued" or .status == "in_progress")' \
             <<<"$current_run_json" >/dev/null; then
             echo "Current deployment run identity does not match its immutable caller workflow generation." >&2
@@ -363,7 +365,8 @@ jobs:
                   and .conclusion == "success"
                   and .head_branch == "main"
                   and .head_sha == $source_ref
-                  and .display_title == $title' \
+                  and .display_title == $title
+                  and .run_attempt == 1' \
                 <<<"$rollback_run_json" >/dev/null; then
                 echo "Rollback release run identity does not match the requested historical source and correlation." >&2
                 exit 1
@@ -371,7 +374,7 @@ jobs:
               rollback_ledger_dir="$(mktemp -d)"
               gh run download "$ROLLBACK_RELEASE_RUN_ID" \
                 --repo "$GITHUB_REPOSITORY" \
-                --name "release-ledger-prod-${deployment_ref}" \
+                --name "release-ledger-prod-${deployment_ref}-${ROLLBACK_RELEASE_CORRELATION}" \
                 --dir "$rollback_ledger_dir"
               rollback_ledger="$rollback_ledger_dir/release-ledger-prod.json"
               EXPECTED_DELIVERY_CORRELATION="$ROLLBACK_RELEASE_CORRELATION" \
@@ -422,7 +425,8 @@ jobs:
                   and .conclusion == "success"
                   and .head_branch == "main"
                   and .head_sha == $source_ref
-                  and .display_title == $title' \
+                  and .display_title == $title
+                  and .run_attempt == 1' \
                 <<<"$test_run_json" >/dev/null; then
                 echo "Deploy Test run identity does not match the exact source and correlation being promoted." >&2
                 exit 1
@@ -430,7 +434,7 @@ jobs:
               provenance_dir="$(mktemp -d)"
               gh run download "$TEST_DELIVERY_RUN_ID" \
                 --repo "$GITHUB_REPOSITORY" \
-                --name "deploy-test-provenance-${deployment_ref}" \
+                --name "deploy-test-provenance-${deployment_ref}-${TEST_DELIVERY_CORRELATION}" \
                 --dir "$provenance_dir"
               provenance_file="$provenance_dir/deploy-test-provenance.json"
               if ! jq -e \
@@ -445,10 +449,12 @@ jobs:
                   and .workflow == "Deploy Test"
                   and .repository == $repository
                   and .deliveryCorrelation == $correlation
+                  and .runAttempt == "1"
                   and .deployFrontend == "true"
                   and .deployFunctions == "true"
                   and .eventName == "workflow_dispatch"
                   and (.artifacts.functionappSha256 | test("^[0-9a-f]{64}$"))
+                  and (.artifacts.sourceFrontendSha256 | test("^[0-9a-f]{64}$"))
                   and (.artifacts.frontendSha256 | test("^[0-9a-f]{64}$"))
                   and (.artifacts.sbomSha256 | test("^[0-9a-f]{64}$"))
                   and .authenticatedSmokeStatus == "passed"
@@ -459,7 +465,7 @@ jobs:
               fi
               {
                 echo "approved_function_digest=$(jq -r '.artifacts.functionappSha256' "$provenance_file")"
-                echo "approved_frontend_digest=$(jq -r '.artifacts.frontendSha256' "$provenance_file")"
+                echo "approved_frontend_digest=$(jq -r '.artifacts.sourceFrontendSha256' "$provenance_file")"
                 echo "approved_sbom_digest=$(jq -r '.artifacts.sbomSha256' "$provenance_file")"
               } >> "$GITHUB_OUTPUT"
               echo "Validated exact Deploy Test provenance from run $TEST_DELIVERY_RUN_ID."
@@ -595,7 +601,7 @@ jobs:
         if: ${{ inputs.allowRollback }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
         with:
-          name: production-release-${{ inputs.sourceRef }}
+          name: production-release-${{ inputs.sourceRef }}-${{ inputs.rollbackReleaseCorrelation }}
           path: ${{ runner.temp }}/release
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -611,6 +617,7 @@ jobs:
           sbom_digest="$(jq -r '.artifacts.sbom.sha256' "$release_dir/release-manifest.json")"
           {
             echo "FUNCTION_ARTIFACT_SHA256=$function_digest"
+            echo "FRONTEND_SOURCE_ARTIFACT_SHA256=$frontend_digest"
             echo "FRONTEND_ARTIFACT_SHA256=$frontend_digest"
             echo "SBOM_SHA256=$sbom_digest"
           } >> "$GITHUB_ENV"
@@ -626,6 +633,7 @@ jobs:
             fi
           fi
       - name: Deploy Bicep infrastructure
+        if: ${{ !inputs.allowRollback }}
         id: infra
         shell: bash
         env:
@@ -734,7 +742,7 @@ jobs:
             echo "No infra/main.bicep found; skipping infrastructure deployment."
           fi
       - name: Verify deployed runtime safety settings
-        if: ${{ inputs.deployFunctions }}
+        if: ${{ inputs.deployFunctions && !inputs.allowRollback }}
         shell: bash
         env:
           DEPLOYED_FUNCTION_APP_NAME: ${{ steps.infra.outputs.function_app_name }}
@@ -794,7 +802,44 @@ jobs:
           effective_host_storage="${{ steps.infra.outputs.host_storage_account_name }}"
           effective_app_insights="${{ steps.infra.outputs.application_insights_name }}"
 
-          if [ "$ENVIRONMENT_NAME" = "prod" ]; then
+          resolve_storage_by_purpose() {
+            local purpose="$1"
+            local -a matches=()
+            mapfile -t matches < <(az storage account list \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "[?tags.purpose=='$purpose'].name" \
+              -o tsv)
+            if [ "${#matches[@]}" -ne 1 ] || [ -z "${matches[0]}" ]; then
+              echo "Expected exactly one storage account tagged purpose=$purpose in $AZURE_RESOURCE_GROUP." >&2
+              return 1
+            fi
+            printf '%s' "${matches[0]}"
+          }
+
+          if [ "$ALLOW_ROLLBACK" = "true" ]; then
+            if [ "$ENVIRONMENT_NAME" != "prod" ]; then
+              echo "Package-only rollback is restricted to production." >&2
+              exit 1
+            fi
+            effective_functionapp_name="${AZURE_FUNCTIONAPP_NAME:-}"
+            effective_release_storage="$(resolve_storage_by_purpose immutable-release-packages)"
+            discovered_static_storage="$(resolve_storage_by_purpose public-static-site)"
+            effective_private_storage="$(resolve_storage_by_purpose private-integration-state)"
+            effective_host_storage="$(resolve_storage_by_purpose function-host)"
+            effective_static_storage="${AZURE_STATIC_WEB_STORAGE_ACCOUNT:-$discovered_static_storage}"
+            if [ "$effective_static_storage" != "$discovered_static_storage" ]; then
+              echo "Configured production static account does not match the uniquely tagged deployed resource." >&2
+              exit 1
+            fi
+            effective_base_url="${PRODUCTION_BASE_URL:-}"
+            effective_app_insights="${APPLICATIONINSIGHTS_NAME:-}"
+            : "${effective_functionapp_name:?AZURE_FUNCTIONAPP_NAME is required for package-only rollback}"
+            az functionapp show \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --name "$effective_functionapp_name" \
+              --query name \
+              -o tsv >/dev/null
+          elif [ "$ENVIRONMENT_NAME" = "prod" ]; then
             effective_functionapp_name="${effective_functionapp_name:-${AZURE_FUNCTIONAPP_NAME:-}}"
             effective_static_storage="${effective_static_storage:-${AZURE_STATIC_WEB_STORAGE_ACCOUNT:-}}"
             effective_base_url="${PRODUCTION_BASE_URL:-}"
@@ -876,6 +921,61 @@ jobs:
             echo "Run the explicit Private Storage Migration workflow and verify its digest before deployment." >&2
             exit 1
           fi
+      - name: Prepare exact deployable frontend bundle
+        if: ${{ inputs.deployFrontend }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="$RUNNER_TEMP/release"
+          frontend_archive="$release_dir/frontend.tar.gz"
+          [ -f "$frontend_archive" ] || { echo "Frontend release archive is missing." >&2; exit 1; }
+
+          if [ "$ALLOW_ROLLBACK" = "true" ]; then
+            echo "Rollback preserves the previously accepted production frontend archive byte-for-byte."
+            exit 0
+          fi
+
+          output_dir="$(mktemp -d "$RUNNER_TEMP/frontend-render.XXXXXX")"
+          tar -xzf "$frontend_archive" -C "$output_dir"
+          [ -f "$output_dir/index.html" ] || { echo "Frontend release lacks index.html." >&2; exit 1; }
+          mkdir -p "$output_dir/assets"
+          if [ "$ENVIRONMENT_NAME" = "prod" ]; then
+            effective_web_api_base_url="${WEB_API_BASE_URL:-$EFFECTIVE_BASE_URL}"
+            effective_web_redirect_uri="${WEB_AUTH_REDIRECT_URI:-}"
+            : "${effective_web_redirect_uri:?WEB_AUTH_REDIRECT_URI is required for production frontend auth}"
+          else
+            effective_web_api_base_url="$EFFECTIVE_BASE_URL"
+            effective_web_redirect_uri="${TEST_WEB_AUTH_REDIRECT_URI:-}"
+          fi
+          export EFFECTIVE_WEB_API_BASE_URL="$effective_web_api_base_url"
+          export EFFECTIVE_WEB_REDIRECT_URI="$effective_web_redirect_uri"
+          export EFFECTIVE_DEPLOYED_AT_UTC="${DEPLOYED_AT_UTC:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
+          echo "EFFECTIVE_DEPLOYED_AT_UTC=$EFFECTIVE_DEPLOYED_AT_UTC" >> "$GITHUB_ENV"
+          node --input-type=module --eval "const config={authEnabled:process.env.WEB_AUTH_ENABLED==='true',authClientId:process.env.WEB_AUTH_CLIENT_ID||'',authAuthority:process.env.WEB_AUTH_AUTHORITY||'',authRedirectUri:process.env.EFFECTIVE_WEB_REDIRECT_URI||'',authApiScope:process.env.WEB_AUTH_API_SCOPE||'',apiBaseUrl:process.env.EFFECTIVE_WEB_API_BASE_URL||'',deployedCommitSha:(process.env.SOURCE_REF||process.env.GITHUB_SHA||'').toLowerCase(),environmentName:process.env.ENVIRONMENT_NAME||'unknown',deploymentRunId:process.env.GITHUB_RUN_ID||'unknown',deployedAtUtc:process.env.EFFECTIVE_DEPLOYED_AT_UTC||'unknown'}; process.stdout.write('window.API_CATALOGUE_CONFIG = '+JSON.stringify(config)+';\\n');" > "$output_dir/assets/config.js"
+          jq -n --arg deployedCommitSha "${SOURCE_REF:-${GITHUB_SHA}}" --arg environmentName "$ENVIRONMENT_NAME" --arg deploymentRunId "$GITHUB_RUN_ID" --arg deployedAtUtc "$EFFECTIVE_DEPLOYED_AT_UTC" '{service:"api-catalogue-web", deployedCommitSha:($deployedCommitSha|ascii_downcase), environmentName:$environmentName, deploymentRunId:$deploymentRunId, deployedAtUtc:$deployedAtUtc}' > "$output_dir/assets/build-info.json"
+
+          rendered_archive="$RUNNER_TEMP/frontend-rendered.tar.gz"
+          tar \
+            --sort=name \
+            --mtime="@${SOURCE_DATE_EPOCH:-0}" \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -czf "$rendered_archive" \
+            -C "$output_dir" \
+            .
+          mv "$rendered_archive" "$frontend_archive"
+          frontend_digest="$(sha256sum "$frontend_archive" | awk '{print $1}')"
+          manifest_tmp="$(mktemp "$RUNNER_TEMP/release-manifest.XXXXXX")"
+          jq --arg digest "$frontend_digest" '.artifacts.frontend.sha256 = $digest' \
+            "$release_dir/release-manifest.json" > "$manifest_tmp"
+          mv "$manifest_tmp" "$release_dir/release-manifest.json"
+          (
+            cd "$release_dir"
+            sha256sum functionapp.zip frontend.tar.gz sbom.cdx.json > SHA256SUMS
+          )
+          node scripts/verify-release-artifacts.mjs "$release_dir" "${SOURCE_REF:-${GITHUB_SHA}}" > "$RUNNER_TEMP/release-manifest-rendered.json"
+          echo "FRONTEND_ARTIFACT_SHA256=$frontend_digest" >> "$GITHUB_ENV"
       - name: Package and deploy Azure Functions
         if: ${{ inputs.deployFunctions }}
         shell: bash
@@ -889,13 +989,15 @@ jobs:
             release_container="function-releases"
             release_blob="functionapp-${FUNCTION_ARTIFACT_SHA256}.zip"
 
-            node scripts/assert-current-main.mjs
-            az storage container create \
-              --auth-mode login \
-              --account-name "$EFFECTIVE_RELEASE_STORAGE_ACCOUNT" \
-              --name "$release_container" \
-              --public-access off \
-              -o none
+            if [ "$ALLOW_ROLLBACK" != "true" ]; then
+              node scripts/assert-current-main.mjs
+              az storage container create \
+                --auth-mode login \
+                --account-name "$EFFECTIVE_RELEASE_STORAGE_ACCOUNT" \
+                --name "$release_container" \
+                --public-access off \
+                -o none
+            fi
             blob_exists="$(az storage blob exists \
               --auth-mode login \
               --account-name "$EFFECTIVE_RELEASE_STORAGE_ACCOUNT" \
@@ -904,6 +1006,10 @@ jobs:
               --query exists \
               -o tsv)"
             if [ "$blob_exists" != "true" ]; then
+              if [ "$ALLOW_ROLLBACK" = "true" ]; then
+                echo "Rollback requires the accepted digest-addressed Function package to already exist." >&2
+                exit 1
+              fi
               node scripts/assert-current-main.mjs
               az storage blob upload \
                 --auth-mode login \
@@ -930,7 +1036,7 @@ jobs:
             fi
 
             package_url="https://$EFFECTIVE_RELEASE_STORAGE_ACCOUNT.blob.core.windows.net/$release_container/$release_blob"
-            deployed_at_utc="${DEPLOYED_AT_UTC:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
+            deployed_at_utc="${EFFECTIVE_DEPLOYED_AT_UTC:-${DEPLOYED_AT_UTC:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}}"
 
             node scripts/assert-current-main.mjs
             az functionapp config appsettings set \
@@ -987,20 +1093,16 @@ jobs:
             tar -xzf "$RUNNER_TEMP/release/frontend.tar.gz" -C "$output_dir"
             : "${output_dir:?Frontend release extraction failed}"
             [ -f "$output_dir/index.html" ] || { echo "Frontend release lacks index.html." >&2; exit 1; }
-            mkdir -p "$output_dir/assets"
-            if [ "$ENVIRONMENT_NAME" = "prod" ]; then
-              effective_web_api_base_url="${WEB_API_BASE_URL:-$EFFECTIVE_BASE_URL}"
-              effective_web_redirect_uri="${WEB_AUTH_REDIRECT_URI:-}"
-              : "${effective_web_redirect_uri:?WEB_AUTH_REDIRECT_URI is required for production frontend auth}"
-            else
-              effective_web_api_base_url="$EFFECTIVE_BASE_URL"
-              effective_web_redirect_uri="${TEST_WEB_AUTH_REDIRECT_URI:-}"
+            [ -f "$output_dir/assets/config.js" ] || { echo "Exact frontend release lacks assets/config.js." >&2; exit 1; }
+            [ -f "$output_dir/assets/build-info.json" ] || { echo "Exact frontend release lacks assets/build-info.json." >&2; exit 1; }
+            if ! jq -e \
+              --arg source_ref "${SOURCE_REF:-${GITHUB_SHA}}" \
+              --arg environment_name "$ENVIRONMENT_NAME" \
+              '.deployedCommitSha == ($source_ref | ascii_downcase) and .environmentName == $environment_name' \
+              "$output_dir/assets/build-info.json" >/dev/null; then
+              echo "Exact frontend build metadata does not match the selected release." >&2
+              exit 1
             fi
-            export EFFECTIVE_WEB_API_BASE_URL="$effective_web_api_base_url"
-            export EFFECTIVE_WEB_REDIRECT_URI="$effective_web_redirect_uri"
-            export EFFECTIVE_DEPLOYED_AT_UTC="${DEPLOYED_AT_UTC:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
-            node --input-type=module --eval "const config={authEnabled:process.env.WEB_AUTH_ENABLED==='true',authClientId:process.env.WEB_AUTH_CLIENT_ID||'',authAuthority:process.env.WEB_AUTH_AUTHORITY||'',authRedirectUri:process.env.EFFECTIVE_WEB_REDIRECT_URI||'',authApiScope:process.env.WEB_AUTH_API_SCOPE||'',apiBaseUrl:process.env.EFFECTIVE_WEB_API_BASE_URL||'',deployedCommitSha:(process.env.SOURCE_REF||process.env.GITHUB_SHA||'').toLowerCase(),environmentName:process.env.ENVIRONMENT_NAME||'unknown',deploymentRunId:process.env.GITHUB_RUN_ID||'unknown',deployedAtUtc:process.env.EFFECTIVE_DEPLOYED_AT_UTC||'unknown'}; process.stdout.write('window.API_CATALOGUE_CONFIG = '+JSON.stringify(config)+';\n');" > "$output_dir/assets/config.js"
-            jq -n --arg deployedCommitSha "${SOURCE_REF:-${GITHUB_SHA}}" --arg environmentName "$ENVIRONMENT_NAME" --arg deploymentRunId "$GITHUB_RUN_ID" --arg deployedAtUtc "$EFFECTIVE_DEPLOYED_AT_UTC" '{service:"api-catalogue-web", deployedCommitSha:($deployedCommitSha|ascii_downcase), environmentName:$environmentName, deploymentRunId:$deploymentRunId, deployedAtUtc:$deployedAtUtc}' > "$output_dir/assets/build-info.json"
             if [ "$ALLOW_ROLLBACK" != "true" ]; then
               node scripts/assert-current-main.mjs
               az storage blob service-properties update \
@@ -1148,7 +1250,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
         with:
-          name: release-ledger-${{ inputs.environmentName }}-${{ inputs.sourceRef || github.sha }}
+          name: release-ledger-${{ inputs.environmentName }}-${{ inputs.sourceRef || github.sha }}-${{ inputs.deliveryCorrelation }}
           path: ${{ runner.temp }}/smoke/release-ledger-${{ inputs.environmentName }}.json
           if-no-files-found: error
           retention-days: 90
@@ -1156,7 +1258,7 @@ jobs:
         if: ${{ inputs.environmentName == 'prod' && !inputs.allowRollback && success() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
         with:
-          name: production-release-${{ inputs.sourceRef || github.sha }}
+          name: production-release-${{ inputs.sourceRef || github.sha }}-${{ inputs.deliveryCorrelation }}
           path: ${{ runner.temp }}/release
           if-no-files-found: error
           retention-days: 90
@@ -1179,6 +1281,7 @@ jobs:
             --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
             --arg deliveryCorrelation "$DELIVERY_CORRELATION" \
             --arg functionappSha256 "$FUNCTION_ARTIFACT_SHA256" \
+            --arg sourceFrontendSha256 "$FRONTEND_SOURCE_ARTIFACT_SHA256" \
             --arg frontendSha256 "$FRONTEND_ARTIFACT_SHA256" \
             --arg sbomSha256 "$SBOM_SHA256" \
             --arg authenticatedSmokeStatus "$(jq -r '.status // "missing"' "$AUTH_SMOKE_RESULTS_PATH")" \
@@ -1197,6 +1300,7 @@ jobs:
               deliveryCorrelation: $deliveryCorrelation,
               artifacts: {
                 functionappSha256: $functionappSha256,
+                sourceFrontendSha256: $sourceFrontendSha256,
                 frontendSha256: $frontendSha256,
                 sbomSha256: $sbomSha256
               },
@@ -1207,7 +1311,7 @@ jobs:
         if: ${{ inputs.environmentName == 'test' && success() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
         with:
-          name: deploy-test-provenance-${{ inputs.sourceRef || github.sha }}
+          name: deploy-test-provenance-${{ inputs.sourceRef || github.sha }}-${{ inputs.deliveryCorrelation }}
           path: .github/deploy-test-provenance.json
           if-no-files-found: error
           retention-days: 30

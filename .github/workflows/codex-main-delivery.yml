@@ -265,7 +265,7 @@ jobs:
           mkdir -p "$test_provenance_dir"
           gh run download "$test_run_id" \
             --repo "$REPOSITORY" \
-            --name "deploy-test-provenance-$SOURCE_REF" \
+            --name "deploy-test-provenance-$SOURCE_REF-$test_correlation" \
             --dir "$test_provenance_dir"
           if ! jq -e \
             --arg source_ref "$SOURCE_REF" \
@@ -309,7 +309,7 @@ jobs:
           mkdir -p "$production_ledger_dir"
           gh run download "$production_run_id" \
             --repo "$REPOSITORY" \
-            --name "release-ledger-prod-$SOURCE_REF" \
+            --name "release-ledger-prod-$SOURCE_REF-$production_correlation" \
             --dir "$production_ledger_dir"
           if ! jq -e \
             --arg source_ref "$SOURCE_REF" \

@@ -20,7 +20,7 @@ Live-only mode verifies the public health endpoint and, when provided, the expec
 npm run ops:runtime-truth -- --environment prod --api-base-url https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net --expected-sha <sha>
 ```
 
-Ledger mode fetches the supplied run's Actions metadata, verifies its exact workflow path/name, event, branch, successful conclusion, head SHA, and correlation-bearing title, then downloads `release-ledger-<environment>-<sha>` from that run. It requires the ledger run ID, source, commit, and correlation to match before comparing live `/health` with the ledger commit:
+Ledger mode fetches the supplied run's Actions metadata, verifies its exact workflow path/name, event, first-attempt status, branch, successful conclusion, head SHA, and correlation-bearing title, then downloads `release-ledger-<environment>-<sha>-<correlation>` from that run. It requires the ledger run ID, source, commit, and correlation to match before comparing live `/health` with the ledger commit. Deployment workflow reruns are intentionally rejected; dispatch a new run and correlation instead:
 
 ```bash
 npm run ops:runtime-truth -- --environment prod --api-base-url https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net --expected-sha <sha> --include-ledger=true --repo JueZ/api --run-id <exact-promote-run-id> --delivery-correlation <exact-correlation>

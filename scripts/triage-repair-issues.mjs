@@ -179,27 +179,26 @@ async function collectLatestProductionVerification({ repo, apiBaseUrl = '', requ
       '--limit',
       '20',
       '--json',
-      'databaseId,headSha,conclusion,status,displayTitle',
+      'databaseId,headSha,conclusion,status,displayTitle,attempt',
     ]),
   );
   for (const run of runs) {
     const sha = String(run.headSha || '').toLowerCase();
     if (!sha) continue;
-    const artifactName = `release-ledger-prod-${sha}`;
+    if (run.attempt !== 1) continue;
+    const titleMatch = String(run.displayTitle || '').match(
+      /^Promote Production ([0-9a-f]{40}) ([A-Za-z0-9][A-Za-z0-9._-]{7,127})$/,
+    );
+    const expectedDeliveryCorrelation = titleMatch?.[2] || '';
+    if (!expectedDeliveryCorrelation || titleMatch?.[1] !== sha) continue;
+    const artifactName = `release-ledger-prod-${sha}-${expectedDeliveryCorrelation}`;
     const dir = await mkdtemp(join(tmpdir(), 'repair-triage-ledger-'));
     try {
       gh(['run', 'download', String(run.databaseId), '--repo', repo, '--name', artifactName, '--dir', dir]);
       const ledgerPath = await findJsonFile(dir);
       if (!ledgerPath) continue;
       const ledger = JSON.parse(await readFile(ledgerPath, 'utf8'));
-      const titleMatch = String(run.displayTitle || '').match(
-        /^Promote Production ([0-9a-f]{40}) ([A-Za-z0-9][A-Za-z0-9._-]{7,127})$/,
-      );
-      const expectedDeliveryCorrelation = titleMatch?.[2] || '';
-      const validationErrors = [
-        ...validateReleaseLedger(ledger, { expectedDeliveryCorrelation }),
-        ...(titleMatch?.[1] === sha ? [] : ['workflow display title does not match its exact production head SHA']),
-      ];
+      const validationErrors = [...validateReleaseLedger(ledger, { expectedDeliveryCorrelation })];
       let liveHealth;
       if (apiBaseUrl) {
         try {

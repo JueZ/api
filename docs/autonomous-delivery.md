@@ -36,7 +36,7 @@ The live branch ruleset must require the exact names in `.github/autonomous-poli
 
 ## Build and delivery
 
-Main CI builds Function, frontend, and CycloneDX SBOM once. The release manifest contains the full source SHA and SHA-256 digests; main artifacts receive build provenance attestations.
+Main CI builds the Function, frontend source bundle, and CycloneDX SBOM once. The release manifest contains the full source SHA and SHA-256 digests; main artifacts receive build provenance attestations. Each environment then renders its approved runtime frontend configuration before deployment, updates the manifest and checksums with the rendered archive digest, and preserves the exact accepted production archive for rollback.
 
 `Codex Main Delivery` is the only normal post-merge controller. It explicitly dispatches and waits for:
 
@@ -44,9 +44,9 @@ Main CI builds Function, frontend, and CycloneDX SBOM once. The release manifest
 2. Deploy Test;
 3. Promote Production.
 
-Test and production download the exact main-CI artifact. Production verifies its digests equal the successful test release ledger. Deployments use Azure OIDC, never a local production command or long-lived Azure client secret.
+Test and production download the exact main-CI artifact. Production verifies the Function, SBOM, and unrendered frontend-source digests against the exact successful test provenance. The environment-specific rendered frontend is independently hashed before either application package is deployed and is recorded in the ledger. Deployments use Azure OIDC, never a local production command or long-lived Azure client secret.
 
-Production stays disabled unless `DEPLOY_PRODUCTION_ENABLED=true`. The user can prevent deployment with the supported skip markers. Promotion and rollback share `production-deployment` concurrency; only the dedicated rollback flow may intentionally deploy an older known-good full `main` SHA.
+Production stays disabled unless `DEPLOY_PRODUCTION_ENABLED=true`. The user can prevent deployment with the supported skip markers. Promotion and rollback share `production-deployment` concurrency; only the dedicated rollback flow may intentionally deploy an older known-good full `main` SHA. Rollback is strictly package-only: current `main` supplies the immutable controller and validation logic, but the workflow does not execute Bicep, reconcile safety settings, create release blobs, or rewrite the preserved frontend bundle. Workflow reruns are rejected before mutation; recovery requires a new dispatch and correlation.
 
 ## Runtime evidence
 

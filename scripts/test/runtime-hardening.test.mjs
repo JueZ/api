@@ -337,6 +337,7 @@ test('runtime truth validates exact deployment workflow run metadata', () => {
     path: '.github/workflows/promote-production.yml',
     name: 'Promote Production',
     event: 'workflow_dispatch',
+    run_attempt: 1,
     conclusion: 'success',
     head_branch: 'main',
     head_sha: sha,
@@ -345,6 +346,7 @@ test('runtime truth validates exact deployment workflow run metadata', () => {
   assert.deepEqual(validateWorkflowRunMetadata(run, options), []);
   assert.ok(validateWorkflowRunMetadata({ ...run, head_sha: 'b'.repeat(40) }, options).length > 0);
   assert.ok(validateWorkflowRunMetadata({ ...run, display_title: 'Promote Production' }, options).length > 0);
+  assert.ok(validateWorkflowRunMetadata({ ...run, run_attempt: 2 }, options).length > 0);
 });
 
 test('runtime truth decision blocks when ledger evidence is missing', () => {

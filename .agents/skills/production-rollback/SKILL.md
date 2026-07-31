@@ -13,14 +13,16 @@ Use this skill for JueZ/api production rollback requests.
 - Roll back only to a full 40-character known-good commit SHA from `main`.
 - The rollback source commit must have passed the repository deployment provenance gates required by the workflow.
 - Supply the exact prior successful `Promote Production` run ID and delivery correlation whose accepted release ledger and preserved release bundle match the rollback SHA and artifact digests.
-- Current `main` remains authoritative for Bicep, identity, storage policy, and safety settings. Rollback may switch only to the exact Function/frontend bytes preserved by that accepted production run.
+- Current `main` remains authoritative for the immutable rollback controller and validation logic. Rollback must not execute Bicep or reconcile identity, storage policy, or safety settings; it may switch only to the exact Function/frontend bytes preserved by that accepted production run.
+- The accepted production run and the new rollback run must both be workflow attempt 1. Never rerun either workflow run; dispatch a new run with a new correlation after diagnosing a failure.
+- Rollback resolves existing Azure resources read-only, requires the digest-addressed Function blob to already exist, changes only the Function package pointer/release provenance, and uploads the preserved rendered frontend archive without rewriting its configuration or build metadata.
 - `DEPLOY_PRODUCTION_ENABLED=true` is required for production rollback deployment.
 - Do not enable `DEPLOY_PRODUCTION_ENABLED=true` unless the operator/user explicitly requests enabling production deployment and the guardrails, approval posture, and risk are documented.
 - Do not print secrets, tokens, connection strings, SAS URLs, or full environment dumps.
 - Do not bypass, remove, disable, or weaken CI, Policy Check, smoke tests, telemetry gates, environment approvals, branch protection, required status checks, or guardrails.
 - Do not delete Azure resources or make destructive Azure changes.
 - Production rollback still uses the GitHub `production` environment; if required reviewers are configured, wait for approval instead of bypassing it.
-- Do not rerun rollback repeatedly without a changed hypothesis.
+- Do not use GitHub's rerun operation for deployment workflows. Diagnose the failure, then create a new dispatch with a new correlation.
 
 ## Preflight
 
@@ -150,7 +152,7 @@ test "$hello_status" = "$expected_hello_status"
 ## If rollback fails
 
 - Inspect failed logs with `gh run view "$RUN_ID" --repo JueZ/api --log-failed`.
-- Do not rerun repeatedly without a changed hypothesis.
+- Do not use GitHub's rerun operation. Diagnose the failure, then create a new dispatch with a new correlation.
 - If the failure is infrastructure, RBAC, OIDC, package, or runtime related, use the repo `azure-cli-devops`, `github-cli-devops`, and `azure-observability-diagnostics` skills.
 - If production remains unhealthy, create or update a repair issue/PR with the run URL, commit SHA, deployed source ref, smoke-test failure summary, and telemetry/runtime-truth evidence.
 - Production repair issues must not be closed merely because a PR merged; require CI, deployment, runtime, smoke, telemetry, or release-ledger evidence as applicable.
