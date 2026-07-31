@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-07-31 — Dependency pairing policy rejected a scripts-only manifest change
+
+- Symptom: PR #285 policy run `30654028191` rejected the root `package.json` because new quality commands did not produce a `package-lock.json` diff.
+- Root cause: the initial pairing rule treated every manifest edit as dependency resolution even though npm lockfiles do not encode ordinary script or descriptive metadata.
+- Repair: compare the committed base and head install-shaping manifest fields before requiring a paired lockfile. Dependency, override, engine, workspace, platform, executable, name, and version changes remain fail-closed; lockfile-only changes remain rejected; full registry, root-consistency, and lifecycle checks still run for both npm projects.
+- Prevention: unit and temporary-Git coverage distinguish script-only edits from dependency changes, prove mutable worktree content cannot change the decision, and exercise the actual base-to-head manifest path.
+
 ## 2026-07-31 — Authenticated test smoke denied the dedicated service identity
 
 - Symptom: test run `30652787906` passed Function startup, exact-SHA health, the unauthenticated `401` gate, and CORS, then authenticated `/api/hello` returned `403` after a short-lived GitHub-OIDC-backed Entra token was minted.

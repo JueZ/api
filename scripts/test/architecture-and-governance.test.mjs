@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +10,13 @@ import {
   importsFrom,
   sourceArchitectureFindings,
 } from '../check-architecture.mjs';
-import { dependencyPairingFindings, inspectDependencyFiles } from '../check-lockfile-policy.mjs';
+import {
+  dependencyFilePairs,
+  dependencyManifestChangesLockfile,
+  dependencyPairingFindings,
+  inspectDependencyFiles,
+  lockfileRelevantManifestChanges,
+} from '../check-lockfile-policy.mjs';
 import {
   isSensitiveRepositoryPath,
   repositoryHygieneFindings,
@@ -141,9 +148,21 @@ test('dependency policy rejects lifecycle scripts and non-registry dependencies'
   assert.ok(findings.some((finding) => finding.includes('postinstall')));
   assert.ok(findings.some((finding) => finding.includes('non-registry')));
   assert.ok(findings.some((finding) => finding.includes('lockfileVersion 3')));
+  assert.ok(findings.some((finding) => finding.includes('missing its root package entry')));
 });
 
-test('dependency policy requires package and lock files to change together in both npm projects', () => {
+test('dependency policy rejects a manifest that disagrees with its lockfile root', () => {
+  const findings = inspectDependencyFiles(
+    { name: 'example', version: '1.0.0', dependencies: { dependency: '2.0.0' } },
+    {
+      lockfileVersion: 3,
+      packages: { '': { name: 'example', version: '1.0.0', dependencies: { dependency: '1.0.0' } } },
+    },
+  );
+  assert.ok(findings.some((finding) => finding.includes('dependencies does not match')));
+});
+
+test('dependency policy requires install-shaping package and lock changes to stay paired', () => {
   assert.deepEqual(dependencyPairingFindings(['package.json', 'package-lock.json']), []);
   assert.deepEqual(dependencyPairingFindings(['apps/api/package.json']), [
     'apps/api/package.json and apps/api/package-lock.json must change together',
@@ -152,6 +171,76 @@ test('dependency policy requires package and lock files to change together in bo
     dependencyPairingFindings(['package-lock.json', 'apps/api/package.json', 'apps/api/package-lock.json']),
     ['package.json and package-lock.json must change together'],
   );
+  assert.deepEqual(dependencyPairingFindings(['package.json'], dependencyFilePairs, []), []);
+  assert.equal(
+    dependencyManifestChangesLockfile(
+      { scripts: { test: 'old' }, dependencies: { example: '1.0.0' } },
+      { scripts: { test: 'new' }, dependencies: { example: '1.0.0' } },
+    ),
+    false,
+  );
+  assert.equal(
+    dependencyManifestChangesLockfile({ packageManager: 'npm@10.0.0' }, { packageManager: 'npm@10.9.8' }),
+    false,
+  );
+  assert.equal(
+    dependencyManifestChangesLockfile({ dependencies: { example: '1.0.0' } }, { dependencies: { example: '2.0.0' } }),
+    true,
+  );
+});
+
+test('dependency policy compares committed base-to-head install metadata', () => {
+  const root = mkdtempSync(join(tmpdir(), 'lockfile-policy-git-'));
+  const packagePath = join(root, 'package.json');
+  const pair = [{ packagePath: 'package.json', lockfilePath: 'package-lock.json' }];
+  const commit = (message) => {
+    execFileSync('git', ['add', 'package.json'], { cwd: root });
+    execFileSync('git', ['commit', '-q', '-m', message], { cwd: root });
+  };
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Policy Test'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'policy-test@example.invalid'], { cwd: root });
+    writeFileSync(packagePath, JSON.stringify({ name: 'fixture', version: '1.0.0', dependencies: { safe: '1.0.0' } }));
+    commit('base');
+
+    writeFileSync(
+      packagePath,
+      JSON.stringify({
+        name: 'fixture',
+        version: '1.0.0',
+        scripts: { test: 'node --test' },
+        dependencies: { safe: '1.0.0' },
+      }),
+    );
+    commit('scripts only');
+    assert.deepEqual([...lockfileRelevantManifestChanges('HEAD~1', ['package.json'], root, pair)], []);
+
+    writeFileSync(
+      packagePath,
+      JSON.stringify({
+        name: 'fixture',
+        version: '1.0.0',
+        scripts: { test: 'node --test' },
+        dependencies: { safe: '2.0.0' },
+      }),
+    );
+    commit('dependency change');
+    assert.deepEqual([...lockfileRelevantManifestChanges('HEAD~1', ['package.json'], root, pair)], ['package.json']);
+
+    writeFileSync(
+      packagePath,
+      JSON.stringify({
+        name: 'fixture',
+        version: '1.0.0',
+        scripts: { test: 'uncommitted' },
+        dependencies: { safe: '1.0.0' },
+      }),
+    );
+    assert.deepEqual([...lockfileRelevantManifestChanges('HEAD~1', ['package.json'], root, pair)], ['package.json']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('repository hygiene rejects tracked local state and recognizes required ignore probes', () => {
