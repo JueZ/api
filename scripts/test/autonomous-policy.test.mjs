@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,6 +21,10 @@ import {
 
 const headSha = 'a'.repeat(40);
 const policy = loadAutonomousPolicy();
+const mainDeliveryWorkflow = readFileSync(
+  new URL('../../.github/workflows/codex-main-delivery.yml', import.meta.url),
+  'utf8',
+);
 
 function pullRequest(overrides = {}) {
   return {
@@ -50,6 +55,14 @@ test('canonical autonomous policy is internally valid', () => {
   assert.equal(policy.merge.allowAdminBypass, false);
   assert.equal(policy.autonomousReview.humanApprovalRequired, false);
   assert.ok(policy.autonomousReview.maxDiffBytes >= 1_200_000);
+});
+
+test('Codex auto-merge completion dispatches exact main CI through one delivery controller', () => {
+  assert.match(mainDeliveryWorkflow, /workflows: \[CI, Codex Auto-Merge\]/);
+  assert.match(mainDeliveryWorkflow, /run main delivery after Codex auto-merge/);
+  assert.match(mainDeliveryWorkflow, /gh workflow run ci\.yml --repo "\$REPOSITORY" --ref main/);
+  assert.match(mainDeliveryWorkflow, /wait_for_dispatch ci\.yml "" "\$ci_started_at" "\$SOURCE_REF"/);
+  assert.match(mainDeliveryWorkflow, /\[ "\$main_sha" != "\$SOURCE_REF" \]/);
 });
 
 test('policy glob matcher handles recursive and exact AGENTS paths', () => {

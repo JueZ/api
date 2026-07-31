@@ -6,7 +6,15 @@
 - Classification: this was not a missing-key, authentication, or quota failure. The request completed without a surfaced API error, but the response did not contain a usable structured decision.
 - Fix: retry an empty or invalid structured response once with a larger output-token allowance, then fail closed with a sanitized rejection artifact if neither bounded attempt yields a valid exact-head decision. Raw model output and error messages are never persisted.
 - Review repair: the first bootstrap review correctly identified that parseable output from an incomplete response, or a structurally invalid decision, could end the retry early. Acceptance now additionally requires a completed API response and a valid exact-head decision whose blocking findings agree with its decision.
-- Status: bounded fail-closed repair prepared in the bootstrap pull request; live validation still requires an exact-head review artifact and trusted-controller merge.
+- Status: repaired through PR #274, whose exact-head independent review, CI, policy, CodeQL, and trusted auto-merge all passed.
+
+## 2026-07-31 — Corrected auto-merge had no post-merge main CI handoff
+
+- Symptom: the corrected trusted controller automatically merged canary PR #271 as `d49833bb119001d930e00cd5400ba7d1badb7550`, but no main CI or `Codex Main Delivery` run started.
+- Root cause: GitHub-token merges do not create ordinary push-triggered workflow runs. The redesigned `Codex Main Delivery` subscribed only to completed `CI` runs and the trusted auto-merge workflow no longer had the required post-merge handoff, so there was no event capable of starting main CI.
+- Fix: subscribe the sole main-delivery controller to successful `Codex Auto-Merge` completions as well as successful push CI. Resolve and verify the exact reviewed PR head and merge SHA, require that SHA to be current `main`, explicitly dispatch and wait for CI with that exact `headSha`, and only then evaluate deployment skip or dispatch the staged test/production workflows.
+- Safety: auto-merge review/check gates remain unchanged; ambiguous or advanced main heads fail closed; workflow-dispatched CI cannot recursively deliver because the CI-triggered path accepts only `push` events.
+- Status: repair included in the PR containing this entry; successful delivery requires the post-merge job named `run main delivery after Codex auto-merge` to pass on the exact merge SHA.
 
 ## 2026-07-31 — Trusted merge controller rejected its own in-progress check state
 

@@ -1,5 +1,11 @@
 # Deployment log
 
+## 2026-07-31 — Corrected controller canary merged; post-merge handoff missing
+
+- PR #271 was automatically squash-merged by corrected controller run `30631182158` after all exact-head required checks and low-risk autonomous review passed. Merge commit `d49833bb119001d930e00cd5400ba7d1badb7550` is the first end-to-end proof that the `unstable` self-gating fix works.
+- No main CI or main-delivery run followed because GitHub-token merges do not emit push workflows and `Codex Main Delivery` was subscribed only to `CI` completion. No test or production deployment ran.
+- A focused workflow repair now subscribes the single main-delivery controller to successful `Codex Auto-Merge` completion and requires exact merge-SHA main CI before any deployment decision.
+
 ## 2026-07-31 — Merge-controller self-gating fix reached main without deployment
 
 - PR #270 fixed the trusted controller's treatment of GitHub's mergeable `unstable` state while retaining exact-head required-check, review, conflict, freshness, fork, and branch-protection gates.
