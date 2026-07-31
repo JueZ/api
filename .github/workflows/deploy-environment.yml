@@ -523,9 +523,11 @@ jobs:
       - name: Verify deployed runtime safety settings
         if: ${{ inputs.deployFunctions }}
         shell: bash
+        env:
+          DEPLOYED_FUNCTION_APP_NAME: ${{ steps.infra.outputs.function_app_name }}
         run: |
           set -euo pipefail
-          function_app_name="${{ steps.infra.outputs.function_app_name }}"
+          function_app_name="$DEPLOYED_FUNCTION_APP_NAME"
           : "${function_app_name:?Function App name is required to verify runtime settings}"
           settings_file="$RUNNER_TEMP/runtime-safety-settings.json"
           az rest \
