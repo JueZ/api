@@ -60,9 +60,11 @@ test('canonical autonomous policy is internally valid', () => {
 test('Codex auto-merge completion dispatches exact main CI through one delivery controller', () => {
   assert.match(mainDeliveryWorkflow, /workflows: \[CI, Codex Auto-Merge\]/);
   assert.match(mainDeliveryWorkflow, /run main delivery after Codex auto-merge/);
+  assert.match(mainDeliveryWorkflow, /gh run download "\$TRIGGER_RUN_ID"/);
+  assert.match(mainDeliveryWorkflow, /\[ "\$pr_head" != "\$reviewed_head" \]/);
   assert.match(mainDeliveryWorkflow, /gh workflow run ci\.yml --repo "\$REPOSITORY" --ref main/);
   assert.match(mainDeliveryWorkflow, /wait_for_dispatch ci\.yml "" "\$ci_started_at" "\$SOURCE_REF"/);
-  assert.match(mainDeliveryWorkflow, /\[ "\$main_sha" != "\$SOURCE_REF" \]/);
+  assert.equal(mainDeliveryWorkflow.match(/^\s+assert_current_main$/gm)?.length, 3);
 });
 
 test('policy glob matcher handles recursive and exact AGENTS paths', () => {
