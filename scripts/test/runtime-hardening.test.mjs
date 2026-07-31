@@ -62,6 +62,20 @@ const runtimeSettingsEnv = {
   MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
   REDDIT_CLIENT_ID: 'reddit-client-id',
   REDDIT_USER_AGENT: 'catalogue-test',
+  REPAIRABLE_ERRORS_LLM_ENABLED: 'true',
+  EXPECTED_APPLICATIONINSIGHTS_CONNECTION_STRING: 'InstrumentationKey=metadata-only',
+  EXPECTED_REDDIT_CLIENT_SECRET_REFERENCE:
+    '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/reddit-client-secret/version)',
+  EXPECTED_WLH_BASE_URL_REFERENCE: '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/wlh-base-url/version)',
+  EXPECTED_BRING_CLIENT_API_KEY_REFERENCE:
+    '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/bring-client-api-key/version)',
+  EXPECTED_BRING_EMAIL_REFERENCE: '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/bring-email/version)',
+  EXPECTED_BRING_PASSWORD_REFERENCE: '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/bring-password/version)',
+  EXPECTED_BRING_CONFIRMATION_HMAC_KEY_REFERENCE:
+    '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/bring-confirmation-hmac-key/version)',
+  EXPECTED_BRING_MUTATION_ENCRYPTION_KEY_REFERENCE:
+    '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/bring-mutation-encryption-key/version)',
+  EXPECTED_OPENAI_API_KEY_REFERENCE: '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/openai-api-key/version)',
 };
 
 test('deployed runtime policy accepts the complete managed key set without reading secret values', () => {
@@ -71,8 +85,8 @@ test('deployed runtime policy accepts the complete managed key set without readi
   const properties = Object.fromEntries(names.map((name) => [name, 'secret-value-not-reported']));
   Object.assign(properties, settings);
   assert.deepEqual(validateArmRuntimeSettingsResponse({ properties }, runtimeSettingsEnv), []);
-  assert.equal('OPENAI_API_KEY' in settings, false);
-  assert.equal('REDDIT_CLIENT_SECRET' in settings, false);
+  assert.equal(settings.OPENAI_API_KEY, runtimeSettingsEnv.EXPECTED_OPENAI_API_KEY_REFERENCE);
+  assert.equal(settings.REDDIT_CLIENT_SECRET, runtimeSettingsEnv.EXPECTED_REDDIT_CLIENT_SECRET_REFERENCE);
 });
 
 test('deployed runtime policy rejects security drift, missing managed keys, and unmanaged settings', () => {
@@ -88,6 +102,30 @@ test('deployed runtime policy rejects security drift, missing managed keys, and 
   assert.ok(errors.some((error) => error.endsWith('BRING_WRITABLE_LIST_UUIDS')));
   assert.ok(errors.some((error) => error.endsWith('UNMANAGED_SECURITY_OVERRIDE')));
   assert.ok(errors.some((error) => error.endsWith('OIDC_ALLOWED_DELEGATED_CLIENT_IDS')));
+});
+
+test('deployed runtime policy rejects plaintext, wrong-version, and wrong-observability managed values', () => {
+  const properties = buildExpectedRuntimeSettings(runtimeSettingsEnv);
+  properties.APPLICATIONINSIGHTS_CONNECTION_STRING = 'InstrumentationKey=wrong-component';
+  properties.REDDIT_CLIENT_SECRET = 'plaintext-secret';
+  properties.OPENAI_API_KEY = '@Microsoft.KeyVault(SecretUri=https://other.test/secrets/openai-api-key/version)';
+
+  const errors = validateArmRuntimeSettingsResponse({ properties }, runtimeSettingsEnv);
+  assert.ok(errors.some((error) => error.endsWith('APPLICATIONINSIGHTS_CONNECTION_STRING')));
+  assert.ok(errors.some((error) => error.endsWith('REDDIT_CLIENT_SECRET')));
+  assert.ok(errors.some((error) => error.endsWith('OPENAI_API_KEY')));
+});
+
+test('deployed runtime policy requires expected metadata and enforces an empty disabled OpenAI setting', () => {
+  const disabledSettings = buildExpectedRuntimeSettings({
+    ...runtimeSettingsEnv,
+    REPAIRABLE_ERRORS_LLM_ENABLED: 'false',
+  });
+  assert.equal(disabledSettings.OPENAI_API_KEY, '');
+
+  const incompleteEnv = { ...runtimeSettingsEnv };
+  delete incompleteEnv.EXPECTED_BRING_PASSWORD_REFERENCE;
+  assert.throws(() => buildExpectedRuntimeSettings(incompleteEnv), /EXPECTED_BRING_PASSWORD_REFERENCE is required/);
 });
 
 test('telemetry KQL sanitizes smoke run IDs', () => {

@@ -778,6 +778,7 @@ jobs:
               echo "static_storage_account_name=$(jq -r '.staticWebStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
               echo "private_storage_account_name=$(jq -r '.privateStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
               echo "application_insights_name=$(jq -r '.applicationInsightsResourceName.value // empty' <<< "$deployment_outputs")"
+              echo "key_vault_name=$(jq -r '.keyVaultResourceName.value // empty' <<< "$deployment_outputs")"
             } >> "$GITHUB_OUTPUT"
           else
             echo "No infra/main.bicep found; skipping infrastructure deployment."
@@ -793,6 +794,7 @@ jobs:
           effective_private_storage="${{ steps.infra.outputs.private_storage_account_name }}"
           effective_host_storage="${{ steps.infra.outputs.host_storage_account_name }}"
           effective_app_insights="${{ steps.infra.outputs.application_insights_name }}"
+          effective_key_vault="${{ steps.infra.outputs.key_vault_name }}"
 
           resolve_storage_by_purpose() {
             local purpose="$1"
@@ -803,6 +805,35 @@ jobs:
               -o tsv)
             if [ "${#matches[@]}" -ne 1 ] || [ -z "${matches[0]}" ]; then
               echo "Expected exactly one storage account tagged purpose=$purpose in $AZURE_RESOURCE_GROUP." >&2
+              return 1
+            fi
+            printf '%s' "${matches[0]}"
+          }
+
+          resolve_single_resource_by_type() {
+            local resource_type="$1"
+            local description="$2"
+            local -a matches=()
+            mapfile -t matches < <(az resource list \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --resource-type "$resource_type" \
+              --query '[].name' \
+              -o tsv)
+            if [ "${#matches[@]}" -ne 1 ] || [ -z "${matches[0]}" ]; then
+              echo "Expected exactly one $description in $AZURE_RESOURCE_GROUP." >&2
+              return 1
+            fi
+            printf '%s' "${matches[0]}"
+          }
+
+          resolve_key_vault_by_purpose() {
+            local -a matches=()
+            mapfile -t matches < <(az keyvault list \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "[?tags.purpose=='provider-secrets'].name" \
+              -o tsv)
+            if [ "${#matches[@]}" -ne 1 ] || [ -z "${matches[0]}" ]; then
+              echo "Expected exactly one Key Vault tagged purpose=provider-secrets in $AZURE_RESOURCE_GROUP." >&2
               return 1
             fi
             printf '%s' "${matches[0]}"
@@ -824,7 +855,6 @@ jobs:
               exit 1
             fi
             effective_base_url="${PRODUCTION_BASE_URL:-}"
-            effective_app_insights="${APPLICATIONINSIGHTS_NAME:-}"
             : "${effective_functionapp_name:?AZURE_FUNCTIONAPP_NAME is required for package-only rollback}"
             az functionapp show \
               --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -835,10 +865,22 @@ jobs:
             effective_functionapp_name="${effective_functionapp_name:-${AZURE_FUNCTIONAPP_NAME:-}}"
             effective_static_storage="${effective_static_storage:-${AZURE_STATIC_WEB_STORAGE_ACCOUNT:-}}"
             effective_base_url="${PRODUCTION_BASE_URL:-}"
-            effective_app_insights="${effective_app_insights:-${APPLICATIONINSIGHTS_NAME:-}}"
           else
             effective_base_url=""
           fi
+
+          discovered_app_insights="$(resolve_single_resource_by_type Microsoft.Insights/components 'Application Insights component')"
+          if [ -n "$effective_app_insights" ] && [ "$effective_app_insights" != "$discovered_app_insights" ]; then
+            echo "Bicep Application Insights output does not match the uniquely deployed component." >&2
+            exit 1
+          fi
+          effective_app_insights="$discovered_app_insights"
+          discovered_key_vault="$(resolve_key_vault_by_purpose)"
+          if [ -n "$effective_key_vault" ] && [ "$effective_key_vault" != "$discovered_key_vault" ]; then
+            echo "Bicep Key Vault output does not match the uniquely tagged deployed vault." >&2
+            exit 1
+          fi
+          effective_key_vault="$discovered_key_vault"
 
           : "${effective_functionapp_name:?Function App name could not be resolved}"
           : "${effective_release_storage:?Release storage account name could not be resolved}"
@@ -871,6 +913,7 @@ jobs:
             echo "EFFECTIVE_BASE_URL=$effective_base_url"
             echo "FRONTEND_BASE_URL=$effective_frontend_url"
             echo "EFFECTIVE_APPLICATIONINSIGHTS_NAME=$effective_app_insights"
+            echo "EFFECTIVE_KEY_VAULT_NAME=$effective_key_vault"
           } >> "$GITHUB_ENV"
 
           {
@@ -901,13 +944,60 @@ jobs:
         run: |
           set -euo pipefail
           : "${EFFECTIVE_FUNCTIONAPP_NAME:?Function App name is required to validate runtime safety settings}"
+          : "${EFFECTIVE_APPLICATIONINSIGHTS_NAME:?Application Insights name is required to validate runtime safety settings}"
+          : "${EFFECTIVE_KEY_VAULT_NAME:?Key Vault name is required to validate runtime safety settings}"
+          app_insights_url="https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Insights/components/$EFFECTIVE_APPLICATIONINSIGHTS_NAME?api-version=2020-02-02"
+          expected_app_insights_connection="$(az rest \
+            --method get \
+            --url "$app_insights_url" \
+            --query properties.ConnectionString \
+            -o tsv)"
+          : "${expected_app_insights_connection:?Application Insights connection string metadata could not be resolved}"
+
+          key_vault_reference() {
+            local secret_name="$1"
+            local secret_url="https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.KeyVault/vaults/$EFFECTIVE_KEY_VAULT_NAME/secrets/$secret_name?api-version=2023-07-01"
+            local secret_uri
+            secret_uri="$(az rest \
+              --method get \
+              --url "$secret_url" \
+              --query properties.secretUriWithVersion \
+              -o tsv)"
+            if [ -z "$secret_uri" ]; then
+              echo "Managed Key Vault secret metadata is missing: $secret_name" >&2
+              return 1
+            fi
+            printf '@Microsoft.KeyVault(SecretUri=%s)' "$secret_uri"
+          }
+
+          expected_reddit_reference="$(key_vault_reference reddit-client-secret)"
+          expected_wlh_reference="$(key_vault_reference wlh-base-url)"
+          expected_bring_api_reference="$(key_vault_reference bring-client-api-key)"
+          expected_bring_email_reference="$(key_vault_reference bring-email)"
+          expected_bring_password_reference="$(key_vault_reference bring-password)"
+          expected_bring_confirmation_reference="$(key_vault_reference bring-confirmation-hmac-key)"
+          expected_bring_encryption_reference="$(key_vault_reference bring-mutation-encryption-key)"
+          expected_openai_reference=""
+          if [ "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" = "true" ]; then
+            expected_openai_reference="$(key_vault_reference openai-api-key)"
+          fi
+
           settings_url="https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$EFFECTIVE_FUNCTIONAPP_NAME/config/appsettings/list?api-version=2023-12-01"
           az rest \
             --method post \
             --url "$settings_url" \
             --body '{}' \
             --output json \
-            | node scripts/validate-deployed-runtime-settings.mjs --arm-response
+            | EXPECTED_APPLICATIONINSIGHTS_CONNECTION_STRING="$expected_app_insights_connection" \
+              EXPECTED_REDDIT_CLIENT_SECRET_REFERENCE="$expected_reddit_reference" \
+              EXPECTED_WLH_BASE_URL_REFERENCE="$expected_wlh_reference" \
+              EXPECTED_BRING_CLIENT_API_KEY_REFERENCE="$expected_bring_api_reference" \
+              EXPECTED_BRING_EMAIL_REFERENCE="$expected_bring_email_reference" \
+              EXPECTED_BRING_PASSWORD_REFERENCE="$expected_bring_password_reference" \
+              EXPECTED_BRING_CONFIRMATION_HMAC_KEY_REFERENCE="$expected_bring_confirmation_reference" \
+              EXPECTED_BRING_MUTATION_ENCRYPTION_KEY_REFERENCE="$expected_bring_encryption_reference" \
+              EXPECTED_OPENAI_API_KEY_REFERENCE="$expected_openai_reference" \
+              node scripts/validate-deployed-runtime-settings.mjs --arm-response
       - name: Verify private WLH reference data is present
         if: ${{ inputs.deployFunctions }}
         shell: bash

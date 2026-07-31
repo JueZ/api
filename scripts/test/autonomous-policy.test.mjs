@@ -100,6 +100,16 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.match(deployEnvironmentWorkflow, /name: Verify complete deployed runtime safety policy/);
   assert.match(deployEnvironmentWorkflow, /node scripts\/validate-deployed-runtime-settings\.mjs --arm-response/);
   assert.doesNotMatch(deployEnvironmentWorkflow, /runtime-setting-names\.json|runtime-safety-settings\.json/);
+  assert.match(deployEnvironmentWorkflow, /resolve_single_resource_by_type Microsoft\.Insights\/components/);
+  assert.match(deployEnvironmentWorkflow, /resolve_key_vault_by_purpose/);
+  assert.match(deployEnvironmentWorkflow, /--query properties\.ConnectionString/);
+  assert.match(deployEnvironmentWorkflow, /--query properties\.secretUriWithVersion/);
+  assert.match(deployEnvironmentWorkflow, /EXPECTED_REDDIT_CLIENT_SECRET_REFERENCE=/);
+  assert.match(deployEnvironmentWorkflow, /EXPECTED_OPENAI_API_KEY_REFERENCE=/);
+  assert.doesNotMatch(deployEnvironmentWorkflow, /az keyvault secret show/);
+  assert.match(runtimeSettingsPolicy, /APPLICATIONINSIGHTS_CONNECTION_STRING: requiredValue/);
+  assert.match(runtimeSettingsPolicy, /REDDIT_CLIENT_SECRET: requiredValue/);
+  assert.match(runtimeSettingsPolicy, /OPENAI_API_KEY: openAiReference/);
   assert.match(deployEnvironmentWorkflow, /actions\/runs\/\$\{CI_RUN_ID\}/);
   assert.match(deployEnvironmentWorkflow, /expected_ci_title="CI \$deployment_ref \$CI_DELIVERY_CORRELATION"/);
   assert.match(deployEnvironmentWorkflow, /\(\.name == \$workflow_name or \.name == \$title\)/);

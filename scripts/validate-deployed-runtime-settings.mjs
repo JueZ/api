@@ -75,6 +75,12 @@ function value(env, name, fallback = '') {
   return configured || fallback;
 }
 
+function requiredValue(env, name) {
+  const configured = value(env, name);
+  if (!configured) throw new Error(`${name} is required before runtime settings can be accepted.`);
+  return configured;
+}
+
 function exactOrigin(raw, name) {
   try {
     const parsed = new URL(raw);
@@ -93,8 +99,13 @@ export function buildExpectedRuntimeSettings(env = process.env) {
   if (!hostStorage || !privateStorage) throw new Error('Resolved host and private storage account names are required.');
   const redirectName = environmentName === 'prod' ? 'WEB_AUTH_REDIRECT_URI' : 'TEST_WEB_AUTH_REDIRECT_URI';
   const corsOrigin = exactOrigin(value(env, redirectName), redirectName);
+  const openAiReference =
+    value(env, 'REPAIRABLE_ERRORS_LLM_ENABLED', 'false') === 'true'
+      ? requiredValue(env, 'EXPECTED_OPENAI_API_KEY_REFERENCE')
+      : '';
 
   return {
+    APPLICATIONINSIGHTS_CONNECTION_STRING: requiredValue(env, 'EXPECTED_APPLICATIONINSIGHTS_CONNECTION_STRING'),
     AzureWebJobsStorage__blobServiceUri: `https://${hostStorage}.blob.core.windows.net`,
     AzureWebJobsStorage__queueServiceUri: `https://${hostStorage}.queue.core.windows.net`,
     AzureWebJobsStorage__tableServiceUri: `https://${hostStorage}.table.core.windows.net`,
@@ -122,7 +133,9 @@ export function buildExpectedRuntimeSettings(env = process.env) {
     MCP_RESOURCE_ORIGIN: value(env, 'MCP_RESOURCE_ORIGIN'),
     MCP_ALLOWED_ORIGINS: value(env, 'MCP_ALLOWED_ORIGINS'),
     REDDIT_CLIENT_ID: value(env, 'REDDIT_CLIENT_ID'),
+    REDDIT_CLIENT_SECRET: requiredValue(env, 'EXPECTED_REDDIT_CLIENT_SECRET_REFERENCE'),
     REDDIT_USER_AGENT: value(env, 'REDDIT_USER_AGENT'),
+    WLH_BASE_URL: requiredValue(env, 'EXPECTED_WLH_BASE_URL_REFERENCE'),
     WLH_STORAGE_ACCOUNT_NAME: privateStorage,
     WLH_CATEGORY_BLOB_CONTAINER: value(env, 'WLH_CATEGORY_BLOB_CONTAINER', 'wlh-reference'),
     WLH_CATEGORY_BLOB_NAME: value(env, 'WLH_CATEGORY_BLOB_NAME', 'categories-marketplace.v1.json.gz'),
@@ -130,7 +143,10 @@ export function buildExpectedRuntimeSettings(env = process.env) {
     BRING_ADD_ENABLED: value(env, 'BRING_ADD_ENABLED', 'false'),
     BRING_DESTRUCTIVE_ENABLED: value(env, 'BRING_DESTRUCTIVE_ENABLED', 'false'),
     BRING_BASE_URL: value(env, 'BRING_BASE_URL', 'https://api.getbring.com/rest/'),
+    BRING_CLIENT_API_KEY: requiredValue(env, 'EXPECTED_BRING_CLIENT_API_KEY_REFERENCE'),
     BRING_COUNTRY: value(env, 'BRING_COUNTRY', 'AT'),
+    BRING_EMAIL: requiredValue(env, 'EXPECTED_BRING_EMAIL_REFERENCE'),
+    BRING_PASSWORD: requiredValue(env, 'EXPECTED_BRING_PASSWORD_REFERENCE'),
     BRING_EXPECTED_ACCOUNT_FINGERPRINT: value(env, 'BRING_EXPECTED_ACCOUNT_FINGERPRINT'),
     BRING_DEFAULT_LIST_UUID: value(env, 'BRING_DEFAULT_LIST_UUID'),
     BRING_READABLE_LIST_UUIDS: value(env, 'BRING_READABLE_LIST_UUIDS'),
@@ -141,6 +157,9 @@ export function buildExpectedRuntimeSettings(env = process.env) {
     BRING_MUTATION_CONTAINER: value(env, 'BRING_MUTATION_CONTAINER', 'bring-mutations'),
     BRING_AUDIT_CONTAINER: value(env, 'BRING_AUDIT_CONTAINER', 'bring-audit'),
     BRING_STORAGE_ACCOUNT_NAME: privateStorage,
+    BRING_CONFIRMATION_HMAC_KEY: requiredValue(env, 'EXPECTED_BRING_CONFIRMATION_HMAC_KEY_REFERENCE'),
+    BRING_MUTATION_ENCRYPTION_KEY: requiredValue(env, 'EXPECTED_BRING_MUTATION_ENCRYPTION_KEY_REFERENCE'),
+    OPENAI_API_KEY: openAiReference,
     REPAIRABLE_ERRORS_LLM_ENABLED: value(env, 'REPAIRABLE_ERRORS_LLM_ENABLED', 'false'),
     REPAIRABLE_ERRORS_LLM_MODEL: value(env, 'REPAIRABLE_ERRORS_LLM_MODEL'),
   };
@@ -178,8 +197,8 @@ export function validateArmRuntimeSettingsResponse(response, env = process.env) 
     return ['Azure app-settings response is missing its properties object'];
   }
   const expectedNames = Object.keys(buildExpectedRuntimeSettings(env));
-  const nonsecretSettings = Object.fromEntries(expectedNames.map((name) => [name, properties[name]]));
-  return validateDeployedRuntimeSettings(nonsecretSettings, Object.keys(properties), env);
+  const policySettings = Object.fromEntries(expectedNames.map((name) => [name, properties[name]]));
+  return validateDeployedRuntimeSettings(policySettings, Object.keys(properties), env);
 }
 
 async function readStandardInput() {
@@ -202,5 +221,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.error(errors.join('\n'));
     process.exit(1);
   }
-  console.log('Effective non-secret runtime safety settings and managed key set match policy.');
+  console.log('Effective runtime policy settings and managed key set match policy.');
 }
