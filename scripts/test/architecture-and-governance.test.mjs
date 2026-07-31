@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   architectureFindings,
@@ -38,6 +39,18 @@ test('authorization architecture rejects provider and transport dependencies', (
 
 test('MCP stays bundled behind one server and one Function route', () => {
   assert.deepEqual(bundledMcpFindings(), []);
+});
+
+test('Azure Functions loads the fail-closed composition root before registering functions', () => {
+  const apiPackage = JSON.parse(readFileSync(new URL('../../apps/api/package.json', import.meta.url), 'utf8'));
+  const compositionRoot = readFileSync(new URL('../../apps/api/src/index.ts', import.meta.url), 'utf8');
+  const infrastructure = readFileSync(new URL('../../infra/main.bicep', import.meta.url), 'utf8');
+  assert.equal(apiPackage.main, 'dist/index.js');
+  assert.ok(
+    compositionRoot.indexOf('assertRuntimeSafety();') < compositionRoot.indexOf("import('./functions/health.js')"),
+  );
+  assert.match(infrastructure, /resource functionAppSettings 'Microsoft\.Web\/sites\/config@[^']+' = \{/);
+  assert.doesNotMatch(infrastructure, /siteConfig:\s*\{[\s\S]*?appSettings:\s*\[/);
 });
 
 test('repository agent skills have valid frontmatter and unique names', () => {

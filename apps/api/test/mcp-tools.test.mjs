@@ -5,7 +5,7 @@ import { BringUpstreamError } from '../dist/shared/bring/client.js';
 
 const authEnv = {
   AUTH_ENABLED: 'false',
-  DEPLOYED_ENVIRONMENT_NAME: 'prod',
+  DEPLOYED_ENVIRONMENT_NAME: 'local',
   OIDC_AUDIENCE: 'api://catalogue-test',
   MCP_RESOURCE_ORIGIN: 'https://mcp.example.test',
   MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
@@ -460,11 +460,11 @@ async function mcpRequest(body, authorization = undefined, services = stubServic
   return handleMcpHttpRequest(
     {
       method: 'POST',
-      url: 'https://mcp.example.test/mcp',
+      url: 'http://localhost:7071/mcp',
       headers: new Headers({
         accept: 'application/json, text/event-stream',
         'content-type': 'application/json',
-        host: 'mcp.example.test',
+        host: 'localhost:7071',
         ...(authorization ? { authorization } : {}),
       }),
       params: {},
