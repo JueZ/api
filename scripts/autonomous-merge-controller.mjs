@@ -69,19 +69,12 @@ export function evaluateRequiredChecks(checkRuns, headSha, requiredChecks) {
 }
 
 export function validateAutonomousReview(review, expectedHeadSha, policy) {
-  const errors = [];
-  if (!isRecord(review)) return { ok: false, errors: ['review result must be an object'] };
-  if (review.reviewedHeadSha !== expectedHeadSha) errors.push('reviewed head SHA does not match');
-  if (!['approve', 'reject'].includes(review.decision)) errors.push('review decision is invalid');
-  if (!Array.isArray(review.findings)) errors.push('review findings must be an array');
+  const errors = validateReviewPayload(review, expectedHeadSha, policy);
 
-  const blockingFindings = Array.isArray(review.findings)
+  const blockingFindings = Array.isArray(review?.findings)
     ? review.findings.filter((finding) => policy.autonomousReview.rejectSeverities.includes(finding?.severity))
     : [];
-  if (blockingFindings.length > 0 && review.decision !== 'reject') {
-    errors.push('review with blocking findings must reject');
-  }
-  if (review.decision !== 'approve') errors.push('autonomous review rejected the change');
+  if (review?.decision !== 'approve') errors.push('autonomous review rejected the change');
 
   return { ok: errors.length === 0, errors, blockingFindings };
 }
@@ -228,7 +221,17 @@ export async function runReview(options, policy, github, openAIClient) {
         continue;
       }
       try {
-        parsed = JSON.parse(outputText);
+        const candidate = JSON.parse(outputText);
+        if (response.status !== 'completed') {
+          modelFailure = summarizeModelFailure(response, 'incomplete_response', attemptIndex + 1);
+          continue;
+        }
+        const validationErrors = validateReviewPayload(candidate, options.headSha, policy);
+        if (validationErrors.length > 0) {
+          modelFailure = summarizeModelFailure(response, 'invalid_review_decision', attemptIndex + 1);
+          continue;
+        }
+        parsed = candidate;
         break;
       } catch {
         modelFailure = summarizeModelFailure(response, 'invalid_structured_output', attemptIndex + 1);
@@ -454,6 +457,43 @@ function summarizeModelFailure(value, kind, attempts) {
 
 function safeDiagnosticToken(value) {
   return typeof value === 'string' && /^[a-z0-9_.:-]{1,100}$/i.test(value) ? value : undefined;
+}
+
+function validateReviewPayload(review, expectedHeadSha, policy) {
+  if (!isRecord(review)) return ['review result must be an object'];
+  const errors = [];
+  if (review.reviewedHeadSha !== expectedHeadSha) errors.push('reviewed head SHA does not match');
+  if (!['approve', 'reject'].includes(review.decision)) errors.push('review decision is invalid');
+  if (typeof review.summary !== 'string' || review.summary.length < 1 || review.summary.length > 2000) {
+    errors.push('review summary is invalid');
+  }
+  if (!Array.isArray(review.findings) || review.findings.length > 25) {
+    errors.push('review findings must be an array with no more than 25 entries');
+  } else {
+    for (const finding of review.findings) {
+      if (
+        !isRecord(finding) ||
+        !['critical', 'high', 'medium', 'low'].includes(finding.severity) ||
+        !isBoundedString(finding.title, 200) ||
+        !isBoundedString(finding.evidence, 2000) ||
+        !isBoundedString(finding.remediation, 2000)
+      ) {
+        errors.push('review contains an invalid finding');
+        break;
+      }
+    }
+  }
+  const hasBlockingFinding = Array.isArray(review.findings)
+    ? review.findings.some((finding) => policy.autonomousReview.rejectSeverities.includes(finding?.severity))
+    : false;
+  if (hasBlockingFinding && review.decision !== 'reject') {
+    errors.push('review with blocking findings must reject');
+  }
+  return errors;
+}
+
+function isBoundedString(value, maximumLength) {
+  return typeof value === 'string' && value.length >= 1 && value.length <= maximumLength;
 }
 
 function delay(milliseconds) {

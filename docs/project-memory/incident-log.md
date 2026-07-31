@@ -5,6 +5,7 @@
 - Symptom: PR #272 exact-head run `30632059074` reached the OpenAI Responses API with the configured repository secret, but the high-risk review returned no aggregated `output_text`; the controller attempted `JSON.parse('')`, so the review job failed without its required evidence artifact.
 - Classification: this was not a missing-key, authentication, or quota failure. The request completed without a surfaced API error, but the response did not contain a usable structured decision.
 - Fix: retry an empty or invalid structured response once with a larger output-token allowance, then fail closed with a sanitized rejection artifact if neither bounded attempt yields a valid exact-head decision. Raw model output and error messages are never persisted.
+- Review repair: the first bootstrap review correctly identified that parseable output from an incomplete response, or a structurally invalid decision, could end the retry early. Acceptance now additionally requires a completed API response and a valid exact-head decision whose blocking findings agree with its decision.
 - Status: bounded fail-closed repair prepared in the bootstrap pull request; live validation still requires an exact-head review artifact and trusted-controller merge.
 
 ## 2026-07-31 — Trusted merge controller rejected its own in-progress check state
