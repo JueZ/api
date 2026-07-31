@@ -69,19 +69,12 @@ export function evaluateRequiredChecks(checkRuns, headSha, requiredChecks) {
 }
 
 export function validateAutonomousReview(review, expectedHeadSha, policy) {
-  const errors = [];
-  if (!isRecord(review)) return { ok: false, errors: ['review result must be an object'] };
-  if (review.reviewedHeadSha !== expectedHeadSha) errors.push('reviewed head SHA does not match');
-  if (!['approve', 'reject'].includes(review.decision)) errors.push('review decision is invalid');
-  if (!Array.isArray(review.findings)) errors.push('review findings must be an array');
+  const errors = validateReviewPayload(review, expectedHeadSha, policy);
 
-  const blockingFindings = Array.isArray(review.findings)
+  const blockingFindings = Array.isArray(review?.findings)
     ? review.findings.filter((finding) => policy.autonomousReview.rejectSeverities.includes(finding?.severity))
     : [];
-  if (blockingFindings.length > 0 && review.decision !== 'reject') {
-    errors.push('review with blocking findings must reject');
-  }
-  if (review.decision !== 'approve') errors.push('autonomous review rejected the change');
+  if (review?.decision !== 'approve') errors.push('autonomous review rejected the change');
 
   return { ok: errors.length === 0, errors, blockingFindings };
 }
@@ -121,7 +114,7 @@ export function mergeGateDecision({ pullRequest, expectedHeadSha, checkEvaluatio
   return { ok: errors.length === 0, errors, pullRequestState, checkEvaluation, reviewState };
 }
 
-export async function runReview(options, policy, github) {
+export async function runReview(options, policy, github, openAIClient) {
   const pullRequest = await github.getPullRequest(options.prNumber);
   assertExpectedHead(pullRequest, options.headSha);
   const files = await github.getPullRequestFiles(options.prNumber);
@@ -145,7 +138,7 @@ export async function runReview(options, policy, github) {
     return review;
   }
 
-  if (!process.env.OPENAI_API_KEY) {
+  if (!openAIClient && !process.env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required for high-risk autonomous review.');
   }
 
@@ -158,13 +151,12 @@ export async function runReview(options, policy, github) {
     );
   }
 
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const response = await client.responses.create({
+  const client = openAIClient ?? new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const request = {
     model: policy.autonomousReview.model,
     reasoning: { effort: policy.autonomousReview.reasoningEffort },
     store: policy.autonomousReview.store,
     safety_identifier: safetyIdentifier(options.repository, options.prNumber),
-    max_output_tokens: 6000,
     text: {
       verbosity: 'medium',
       format: {
@@ -211,9 +203,67 @@ export async function runReview(options, policy, github) {
         }),
       },
     ],
-  });
+  };
 
-  const parsed = JSON.parse(response.output_text);
+  const outputTokenLimits = [6000, 12000];
+  let parsed;
+  let response;
+  let modelFailure;
+  for (const [attemptIndex, maxOutputTokens] of outputTokenLimits.entries()) {
+    try {
+      response = await client.responses.create({
+        ...request,
+        max_output_tokens: maxOutputTokens,
+      });
+      const outputText = typeof response.output_text === 'string' ? response.output_text.trim() : '';
+      if (!outputText) {
+        modelFailure = summarizeModelFailure(response, 'empty_output', attemptIndex + 1);
+        continue;
+      }
+      try {
+        const candidate = JSON.parse(outputText);
+        if (response.status !== 'completed') {
+          modelFailure = summarizeModelFailure(response, 'incomplete_response', attemptIndex + 1);
+          continue;
+        }
+        const validationErrors = validateReviewPayload(candidate, options.headSha, policy);
+        if (validationErrors.length > 0) {
+          modelFailure = summarizeModelFailure(response, 'invalid_review_decision', attemptIndex + 1);
+          continue;
+        }
+        parsed = candidate;
+        break;
+      } catch {
+        modelFailure = summarizeModelFailure(response, 'invalid_structured_output', attemptIndex + 1);
+      }
+    } catch (error) {
+      modelFailure = summarizeModelFailure(error, 'request_error', attemptIndex + 1);
+    }
+  }
+
+  if (!parsed) {
+    const review = {
+      decision: 'reject',
+      reviewedHeadSha: options.headSha,
+      summary: 'Independent model review did not return a usable structured decision after two bounded attempts.',
+      findings: [
+        {
+          severity: 'high',
+          title: 'Autonomous review unavailable',
+          evidence: `The OpenAI Responses API review ended with ${modelFailure?.kind ?? 'an unknown failure'}.`,
+          remediation: 'Retry the exact-head autonomous review; do not merge without an approved review artifact.',
+        },
+      ],
+      risk,
+      modelInvoked: true,
+      model: policy.autonomousReview.model,
+      responseId: modelFailure?.responseId,
+      modelFailure,
+    };
+    await publishReview(review, options);
+    throw new Error(`Autonomous review unavailable: ${modelFailure?.kind ?? 'unknown_failure'}.`);
+  }
+
   const review = {
     ...parsed,
     risk,
@@ -386,6 +436,64 @@ function assertExpectedHead(pullRequest, expectedHeadSha) {
 
 function safetyIdentifier(repository, prNumber) {
   return createHash('sha256').update(`${repository}:pull:${prNumber}`).digest('hex');
+}
+
+function summarizeModelFailure(value, kind, attempts) {
+  const responseId = safeDiagnosticToken(value?.id ?? value?.request_id);
+  const responseStatus = safeDiagnosticToken(value?.status);
+  const incompleteReason = safeDiagnosticToken(value?.incomplete_details?.reason);
+  const errorCode = safeDiagnosticToken(value?.error?.code ?? value?.code);
+  const httpStatus = Number.isInteger(value?.status) ? value.status : undefined;
+  return {
+    kind,
+    attempts,
+    ...(responseId ? { responseId } : {}),
+    ...(responseStatus ? { responseStatus } : {}),
+    ...(incompleteReason ? { incompleteReason } : {}),
+    ...(errorCode ? { errorCode } : {}),
+    ...(httpStatus ? { httpStatus } : {}),
+  };
+}
+
+function safeDiagnosticToken(value) {
+  return typeof value === 'string' && /^[a-z0-9_.:-]{1,100}$/i.test(value) ? value : undefined;
+}
+
+function validateReviewPayload(review, expectedHeadSha, policy) {
+  if (!isRecord(review)) return ['review result must be an object'];
+  const errors = [];
+  if (review.reviewedHeadSha !== expectedHeadSha) errors.push('reviewed head SHA does not match');
+  if (!['approve', 'reject'].includes(review.decision)) errors.push('review decision is invalid');
+  if (typeof review.summary !== 'string' || review.summary.length < 1 || review.summary.length > 2000) {
+    errors.push('review summary is invalid');
+  }
+  if (!Array.isArray(review.findings) || review.findings.length > 25) {
+    errors.push('review findings must be an array with no more than 25 entries');
+  } else {
+    for (const finding of review.findings) {
+      if (
+        !isRecord(finding) ||
+        !['critical', 'high', 'medium', 'low'].includes(finding.severity) ||
+        !isBoundedString(finding.title, 200) ||
+        !isBoundedString(finding.evidence, 2000) ||
+        !isBoundedString(finding.remediation, 2000)
+      ) {
+        errors.push('review contains an invalid finding');
+        break;
+      }
+    }
+  }
+  const hasBlockingFinding = Array.isArray(review.findings)
+    ? review.findings.some((finding) => policy.autonomousReview.rejectSeverities.includes(finding?.severity))
+    : false;
+  if (hasBlockingFinding && review.decision !== 'reject') {
+    errors.push('review with blocking findings must reject');
+  }
+  return errors;
+}
+
+function isBoundedString(value, maximumLength) {
+  return typeof value === 'string' && value.length >= 1 && value.length <= maximumLength;
 }
 
 function delay(milliseconds) {

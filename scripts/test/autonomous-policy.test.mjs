@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -105,14 +105,14 @@ test('required checks treat pending and failed checks as non-passing', () => {
 });
 
 test('autonomous review is bound to the exact head and rejects blocking findings', () => {
-  const approved = { decision: 'approve', reviewedHeadSha: headSha, findings: [] };
+  const approved = { decision: 'approve', reviewedHeadSha: headSha, summary: 'Approved.', findings: [] };
   assert.equal(validateAutonomousReview(approved, headSha, policy).ok, true);
   assert.equal(validateAutonomousReview({ ...approved, reviewedHeadSha: 'b'.repeat(40) }, headSha, policy).ok, false);
   assert.equal(
     validateAutonomousReview(
       {
         ...approved,
-        findings: [{ severity: 'high' }],
+        findings: [{ severity: 'high', title: 'Blocked', evidence: 'Unsafe.', remediation: 'Repair it.' }],
       },
       headSha,
       policy,
@@ -150,6 +150,226 @@ test('autonomous review rechecks the mutable pull-request head after loading fil
   );
 });
 
+test('high-risk autonomous review retries an empty response with a larger output budget', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-retry-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const requests = [];
+  const github = {
+    async getPullRequest() {
+      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
+    },
+    async getPullRequestFiles() {
+      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
+    },
+    async getPullRequestDiff() {
+      return 'diff --git a/example b/example';
+    },
+  };
+  const client = {
+    responses: {
+      async create(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return {
+            id: 'resp_incomplete',
+            status: 'incomplete',
+            incomplete_details: { reason: 'max_output_tokens' },
+            output_text: '',
+          };
+        }
+        return {
+          id: 'resp_complete',
+          status: 'completed',
+          output_text: JSON.stringify({
+            decision: 'approve',
+            reviewedHeadSha: headSha,
+            summary: 'No blocking findings.',
+            findings: [],
+          }),
+        };
+      },
+    },
+  };
+
+  const review = await runReview(
+    {
+      repository: 'JueZ/api',
+      prNumber: 1,
+      headSha,
+      reviewFile: join(directory, 'review.json'),
+    },
+    policy,
+    github,
+    client,
+  );
+
+  assert.equal(review.decision, 'approve');
+  assert.equal(review.responseId, 'resp_complete');
+  assert.deepEqual(
+    requests.map((request) => request.max_output_tokens),
+    [6000, 12000],
+  );
+});
+
+test('high-risk autonomous review does not accept structured output from an incomplete response', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-incomplete-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const requests = [];
+  const approvedOutput = JSON.stringify({
+    decision: 'approve',
+    reviewedHeadSha: headSha,
+    summary: 'No blocking findings.',
+    findings: [],
+  });
+  const github = {
+    async getPullRequest() {
+      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
+    },
+    async getPullRequestFiles() {
+      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
+    },
+    async getPullRequestDiff() {
+      return 'diff --git a/example b/example';
+    },
+  };
+  const client = {
+    responses: {
+      async create(request) {
+        requests.push(request);
+        return requests.length === 1
+          ? {
+              id: 'resp_incomplete',
+              status: 'incomplete',
+              incomplete_details: { reason: 'max_output_tokens' },
+              output_text: approvedOutput,
+            }
+          : { id: 'resp_complete', status: 'completed', output_text: approvedOutput };
+      },
+    },
+  };
+
+  const review = await runReview(
+    {
+      repository: 'JueZ/api',
+      prNumber: 1,
+      headSha,
+      reviewFile: join(directory, 'review.json'),
+    },
+    policy,
+    github,
+    client,
+  );
+
+  assert.equal(review.decision, 'approve');
+  assert.equal(review.responseId, 'resp_complete');
+  assert.equal(requests.length, 2);
+});
+
+test('high-risk autonomous review retries a structurally invalid decision', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-invalid-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  let attempts = 0;
+  const github = {
+    async getPullRequest() {
+      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
+    },
+    async getPullRequestFiles() {
+      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
+    },
+    async getPullRequestDiff() {
+      return 'diff --git a/example b/example';
+    },
+  };
+  const client = {
+    responses: {
+      async create() {
+        attempts += 1;
+        return {
+          id: `resp_${attempts}`,
+          status: 'completed',
+          output_text: JSON.stringify({
+            decision: 'approve',
+            reviewedHeadSha: headSha,
+            summary: 'Review result.',
+            findings:
+              attempts === 1
+                ? [{ severity: 'high', title: 'Blocked', evidence: 'Unsafe.', remediation: 'Repair it.' }]
+                : [],
+          }),
+        };
+      },
+    },
+  };
+
+  const review = await runReview(
+    {
+      repository: 'JueZ/api',
+      prNumber: 1,
+      headSha,
+      reviewFile: join(directory, 'review.json'),
+    },
+    policy,
+    github,
+    client,
+  );
+
+  assert.equal(review.decision, 'approve');
+  assert.equal(review.responseId, 'resp_2');
+  assert.equal(attempts, 2);
+});
+
+test('persistent empty model output fails closed with sanitized review evidence', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-empty-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const reviewFile = join(directory, 'review.json');
+  const github = {
+    async getPullRequest() {
+      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
+    },
+    async getPullRequestFiles() {
+      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
+    },
+    async getPullRequestDiff() {
+      return 'diff --git a/example b/example';
+    },
+  };
+  const client = {
+    responses: {
+      async create() {
+        return {
+          id: 'resp_incomplete',
+          status: 'incomplete',
+          incomplete_details: { reason: 'max_output_tokens' },
+          output_text: '',
+        };
+      },
+    },
+  };
+
+  await assert.rejects(
+    runReview(
+      {
+        repository: 'JueZ/api',
+        prNumber: 1,
+        headSha,
+        reviewFile,
+      },
+      policy,
+      github,
+      client,
+    ),
+    /Autonomous review unavailable: empty_output/,
+  );
+
+  const review = JSON.parse(await readFile(reviewFile, 'utf8'));
+  assert.equal(review.decision, 'reject');
+  assert.equal(review.reviewedHeadSha, headSha);
+  assert.equal(review.modelFailure.kind, 'empty_output');
+  assert.equal(review.modelFailure.attempts, 2);
+  assert.equal(review.modelFailure.incompleteReason, 'max_output_tokens');
+  assert.equal(review.findings[0].severity, 'high');
+});
+
 test('pull request state rejects forks, stale heads, and behind branches', () => {
   assert.equal(evaluatePullRequestState(pullRequest(), headSha, policy).ok, true);
   assert.equal(
@@ -175,7 +395,7 @@ test('pull request state rejects forks, stale heads, and behind branches', () =>
 
 test('merge decision requires pull request state, checks, and review to all pass', () => {
   const checkEvaluation = evaluateRequiredChecks(successfulChecks(), headSha, policy.requiredChecks);
-  const review = { decision: 'approve', reviewedHeadSha: headSha, findings: [] };
+  const review = { decision: 'approve', reviewedHeadSha: headSha, summary: 'Approved.', findings: [] };
   assert.equal(
     mergeGateDecision({
       pullRequest: pullRequest(),
