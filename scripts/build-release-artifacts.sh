@@ -38,15 +38,15 @@ npm ci --omit=dev --ignore-scripts --prefix "$function_stage"
 # Import the exact production-only staged package with fail-closed deployment
 # settings. This catches dependencies that exist only in the root workspace and
 # composition-root/indexing regressions before the archive can be published.
+# Entra object and tenant IDs are GUID-shaped identifiers; they are not
+# guaranteed to encode RFC UUID version or variant marker bits. Keep these
+# production-package probes deliberately non-versioned so the release build
+# exercises the same identifier contract as a real Entra configuration.
 DEPLOYED_ENVIRONMENT_NAME=test \
 AUTH_ENABLED=true \
 OIDC_ISSUER=https://login.example.test/tenant/v2.0 \
 OIDC_AUDIENCE=api://catalogue-test \
 OIDC_REQUIRED_SCOPES=catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove \
-# Entra object and tenant IDs are GUID-shaped identifiers; they are not
-# guaranteed to encode RFC UUID version or variant marker bits. Keep these
-# production-package probes deliberately non-versioned so the release build
-# exercises the same identifier contract as a real Entra configuration.
 OIDC_ALLOWED_OBJECT_IDS=11111111-1111-0000-0000-111111111111 \
 OIDC_ALLOWED_TENANTS=22222222-2222-0000-0000-222222222222 \
 API_CORS_ALLOWED_ORIGINS=https://web.example.test \

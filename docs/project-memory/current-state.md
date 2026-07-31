@@ -1,5 +1,15 @@
 # Current state
 
+## 2026-07-31 enterprise hardening prepared; test runtime recovered and service-role proof remains blocked
+
+- PR #283 merged the Entra GUID/UUID separation as `66c1fa4136093dbb54c495825b14602113b7f99f`. Test run `30652787906` then proved the exact Function release starts correctly: `/health` reported the expected SHA, unauthenticated `/api/hello` returned `401`, and the CORS check passed.
+- The same test run failed closed at authenticated `/api/hello` with `403`. The effective smoke client, tenant, issuer, audience, tenant allowlist, and service-client allowlist correlate, but the current Codex Azure service principal is denied Microsoft Graph directory reads and cannot verify or repair the smoke application's `catalogue.read,reddit.read` app-role assignments. Telemetry, accepted provenance, and production promotion did not run.
+- The enterprise-hardening branch adds a required change-quality skill, durable agent workflow contracts, stronger GitHub/Azure diagnostic and delivery skills, repository hygiene and secret-signature preflight, dual-lockfile/SBOM/attestation controls, generated branch-protection payloads, schema-backed release ledgers, coverage thresholds, ARM validate/secret-safe what-if, deployment-generation telemetry scoping, and explicit PR evidence requirements.
+- Application changes isolate MCP provider initialization so one unavailable provider does not disable unrelated tools. The web client keeps Bring confirmation tokens in a private expiring vault, injects them only for apply, clears them on every terminal path, and prevents generic UI/curl/clipboard serialization.
+- The release package now imports the exact production-only staged `dist/index.js` under production-shaped non-versioned Entra GUIDs. Authenticated smoke token minting verifies the exact expected app roles without printing token claims before exporting the token.
+- A local untracked Codex environment file containing plaintext credential material was found outside Git history. Its mode was restricted to owner-only, repository ignores and preflight now reject local Codex/Azure state and high-confidence changed-file secret signatures, and the affected credentials still require external rotation. No value is recorded in project memory.
+- An explicit repository-owned Log Analytics workspace, daily cap, and cap alert remain a separate test-first infrastructure change. Relinking is supported but splits historical telemetry; preserve old managed workspaces for at least 90 days before cleanup.
+
 ## 2026-07-31 AI-native hardening merged; test acceptance blocked by fail-open auth
 
 - PR #264 merged the 2026-07 architecture and AI-native audit remediation as `4d82ed8491a32440ec5495049ba39e8f73c6bbac`. Exact-head PR CI, Policy Check, and CodeQL passed; main CI, Policy Check, and CodeQL also passed. The PR used `[skip autodeploy]`, the main-delivery workflow honored it, and no production deployment was dispatched.

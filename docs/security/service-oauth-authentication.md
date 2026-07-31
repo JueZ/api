@@ -26,3 +26,5 @@ bring.remove
 Service tokens are recognized only by an app-only marker or roles-only client-credential evidence plus explicit service allowlists. Delegated tokens always remain on the user allowlist path. The code denies service tokens for destructive Bring operations even if a role is accidentally assigned.
 
 GitHub Actions obtains a GitHub OIDC assertion and exchanges it for a short-lived Entra access token. No static API bearer token or service client secret is stored. Use `scripts/configure-entra-service-oauth.sh` to configure non-destructive roles; it rejects destructive Bring roles.
+
+Before authenticated smoke, `scripts/mint-smoke-token.mjs` decodes only the short-lived token it just received over the Entra token endpoint and verifies the configured tenant/client correlation plus the exact expected application-role names. It does not log token claims. Deployment smoke requires `catalogue.read,reddit.read`; the Bring read canary requires only `bring.read`. Missing roles fail before the token is exported and must be repaired in Entra rather than by broadening API authorization.

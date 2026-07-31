@@ -1478,6 +1478,7 @@ jobs:
           set -euo pipefail
           export ENVIRONMENT_NAME
           export REQUIRE_AUTH_SMOKE=true
+          export SERVICE_AUTH_REQUIRED_ROLES='catalogue.read,reddit.read'
           npm run --silent ops:mint-smoke-token
       - name: Run authenticated smoke tests
         shell: bash

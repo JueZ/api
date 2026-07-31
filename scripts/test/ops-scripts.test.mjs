@@ -13,10 +13,12 @@ import {
 } from '../lib/smoke-utils.mjs';
 import { runAuthenticatedSmoke } from '../smoke-auth.mjs';
 import {
+  decodeAccessTokenClaims,
   missingServiceAuthFields,
   parseSmokeTokenFetchTimeoutMs,
   sanitizeTokenEndpointErrorCode,
   selectServiceAuthConfig,
+  validateServiceTokenClaims,
 } from '../mint-smoke-token.mjs';
 
 test('release ledger validation accepts required runtime truth fields', () => {
@@ -142,9 +144,11 @@ test('smoke token mint config selects production service variables', () => {
     PROD_SERVICE_AUTH_CLIENT_ID: 'client-id',
     PROD_SERVICE_AUTH_TENANT_ID: 'tenant-id',
     PROD_SERVICE_AUTH_SCOPE: 'api://example/.default',
+    SERVICE_AUTH_REQUIRED_ROLES: 'catalogue.read,reddit.read',
   });
 
   assert.equal(config.prefix, 'PROD');
+  assert.deepEqual(config.requiredRoles, ['catalogue.read', 'reddit.read']);
   assert.deepEqual(missingServiceAuthFields(config), []);
 });
 
@@ -162,11 +166,38 @@ test('smoke token mint supports a dedicated least-privilege canary identity', ()
     BRING_CANARY_SERVICE_AUTH_CLIENT_ID: 'canary-client',
     BRING_CANARY_SERVICE_AUTH_TENANT_ID: 'canary-tenant',
     BRING_CANARY_SERVICE_AUTH_SCOPE: 'api://example/.default',
+    SERVICE_AUTH_REQUIRED_ROLES: 'bring.read',
   });
   assert.equal(config.prefix, 'BRING_CANARY');
   assert.equal(config.clientId, 'canary-client');
   assert.deepEqual(missingServiceAuthFields(config), []);
   assert.throws(() => selectServiceAuthConfig({ SERVICE_AUTH_PREFIX: '../../BAD' }), /SERVICE_AUTH_PREFIX/);
+  assert.throws(
+    () => selectServiceAuthConfig({ SERVICE_AUTH_REQUIRED_ROLES: 'bring.read,unsafe role' }),
+    /SERVICE_AUTH_REQUIRED_ROLES/,
+  );
+});
+
+test('smoke token preflight requires the configured granular application roles', () => {
+  const claims = { tid: 'tenant-id', azp: 'client-id', roles: ['catalogue.read', 'reddit.read'] };
+  const token = `header.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`;
+  assert.deepEqual(decodeAccessTokenClaims(token), claims);
+  assert.deepEqual(
+    validateServiceTokenClaims(claims, {
+      tenantId: 'tenant-id',
+      clientId: 'client-id',
+      requiredRoles: ['catalogue.read', 'reddit.read'],
+    }),
+    [],
+  );
+  assert.deepEqual(
+    validateServiceTokenClaims(
+      { ...claims, roles: ['catalogue.read'] },
+      { tenantId: 'tenant-id', clientId: 'client-id', requiredRoles: ['catalogue.read', 'reddit.read'] },
+    ),
+    ['missing_roles:reddit.read'],
+  );
+  assert.throws(() => decodeAccessTokenClaims('not-a-jwt'), /was not a JWT/);
 });
 
 test('smoke token timeout override defaults and validates safe bounds', () => {

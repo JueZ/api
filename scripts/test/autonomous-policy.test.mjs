@@ -40,6 +40,10 @@ const rollbackProductionWorkflow = readFileSync(
   new URL('../../.github/workflows/rollback-production.yml', import.meta.url),
   'utf8',
 );
+const bringCanaryWorkflow = readFileSync(
+  new URL('../../.github/workflows/bring-readonly-canary.yml', import.meta.url),
+  'utf8',
+);
 const runtimeSettingsPolicy = readFileSync(
   new URL('../validate-deployed-runtime-settings.mjs', import.meta.url),
   'utf8',
@@ -245,6 +249,11 @@ test('Function supply-chain policy covers the independently locked deployed pack
     releaseArtifactBuilder.indexOf('npm ci --omit=dev --ignore-scripts --prefix "$function_stage"') <
       releaseArtifactBuilder.indexOf('node "$function_stage/dist/index.js"'),
   );
+});
+
+test('service smoke tokens prove least-privilege application roles before use', () => {
+  assert.match(deployEnvironmentWorkflow, /SERVICE_AUTH_REQUIRED_ROLES='catalogue\.read,reddit\.read'/);
+  assert.match(bringCanaryWorkflow, /SERVICE_AUTH_REQUIRED_ROLES: bring\.read/);
 });
 
 test('Azure diagnostics select architecture-tagged storage and emit only aggregate telemetry', () => {

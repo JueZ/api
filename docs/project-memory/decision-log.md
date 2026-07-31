@@ -1,5 +1,27 @@
 # Decision log
 
+## 2026-07-31 — Make autonomous change quality, release evidence, and incident diagnosis executable contracts
+
+- Decision: `AGENTS.md` invokes a repository `change-quality-gate` for every behavioral, deployment, security, and agent-control change. Definition of Done requires a behavior contract, regression tests, proportionate validation, documentation/project-memory updates, risk/rollback evidence, repository hygiene, and both worktree and complete-branch policy evaluation. Skipped checks are not passes.
+- Decision: keep `.github/autonomous-policy.yml` authoritative for required checks and generate branch-protection payloads from it. Validate skills against the official skill/metadata rules and mechanically evaluate durable workflow contracts for quality, GitHub review, Azure diagnosis, staged delivery, rollback, and memory maintenance.
+- Decision: build, import, SBOM, attest, and verify the exact independently locked Function package before Azure login. ARM validation and a secret-suppressed `ResourceIdOnly` what-if must use the identical parameter vector later used for create. Release-ledger runtime validation must follow the published JSON Schema.
+- Decision: authenticated smoke token minting must prove the least-privilege Entra application roles before exporting the short-lived token. Missing roles are repaired in Entra by a privileged operator; API authorization, authenticated smoke, and retired-role policy must not be weakened.
+- Rationale: the repository is operated by agents, so intent must be encoded as executable, discoverable constraints rather than depending on session memory. Exact package/config/evidence correlation reduces false-green releases and makes failures actionable without exposing secrets.
+- Status: implemented on the enterprise-hardening branch; remote PR gates and staged rollout remain required.
+
+## 2026-07-31 — Isolate provider startup and keep Bring confirmations out of generic UI state
+
+- Decision: initialize Reddit, WLH, and Bring lazily per provider after authentication. A missing or disabled provider returns a sanitized provider-local `503` result and must not prevent MCP initialization or unrelated tools.
+- Decision: store Bring confirmation tokens only in a private expiring browser vault. Never place a token in the generic form model, rendered response, curl output, clipboard, or DOM; inject only for the matching apply operation and clear on expiry, a new prepare, apply success/failure, login, and logout.
+- Rationale: optional provider configuration is a dependency boundary, not a whole-gateway startup dependency. Confirmation tokens are credentials and generic request/rendering state creates accidental disclosure paths.
+- Status: implemented with API and web behavioral regression coverage; staged deployment remains required.
+
+## 2026-07-31 — Defer explicit Log Analytics ownership to a dedicated migration
+
+- Decision: do not mix Application Insights workspace relinking into the broad hardening delivery. Implement an explicit `PerGB2018` workspace, retention, one-GB declarative safety cap, and cap alert in a separate test-first infrastructure PR.
+- Rationale: relinking is supported and current ingestion is very small, but historical telemetry is not copied. The old managed workspaces/resource groups must remain queryable for at least 90 days, and post-deployment validation must prove the new link before cleanup.
+- Status: planned; no telemetry resource was changed by this branch.
+
 ## 2026-07-31 — Validate Entra identifiers as GUIDs, not versioned UUIDs
 
 - Decision: Validate `OIDC_ALLOWED_OBJECT_IDS` and `OIDC_ALLOWED_TENANTS` with the Microsoft GUID shape only. Retain the stricter RFC-versioned UUID pattern for Bring list identifiers.

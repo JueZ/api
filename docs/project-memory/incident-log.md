@@ -1,12 +1,27 @@
 # Incident log
 
+## 2026-07-31 — Authenticated test smoke denied the dedicated service identity
+
+- Symptom: test run `30652787906` passed Function startup, exact-SHA health, the unauthenticated `401` gate, and CORS, then authenticated `/api/hello` returned `403` after a short-lived GitHub-OIDC-backed Entra token was minted.
+- Evidence: the effective client, tenant, issuer, requested API resource, tenant allowlist, and service-client allowlist correlate. The current Codex Azure identity is a service principal and Microsoft Graph denies its service-principal lookup, so it cannot inspect or repair app-role assignments.
+- Likely boundary: the dedicated smoke service principal does not currently present both required application roles (`catalogue.read,reddit.read`). This remains an evidence-backed hypothesis until a privileged operator or the new safe token-role preflight confirms it.
+- Prevention: token minting now validates the exact expected role names before exporting the token and reports only missing role names. Never restore retired roles, broaden API authorization, or bypass authenticated smoke.
+- Status: test is not accepted; telemetry/provenance did not run and production was not dispatched.
+
+## 2026-07-31 — Untracked local Codex environment contained plaintext credential material
+
+- Symptom: repository-adjacent local state included an untracked `.codex/environments/environment.toml` with credential material and permissions readable beyond the owner. The file was not present in Git history.
+- Containment: permissions were restricted to owner-only. Repository ignores now cover root `.codex`, `.azure`, local Function settings, and existing environment files; a preflight rejects sensitive tracked paths, unsafe local permissions, and high-confidence secret signatures in changed files without printing matched values.
+- Required response: rotate the affected GitHub, Azure, and provider credentials through their authoritative systems. Rotation/revocation was not possible from repository code and is not complete merely because the local file is ignored.
+- Safety: no credential value is recorded here or intentionally emitted in diagnostics.
+
 ## 2026-07-31 — Entra GUID was rejected as a non-versioned UUID at Function startup
 
 - Symptom: test-only run `30651802409` passed infrastructure, complete settings reconciliation, immutable Function activation, and frontend activation, but every Function route returned `404`. Application Insights recorded the fail-closed entry-point error `OIDC_ALLOWED_OBJECT_IDS must contain at least one valid user object ID in test`.
 - Root cause: runtime safety reused an RFC-versioned UUID regex for both Bring list UUIDs and Microsoft Entra object/tenant GUIDs. One valid configured Entra object GUID does not encode an RFC version marker, so the worker rejected the full configuration before registering routes.
 - Safety impact: the host served no application route; smoke, authenticated checks, telemetry acceptance, and provenance did not pass. No secret value was read. Production was not dispatched.
 - Repair: add a GUID-only shape for Entra `oid`/`tid` allowlists, retain strict UUID validation for Bring list IDs, and cover a syntactically valid non-versioned GUID.
-- Status: local repair pending PR gates and a fresh test-only deployment.
+- Status: resolved by PR #283. Test run `30652787906` proved runtime startup, exact-SHA health, unauthenticated `401`, and CORS before reaching the separate authenticated-service-role failure.
 
 ## 2026-07-31 — ARM boolean string casing blocked runtime-policy acceptance
 

@@ -1,5 +1,12 @@
 # Deployment log
 
+## 2026-07-31 — Entra GUID repair restored the runtime; authenticated service role still failed closed
+
+- PR #283 exact head passed CI, Policy Check, CodeQL, and the first-attempt trusted review/merge controller, then squash-merged as `66c1fa4136093dbb54c495825b14602113b7f99f`. Exact main CI run `30652618452` passed.
+- Test run `30652787906` passed Bicep, complete runtime-setting verification, immutable Function activation, activation-last frontend convergence, `/health` at the exact SHA, unauthenticated `/api/hello` returning `401`, and CORS.
+- GitHub OIDC successfully minted the dedicated short-lived service token, but authenticated `/api/hello` returned `403`. Telemetry, accepted test provenance, and production promotion did not run.
+- Repository hardening adds a pre-export role proof for `catalogue.read,reddit.read`; a privileged Entra operator must confirm/repair assignments before a new first-attempt test run.
+
 ## 2026-07-31 — Lowercase settings passed; Entra GUID startup check failed closed
 
 - PR #282 exact head `7c637f8b29caddc81eef1946f6208d90751f0b24` passed CI run `30651446037`, Policy Check `30651446063`, CodeQL `30651446510`, and first-attempt independent review/merge run `30651447011`, then squash-merged as `a1d2249c9b8b997229158220b3ac38751f1da668`.

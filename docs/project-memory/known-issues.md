@@ -1,15 +1,21 @@
 # Known issues and unresolved risks
 
-## Test deployment is not yet accepted after protected auth failed open
+## Test runtime is healthy; authenticated service-role acceptance remains blocked
 
-- PR #264 and main CI/policy passed, and test run `30629930683` deployed exact commit `4d82ed8491a32440ec5495049ba39e8f73c6bbac`, but the runtime gate failed: unauthenticated `GET /api/hello` returned `200` as `local-dev-placeholder` instead of `401`.
-- The Azure deployment received `authEnabled=true`, while the effective Function worker behaved as if `AUTH_ENABLED` was false or missing. The focused repair makes app settings an explicit resource and validates every Bicep-managed value, including the exact deployed Application Insights connection metadata and versioned Key Vault reference identities, after normal deployment and read-only before rollback. The streamed Azure response is never persisted, and secret values are never read or emitted.
-- The focused repair loads `dist/index.js`, executes `assertRuntimeSafety()` before registration, and independently rejects disabled authentication outside local development. Local regression coverage passes; live test deployment still must prove the behavior.
-- The first fresh live attempt, run `30650254586`, stopped before package deployment on an ARM circular dependency caused by listing and directly writing Function `appsettings` in one template. The follow-up secure nested-module boundary builds locally but still requires PR gates and a newly dispatched test run.
-- PR #281 merged that nested-module repair, and test run `30651053281` proved the ARM cycle resolved. The next fail-closed gate found that all seven `string(bool)` app settings were title-cased by ARM instead of matching the runtime's lowercase contract. The focused normalization repair still requires PR gates and a fresh test-only run.
-- PR #282 merged the lowercase repair, and test run `30651802409` passed the complete settings gate and both package deployments. Function startup then failed closed because Entra GUIDs were incorrectly constrained to RFC-versioned UUIDs. The focused GUID/UUID separation still requires PR gates and a fresh test-only run.
-- Test environment origin placeholders were corrected to the exact Function origin without reading or changing secrets. Infrastructure and workflow validation now reject `https://null` and the test frontend derives its API base from the deployed Function output.
-- Authenticated smoke, telemetry correlation, and accepted test provenance remain pending until the Entra GUID validation repair merges and deploys. Production must not be promoted from this release.
+- PR #283 and test run `30652787906` resolved the preceding startup/auth-setting chain. Exact-SHA health, unauthenticated `401`, and CORS now pass.
+- Authenticated `/api/hello` returns `403` for the dedicated GitHub-OIDC-backed smoke identity. Effective tenant/client/issuer/audience/allowlist wiring correlates, leaving Entra app-role assignment as the unverified boundary.
+- The current Codex Azure service principal lacks Microsoft Graph directory permission and cannot inspect or assign the required `catalogue.read,reddit.read` application roles. Use `scripts/configure-entra-service-oauth.sh` from a trusted checkout under a privileged Entra operator.
+- A new token-role preflight will confirm missing role names without logging claims. Test telemetry/provenance and production promotion remain blocked until a new first-attempt run passes every gate.
+
+## Local plaintext credentials require external rotation
+
+- An untracked local Codex environment file was contained with owner-only permissions and is now covered by repository ignore/hygiene policy; it was not found in Git history.
+- Ignoring and permission-hardening do not revoke credentials. Rotate every affected GitHub, Azure, and provider credential externally, then replace the local values through the supported environment setup without committing them.
+
+## Explicit Log Analytics workspace migration is deferred
+
+- Application Insights currently uses Azure-managed workspaces. A repository-owned workspace improves predictable retention/capping but relinking does not move historical telemetry.
+- Deliver the workspace, cap alert, read-back validation, and cost note in a dedicated test-first PR. Preserve old managed resource groups for at least 90 days before reviewed cleanup.
 
 ## Granular Entra configuration and new test SPA redirect need privileged verification
 

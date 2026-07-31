@@ -12,10 +12,8 @@ This skill is read-only by default. Do not change code, infrastructure, app sett
 This skill is for:
 
 - Azure Functions 500/503 startup/runtime issues
-- failed smoke tests
-- failed Deploy Test, Promote Production, or Rollback Production runs
-- Application Insights queries
-- Function App host/runtime state
+- failed smoke tests and Deploy Test, Promote Production, or Rollback Production runs
+- Application Insights queries and Function App host/runtime state
 - Azure Monitor Activity Logs
 - deployment logs
 - Storage package / run-from-package problems
@@ -217,6 +215,10 @@ az functionapp function list \
 ```
 
 If this fails while the app is unhealthy, note that function discovery may fail because the host is not starting.
+
+## Authenticated smoke 403 triage
+
+When `/health` and the unauthenticated `401` gate pass but authenticated smoke returns `403`, keep authorization fail-closed and read [Authenticated smoke 403 triage](references/authenticated-smoke-403.md) before diagnosing or repairing Entra controls.
 
 ## Application Insights diagnostics
 
