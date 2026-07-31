@@ -3,7 +3,7 @@
 ## Current delivery boundary
 
 - PR #264 is merged and its exact commit was deployed to test, but runtime acceptance failed on the unauthenticated auth gate after the two permitted deployment repair attempts.
-- Bootstrap PR #274 repaired the trusted reviewer. Focused runtime/bootstrap/settings PR #275 and successors #276/#277/#278/#279 each exhausted two bounded high-risk reviews without bypass. A fresh successor carries the accumulated package-only rollback, attempt rejection, correlation-bound artifact/provenance, immutable Function blob-version binding, activation-last frontend convergence, complete safety-policy, idempotent trigger, and exact CI authorization repairs.
+- Bootstrap PR #274 repaired the trusted reviewer. Focused runtime/bootstrap/settings PR #275 and successors #276/#277/#278/#279 each exhausted two bounded high-risk reviews without bypass. PR #280 carried the accumulated package-only rollback, attempt rejection, correlation-bound artifact/provenance, immutable Function blob-version binding, activation-last frontend convergence, complete safety-policy, idempotent trigger, and exact CI authorization repairs to main. Its first test-only run exposed an ARM app-settings cycle; a focused successor moves that write behind a secure nested Bicep module.
 - Production deployment is not authorized for this rollout and remains blocked.
 - Do not change or reveal the shared repository `OPENAI_API_KEY`; verify only that deployment wiring and secret references succeed.
 

@@ -1,5 +1,11 @@
 # Decision log
 
+## 2026-07-31 — Reconcile preserved Function settings through a secure nested deployment
+
+- Decision: Keep the parent-template read and strict allowlist of release-owned Function settings, but move the complete `Microsoft.Web/sites/config` write into a local nested Bicep module with a `secureObject` parameter.
+- Rationale: ARM rejects a template that both lists and directly writes the same `appsettings` child as circular. The nested deployment depends on the Function App and secret resources, receives only the complete intended settings object, and prevents secret-bearing values from being retained in deployment history.
+- Status: Implemented after test run `30650254586` failed before package mutation; PR validation and a fresh test-only dispatch remain pending.
+
 ## 2026-07-31 — Pin immutable Function versions and activate the frontend entrypoint last
 
 - Decision: A digest-addressed Function blob name is insufficient by itself. Resolve its Azure Blob version ID, download and hash that exact immutable version, put the encoded `versionid` in `WEBSITE_RUN_FROM_PACKAGE`, and verify the exact setting through the management plane before restart.
