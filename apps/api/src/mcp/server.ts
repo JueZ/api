@@ -8,7 +8,9 @@ import { createCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
 import { RedditThreadService } from '../shared/reddit/service.js';
 import type { RedditThreadOverviewRequest, RedditThreadRequest } from '../shared/reddit/types.js';
 import { WlhService } from '../shared/wlh/service.js';
+import { WlhConfigError } from '../shared/wlh/config.js';
 import { BringUpstreamError } from '../shared/bring/client.js';
+import { BringConfigError } from '../shared/bring/config.js';
 import {
   BringDisabledError,
   BringInputError,
@@ -33,6 +35,7 @@ import {
 } from './auth.js';
 import { getOperationDefinition, OPERATION_IDS } from '../application/operations/registry.js';
 import type { BringApplicationPort } from '../application/operations/bring/application.js';
+import { peekBringConfirmationOperation } from '../application/operations/bring/mutationSecurity.js';
 import { createBringApplication } from '../infrastructure/composition/bring.js';
 import type { AuthenticatedPrincipal } from '../application/authorization/types.js';
 import { registerBringTools } from './tools/bring.js';
@@ -47,6 +50,12 @@ export interface McpGatewayServices {
   reddit: Pick<RedditThreadService, 'fetchThread' | 'fetchThreadOverview'>;
   wlh: Pick<WlhService, 'search' | 'offer' | 'topCategories' | 'children'>;
   bring: BringApplicationPort;
+}
+
+export interface McpGatewayServiceFactories {
+  reddit(): McpGatewayServices['reddit'];
+  wlh(): McpGatewayServices['wlh'];
+  bring(): McpGatewayServices['bring'];
 }
 
 export interface McpRequestOptions {
@@ -873,6 +882,7 @@ type ToolSecurity = {
 type ToolSource = 'reddit' | 'wlh' | 'bring' | 'mcp';
 type SafeToolErrorCode =
   | 'invalid_arguments'
+  | 'provider_unavailable'
   | 'upstream_unavailable'
   | 'upstream_rate_limited'
   | 'not_found'
@@ -913,9 +923,9 @@ async function withToolErrorBoundary(
   try {
     return await action();
   } catch (error) {
-    const code = classifyToolError(error);
+    const code = classifyToolError(error, operationId);
     const upstreamStatus = error instanceof BringUpstreamError ? error.diagnostics?.upstreamStatus : undefined;
-    const message = safeToolErrorMessage(error, source);
+    const message = safeToolErrorMessage(code, source);
     const deterministic = buildMcpToolProblem(code, message, operationId, source, upstreamStatus);
     const operation = getOperationDefinition(operationId);
     const endpoint = `/mcp#${operation.mcp?.toolName ?? operationId}`;
@@ -942,10 +952,16 @@ async function withToolErrorBoundary(
   }
 }
 
-function classifyToolError(error: unknown): SafeToolErrorCode {
+function classifyToolError(error: unknown, operationId: string): SafeToolErrorCode {
   if (error instanceof BringInputError) return 'invalid_arguments';
   if (error instanceof BringNotFoundError) return 'not_found';
-  if (error instanceof BringDisabledError || error instanceof BringPolicyError) return 'policy_denied';
+  if (error instanceof WlhConfigError || error instanceof BringConfigError) return 'provider_unavailable';
+  if (error instanceof BringDisabledError) {
+    return operationId === OPERATION_IDS.bringListLists || operationId === OPERATION_IDS.bringGetItems
+      ? 'provider_unavailable'
+      : 'policy_denied';
+  }
+  if (error instanceof BringPolicyError) return 'policy_denied';
   if (error instanceof BringVersionConflictError || error instanceof BringIdempotencyConflictError) {
     return 'idempotency_conflict';
   }
@@ -970,9 +986,11 @@ function classifyToolError(error: unknown): SafeToolErrorCode {
   return 'upstream_unavailable';
 }
 
-function safeToolErrorMessage(error: unknown, source: ToolSource): string {
-  const code = classifyToolError(error);
+function safeToolErrorMessage(code: SafeToolErrorCode, source: ToolSource): string {
   if (code === 'invalid_arguments') return 'The tool arguments violate the Bring mutation contract.';
+  if (code === 'provider_unavailable') {
+    return `${source.toUpperCase()} integration is unavailable because its provider configuration is disabled or invalid.`;
+  }
   if (code === 'policy_denied') return 'The requested Bring operation is disabled or the list is not allowlisted.';
   if (code === 'idempotency_conflict') {
     return 'The operation ID or expected list version conflicts with durable mutation state.';
@@ -1072,6 +1090,7 @@ function buildMcpToolProblem(
 function toolErrorClassification(code: SafeToolErrorCode): RepairableErrorClassification {
   if (code === 'invalid_arguments' || code === 'unsupported_url') return 'caller_contract_violation';
   if (code === 'not_found') return 'resource_not_found';
+  if (code === 'provider_unavailable') return 'dependency_failure';
   if (code === 'policy_denied' || code === 'bring_authentication_failed') return 'authorization_context_mismatch';
   if (code === 'idempotency_conflict' || code === 'confirmation_invalid' || code === 'confirmation_expired')
     return 'semantic_precondition_missing';
@@ -1083,6 +1102,7 @@ function toolErrorClassification(code: SafeToolErrorCode): RepairableErrorClassi
 
 function toolErrorStatus(code: SafeToolErrorCode, upstreamStatus?: number): number {
   if (code === 'invalid_arguments' || code === 'unsupported_url') return 400;
+  if (code === 'provider_unavailable') return 503;
   if (code === 'policy_denied' || code === 'bring_authentication_failed') return 403;
   if (code === 'not_found') return 404;
   if (code === 'confirmation_expired') return 410;
@@ -1095,6 +1115,7 @@ function toolErrorStatus(code: SafeToolErrorCode, upstreamStatus?: number): numb
 
 function toolErrorTitle(code: SafeToolErrorCode, source: ToolSource): string {
   if (code === 'invalid_arguments' || code === 'unsupported_url') return 'MCP tool arguments are invalid';
+  if (code === 'provider_unavailable') return `${source.toUpperCase()} provider is unavailable`;
   if (code === 'not_found') return `${source.toUpperCase()} resource was not found`;
   if (code === 'policy_denied') return 'MCP operation is denied by policy';
   if (code === 'upstream_rate_limited') return `${source.toUpperCase()} rate limit reached`;
@@ -1107,6 +1128,9 @@ function toolErrorTitle(code: SafeToolErrorCode, source: ToolSource): string {
 function toolCallerInstruction(code: SafeToolErrorCode, operationId: string): string {
   if (code === 'invalid_arguments' || code === 'unsupported_url')
     return `Correct the arguments using the schema for ${operationId}, then retry. Do not invent fields.`;
+  if (code === 'provider_unavailable') {
+    return 'Do not change tool arguments or retry until the provider configuration or enablement state changes. Report the diagnostic ID.';
+  }
   if (code === 'not_found') return 'Verify the visible resource identifier and retry only with a corrected identifier.';
   if (code === 'policy_denied' || code === 'bring_authentication_failed')
     return 'Do not mutate tool arguments. Use an authorized identity or stop and report the access requirement.';
@@ -1195,14 +1219,64 @@ function safeAuthErrorDescription(auth: Extract<Awaited<ReturnType<typeof author
     : 'Missing, malformed, or invalid bearer token.';
 }
 
-function defaultServices(context: InvocationContext): McpGatewayServices {
+export function createDefaultMcpGatewayServices(
+  context: InvocationContext,
+  overrides: Partial<McpGatewayServiceFactories> = {},
+): McpGatewayServices {
+  const redditFactory = overrides.reddit ?? (() => new RedditThreadService());
+  const wlhFactory = overrides.wlh ?? (() => new WlhService());
+  const bringFactory =
+    overrides.bring ??
+    (() =>
+      createBringApplication({
+        warn: (message, details) => context.warn(message, details),
+      }));
   return {
-    reddit: new RedditThreadService(),
-    wlh: new WlhService(),
-    bring: createBringApplication({
-      warn: (message, details) => context.warn(message, details),
-    }),
+    reddit: lazyRedditService(redditFactory),
+    wlh: lazyWlhService(wlhFactory),
+    bring: lazyBringApplication(bringFactory),
   };
+}
+
+function defaultServices(context: InvocationContext): McpGatewayServices {
+  return createDefaultMcpGatewayServices(context);
+}
+
+function lazyRedditService(factory: McpGatewayServiceFactories['reddit']): McpGatewayServices['reddit'] {
+  const current = lazyProvider(factory);
+  return {
+    fetchThread: (request) => current().fetchThread(request),
+    fetchThreadOverview: (request) => current().fetchThreadOverview(request),
+  };
+}
+
+function lazyWlhService(factory: McpGatewayServiceFactories['wlh']): McpGatewayServices['wlh'] {
+  const current = lazyProvider(factory);
+  return {
+    search: (request) => current().search(request),
+    offer: (adId) => current().offer(adId),
+    topCategories: () => current().topCategories(),
+    children: (categoryId) => current().children(categoryId),
+  };
+}
+
+function lazyBringApplication(factory: McpGatewayServiceFactories['bring']): BringApplicationPort {
+  const current = lazyProvider(factory);
+  return {
+    listLists: () => current().listLists(),
+    getList: (listUuid) => current().getList(listUuid),
+    addItems: (principal, command, correlationId) => current().addItems(principal, command, correlationId),
+    prepareMutation: (principal, command, correlationId) =>
+      current().prepareMutation(principal, command, correlationId),
+    applyMutation: (principal, command, correlationId) => current().applyMutation(principal, command, correlationId),
+    getMutationOperation: (operationId) => current().getMutationOperation(operationId),
+    getConfirmationOperation: (confirmationToken) => peekBringConfirmationOperation(confirmationToken),
+  };
+}
+
+function lazyProvider<T>(factory: () => T): () => T {
+  let provider: T | undefined;
+  return () => (provider ??= factory());
 }
 
 function textResult(structuredContent: object, text: string): CallToolResult {

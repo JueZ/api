@@ -2,7 +2,11 @@ node_modules/
 dist/
 .angular/
 coverage/
-local.settings.json
+
+# Codex/Azure host state and developer configuration can contain credentials.
+/.codex/
+/.azure/
+**/local.settings.json
 .env
 .env.*
 !.env.example
@@ -13,7 +17,6 @@ infra/*.json
 apps/web/src/assets/openapi.yaml
 apps/web/src/app/openapi.generated.ts
 
-local.settings.json
 local-data/
 categories-marketplace*.json
 categories-marketplace*.json.gz

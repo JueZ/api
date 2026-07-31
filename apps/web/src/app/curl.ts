@@ -1,5 +1,12 @@
 import type { ApiOperationDoc } from './openapi';
-import { buildRequestBody, buildRequestHeaders, buildRequestUrl, type OperationFormValues } from './request-builder';
+import {
+  buildRequestBody,
+  buildRequestHeaders,
+  buildRequestUrl,
+  CONFIRMATION_TOKEN_FIELD,
+  CONFIRMATION_TOKEN_PLACEHOLDER,
+  type OperationFormValues,
+} from './request-builder';
 
 export const ACCESS_TOKEN_PLACEHOLDER = '<ACCESS_TOKEN>';
 
@@ -18,7 +25,16 @@ export function buildCurlCommand(args: {
   }
 
   if (operation.requestFields.length) {
-    parts.push('--data', shellQuote(JSON.stringify(buildRequestBody(operation, values))));
+    parts.push(
+      '--data',
+      shellQuote(
+        JSON.stringify(
+          buildRequestBody(operation, values, {
+            [CONFIRMATION_TOKEN_FIELD]: CONFIRMATION_TOKEN_PLACEHOLDER,
+          }),
+        ),
+      ),
+    );
   }
 
   return parts.join(' \\\n  ');

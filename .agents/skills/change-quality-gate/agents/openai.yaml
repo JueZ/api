@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Change Quality Gate'
+  short_description: 'Plan and prove safe repository changes'
+  default_prompt: 'Use $change-quality-gate to plan tests, documentation, and validation for this change.'

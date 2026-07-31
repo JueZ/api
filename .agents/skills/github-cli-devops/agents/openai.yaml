@@ -1,0 +1,4 @@
+interface:
+  display_name: 'GitHub CLI DevOps'
+  short_description: 'Review PRs and investigate GitHub delivery evidence'
+  default_prompt: 'Use $github-cli-devops for this pull request, Actions, or repository operation.'

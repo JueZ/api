@@ -130,6 +130,7 @@ permissions:
   contents: read
   id-token: write
   actions: read
+  attestations: read
   issues: write
 
 jobs:
@@ -195,7 +196,6 @@ jobs:
       REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
       REPAIRABLE_ERRORS_LLM_ENABLED: ${{ vars.REPAIRABLE_ERRORS_LLM_ENABLED }}
       REPAIRABLE_ERRORS_LLM_MODEL: ${{ vars.REPAIRABLE_ERRORS_LLM_MODEL }}
-      WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
       WLH_CATEGORY_VERSION: ${{ vars.WLH_CATEGORY_VERSION }}
       WLH_CATEGORY_BLOB_NAME: ${{ vars.WLH_CATEGORY_BLOB_NAME }}
       WLH_CATEGORY_BLOB_CONTAINER: ${{ vars.WLH_CATEGORY_BLOB_CONTAINER }}
@@ -215,7 +215,6 @@ jobs:
       BRING_AUDIT_CONTAINER: ${{ vars.BRING_AUDIT_CONTAINER }}
       DEPLOYED_AT_UTC: ${{ github.event.head_commit.timestamp || '' }}
       DEPLOYMENT_RUN_ID: ${{ github.run_id }}
-      GH_TOKEN: ${{ github.token }}
       ROLLBACK_REQUESTED: ${{ inputs.allowRollback }}
       ALLOW_ROLLBACK: >-
         ${{
@@ -516,6 +515,8 @@ jobs:
           node-version: '22'
       - name: Validate deployment configuration
         shell: bash
+        env:
+          WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
         run: |
           set -euo pipefail
           : "${AZURE_CLIENT_ID:?AZURE_CLIENT_ID repository variable is required}"
@@ -616,17 +617,11 @@ jobs:
           if [ "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" = "true" ]; then
             : "${REPAIRABLE_ERRORS_LLM_MODEL:?REPAIRABLE_ERRORS_LLM_MODEL repository variable is required when Repairable Error LLM diagnostics are enabled}"
           fi
-      - name: Azure OIDC login
-        uses: azure/login@2dd0bbf4064d5a1812889dc200bb8eed2597f82a # tag=v3
-        with:
-          client-id: ${{ env.AZURE_CLIENT_ID }}
-          tenant-id: ${{ env.AZURE_TENANT_ID }}
-          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
       - name: Install dependencies
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+          if [ -f package-lock.json ]; then npm ci --ignore-scripts; elif [ -f package.json ]; then npm install --ignore-scripts; fi
       - name: Download immutable CI release bundle
         if: ${{ !inputs.allowRollback }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
@@ -647,10 +642,25 @@ jobs:
           run-id: ${{ inputs.rollbackReleaseRunId }}
       - name: Verify immutable release bundle
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           release_dir="$RUNNER_TEMP/release"
           node scripts/verify-release-artifacts.mjs "$release_dir" "${SOURCE_REF:-${GITHUB_SHA}}" > "$RUNNER_TEMP/release-manifest-verified.json"
+          attested_artifacts=()
+          if [ "$ALLOW_ROLLBACK" != "true" ]; then
+            attested_artifacts=(functionapp.zip sbom.cdx.json frontend.tar.gz)
+          fi
+          for artifact in "${attested_artifacts[@]}"; do
+            gh attestation verify "$release_dir/$artifact" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "github.com/$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+              --source-digest "${SOURCE_REF:-${GITHUB_SHA}}" \
+              --source-ref refs/heads/main \
+              --deny-self-hosted-runners \
+              >/dev/null
+          done
           function_digest="$(jq -r '.artifacts.functionapp.sha256' "$release_dir/release-manifest.json")"
           frontend_digest="$(jq -r '.artifacts.frontend.sha256' "$release_dir/release-manifest.json")"
           sbom_digest="$(jq -r '.artifacts.sbom.sha256' "$release_dir/release-manifest.json")"
@@ -671,6 +681,12 @@ jobs:
               exit 1
             fi
           fi
+      - name: Azure OIDC login
+        uses: azure/login@2dd0bbf4064d5a1812889dc200bb8eed2597f82a # tag=v3
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
       - name: Deploy Bicep infrastructure
         if: ${{ !inputs.allowRollback }}
         id: infra
@@ -683,6 +699,7 @@ jobs:
           BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
           BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
           BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
+          WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
         run: |
           set -euo pipefail
           : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
@@ -716,58 +733,77 @@ jobs:
               monthly_budget_eur=15
             fi
 
+            deployment_parameters=(
+              "environmentName=$ENVIRONMENT_NAME"
+              "authEnabled=$AUTH_ENABLED"
+              "oidcIssuer=${OIDC_ISSUER:-}"
+              "oidcAudience=${OIDC_AUDIENCE:-}"
+              "oidcJwksUri=${OIDC_JWKS_URI:-}"
+              "oidcRequiredScopes=${OIDC_REQUIRED_SCOPES:-catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove}"
+              "oidcAllowedObjectIds=${OIDC_ALLOWED_OBJECT_IDS:-}"
+              "oidcAllowedSubjects=${OIDC_ALLOWED_SUBJECTS:-}"
+              "oidcAllowedAppObjectIds=${OIDC_ALLOWED_APP_OBJECT_IDS:-}"
+              "oidcAllowedClientIds=${OIDC_ALLOWED_CLIENT_IDS:-}"
+              "oidcAllowedDelegatedClientIds=${OIDC_ALLOWED_DELEGATED_CLIENT_IDS:-}"
+              "oidcAllowedTenants=${OIDC_ALLOWED_TENANTS:-}"
+              "authDebug=${AUTH_DEBUG:-false}"
+              "apiCorsAllowedOrigins=$api_cors_allowed_origins"
+              "mcpResourceOrigin=$MCP_RESOURCE_ORIGIN"
+              "mcpAllowedOrigins=$MCP_ALLOWED_ORIGINS"
+              "deploymentPrincipalObjectId=$AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID"
+              "operatorAlertEmail=$OPERATOR_ALERT_EMAIL"
+              "monthlyBudgetEur=$monthly_budget_eur"
+              "redditClientId=${REDDIT_CLIENT_ID:-}"
+              "redditOAuthSecret=${REDDIT_CLIENT_SECRET:-}"
+              "redditUserAgent=${REDDIT_USER_AGENT:-}"
+              "bringBaseUrl=${BRING_BASE_URL:-https://api.getbring.com/rest/}"
+              "bringClientApiKey=$BRING_CLIENT_API_KEY"
+              "bringCountry=${BRING_COUNTRY:-AT}"
+              "bringEmail=$BRING_EMAIL"
+              "bringPassword=$BRING_PASSWORD"
+              "bringEnabled=$BRING_ENABLED"
+              "bringAddEnabled=$BRING_ADD_ENABLED"
+              "bringDestructiveEnabled=$BRING_DESTRUCTIVE_ENABLED"
+              "bringExpectedAccountFingerprint=${BRING_EXPECTED_ACCOUNT_FINGERPRINT:-}"
+              "bringDefaultListUuid=${BRING_DEFAULT_LIST_UUID:-}"
+              "bringReadableListUuids=${BRING_READABLE_LIST_UUIDS:-}"
+              "bringWritableListUuids=${BRING_WRITABLE_LIST_UUIDS:-}"
+              "bringSessionCacheEnabled=${BRING_SESSION_CACHE_ENABLED:-true}"
+              "bringSessionCacheContainer=${BRING_SESSION_CACHE_CONTAINER:-bring-private}"
+              "bringSessionCacheBlob=${BRING_SESSION_CACHE_BLOB:-session-v1.json}"
+              "bringMutationContainer=${BRING_MUTATION_CONTAINER:-bring-mutations}"
+              "bringAuditContainer=${BRING_AUDIT_CONTAINER:-bring-audit}"
+              "bringConfirmationHmacKey=$BRING_CONFIRMATION_HMAC_KEY"
+              "bringMutationEncryptionKey=$BRING_MUTATION_ENCRYPTION_KEY"
+              "wlhBaseUrl=${WLH_BASE_URL:-}"
+              "wlhCategoryBlobContainer=${WLH_CATEGORY_BLOB_CONTAINER:-wlh-reference}"
+              "wlhCategoryBlobName=${WLH_CATEGORY_BLOB_NAME:-categories-marketplace.v1.json.gz}"
+              "openAiCredential=$openai_credential"
+              "repairableErrorsLlmEnabled=${REPAIRABLE_ERRORS_LLM_ENABLED:-false}"
+              "repairableErrorsLlmModel=${REPAIRABLE_ERRORS_LLM_MODEL:-}"
+            )
+
+            az deployment group validate \
+              --name "main-${ENVIRONMENT_NAME}-validate" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --template-file infra/main.bicep \
+              --parameters "${deployment_parameters[@]}" \
+              --output none
+
+            az deployment group what-if \
+              --name "main-${ENVIRONMENT_NAME}-what-if" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --template-file infra/main.bicep \
+              --parameters "${deployment_parameters[@]}" \
+              --result-format ResourceIdOnly \
+              --output none
+
             node scripts/assert-current-main.mjs
             deployment_outputs=$(az deployment group create \
               --name "main-${ENVIRONMENT_NAME}" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --template-file infra/main.bicep \
-              --parameters environmentName="$ENVIRONMENT_NAME" \
-                authEnabled="$AUTH_ENABLED" \
-                oidcIssuer="${OIDC_ISSUER:-}" \
-                oidcAudience="${OIDC_AUDIENCE:-}" \
-                oidcJwksUri="${OIDC_JWKS_URI:-}" \
-                oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove}" \
-                oidcAllowedObjectIds="${OIDC_ALLOWED_OBJECT_IDS:-}" \
-                oidcAllowedSubjects="${OIDC_ALLOWED_SUBJECTS:-}" \
-                oidcAllowedAppObjectIds="${OIDC_ALLOWED_APP_OBJECT_IDS:-}" \
-                oidcAllowedClientIds="${OIDC_ALLOWED_CLIENT_IDS:-}" \
-                oidcAllowedDelegatedClientIds="${OIDC_ALLOWED_DELEGATED_CLIENT_IDS:-}" \
-                oidcAllowedTenants="${OIDC_ALLOWED_TENANTS:-}" \
-                authDebug="${AUTH_DEBUG:-false}" \
-                apiCorsAllowedOrigins="$api_cors_allowed_origins" \
-                mcpResourceOrigin="$MCP_RESOURCE_ORIGIN" \
-                mcpAllowedOrigins="$MCP_ALLOWED_ORIGINS" \
-                deploymentPrincipalObjectId="$AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID" \
-                operatorAlertEmail="$OPERATOR_ALERT_EMAIL" \
-                monthlyBudgetEur="$monthly_budget_eur" \
-                redditClientId="${REDDIT_CLIENT_ID:-}" \
-                redditOAuthSecret="${REDDIT_CLIENT_SECRET:-}" \
-                redditUserAgent="${REDDIT_USER_AGENT:-}" \
-                bringBaseUrl="${BRING_BASE_URL:-https://api.getbring.com/rest/}" \
-                bringClientApiKey="$BRING_CLIENT_API_KEY" \
-                bringCountry="${BRING_COUNTRY:-AT}" \
-                bringEmail="$BRING_EMAIL" \
-                bringPassword="$BRING_PASSWORD" \
-                bringEnabled="$BRING_ENABLED" \
-                bringAddEnabled="$BRING_ADD_ENABLED" \
-                bringDestructiveEnabled="$BRING_DESTRUCTIVE_ENABLED" \
-                bringExpectedAccountFingerprint="${BRING_EXPECTED_ACCOUNT_FINGERPRINT:-}" \
-                bringDefaultListUuid="${BRING_DEFAULT_LIST_UUID:-}" \
-                bringReadableListUuids="${BRING_READABLE_LIST_UUIDS:-}" \
-                bringWritableListUuids="${BRING_WRITABLE_LIST_UUIDS:-}" \
-                bringSessionCacheEnabled="${BRING_SESSION_CACHE_ENABLED:-true}" \
-                bringSessionCacheContainer="${BRING_SESSION_CACHE_CONTAINER:-bring-private}" \
-                bringSessionCacheBlob="${BRING_SESSION_CACHE_BLOB:-session-v1.json}" \
-                bringMutationContainer="${BRING_MUTATION_CONTAINER:-bring-mutations}" \
-                bringAuditContainer="${BRING_AUDIT_CONTAINER:-bring-audit}" \
-                bringConfirmationHmacKey="$BRING_CONFIRMATION_HMAC_KEY" \
-                bringMutationEncryptionKey="$BRING_MUTATION_ENCRYPTION_KEY" \
-                wlhBaseUrl="${WLH_BASE_URL:-}" \
-                wlhCategoryBlobContainer="${WLH_CATEGORY_BLOB_CONTAINER:-wlh-reference}" \
-                wlhCategoryBlobName="${WLH_CATEGORY_BLOB_NAME:-categories-marketplace.v1.json.gz}" \
-                openAiCredential="$openai_credential" \
-                repairableErrorsLlmEnabled="${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" \
-                repairableErrorsLlmModel="${REPAIRABLE_ERRORS_LLM_MODEL:-}" \
+              --parameters "${deployment_parameters[@]}" \
               --query properties.outputs \
               -o json)
 
@@ -1174,6 +1210,8 @@ jobs:
             fi
 
             node scripts/assert-current-main.mjs
+            telemetry_evaluation_start="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "TELEMETRY_EVALUATION_START=$telemetry_evaluation_start" >> "$GITHUB_ENV"
             az functionapp config appsettings set \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --name "$EFFECTIVE_FUNCTIONAPP_NAME" \
@@ -1470,6 +1508,7 @@ jobs:
           export REQUIRE_TELEMETRY_CHECK=true
           export TELEMETRY_REQUIRE_SMOKE_CORRELATION=true
           export TELEMETRY_TIMESPAN_MINUTES=45
+          export TELEMETRY_EVALUATION_START="${TELEMETRY_EVALUATION_START:-}"
           export TELEMETRY_RESULTS_PATH="$smoke_dir/telemetry.json"
           npm run --silent ops:check-telemetry
           echo "TELEMETRY_RESULTS_PATH=$smoke_dir/telemetry.json" >> "$GITHUB_ENV"

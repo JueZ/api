@@ -31,7 +31,7 @@ Before the first split-storage cutover, copy existing WLH reference/session data
 ## Rollout
 
 1. Validate locally and in PR.
-2. Run Azure what-if against test.
+2. Let the non-rollback deployment workflow run ARM validation and Azure what-if against test using the exact same parameter array later passed to create. What-if uses `ResourceIdOnly` and suppresses command output so secure parameter values are not emitted.
 3. Deploy the exact main-CI artifact to test.
 4. Verify health SHA, auth, exact CORS/MCP origin, private/public storage boundaries, Key Vault references, Bring read-only policy, smokes, telemetry correlation, and release ledger.
 5. Optionally enable the GET-only Bring canary with its dedicated `bring.read` identity.

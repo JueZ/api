@@ -1,5 +1,3 @@
-import { formatBody } from './request-builder';
-
 export interface RetryPolicy {
   can_retry: boolean;
   same_request: boolean;
@@ -13,12 +11,18 @@ export interface RepairableProblem {
   status?: number;
   detail?: string;
   instance?: string;
+  rec_version?: string;
+  operation_id?: string;
   diagnostic_id?: string;
+  classification?: string;
+  repairable?: boolean;
+  confidence?: number;
   retry_policy?: RetryPolicy;
   repair_patch?: unknown[];
   repair_plan?: unknown[];
   caller_instruction?: string;
   safe_debug_summary?: string;
+  analysis_mode?: string;
 }
 
 export interface SafeProblemView {
@@ -39,16 +43,22 @@ const SAFE_PROBLEM_KEYS = [
   'status',
   'detail',
   'instance',
+  'rec_version',
+  'operation_id',
   'diagnostic_id',
+  'classification',
+  'repairable',
+  'confidence',
   'retry_policy',
   'repair_patch',
   'repair_plan',
   'caller_instruction',
   'safe_debug_summary',
+  'analysis_mode',
 ] as const;
 
 export function formatProblemResponse(body: unknown, fallbackStatus: number): SafeProblemView | null {
-  if (!isJsonObject(body)) {
+  if (!isRepairableProblemShape(body, fallbackStatus)) {
     return null;
   }
 
@@ -78,7 +88,7 @@ export function formatApiError(status: number, body: unknown): string {
   if (problem) {
     return `API returned ${problem.status}: ${problem.title}`;
   }
-  return `API returned ${status}: ${formatBody(body)}`;
+  return `API returned ${status}: response details were suppressed because they did not match the sanitized problem contract.`;
 }
 
 function formatOptionalJson(value: unknown): string {
@@ -91,4 +101,29 @@ function safeString(value: unknown): string {
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isRepairableProblemShape(value: unknown, fallbackStatus: number): value is Record<string, unknown> {
+  if (!isJsonObject(value) || !isJsonObject(value['retry_policy'])) return false;
+  const retryPolicy = value['retry_policy'];
+  return (
+    typeof value['type'] === 'string' &&
+    typeof value['title'] === 'string' &&
+    Number.isInteger(value['status']) &&
+    value['status'] === fallbackStatus &&
+    typeof value['detail'] === 'string' &&
+    typeof value['instance'] === 'string' &&
+    value['rec_version'] === '1.0' &&
+    typeof value['operation_id'] === 'string' &&
+    typeof value['diagnostic_id'] === 'string' &&
+    typeof value['classification'] === 'string' &&
+    typeof value['repairable'] === 'boolean' &&
+    typeof value['confidence'] === 'number' &&
+    Number.isFinite(value['confidence']) &&
+    typeof retryPolicy['can_retry'] === 'boolean' &&
+    typeof retryPolicy['same_request'] === 'boolean' &&
+    typeof value['caller_instruction'] === 'string' &&
+    typeof value['safe_debug_summary'] === 'string' &&
+    typeof value['analysis_mode'] === 'string'
+  );
 }

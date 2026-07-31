@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import {
   architectureFindings,
@@ -7,7 +9,13 @@ import {
   importsFrom,
   sourceArchitectureFindings,
 } from '../check-architecture.mjs';
-import { inspectDependencyFiles } from '../check-lockfile-policy.mjs';
+import { dependencyPairingFindings, inspectDependencyFiles } from '../check-lockfile-policy.mjs';
+import {
+  isSensitiveRepositoryPath,
+  repositoryHygieneFindings,
+  stagedSecretFindings,
+} from '../check-repository-hygiene.mjs';
+import { agentWorkflowContractFindings, loadAgentWorkflowDocuments } from '../check-agent-workflow-contracts.mjs';
 import { validateAgentSkills } from '../validate-agent-skills.mjs';
 
 test('repository architecture dependency directions are valid', () => {
@@ -92,6 +100,36 @@ test('repository agent skills have valid frontmatter and unique names', () => {
   assert.deepEqual(validateAgentSkills(), []);
 });
 
+test('repository agent workflows retain their durable delivery contracts', () => {
+  const documents = loadAgentWorkflowDocuments();
+  assert.deepEqual(agentWorkflowContractFindings(documents), []);
+  assert.ok(
+    agentWorkflowContractFindings({ ...documents, delivery: '' }).some((finding) =>
+      finding.includes('full branch diff'),
+    ),
+  );
+});
+
+test('agent skill validation rejects official metadata violations and broken local links', () => {
+  const root = mkdtempSync(join(tmpdir(), 'agent-skill-validation-'));
+  const skill = join(root, 'unsafe-skill');
+  mkdirSync(skill, { recursive: true });
+  writeFileSync(
+    join(skill, 'SKILL.md'),
+    `---\nname: Unsafe_Skill\ndescription: Use this skill to move <unsafe> changes.\nextra: true\n---\n\n# Unsafe\n\nSee [missing](references/missing.md).\n`,
+  );
+  try {
+    const findings = validateAgentSkills(root);
+    assert.ok(findings.some((finding) => finding.includes('name must be unsafe-skill')));
+    assert.ok(findings.some((finding) => finding.includes('lowercase letters, digits, and hyphens')));
+    assert.ok(findings.some((finding) => finding.includes('angle brackets')));
+    assert.ok(findings.some((finding) => finding.includes('unsupported frontmatter key extra')));
+    assert.ok(findings.some((finding) => finding.includes('local link does not exist')));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('dependency policy rejects lifecycle scripts and non-registry dependencies', () => {
   const findings = inspectDependencyFiles(
     {
@@ -103,4 +141,42 @@ test('dependency policy rejects lifecycle scripts and non-registry dependencies'
   assert.ok(findings.some((finding) => finding.includes('postinstall')));
   assert.ok(findings.some((finding) => finding.includes('non-registry')));
   assert.ok(findings.some((finding) => finding.includes('lockfileVersion 3')));
+});
+
+test('dependency policy requires package and lock files to change together in both npm projects', () => {
+  assert.deepEqual(dependencyPairingFindings(['package.json', 'package-lock.json']), []);
+  assert.deepEqual(dependencyPairingFindings(['apps/api/package.json']), [
+    'apps/api/package.json and apps/api/package-lock.json must change together',
+  ]);
+  assert.deepEqual(
+    dependencyPairingFindings(['package-lock.json', 'apps/api/package.json', 'apps/api/package-lock.json']),
+    ['package.json and package-lock.json must change together'],
+  );
+});
+
+test('repository hygiene rejects tracked local state and recognizes required ignore probes', () => {
+  assert.equal(isSensitiveRepositoryPath('.codex/environments/environment.toml'), true);
+  assert.equal(isSensitiveRepositoryPath('apps/api/local.settings.json'), true);
+  assert.equal(isSensitiveRepositoryPath('.env.example'), false);
+  const ignoredPaths = new Set([
+    '.codex/environments/environment.toml',
+    '.azure/accessTokens.json',
+    '.env',
+    '.env.local',
+    'local.settings.json',
+    'apps/api/local.settings.json',
+  ]);
+  assert.deepEqual(repositoryHygieneFindings({ trackedFiles: ['src/index.ts'], ignoredPaths }), []);
+  assert.ok(
+    repositoryHygieneFindings({ trackedFiles: ['.codex/environments/environment.toml'], ignoredPaths }).some(
+      (finding) => finding.includes('sensitive local path is tracked'),
+    ),
+  );
+});
+
+test('repository hygiene detects strong staged secret signatures without echoing their values', () => {
+  const simulatedToken = `gh${'p_'}abcdefghijklmnopqrstuvwxyz1234567890`;
+  const findings = stagedSecretFindings(`+token = "${simulatedToken}"\n`);
+  assert.deepEqual(findings, ['staged changes contain a github-token signature']);
+  assert.equal(findings.join('\n').includes('ghp_'), false);
 });

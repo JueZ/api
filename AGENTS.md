@@ -9,11 +9,12 @@ This repository uses autonomous PR-based delivery for routine work.
 For any task that changes repository files, Codex must:
 
 1. Work on a non-`main` branch.
-2. Commit the change.
-3. Open a new pull request or update the existing pull request for the branch.
-4. Run the relevant local checks before or during PR work when the environment allows.
-5. Monitor CI, policy, auto-merge, deployment, and smoke gates until they reach a terminal result or a concrete blocker is found.
-6. Report the PR URL, check/deployment status, repair attempts, blockers, and remaining risks.
+2. Use `change-quality-gate` to define behavior, risk, tests, documentation, and validation before implementation.
+3. Commit the change.
+4. Open a new pull request or update the existing pull request for the branch.
+5. Run the relevant local checks before or during PR work when the environment allows.
+6. Monitor CI, policy, auto-merge, deployment, and smoke gates until they reach a terminal result or a concrete blocker is found.
+7. Report the PR URL, check/deployment status, repair attempts, blockers, and remaining risks.
 
 Read-only investigations, explanations, and planning tasks do not require a branch, commit, or PR.
 
@@ -37,6 +38,7 @@ Before non-trivial work, especially architecture, auth, Azure, GitHub Actions, C
 
 Use repo skills for repeatable workflows:
 
+- `change-quality-gate` — use before and during every repository-changing task to require regression tests, durable documentation, risk analysis, validation, and delivery evidence.
 - `autonomous-pr-delivery` — use for every repository-changing task after implementing or committing changes, to push the branch, create/update the PR, monitor checks, and report delivery status.
 - `github-cli-devops` — use for GitHub CLI work: PRs, workflow runs, CI logs, labels, variables, branch protection, auto-merge, and GitHub Actions debugging.
 - `azure-cli-devops` — use for Azure CLI diagnostics, Bicep validation, Azure Functions, Storage, Entra/OIDC, RBAC, deployment debugging, and Azure cost-aware planning.
@@ -55,6 +57,8 @@ npm install
 npm run lint
 npm run type-check
 npm test
+npm run test:coverage
+npm run test:web
 npm run test:api
 npm run build
 npm run build:web
@@ -71,6 +75,9 @@ npm run ops:runtime-truth
 npm run ops:check-telemetry
 npm run ops:validate-release-ledger
 npm run ops:policy-guardrails
+npm run ops:policy-guardrails:worktree
+npm run ops:policy-guardrails:branch
+npm run ops:preflight-change
 npm run ops:triage-repair-issues
 ```
 
@@ -80,6 +87,16 @@ Use the smallest command set that validates the change. For example:
 - Frontend change: `npm run type-check`, `npm run build:web`, and relevant tests.
 - Infrastructure/workflow/security change: `npm run ops:policy-guardrails`, relevant workflow validation, and any affected build/test commands.
 - OpenAPI change: validate the changed contract and run affected API tests.
+
+## Definition of done
+
+- Bug fixes include a regression test that demonstrates the previous failure.
+- Observable behavior changes include appropriate positive, negative, boundary, authorization, and failure-path tests.
+- Contract, security, deployment, operational, or agent-governance changes update the canonical documentation and project memory when the knowledge is durable.
+- Generated contracts or documentation are regenerated and drift-checked with their source.
+- Formatting-only or comment-only changes may omit new tests, but the PR must state why behavior is unaffected.
+- If an automated test is impractical, the PR must state the exact limitation, compensating evidence, and remaining risk. A skipped check is never reported as passing.
+- Before commit, run `npm run ops:preflight-change` and `npm run ops:policy-guardrails:worktree`. Before push, run `npm run ops:policy-guardrails:branch` so the full branch diff is reviewed.
 
 If a command cannot run because credentials, network access, Azure CLI, GitHub CLI, or environment variables are unavailable, report that as a blocker or limitation. Do not treat skipped checks as passing.
 
@@ -132,24 +149,10 @@ Codex must not weaken these settings to make delivery easier.
 
 ## Required checks and gates
 
-Protected-branch required status checks, where supported by GitHub branch protection, must include at least:
-
-- `install`
-- `lint`
-- `type-check`
-- `unit tests`
-- `API tests`
-- `Angular build`
-- `Azure Functions build`
-- `OpenAPI validation`
-- `Bicep validation`
-- `security scan`
-- `secret scan`
-- `dependency audit`
-- `cost-policy check`
-- `guardrail policy check`
-- `CI complete`
-- `Policy complete`
+`.github/autonomous-policy.yml` is the authoritative protected-branch required-check list, including the expected
+GitHub App for each check. Do not maintain a second list in instructions. Use
+`npm run ops:render-branch-protection` to render a bootstrap payload and compare it with live branch protection before
+any authorized configuration change.
 
 Codex delivery checks to monitor for Codex PRs include:
 

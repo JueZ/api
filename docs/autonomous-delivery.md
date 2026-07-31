@@ -36,7 +36,7 @@ The live branch ruleset must require the exact names in `.github/autonomous-poli
 
 ## Build and delivery
 
-Main CI builds the Function, frontend source bundle, and CycloneDX SBOM once. The release manifest contains the full source SHA and SHA-256 digests; main artifacts receive build provenance attestations. Each environment then renders its approved runtime frontend configuration before deployment, updates the manifest and checksums with the rendered archive digest, and preserves the exact accepted production archive for rollback.
+Main CI builds the Function, frontend source bundle, and CycloneDX SBOM once. The release manifest contains the full source SHA and SHA-256 digests; main artifacts receive build provenance attestations. Before Azure login or mutation, deployment verifies the Function, SBOM, and (for normal promotion) frontend attestations against the exact `main` source SHA and `ci.yml` signer workflow, then verifies the checked-in release manifest. Each environment then renders its approved runtime frontend configuration before deployment, updates the manifest and checksums with the rendered archive digest, and preserves the exact accepted production archive for rollback.
 
 `Codex Main Delivery` is the only normal post-merge controller. It explicitly dispatches and waits for:
 

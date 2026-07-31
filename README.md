@@ -183,55 +183,21 @@ gh api \
   -F delete_branch_on_merge=true
 ```
 
-Protect `main` with the required checks. This JSON intentionally avoids organization-only restriction fields that
-can break personal repositories.
+Protect `main` with the required checks. `.github/autonomous-policy.yml` is the single source of truth; render the
+payload from it instead of maintaining another check list. The generated JSON intentionally avoids organization-only
+restriction fields that can break personal repositories.
 
 ```bash
+npm run --silent ops:render-branch-protection > branch-protection.json
 gh api \
   --method PUT \
   "repos/OWNER/REPO/branches/main/protection" \
   -H "Accept: application/vnd.github+json" \
-  --input - <<'JSON'
-{
-  "required_status_checks": {
-    "strict": true,
-    "contexts": [
-      "install",
-      "lint",
-      "type-check",
-      "unit tests",
-      "API tests",
-      "Angular build",
-      "Azure Functions build",
-      "OpenAPI validation",
-      "Bicep validation",
-      "security scan",
-      "secret scan",
-      "dependency audit",
-      "CI complete",
-      "cost-policy check",
-      "guardrail policy check",
-      "Policy complete"
-    ]
-  },
-  "enforce_admins": true,
-  "required_pull_request_reviews": {
-    "required_approving_review_count": 0,
-    "dismiss_stale_reviews": false,
-    "require_code_owner_reviews": false,
-    "require_last_push_approval": false
-  },
-  "restrictions": null,
-  "required_linear_history": true,
-  "allow_force_pushes": false,
-  "allow_deletions": false,
-  "block_creations": false,
-  "required_conversation_resolution": false,
-  "lock_branch": false,
-  "allow_fork_syncing": true
-}
-JSON
+  --input branch-protection.json
 ```
+
+Inspect the payload and live protection before applying it. Do not use this bootstrap command to weaken an existing
+ruleset or bypass a required check.
 
 ### 2. GitHub labels
 
@@ -486,6 +452,13 @@ Configure Codex non-secret variables:
 `CODEX_AZURE_TENANT_ID` is canonical for Codex setup, and `CODEX_GH_TOKEN` is canonical for Codex setup GitHub
 authentication. Do not use `GH_TOKEN` or `GITHUB_TOKEN` for Codex setup auth if you want `gh` to persist credentials.
 The setup script clears `GH_TOKEN` and `GITHUB_TOKEN` before running `gh auth login`.
+
+Store secret values only in the Codex secret store or another approved injected-secret mechanism. Never place literal
+credentials in a repository-local `.codex/` manifest, `.env` file, `local.settings.json`, documentation, or project
+memory. The repository ignores those local paths and `npm run ops:preflight-change` rejects tracked sensitive paths,
+unsafe permissions on known local secret files, and high-confidence secret signatures in staged changes. Run that
+preflight before every commit; GitHub's Gitleaks scan remains the full-history remote gate. Rotate any credential that
+was exposed locally to an unauthorized reader or in Git history.
 
 ### 13. Codex setup and maintenance scripts
 

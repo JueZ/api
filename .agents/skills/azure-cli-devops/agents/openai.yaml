@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Azure CLI DevOps'
+  short_description: 'Investigate and operate JueZ Azure resources safely'
+  default_prompt: 'Use $azure-cli-devops for this Azure infrastructure or deployment task.'

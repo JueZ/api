@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { handleMcpHttpRequest } from '../dist/mcp/server.js';
+import { createDefaultMcpGatewayServices, handleMcpHttpRequest } from '../dist/mcp/server.js';
 import { BringUpstreamError } from '../dist/shared/bring/client.js';
 
 const authEnv = {
@@ -101,6 +101,157 @@ test('MCP initialize and tools/list expose protected Bring reads and controlled 
       }
     }
   });
+});
+
+test('missing WLH configuration does not prevent MCP initialization or unrelated providers', async () => {
+  const stubs = stubServices();
+  await withEnv(
+    {
+      ...authEnv,
+      WLH_BASE_URL: undefined,
+      WLH_STORAGE_ACCOUNT_NAME: undefined,
+      WLH_CATEGORY_FILE: undefined,
+    },
+    async () => {
+      const services = createDefaultMcpGatewayServices(contextStub(), {
+        reddit: () => stubs.reddit,
+        bring: () => stubs.bring,
+      });
+
+      const initialize = await mcpRequest(
+        {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+        },
+        undefined,
+        services,
+      );
+      assert.equal(initialize.status, 200);
+
+      const reddit = await mcpCall('reddit_get_thread', { postId: 'abc' }, 'Bearer local-dev-token', services);
+      assert.equal(reddit.jsonBody.result.structuredContent.post.id, 'abc');
+
+      const bring = await mcpCall('bring_list_lists', {}, 'Bearer local-dev-token', services);
+      assert.equal(bring.jsonBody.result.structuredContent.source, 'bring');
+
+      const wlh = await mcpCall('wlh_categories_top', {}, 'Bearer local-dev-token', services);
+      assertProviderUnavailable(wlh, 'wlh');
+      assert.doesNotMatch(JSON.stringify(wlh.jsonBody), /WLH_BASE_URL|WLH_STORAGE_ACCOUNT_NAME|WLH_CATEGORY_FILE/);
+    },
+  );
+});
+
+test('missing Bring configuration does not prevent MCP initialization or unrelated providers', async () => {
+  const stubs = stubServices();
+  await withEnv(
+    {
+      ...authEnv,
+      BRING_ENABLED: undefined,
+      BRING_BASE_URL: undefined,
+      BRING_COUNTRY: undefined,
+      BRING_EMAIL: undefined,
+      BRING_CLIENT_API_KEY: undefined,
+      BRING_PASSWORD: undefined,
+    },
+    async () => {
+      const services = createDefaultMcpGatewayServices(contextStub(), {
+        reddit: () => stubs.reddit,
+        wlh: () => stubs.wlh,
+      });
+
+      const listed = await mcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, undefined, services);
+      assert.equal(listed.status, 200);
+      assert.ok(listed.jsonBody.result.tools.some((tool) => tool.name === 'bring_list_lists'));
+
+      const wlh = await mcpCall('wlh_categories_top', {}, 'Bearer local-dev-token', services);
+      assert.equal(wlh.jsonBody.result.structuredContent.categories[0].id, '10');
+
+      const reddit = await mcpCall('reddit_get_thread', { postId: 'abc' }, 'Bearer local-dev-token', services);
+      assert.equal(reddit.jsonBody.result.structuredContent.post.id, 'abc');
+
+      const bring = await mcpCall('bring_list_lists', {}, 'Bearer local-dev-token', services);
+      assertProviderUnavailable(bring, 'bring');
+      assert.doesNotMatch(
+        JSON.stringify(bring.jsonBody),
+        /BRING_BASE_URL|BRING_COUNTRY|BRING_EMAIL|BRING_CLIENT_API_KEY|BRING_PASSWORD/,
+      );
+    },
+  );
+});
+
+test('disabled Bring reads fail only Bring tools with a safe unavailable result', async () => {
+  const stubs = stubServices();
+  await withEnv(
+    {
+      ...authEnv,
+      BRING_ENABLED: 'false',
+      BRING_ADD_ENABLED: 'false',
+      BRING_DESTRUCTIVE_ENABLED: 'false',
+      BRING_BASE_URL: 'https://bring.test/rest/',
+      BRING_COUNTRY: 'AT',
+      BRING_EMAIL: 'disabled@example.test',
+      BRING_CLIENT_API_KEY: 'test-client-key',
+      BRING_PASSWORD: 'p',
+      BRING_SESSION_CACHE_ENABLED: 'false',
+    },
+    async () => {
+      const services = createDefaultMcpGatewayServices(contextStub(), {
+        reddit: () => stubs.reddit,
+        wlh: () => stubs.wlh,
+      });
+      const bring = await mcpCall('bring_get_items', { listUuid: bringListUuid }, 'Bearer local-dev-token', services);
+      assertProviderUnavailable(bring, 'bring');
+
+      const wlh = await mcpCall('wlh_categories_top', {}, 'Bearer local-dev-token', services);
+      assert.equal(wlh.jsonBody.result.structuredContent.categories[0].id, '10');
+    },
+  );
+});
+
+test('protected provider tools reject missing authentication before provider initialization', async () => {
+  const factoryCalls = { reddit: 0, wlh: 0, bring: 0 };
+  const services = createDefaultMcpGatewayServices(contextStub(), {
+    reddit: () => {
+      factoryCalls.reddit += 1;
+      throw new Error('Reddit provider factory must not run before authorization.');
+    },
+    wlh: () => {
+      factoryCalls.wlh += 1;
+      throw new Error('WLH provider factory must not run before authorization.');
+    },
+    bring: () => {
+      factoryCalls.bring += 1;
+      throw new Error('Bring provider factory must not run before authorization.');
+    },
+  });
+  await withEnv(
+    {
+      AUTH_ENABLED: 'true',
+      DEPLOYED_ENVIRONMENT_NAME: 'local',
+      OIDC_ISSUER: 'https://login.example.test/tenant/v2.0',
+      OIDC_AUDIENCE: 'api://catalogue-test',
+      OIDC_REQUIRED_SCOPES: 'catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove',
+      OIDC_ALLOWED_OBJECT_IDS: 'allowed-oid',
+      OIDC_ALLOWED_SUBJECTS: '',
+      OIDC_ALLOWED_APP_OBJECT_IDS: '',
+      OIDC_ALLOWED_CLIENT_IDS: '',
+      OIDC_ALLOWED_DELEGATED_CLIENT_IDS: '',
+      MCP_RESOURCE_ORIGIN: 'https://mcp.example.test',
+      MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
+    },
+    async () => {
+      for (const toolName of ['reddit_get_thread', 'wlh_categories_top', 'bring_list_lists']) {
+        const args = toolName === 'reddit_get_thread' ? { postId: 'abc' } : {};
+        const response = await mcpCall(toolName, args, undefined, services);
+        assert.equal(response.status, 200);
+        assert.equal(response.jsonBody.result.isError, true);
+        assert.equal(response.jsonBody.result.structuredContent.error, 'invalid_token');
+      }
+      assert.deepEqual(factoryCalls, { reddit: 0, wlh: 0, bring: 0 });
+    },
+  );
 });
 
 test('authenticated MCP hello returns safe user shape without full claims or token material', async () => {
@@ -508,6 +659,19 @@ function assertToolError(response, error, source = undefined) {
   assert.equal(problem.caller_instruction.length > 0, true);
   const serialized = JSON.stringify(response.jsonBody);
   assert.doesNotMatch(serialized, /Bearer|local-dev-token|claims|headers|cookie|secret|password|Authorization\s*:/i);
+}
+
+function assertProviderUnavailable(response, source) {
+  assertToolError(response, 'provider_unavailable', source);
+  const problem = response.jsonBody.result.structuredContent.repairable_problem;
+  assert.equal(problem.status, 503);
+  assert.equal(problem.classification, 'dependency_failure');
+  assert.equal(problem.retry_policy.can_retry, false);
+  assert.equal(problem.retry_policy.same_request, false);
+}
+
+function contextStub() {
+  return { invocationId: 'mcp-provider-isolation-test', warn: () => undefined };
 }
 
 function stubServices(calls = []) {

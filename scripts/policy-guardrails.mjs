@@ -92,7 +92,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error(`Autonomous policy validation failed:\n- ${policyErrors.join('\n- ')}`);
     process.exit(1);
   }
-  const baseRef = process.env.BASE_REF || process.argv[2] || 'HEAD~1';
+  const requestedScope = process.env.POLICY_DIFF_SCOPE || '';
+  const baseRef =
+    process.env.BASE_REF ||
+    process.argv[2] ||
+    (requestedScope === 'branch' ? git(['merge-base', 'HEAD', 'origin/main']).trim() : 'HEAD~1');
   const includeWorktree = process.env.INCLUDE_WORKTREE === 'true';
   const excludedPrefixes = (process.env.WORKTREE_EXCLUDE_PREFIXES ?? '')
     .split(',')

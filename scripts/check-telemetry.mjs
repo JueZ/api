@@ -23,10 +23,19 @@ export function sanitizeTelemetrySmokeRunId(value) {
   return sanitizeSmokeRunId(value) || '';
 }
 
-export function buildTelemetryQuery({ timespanMinutes, smokeRunId = '' }) {
+export function sanitizeTelemetryEvaluationStart(value) {
+  const raw = String(value ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(raw)) return '';
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString();
+}
+
+export function buildTelemetryQuery({ timespanMinutes, smokeRunId = '', evaluationStart = '' }) {
   const minutes = parsePositiveInt(timespanMinutes, 30);
   const safeSmokeRunId = sanitizeTelemetrySmokeRunId(smokeRunId);
-  return `let since = ago(${minutes}m);\nlet smokeRunId = '${safeSmokeRunId}';\nlet recentExceptions = toscalar(\n  exceptions\n  | where timestamp > since\n  | count\n);\nlet recent5xx = toscalar(\n  requests\n  | where timestamp > since\n  | where toint(resultCode) >= 500\n  | count\n);\nlet failedRequests = toscalar(\n  requests\n  | where timestamp > since\n  | where success == false and toint(resultCode) >= 500\n  | count\n);\nlet smokeTraces = toscalar(\n  traces\n  | where timestamp > since\n  | where smokeRunId != ''\n  | where tostring(customDimensions.smoke_run_id) == smokeRunId\n      or tostring(customDimensions['smoke_run_id']) == smokeRunId\n      or tostring(customDimensions) has smokeRunId\n      or message has smokeRunId\n  | count\n);\nlet smokeRequests = toscalar(\n  requests\n  | where timestamp > since\n  | where smokeRunId != ''\n  | where tostring(customDimensions.smoke_run_id) == smokeRunId\n      or tostring(customDimensions['smoke_run_id']) == smokeRunId\n      or tostring(customDimensions) has smokeRunId\n      or name has smokeRunId\n  | count\n);\nprint\n  exceptions=recentExceptions,\n  http5xx=recent5xx,\n  failedRequests=failedRequests,\n  smokeTraceCount=smokeTraces,\n  smokeRequestCount=smokeRequests,\n  smokeEvidenceCount=smokeTraces + smokeRequests`;
+  const safeEvaluationStart = sanitizeTelemetryEvaluationStart(evaluationStart);
+  const since = safeEvaluationStart ? `datetime(${safeEvaluationStart})` : `ago(${minutes}m)`;
+  return `let since = ${since};\nlet smokeRunId = '${safeSmokeRunId}';\nlet recentExceptions = toscalar(\n  exceptions\n  | where timestamp >= since\n  | count\n);\nlet recent5xx = toscalar(\n  requests\n  | where timestamp >= since\n  | where toint(resultCode) >= 500\n  | count\n);\nlet failedRequests = toscalar(\n  requests\n  | where timestamp >= since\n  | where success == false and toint(resultCode) >= 500\n  | count\n);\nlet smokeTraces = toscalar(\n  traces\n  | where timestamp >= since\n  | where smokeRunId != ''\n  | where tostring(customDimensions.smoke_run_id) == smokeRunId\n      or tostring(customDimensions['smoke_run_id']) == smokeRunId\n      or tostring(customDimensions) has smokeRunId\n      or message has smokeRunId\n  | count\n);\nlet smokeRequests = toscalar(\n  requests\n  | where timestamp >= since\n  | where smokeRunId != ''\n  | where tostring(customDimensions.smoke_run_id) == smokeRunId\n      or tostring(customDimensions['smoke_run_id']) == smokeRunId\n      or tostring(customDimensions) has smokeRunId\n      or name has smokeRunId\n  | count\n);\nprint\n  exceptions=recentExceptions,\n  http5xx=recent5xx,\n  failedRequests=failedRequests,\n  smokeTraceCount=smokeTraces,\n  smokeRequestCount=smokeRequests,\n  smokeEvidenceCount=smokeTraces + smokeRequests`;
 }
 
 export function parseAzureMonitorQueryResult(parsed) {
@@ -152,6 +161,7 @@ export async function runTelemetryCheck({
   const failClosed = parseBoolean(env.REQUIRE_TELEMETRY_CHECK, false) || environmentName === 'prod';
   const requireSmokeCorrelation = parseBoolean(env.TELEMETRY_REQUIRE_SMOKE_CORRELATION, environmentName === 'prod');
   const timespanMinutes = parsePositiveInt(env.TELEMETRY_TIMESPAN_MINUTES, 30);
+  const evaluationStart = sanitizeTelemetryEvaluationStart(env.TELEMETRY_EVALUATION_START);
   const maxAttempts = parsePositiveInt(env.TELEMETRY_QUERY_RETRIES, 6);
   const retryDelayMs = parsePositiveInt(env.TELEMETRY_QUERY_RETRY_DELAY_MS, 10_000);
   const outputPath = env.TELEMETRY_RESULTS_PATH || '';
@@ -162,6 +172,7 @@ export async function runTelemetryCheck({
     smokeRunId: smokeRunId || undefined,
     checkedAt: now().toISOString(),
     timespanMinutes,
+    evaluationStart: evaluationStart || undefined,
     checks: {},
   };
 
@@ -177,7 +188,7 @@ export async function runTelemetryCheck({
     return finish({ ...baseResult, ...decision, checks: decision.checks }, outputPath);
   }
 
-  const query = buildTelemetryQuery({ timespanMinutes, smokeRunId });
+  const query = buildTelemetryQuery({ timespanMinutes, smokeRunId, evaluationStart });
   let finalDecision;
   let lastBlockedReason = '';
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {

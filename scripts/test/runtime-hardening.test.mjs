@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   buildTelemetryQuery,
   parseAzureMonitorQueryResult,
+  sanitizeTelemetryEvaluationStart,
   sanitizeTelemetrySmokeRunId,
   telemetryDecision,
   shouldRetryTelemetry,
@@ -134,6 +135,18 @@ test('telemetry KQL sanitizes smoke run IDs', () => {
   assert.ok(query.includes("let smokeRunId = 'smoke-prod-drop';"));
   assert.ok(query.includes('smokeTraceCount'));
   assert.ok(query.includes('smokeRequestCount'));
+});
+
+test('telemetry KQL can scope runtime errors to the current deployment generation', () => {
+  assert.equal(sanitizeTelemetryEvaluationStart('2026-07-31T17:30:00Z'), '2026-07-31T17:30:00.000Z');
+  assert.equal(sanitizeTelemetryEvaluationStart('2026-07-31T17:30:00Z); drop table requests'), '');
+  const query = buildTelemetryQuery({
+    timespanMinutes: 45,
+    evaluationStart: '2026-07-31T17:30:00Z',
+  });
+  assert.ok(query.includes('let since = datetime(2026-07-31T17:30:00.000Z);'));
+  assert.ok(query.includes('where timestamp >= since'));
+  assert.equal(query.includes('ago(45m)'), false);
 });
 
 test('telemetry parser reads Azure Monitor output by column name', () => {

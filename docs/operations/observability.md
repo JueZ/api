@@ -45,10 +45,12 @@ export AZURE_CORE_OUTPUT=none
 Production Function App state can be inspected with a narrow query:
 
 ```bash
-az functionapp show \
+az resource show \
   --resource-group rg-api-prod \
+  --resource-type Microsoft.Web/sites \
   --name func-api-catalogue-prod-bfjstshehpbfk \
-  --query "{name:name,state:state,defaultHostName:defaultHostName,kind:kind,linuxFxVersion:siteConfig.linuxFxVersion,identityType:identity.type}" \
+  --api-version 2023-12-01 \
+  --query "{name:name,state:properties.state,defaultHostName:properties.defaultHostName,kind:kind,linuxFxVersion:properties.siteConfig.linuxFxVersion,identityType:identity.type}" \
   --output table
 ```
 
@@ -112,6 +114,20 @@ az resource list \
 
 Use recent, narrow KQL and project only safe fields. Do not select full `customDimensions` when it may contain headers or tokens.
 
+Start with an aggregate baseline that exposes no payloads, messages, URLs, user identifiers, or custom dimensions:
+
+```kusto
+let since = ago(30m);
+print
+  requestCount=toscalar(requests | where timestamp > since | count),
+  failedRequestCount=toscalar(requests | where timestamp > since and success == false | count),
+  serverErrorCount=toscalar(requests | where timestamp > since and toint(resultCode) between (500 .. 599) | count),
+  exceptionCount=toscalar(exceptions | where timestamp > since | count),
+  failedDependencyCount=toscalar(dependencies | where timestamp > since and success == false | count)
+```
+
+Only move to detailed event projections after the aggregate counts identify a relevant signal.
+
 Recent failed requests:
 
 ```kusto
@@ -148,7 +164,7 @@ CLI query shape:
 
 ```bash
 az monitor app-insights query \
-  --app <application-insights-app-id-or-name> \
+  --apps <application-insights-app-id-or-name> \
   --analytics-query "<KQL>" \
   --offset 30m \
   --output table
@@ -186,6 +202,17 @@ Activity Logs explain Azure management-plane operations. They are not applicatio
 ## Storage and run-from-package diagnostics
 
 Inspect package storage without printing URLs or credentials.
+
+Resolve the release account by tag and require exactly one match:
+
+```bash
+az storage account list \
+  --resource-group <resource-group> \
+  --query "sort([?tags.purpose=='immutable-release-packages'].name)" \
+  --output tsv
+```
+
+Zero or multiple matches indicate configuration drift. Do not query an arbitrary or first-listed storage account.
 
 List container names:
 
@@ -270,4 +297,4 @@ scripts/collect-azure-diagnostics.sh test
 scripts/collect-azure-diagnostics.sh prod
 ```
 
-The script prints resource group state, Function App state, safe app setting names, recent failed Activity Log entries, Application Insights resource names, and package artifact metadata. It does not deploy, mutate resources, or print app setting values.
+The script prints resource group state, Function App state, safe app setting names, recent failed Activity Log entries, aggregate Application Insights health counts, and package artifact metadata from the uniquely tagged immutable-release account. It does not deploy, mutate resources, or print app setting values, telemetry messages/payloads/custom dimensions, or credential-bearing URLs.

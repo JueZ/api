@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateReleaseLedger } from '../validate-release-ledger.mjs';
+import { releaseLedgerSchema, validateReleaseLedger, validateSchemaValue } from '../validate-release-ledger.mjs';
+import { writeReleaseLedger } from '../write-release-ledger.mjs';
 import { parseRepairIssueBody, decideRepairIssueAction } from '../triage-repair-issues.mjs';
 import { forbiddenDiffFindings, highRiskPaths } from '../policy-guardrails.mjs';
 import {
@@ -49,6 +50,45 @@ test('release ledger validation accepts required runtime truth fields', () => {
       'deliveryCorrelation does not match the expected workflow dispatch',
     ),
   );
+});
+
+test('release ledger writer output satisfies the published JSON Schema contract', async (t) => {
+  const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const tempDir = await mkdtemp(join(tmpdir(), 'release-ledger-contract-'));
+  t.after(() => rm(tempDir, { recursive: true, force: true }));
+  const out = join(tempDir, 'release-ledger.json');
+  const checkPath = join(tempDir, 'check.json');
+  await import('node:fs/promises').then(({ writeFile }) => writeFile(checkPath, '{"status":"passed"}\n'));
+  await writeReleaseLedger({
+    env: {
+      RELEASE_LEDGER_PATH: out,
+      ENVIRONMENT_NAME: 'test',
+      EXPECTED_DEPLOYED_COMMIT_SHA: 'a'.repeat(40),
+      DEPLOYED_SOURCE_REF: 'a'.repeat(40),
+      GITHUB_RUN_ID: '123',
+      DELIVERY_CORRELATION: 'delivery-12345678',
+      EFFECTIVE_FUNCTIONAPP_NAME: 'func-test',
+      API_BASE_URL: 'https://example.test',
+      RELEASE_FUNCTION_SHA256: 'b'.repeat(64),
+      RELEASE_FRONTEND_SHA256: 'c'.repeat(64),
+      RELEASE_SBOM_SHA256: 'd'.repeat(64),
+      SMOKE_RUN_ID: 'smoke-test-1',
+      SMOKE_RESULTS_PATH: checkPath,
+      AUTH_SMOKE_RESULTS_PATH: checkPath,
+      TELEMETRY_RESULTS_PATH: checkPath,
+    },
+    argv: [],
+  });
+  const ledger = JSON.parse(await readFile(out, 'utf8'));
+  assert.deepEqual(validateSchemaValue(ledger, releaseLedgerSchema), []);
+  assert.deepEqual(validateReleaseLedger(ledger), []);
+  assert.deepEqual(releaseLedgerSchema.properties.artifacts.required, [
+    'functionappSha256',
+    'frontendSha256',
+    'sbomSha256',
+  ]);
 });
 
 test('repair issue parser finds PRs and workflow runs', () => {

@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Azure Observability Diagnostics'
+  short_description: 'Diagnose Azure runtime and deployment failures safely'
+  default_prompt: 'Use $azure-observability-diagnostics to investigate this runtime or deployment failure.'

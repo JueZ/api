@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Autonomous PR Delivery'
+  short_description: 'Deliver repository changes through verified PR gates'
+  default_prompt: 'Use $autonomous-pr-delivery to publish and verify this repository change.'

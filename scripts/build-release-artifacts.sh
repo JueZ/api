@@ -17,6 +17,7 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$output_dir"
+output_dir="$(cd "$output_dir" && pwd -P)"
 rm -f \
   "$output_dir/functionapp.zip" \
   "$output_dir/frontend.tar.gz" \
@@ -33,6 +34,28 @@ cp \
   "$function_stage/"
 cp -R "$repository_root/apps/api/dist" "$function_stage/dist"
 npm ci --omit=dev --ignore-scripts --prefix "$function_stage"
+
+# Import the exact production-only staged package with fail-closed deployment
+# settings. This catches dependencies that exist only in the root workspace and
+# composition-root/indexing regressions before the archive can be published.
+DEPLOYED_ENVIRONMENT_NAME=test \
+AUTH_ENABLED=true \
+OIDC_ISSUER=https://login.example.test/tenant/v2.0 \
+OIDC_AUDIENCE=api://catalogue-test \
+OIDC_REQUIRED_SCOPES=catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove \
+# Entra object and tenant IDs are GUID-shaped identifiers; they are not
+# guaranteed to encode RFC UUID version or variant marker bits. Keep these
+# production-package probes deliberately non-versioned so the release build
+# exercises the same identifier contract as a real Entra configuration.
+OIDC_ALLOWED_OBJECT_IDS=11111111-1111-0000-0000-111111111111 \
+OIDC_ALLOWED_TENANTS=22222222-2222-0000-0000-222222222222 \
+API_CORS_ALLOWED_ORIGINS=https://web.example.test \
+MCP_RESOURCE_ORIGIN=https://api.example.test \
+MCP_ALLOWED_ORIGINS=https://chatgpt.com \
+BRING_ENABLED=false \
+BRING_ADD_ENABLED=false \
+BRING_DESTRUCTIVE_ENABLED=false \
+node "$function_stage/dist/index.js"
 
 (
   cd "$function_stage"
@@ -57,8 +80,8 @@ tar \
   .
 
 (
-  cd "$repository_root"
-  npm sbom --sbom-format cyclonedx > "$output_dir/sbom.cdx.json"
+  cd "$function_stage"
+  npm sbom --omit=dev --sbom-format cyclonedx > "$output_dir/sbom.cdx.json"
 )
 
 (

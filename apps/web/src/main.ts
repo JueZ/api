@@ -2,30 +2,33 @@ import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/c
 import { bootstrapApplication } from '@angular/platform-browser';
 import type { AccountInfo } from '@azure/msal-browser';
 import { acquireAccessToken, createMsalClient, initializeMsal } from './app/auth';
+import {
+  BringConfirmationVault,
+  isBringMutationOperation,
+  isSucceededBringMutationResponse,
+  type BringMutationOperation,
+  type PendingBringConfirmation,
+} from './app/bring-confirmation';
 import { buildCurlCommand } from './app/curl';
 import { buildApiOperations, parseOpenApiDocument, type ApiOperationDoc, type SchemaFieldDoc } from './app/openapi';
+import { resolveOperationScope } from './app/operation-scope';
 import { formatApiError, formatProblemResponse, type SafeProblemView } from './app/problem-format';
 import {
   buildInitialBody,
   buildRequestBody,
   buildRequestHeaders,
   buildRequestUrl,
+  CONFIRMATION_TOKEN_FIELD,
   formatBody,
+  isSensitiveRequestFieldName,
   parseJsonOrText,
+  withoutSensitiveFormValues,
 } from './app/request-builder';
 import { readRuntimeConfig } from './app/runtime-config';
 
 const OPENAPI_ASSET_URL = 'assets/openapi.yaml';
 const config = readRuntimeConfig();
 const msalClient = createMsalClient(config);
-
-interface PendingBringConfirmation {
-  operationId: string;
-  operation: 'complete' | 'remove';
-  listPseudonym: string;
-  itemCount: number;
-  expiresAt: string;
-}
 
 @Component({
   selector: 'app-root',
@@ -217,45 +220,47 @@ interface PendingBringConfirmation {
               </label>
             }
             @for (field of operation.requestFields; track field.name) {
-              <label class="field">
-                <span
-                  >{{ field.name }}
-                  @if (field.required) {
-                    <em>(required)</em>
-                  }
-                </span>
-                @if (field.enumValues.length) {
-                  <select
-                    [value]="inputValue(operation.id, field.name)"
-                    (change)="setInputValue(operation.id, field.name, $any($event.target).value)"
-                  >
-                    @for (value of field.enumValues; track value) {
-                      <option [value]="value">{{ value }}</option>
+              @if (!isSensitiveRequestField(field.name)) {
+                <label class="field">
+                  <span
+                    >{{ field.name }}
+                    @if (field.required) {
+                      <em>(required)</em>
                     }
-                  </select>
-                } @else if (field.inputType === 'checkbox') {
-                  <input
-                    type="checkbox"
-                    [checked]="inputValue(operation.id, field.name) === 'true'"
-                    (change)="setInputValue(operation.id, field.name, $any($event.target).checked ? 'true' : 'false')"
-                  />
-                } @else if (field.inputType === 'textarea') {
-                  <textarea
-                    rows="8"
-                    [value]="inputValue(operation.id, field.name)"
-                    (input)="setInputValue(operation.id, field.name, $any($event.target).value)"
-                  ></textarea>
-                } @else {
-                  <input
-                    [type]="field.inputType"
-                    [min]="field.inputType === 'number' ? minimumFor(field) : null"
-                    [max]="field.inputType === 'number' ? maximumFor(field) : null"
-                    [value]="inputValue(operation.id, field.name)"
-                    (input)="setInputValue(operation.id, field.name, $any($event.target).value)"
-                  />
-                }
-                <small>{{ field.description }}</small>
-              </label>
+                  </span>
+                  @if (field.enumValues.length) {
+                    <select
+                      [value]="inputValue(operation.id, field.name)"
+                      (change)="setInputValue(operation.id, field.name, $any($event.target).value)"
+                    >
+                      @for (value of field.enumValues; track value) {
+                        <option [value]="value">{{ value }}</option>
+                      }
+                    </select>
+                  } @else if (field.inputType === 'checkbox') {
+                    <input
+                      type="checkbox"
+                      [checked]="inputValue(operation.id, field.name) === 'true'"
+                      (change)="setInputValue(operation.id, field.name, $any($event.target).checked ? 'true' : 'false')"
+                    />
+                  } @else if (field.inputType === 'textarea') {
+                    <textarea
+                      rows="8"
+                      [value]="inputValue(operation.id, field.name)"
+                      (input)="setInputValue(operation.id, field.name, $any($event.target).value)"
+                    ></textarea>
+                  } @else {
+                    <input
+                      [type]="field.inputType"
+                      [min]="field.inputType === 'number' ? minimumFor(field) : null"
+                      [max]="field.inputType === 'number' ? maximumFor(field) : null"
+                      [value]="inputValue(operation.id, field.name)"
+                      (input)="setInputValue(operation.id, field.name, $any($event.target).value)"
+                    />
+                  }
+                  <small>{{ field.description }}</small>
+                </label>
+              }
             }
             <div class="button-row">
               <button
@@ -409,6 +414,12 @@ export class AppComponent {
   protected readonly operationProblems = signal<Record<string, SafeProblemView | null>>({});
   protected readonly copyStatuses = signal<Record<string, string>>({});
   protected readonly pendingBringConfirmation = signal<PendingBringConfirmation | null>(null);
+  private readonly bringConfirmationVault = new BringConfirmationVault({
+    onClear: () => {
+      this.pendingBringConfirmation.set(null);
+      this.clearBringApplyForm();
+    },
+  });
   protected readonly canUseAuth = computed(() => Boolean(msalClient && config.authApiScope));
   protected readonly isSignedIn = computed(() => this.activeAccount() !== null);
   protected readonly statusMessage = computed(() => {
@@ -459,10 +470,12 @@ export class AppComponent {
     }
 
     this.clearAllErrors();
+    this.clearPendingBringConfirmation();
     await msalClient.loginRedirect({ scopes: [config.authApiScope] });
   }
 
   async logout(): Promise<void> {
+    this.clearPendingBringConfirmation();
     if (!msalClient) {
       return;
     }
@@ -480,6 +493,7 @@ export class AppComponent {
   }
 
   setInputValue(operationId: string, fieldName: string, value: string): void {
+    if (isSensitiveRequestFieldName(fieldName)) return;
     this.formValues.update((current) => ({
       ...current,
       [operationId]: {
@@ -519,6 +533,10 @@ export class AppComponent {
     return match ? Number(match[1]) : null;
   }
 
+  isSensitiveRequestField(fieldName: string): boolean {
+    return isSensitiveRequestFieldName(fieldName);
+  }
+
   operationScopeMessage(operation: ApiOperationDoc): string {
     const scopes = operation.requiredScopes.length
       ? operation.requiredScopes.join(' or ')
@@ -540,10 +558,30 @@ export class AppComponent {
     ) {
       return;
     }
+    if (operation.id === 'bringPrepareItemMutation') {
+      this.clearPendingBringConfirmation();
+    }
     this.setOperationLoading(operation.id, true);
     this.clearOperationMessages(operation.id);
 
     try {
+      const values = this.formValues()[operation.id] ?? {};
+      const activeBringConfirmation =
+        operation.id === 'bringApplyItemMutation' ? this.bringConfirmationVault.active() : null;
+      if (operation.id === 'bringApplyItemMutation' && !activeBringConfirmation) {
+        throw new Error('Prepare a new Bring mutation before applying it.');
+      }
+      let bringMutationOperation: BringMutationOperation | undefined;
+      if (operation.id === 'bringPrepareItemMutation') {
+        const requestedOperation = values['operation'];
+        if (!isBringMutationOperation(requestedOperation)) {
+          throw new Error('Choose complete or remove before preparing the Bring mutation.');
+        }
+        bringMutationOperation = requestedOperation;
+      } else if (activeBringConfirmation) {
+        bringMutationOperation = activeBringConfirmation.operation;
+      }
+
       let accessToken: string | undefined;
       if (operation.requiresAuth) {
         if (!msalClient || !config.authApiScope) {
@@ -558,16 +596,23 @@ export class AppComponent {
         accessToken = await acquireAccessToken({
           msalClient,
           account,
-          scope: resolveOperationScope(operation, config.authApiScope),
+          scope: resolveOperationScope(operation, config.authApiScope, bringMutationOperation),
         });
       }
 
-      const values = this.formValues()[operation.id] ?? {};
       const headers = buildRequestHeaders(operation, accessToken);
       const init: RequestInit = { method: operation.method.toUpperCase(), headers };
       const requestUrl = buildRequestUrl(operation, values, config.apiBaseUrl);
       if (operation.requestFields.length) {
-        init.body = JSON.stringify(buildRequestBody(operation, values));
+        init.body = JSON.stringify(
+          buildRequestBody(
+            operation,
+            values,
+            activeBringConfirmation
+              ? { [CONFIRMATION_TOKEN_FIELD]: activeBringConfirmation.confirmationToken }
+              : undefined,
+          ),
+        );
       }
 
       const response = await fetch(requestUrl, init);
@@ -587,9 +632,6 @@ export class AppComponent {
       }));
       if (operation.id === 'bringPrepareItemMutation') {
         this.captureBringConfirmation(responseBody);
-      } else if (operation.id === 'bringApplyItemMutation') {
-        this.pendingBringConfirmation.set(null);
-        this.setInputValue('bringApplyItemMutation', 'confirmationToken', '');
       }
     } catch (error) {
       this.operationErrors.update((current) => ({
@@ -597,46 +639,48 @@ export class AppComponent {
         [operation.id]: error instanceof Error ? error.message : 'Unknown API error.',
       }));
     } finally {
+      if (operation.id === 'bringApplyItemMutation') {
+        this.clearPendingBringConfirmation();
+      }
       this.setOperationLoading(operation.id, false);
     }
   }
 
   private captureBringConfirmation(responseBody: unknown): void {
-    if (!isRecord(responseBody)) return;
-    const operation = responseBody['operation'];
-    const operationId = responseBody['operationId'];
-    const confirmationToken = responseBody['confirmationToken'];
-    const listPseudonym = responseBody['listPseudonym'];
-    const itemCount = responseBody['itemCount'];
-    const expiresAt = responseBody['expiresAt'];
     const listUuid = this.inputValue('bringPrepareItemMutation', 'listUuid');
-    if (
-      (operation !== 'complete' && operation !== 'remove') ||
-      typeof operationId !== 'string' ||
-      typeof confirmationToken !== 'string' ||
-      typeof listPseudonym !== 'string' ||
-      typeof itemCount !== 'number' ||
-      typeof expiresAt !== 'string' ||
-      !listUuid
-    ) {
-      return;
+    const pending = this.bringConfirmationVault.capture(responseBody, listUuid);
+    if (!pending) {
+      if (isSucceededBringMutationResponse(responseBody)) return;
+      throw new Error('Bring prepare response did not contain a valid unexpired confirmation.');
     }
 
     this.formValues.update((current) => ({
       ...current,
       bringApplyItemMutation: {
-        ...(current['bringApplyItemMutation'] ?? {}),
+        ...withoutSensitiveFormValues(current['bringApplyItemMutation'] ?? {}),
         listUuid,
-        operationId,
-        confirmationToken,
+        operationId: pending.operationId,
       },
     }));
-    this.pendingBringConfirmation.set({
-      operation,
-      operationId,
-      listPseudonym,
-      itemCount,
-      expiresAt,
+    this.pendingBringConfirmation.set(pending);
+  }
+
+  private clearPendingBringConfirmation(): void {
+    this.bringConfirmationVault.clear();
+  }
+
+  private clearBringApplyForm(): void {
+    this.formValues.update((current) => {
+      const currentApply = current['bringApplyItemMutation'];
+      if (!currentApply) return current;
+      return {
+        ...current,
+        bringApplyItemMutation: {
+          ...withoutSensitiveFormValues(currentApply),
+          listUuid: '',
+          operationId: '',
+        },
+      };
     });
   }
 
@@ -692,18 +736,4 @@ if (!isEmbeddedFrame()) {
 
 function isEmbeddedFrame(): boolean {
   return window.self !== window.top;
-}
-
-function resolveOperationScope(operation: ApiOperationDoc, configuredScope: string): string {
-  const requiredScope = operation.requiredScopes[0];
-  if (!requiredScope) return configuredScope;
-  if (requiredScope.startsWith('api://') || requiredScope.startsWith('https://')) {
-    return requiredScope;
-  }
-  const separator = configuredScope.lastIndexOf('/');
-  return separator > 'api://'.length ? `${configuredScope.slice(0, separator + 1)}${requiredScope}` : requiredScope;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

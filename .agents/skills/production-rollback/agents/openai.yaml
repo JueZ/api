@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Production Rollback'
+  short_description: 'Roll back production through verified release evidence'
+  default_prompt: 'Use $production-rollback to evaluate and execute this production rollback safely.'

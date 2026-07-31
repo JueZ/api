@@ -1,6 +1,6 @@
 ---
 name: autonomous-pr-delivery
-description: Use this skill for every repository-changing Codex task in JueZ/api to complete the branch -> commit -> push -> PR -> checks -> delivery-status report loop safely.
+description: Use this skill for every repository-changing Codex task in JueZ/api to complete the branch, commit, push, pull request, checks, and delivery-status report loop safely.
 ---
 
 # Autonomous PR Delivery Skill
@@ -40,7 +40,7 @@ Complete repository-changing work through the required autonomous delivery loop 
 
    If on `main`, create or switch to a non-`main` branch before committing.
 
-2. Run the smallest relevant local validation set for the change when the environment allows.
+2. Complete `change-quality-gate`, then run the smallest relevant local validation set for the change when the environment allows.
 
    Common examples:
 
@@ -49,18 +49,25 @@ Complete repository-changing work through the required autonomous delivery loop 
    npm test
    npm run test:api
    npm run build
-   npm run ops:policy-guardrails
+   npm run ops:preflight-change
+   npm run ops:policy-guardrails:worktree
    ```
 
    If a command cannot run because credentials, network, tools, or environment variables are unavailable, record it as blocked or skipped with the reason. Do not treat skipped checks as passing.
 
-3. Commit the change if it is not already committed:
+3. Confirm the PR evidence sections are ready: behavior/risk, tests, documentation/memory, deployment/rollback, and limitations. Commit the change if it is not already committed:
 
    ```bash
    git status --short
    git add <changed-files>
    git commit -m "<concise task summary>"
    git log -1 --oneline
+   ```
+
+   After committing, validate the complete branch diff rather than only the last commit:
+
+   ```bash
+   npm run ops:policy-guardrails:branch
    ```
 
 4. Run mandatory PR preflight and safe recovery:

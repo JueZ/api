@@ -39,9 +39,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ -f package-lock.json ]; then
-            npm ci
+            npm ci --ignore-scripts
           elif [ -f package.json ]; then
-            npm install
+            npm install --ignore-scripts
           else
             echo "No root package.json found; install check is not applicable yet."
           fi
@@ -117,7 +117,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if npm run | grep -qE '^  test$|^    test$| test$'; then
+          if npm run | grep -qE '^  test:coverage$|^    test:coverage$| test:coverage$'; then
+            npm run test:coverage
+          elif npm run | grep -qE '^  test$|^    test$| test$'; then
             npm test -- --watch=false
           else
             echo "No npm test script found; unit test check is not applicable yet."
@@ -308,8 +310,12 @@ jobs:
         run: npm run ops:check-architecture
       - name: Validate repository agent skills
         run: npm run ops:validate-agent-skills
-      - name: Run deterministic agent safety evals
-        run: npm run eval:agents
+      - name: Validate repository secret hygiene
+        run: npm run ops:preflight-change
+      - name: Run deterministic operation governance evals
+        run: npm run eval:operation-governance
+      - name: Run repository agent workflow contracts
+        run: npm run eval:agent-workflows
       - name: Check generated operation catalogue
         run: npm run docs:check-operations
 
@@ -351,19 +357,15 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            apps/api/package-lock.json
       - name: Audit npm dependencies
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f package-lock.json ]; then
-            npm audit --audit-level=high
-          elif [ -f package.json ]; then
-            npm install --package-lock-only
-            npm audit --audit-level=high
-          else
-            echo "No npm package files found; dependency audit is not applicable yet."
-          fi
+          npm audit --audit-level=high
+          npm --prefix apps/api audit --audit-level=high
 
   release-artifacts:
     name: release artifacts
@@ -411,7 +413,7 @@ jobs:
           retention-days: 90
   attest-release-artifacts:
     name: attest release artifacts
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     timeout-minutes: 10
     runs-on: ubuntu-latest
     needs: release-artifacts

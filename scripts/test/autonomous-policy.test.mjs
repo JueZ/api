@@ -18,9 +18,11 @@ import {
   runReview,
   validateAutonomousReview,
 } from '../autonomous-merge-controller.mjs';
+import { renderBranchProtection } from '../render-branch-protection.mjs';
 
 const headSha = 'a'.repeat(40);
 const policy = loadAutonomousPolicy();
+const ciWorkflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const mainDeliveryWorkflow = readFileSync(
   new URL('../../.github/workflows/codex-main-delivery.yml', import.meta.url),
   'utf8',
@@ -43,6 +45,9 @@ const runtimeSettingsPolicy = readFileSync(
   'utf8',
 );
 const mainBicep = readFileSync(new URL('../../infra/main.bicep', import.meta.url), 'utf8');
+const dependabotConfig = readFileSync(new URL('../../.github/dependabot.yml', import.meta.url), 'utf8');
+const releaseArtifactBuilder = readFileSync(new URL('../build-release-artifacts.sh', import.meta.url), 'utf8');
+const azureDiagnostics = readFileSync(new URL('../collect-azure-diagnostics.sh', import.meta.url), 'utf8');
 
 function pullRequest(overrides = {}) {
   return {
@@ -73,6 +78,18 @@ test('canonical autonomous policy is internally valid', () => {
   assert.equal(policy.merge.allowAdminBypass, false);
   assert.equal(policy.autonomousReview.humanApprovalRequired, false);
   assert.ok(policy.autonomousReview.maxDiffBytes >= 1_200_000);
+});
+
+test('branch-protection bootstrap is rendered from canonical required checks', () => {
+  const protection = renderBranchProtection(policy);
+  assert.deepEqual(
+    protection.required_status_checks.contexts,
+    policy.requiredChecks.map(({ name }) => name),
+  );
+  assert.equal(protection.required_status_checks.strict, true);
+  assert.equal(protection.allow_force_pushes, false);
+  assert.equal(protection.allow_deletions, false);
+  assert.equal(protection.required_linear_history, true);
 });
 
 test('Codex auto-merge completion dispatches exact main CI through one delivery controller', () => {
@@ -135,6 +152,8 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.doesNotMatch(deployEnvironmentWorkflow, /successful_test_run_ids/);
   assert.doesNotMatch(deployEnvironmentWorkflow, /ROLLBACK_PROVENANCE_VERIFIED/);
   assert.match(deployEnvironmentWorkflow, /deliveryCorrelation: \$deliveryCorrelation/);
+  assert.match(deployEnvironmentWorkflow, /TELEMETRY_EVALUATION_START=\$telemetry_evaluation_start/);
+  assert.match(deployEnvironmentWorkflow, /export TELEMETRY_EVALUATION_START="\$\{TELEMETRY_EVALUATION_START:-\}"/);
   assert.match(deployEnvironmentWorkflow, /\[ "\$GITHUB_RUN_ATTEMPT" != "1" \]/);
   assert.match(deployEnvironmentWorkflow, /\.run_attempt == 1/);
   assert.match(deployEnvironmentWorkflow, /\.runAttempt == "1"/);
@@ -158,6 +177,87 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.doesNotMatch(promoteProductionWorkflow, /inputs\.deploy_frontend|inputs\.deploy_functions/);
   assert.match(promoteProductionWorkflow, /deployFrontend: true/);
   assert.match(promoteProductionWorkflow, /deployFunctions: true/);
+});
+
+test('infrastructure deployment validates and previews the exact create parameters without sensitive output', () => {
+  const start = deployEnvironmentWorkflow.indexOf('deployment_parameters=(');
+  const end = deployEnvironmentWorkflow.indexOf('echo "function_app_name=', start);
+  const infrastructureDeployment = deployEnvironmentWorkflow.slice(start, end);
+  const validateIndex = infrastructureDeployment.indexOf('az deployment group validate');
+  const whatIfIndex = infrastructureDeployment.indexOf('az deployment group what-if');
+  const generationIndex = infrastructureDeployment.indexOf('node scripts/assert-current-main.mjs');
+  const createIndex = infrastructureDeployment.indexOf('az deployment group create');
+
+  assert.ok(start > 0 && validateIndex < whatIfIndex && whatIfIndex < generationIndex && generationIndex < createIndex);
+  assert.equal(infrastructureDeployment.match(/--parameters "\$\{deployment_parameters\[@\]\}"/g)?.length, 3);
+  assert.match(infrastructureDeployment, /az deployment group what-if[\s\S]*?--result-format ResourceIdOnly/);
+  assert.equal(infrastructureDeployment.match(/--output none/g)?.length, 2);
+});
+
+test('deployment verifies dependencies and artifacts before cloud login and scopes workflow secrets', () => {
+  const installIndex = deployEnvironmentWorkflow.indexOf('- name: Install dependencies');
+  const verificationIndex = deployEnvironmentWorkflow.indexOf('- name: Verify immutable release bundle');
+  const loginIndex = deployEnvironmentWorkflow.indexOf('- name: Azure OIDC login');
+  const bicepIndex = deployEnvironmentWorkflow.indexOf('- name: Deploy Bicep infrastructure');
+  assert.ok(installIndex < verificationIndex && verificationIndex < loginIndex && loginIndex < bicepIndex);
+  assert.match(deployEnvironmentWorkflow.slice(installIndex, verificationIndex), /npm ci --ignore-scripts/);
+  const verificationBlock = deployEnvironmentWorkflow.slice(verificationIndex, loginIndex);
+  assert.match(verificationBlock, /gh attestation verify "\$release_dir\/\$artifact"/);
+  assert.match(verificationBlock, /--signer-workflow "github\.com\/\$GITHUB_REPOSITORY\/\.github\/workflows\/ci\.yml"/);
+  assert.match(verificationBlock, /--source-digest "\$\{SOURCE_REF:-\$\{GITHUB_SHA\}\}"/);
+  assert.match(verificationBlock, /--source-ref refs\/heads\/main/);
+  assert.match(verificationBlock, /--deny-self-hosted-runners/);
+
+  const jobEnvironment = deployEnvironmentWorkflow.slice(
+    deployEnvironmentWorkflow.indexOf('    env:\n'),
+    deployEnvironmentWorkflow.indexOf('    steps:\n'),
+  );
+  assert.doesNotMatch(jobEnvironment, /WLH_BASE_URL|GH_TOKEN/);
+  assert.match(
+    deployEnvironmentWorkflow,
+    /name: Validate deployment configuration[\s\S]*?WLH_BASE_URL: \$\{\{ secrets\.WLH_BASE_URL \}\}/,
+  );
+  assert.match(
+    deployEnvironmentWorkflow,
+    /name: Deploy Bicep infrastructure[\s\S]*?WLH_BASE_URL: \$\{\{ secrets\.WLH_BASE_URL \}\}/,
+  );
+});
+
+test('Function supply-chain policy covers the independently locked deployed package', () => {
+  assert.match(dependabotConfig, /directory: '\/apps\/api'/);
+  assert.match(ciWorkflow, /cache-dependency-path: \|\n\s+package-lock\.json\n\s+apps\/api\/package-lock\.json/);
+  assert.match(ciWorkflow, /npm --prefix apps\/api audit --audit-level=high/);
+  assert.match(
+    ciWorkflow,
+    /if: github\.ref == 'refs\/heads\/main' && \(github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'\)/,
+  );
+  const sbomBlock = releaseArtifactBuilder.slice(
+    releaseArtifactBuilder.lastIndexOf('(\n', releaseArtifactBuilder.indexOf('npm sbom')),
+    releaseArtifactBuilder.indexOf('\n)\n', releaseArtifactBuilder.indexOf('npm sbom')) + 3,
+  );
+  assert.match(sbomBlock, /cd "\$function_stage"/);
+  assert.match(sbomBlock, /npm sbom --omit=dev --sbom-format cyclonedx/);
+  assert.doesNotMatch(sbomBlock, /repository_root/);
+  assert.match(releaseArtifactBuilder, /node "\$function_stage\/dist\/index\.js"/);
+  assert.match(releaseArtifactBuilder, /OIDC_ALLOWED_OBJECT_IDS=[0-9a-f-]+-0000-0000-[0-9a-f-]+ \\/i);
+  assert.match(releaseArtifactBuilder, /OIDC_ALLOWED_TENANTS=[0-9a-f-]+-0000-0000-[0-9a-f-]+ \\/i);
+  assert.ok(
+    releaseArtifactBuilder.indexOf('npm ci --omit=dev --ignore-scripts --prefix "$function_stage"') <
+      releaseArtifactBuilder.indexOf('node "$function_stage/dist/index.js"'),
+  );
+});
+
+test('Azure diagnostics select architecture-tagged storage and emit only aggregate telemetry', () => {
+  assert.match(azureDiagnostics, /tags\.purpose=='immutable-release-packages'/);
+  assert.match(azureDiagnostics, /expected exactly one Storage account tagged purpose=immutable-release-packages/);
+  assert.doesNotMatch(azureDiagnostics, /head -n 1/);
+
+  const queryStart = azureDiagnostics.indexOf("aggregate_query=$(cat <<'KQL'");
+  const queryEnd = azureDiagnostics.indexOf('\nKQL\n', queryStart);
+  const aggregateQuery = azureDiagnostics.slice(queryStart, queryEnd);
+  assert.match(aggregateQuery, /requestCount=/);
+  assert.match(aggregateQuery, /exceptionCount=/);
+  assert.doesNotMatch(aggregateQuery, /message|payload|customDimensions/i);
 });
 
 test('rollback changes only accepted application packages and leaves infrastructure configuration unchanged', () => {
@@ -284,9 +384,13 @@ test('policy glob matcher handles recursive and exact AGENTS paths', () => {
   assert.equal(matchesPolicyGlob('README.md', '**/AGENTS.md'), false);
 });
 
-test('risk classification covers workflow, MCP, Bring, contracts, and agent skills', () => {
+test('risk classification covers workflow, supply-chain, deployment, application, and agent controls', () => {
   const paths = [
     '.github/workflows/ci.yml',
+    'package-lock.json',
+    'apps/api/package-lock.json',
+    'scripts/build-release-artifacts.sh',
+    'scripts/assert-current-main.mjs',
     'apps/api/src/mcp/server.ts',
     'apps/api/src/shared/bring/client.ts',
     'contracts/openapi.yaml',
@@ -295,6 +399,12 @@ test('risk classification covers workflow, MCP, Bring, contracts, and agent skil
   const risk = classifyRisk(paths, policy);
   assert.equal(risk.highRisk, true);
   assert.deepEqual(risk.highRiskPaths, paths);
+  assert.deepEqual(risk.classes.softwareSupplyChain, [
+    'package-lock.json',
+    'apps/api/package-lock.json',
+    'scripts/build-release-artifacts.sh',
+  ]);
+  assert.deepEqual(risk.classes.deploymentRuntime, ['scripts/assert-current-main.mjs']);
 });
 
 test('auto-merge candidates are scoped and blocked labels fail closed', () => {

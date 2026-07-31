@@ -51,9 +51,15 @@ requiredChecks:
     appSlug: github-actions
 
 highRiskPaths:
+  - .gitignore
+  - package.json
+  - package-lock.json
+  - apps/api/package.json
+  - apps/api/package-lock.json
   - .github/workflows/**
   - .github/actions/**
   - .github/autonomous-policy.yml
+  - .github/pull_request_template.md
   - infra/**
   - apps/api/src/shared/security/**
   - apps/api/src/shared/config/**
@@ -67,8 +73,19 @@ highRiskPaths:
   - contracts/**
   - scripts/policy-guardrails.mjs
   - scripts/autonomous-merge-controller.mjs
+  - scripts/render-branch-protection.mjs
   - scripts/check-architecture.mjs
   - scripts/validate-agent-skills.mjs
+  - scripts/check-repository-hygiene.mjs
+  - scripts/check-agent-workflow-contracts.mjs
+  - scripts/check-lockfile-policy.mjs
+  - scripts/build-release-artifacts.sh
+  - scripts/verify-release-artifacts.mjs
+  - scripts/assert-current-main.mjs
+  - scripts/frontend-inventory.mjs
+  - scripts/validate-deployed-runtime-settings.mjs
+  - scripts/mint-smoke-token.mjs
+  - scripts/lib/smoke-utils.mjs
   - scripts/smoke-**
   - scripts/check-telemetry.mjs
   - scripts/runtime-truth.mjs
@@ -90,6 +107,7 @@ riskClasses:
     - .github/workflows/**
     - .github/actions/**
     - scripts/autonomous-merge-controller.mjs
+    - scripts/render-branch-protection.mjs
   infrastructure:
     - infra/**
   authentication:
@@ -105,6 +123,25 @@ riskClasses:
     - AGENTS.md
     - '**/AGENTS.md'
     - .agents/skills/**
+    - scripts/check-agent-workflow-contracts.mjs
+  softwareSupplyChain:
+    - package.json
+    - package-lock.json
+    - apps/api/package.json
+    - apps/api/package-lock.json
+    - scripts/check-lockfile-policy.mjs
+    - scripts/build-release-artifacts.sh
+    - scripts/verify-release-artifacts.mjs
+  deploymentRuntime:
+    - scripts/assert-current-main.mjs
+    - scripts/frontend-inventory.mjs
+    - scripts/validate-deployed-runtime-settings.mjs
+    - scripts/mint-smoke-token.mjs
+    - scripts/lib/smoke-utils.mjs
+  repositorySecurity:
+    - .gitignore
+    - .github/pull_request_template.md
+    - scripts/check-repository-hygiene.mjs
 
 autonomousReview:
   checkName: Autonomous review complete

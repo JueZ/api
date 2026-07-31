@@ -12,6 +12,7 @@
     "deliveryCorrelation",
     "functionAppName",
     "apiBaseUrl",
+    "artifacts",
     "smokeRunId",
     "smokeResults",
     "authenticatedSmokeResults",
@@ -28,6 +29,16 @@
     "frontendUrl": { "type": "string" },
     "apiBaseUrl": { "type": "string", "format": "uri" },
     "frontendMetadataUrl": { "type": "string" },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["functionappSha256", "frontendSha256", "sbomSha256"],
+      "properties": {
+        "functionappSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "frontendSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "sbomSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
     "smokeRunId": { "type": "string", "minLength": 1, "maxLength": 96 },
     "smokeResults": { "$ref": "#/$defs/checkResult" },
     "authenticatedSmokeResults": { "$ref": "#/$defs/checkResult" },

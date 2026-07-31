@@ -90,17 +90,54 @@ test('request body helper coerces form values into typed JSON', () => {
   );
 });
 
+test('confirmation capability bypasses generic form state and uses an explicit sensitive request channel', () => {
+  const operation = operationFixture({
+    id: 'bringApplyItemMutation',
+    requestFields: [
+      fieldFixture({ name: 'operationId', required: true }),
+      fieldFixture({ name: 'confirmationToken', required: true }),
+    ],
+    requestExample: JSON.stringify({ operationId: 'operation-1', confirmationToken: 'example-must-not-enter-state' }),
+  });
+
+  const initial = helpers.buildInitialBody(operation);
+  assert.equal(Object.hasOwn(initial, 'confirmationToken'), false);
+  assert.deepEqual(
+    helpers.buildRequestBody(
+      operation,
+      { operationId: 'operation-1', confirmationToken: 'generic-state-value' },
+      { confirmationToken: 'ephemeral-capability-value' },
+    ),
+    {
+      operationId: 'operation-1',
+      confirmationToken: 'ephemeral-capability-value',
+    },
+  );
+  assert.deepEqual(helpers.withoutSensitiveFormValues({ operationId: 'operation-1', confirmationToken: 'value' }), {
+    operationId: 'operation-1',
+  });
+});
+
 test('problem response formatter exposes only sanitized RepairableProblem fields', () => {
   const problem = helpers.formatProblemResponse(
     {
+      type: 'https://api.example.test/problems/caller-contract-violation',
       title: 'Invalid Reddit post',
       status: 400,
       detail: 'The post field is required.',
+      instance: 'urn:diagnostic:diag_test',
+      rec_version: '1.0',
+      operation_id: 'postRedditThread',
+      classification: 'caller_contract_violation',
+      repairable: true,
+      confidence: 0.99,
       caller_instruction: 'Move the Reddit URL into post and retry.',
       retry_policy: { can_retry: true, same_request: false },
       repair_patch: [{ op: 'add', path: '/post', value: 'abc123' }],
       repair_plan: [{ action: 'provide_missing_value', path: '/post', reason: 'Required.' }],
       diagnostic_id: 'diag_test',
+      safe_debug_summary: 'The post field was missing.',
+      analysis_mode: 'deterministic',
       unsafe_raw_detail: 'Authorization Bearer real-token',
     },
     400,
@@ -114,6 +151,38 @@ test('problem response formatter exposes only sanitized RepairableProblem fields
   assert.match(problem.repairPlan, /provide_missing_value/);
   assert.equal(problem.diagnosticId, 'diag_test');
   assert.equal(problem.raw.unsafe_raw_detail, undefined);
+});
+
+test('non-problem API errors suppress untrusted response bodies', () => {
+  const error = helpers.formatApiError(
+    502,
+    '<html>Authorization: Bearer raw-response-token; Set-Cookie: private-cookie</html>',
+  );
+
+  assert.equal(
+    error,
+    'API returned 502: response details were suppressed because they did not match the sanitized problem contract.',
+  );
+  assert.doesNotMatch(error, /raw-response-token|private-cookie|Authorization|Set-Cookie|<html>/i);
+
+  const objectError = helpers.formatApiError(502, {
+    detail: 'Authorization: Bearer object-response-token',
+  });
+  assert.doesNotMatch(objectError, /object-response-token|Authorization/i);
+});
+
+test('successful response formatting recursively redacts confirmation capabilities', () => {
+  const formatted = helpers.formatBody(
+    {
+      state: 'prepared',
+      confirmationToken: 'top-level-capability',
+      nested: { confirmation_token: 'nested-capability' },
+    },
+    true,
+  );
+
+  assert.match(formatted, /<REDACTED>/);
+  assert.doesNotMatch(formatted, /top-level-capability|nested-capability/);
 });
 
 test('curl generation uses bearer placeholder and never includes real tokens', () => {
@@ -137,6 +206,100 @@ test('curl generation uses bearer placeholder and never includes real tokens', (
   assert.doesNotMatch(curl, /real-token|eyJ|Bearer [A-Za-z0-9._-]{12,}/);
 });
 
+test('curl generation replaces confirmation capabilities even if unsafe state is supplied', () => {
+  const operation = operationFixture({
+    id: 'bringApplyItemMutation',
+    requiresAuth: true,
+    requestFields: [
+      fieldFixture({ name: 'operationId', required: true }),
+      fieldFixture({ name: 'confirmationToken', required: true }),
+    ],
+  });
+
+  const curl = helpers.buildCurlCommand({
+    operation,
+    values: { operationId: 'operation-1', confirmationToken: 'must-not-reach-clipboard' },
+    apiBaseUrl: 'https://api.example.test',
+  });
+
+  assert.match(curl, /<CONFIRMATION_TOKEN>/);
+  assert.doesNotMatch(curl, /must-not-reach-clipboard/);
+});
+
+test('Bring complete and remove flows resolve their exact OpenAPI OAuth scopes', () => {
+  const operation = operationFixture({
+    id: 'bringPrepareItemMutation',
+    requiresAuth: true,
+    requiredScopes: ['bring.complete', 'bring.remove'],
+  });
+
+  assert.equal(
+    helpers.resolveOperationScope(operation, 'api://catalogue-client/catalogue.read', 'complete'),
+    'api://catalogue-client/bring.complete',
+  );
+  assert.equal(
+    helpers.resolveOperationScope(operation, 'api://catalogue-client/catalogue.read', 'remove'),
+    'api://catalogue-client/bring.remove',
+  );
+  assert.throws(
+    () =>
+      helpers.resolveOperationScope(
+        operationFixture({ id: 'brokenBringMutation', requiredScopes: ['bring.complete'] }),
+        'api://catalogue-client/catalogue.read',
+        'remove',
+      ),
+    /does not declare the bring\.remove permission/,
+  );
+});
+
+test('Bring confirmation vault exposes only safe UI metadata and clears at expiry', () => {
+  const now = Date.parse('2026-07-31T12:00:00.000Z');
+  let expiryCallback;
+  let scheduledDelay = -1;
+  let clearNotifications = 0;
+  const vault = new helpers.BringConfirmationVault({
+    now: () => now,
+    schedule: (callback, delayMs) => {
+      expiryCallback = callback;
+      scheduledDelay = delayMs;
+      return 1;
+    },
+    cancel: () => undefined,
+    onClear: () => {
+      clearNotifications += 1;
+    },
+  });
+
+  const summary = vault.capture(
+    {
+      operation: 'remove',
+      state: 'prepared',
+      operationId: 'operation-1',
+      confirmationToken: 'ephemeral-capability-value',
+      listPseudonym: 'list-abcd',
+      itemCount: 2,
+      expiresAt: '2026-07-31T12:05:00.000Z',
+    },
+    '11111111-1111-4111-8111-111111111111',
+  );
+
+  assert.deepEqual(summary, {
+    operation: 'remove',
+    operationId: 'operation-1',
+    listPseudonym: 'list-abcd',
+    itemCount: 2,
+    expiresAt: '2026-07-31T12:05:00.000Z',
+  });
+  assert.doesNotMatch(JSON.stringify(summary), /ephemeral-capability-value|confirmationToken/);
+  assert.equal(vault.active().confirmationToken, 'ephemeral-capability-value');
+  assert.equal(scheduledDelay, 300_000);
+  assert.equal(clearNotifications, 1);
+
+  expiryCallback();
+  assert.equal(vault.active(), null);
+  assert.equal(clearNotifications, 2);
+});
+
 test('OpenAPI contract drives the interactive API catalogue', () => {
   assert.match(mainSource, /parseOpenApiDocument/);
   assert.match(mainSource, /buildApiOperations\(openApiDocument\)/);
@@ -145,7 +308,7 @@ test('OpenAPI contract drives the interactive API catalogue', () => {
 });
 
 test('API calls send bearer tokens for protected OpenAPI operations', () => {
-  assert.match(mainSource, /resolveOperationScope\(operation, config\.authApiScope\)/);
+  assert.match(mainSource, /resolveOperationScope\(operation, config\.authApiScope, bringMutationOperation\)/);
   assert.match(mainSource, /Authentication is not configured\./);
   assert.match(mainSource, /operation\.requiresAuth/);
 });
@@ -169,7 +332,7 @@ test('copy-as-curl button and stable operation anchors are rendered', () => {
 test('OpenAPI request payload fields render interactive controls', () => {
   assert.match(mainSource, /field\.enumValues\.length/);
   assert.match(mainSource, /setInputValue\(operation\.id, field\.name/);
-  assert.match(mainSource, /buildRequestBody\(operation, values\)/);
+  assert.match(mainSource, /buildRequestBody\(\s*operation,\s*values,/);
   assert.doesNotMatch(mainSource, /sort: 'confidence'/);
   assert.match(mainSource, /field\.inputType === 'textarea'/);
   assert.match(mainSource, /Bring! lists and items/);
@@ -202,6 +365,9 @@ test('Bring destructive writes use a separate prepared confirmation step', () =>
   assert.match(mainSource, /bringApplyItemMutation/);
   assert.match(mainSource, /window\.confirm\('Apply this prepared Bring!/);
   assert.match(mainSource, /captureBringConfirmation\(responseBody\)/);
+  assert.match(mainSource, /new BringConfirmationVault/);
+  assert.match(mainSource, /@if \(!isSensitiveRequestField\(field\.name\)\)/);
+  assert.match(mainSource, /this\.clearPendingBringConfirmation\(\)/);
   assert.doesNotMatch(mainSource, /bringCompleteItems|bringRemoveItems/);
 });
 
@@ -259,7 +425,14 @@ function fieldFixture(overrides = {}) {
 
 async function importWebHelpers() {
   const tempDirectory = await mkdtemp(join(process.cwd(), 'apps/web/test/.tmp-web-helper-tests-'));
-  const sourceFiles = ['openapi.ts', 'request-builder.ts', 'problem-format.ts', 'curl.ts'];
+  const sourceFiles = [
+    'openapi.ts',
+    'bring-confirmation.ts',
+    'operation-scope.ts',
+    'request-builder.ts',
+    'problem-format.ts',
+    'curl.ts',
+  ];
 
   await Promise.all(
     sourceFiles.map(async (fileName) => {

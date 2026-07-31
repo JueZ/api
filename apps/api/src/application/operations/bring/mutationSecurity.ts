@@ -91,14 +91,7 @@ export class BringMutationSecurity {
   }
 
   peekConfirmationOperation(token: string): 'complete' | 'remove' | undefined {
-    const encoded = token.split('.')[0];
-    if (!encoded) return undefined;
-    try {
-      const claims: unknown = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
-      return isConfirmationClaims(claims) ? claims.operation : undefined;
-    } catch {
-      return undefined;
-    }
+    return peekBringConfirmationOperation(token);
   }
 
   encryptPayload(payload: BringMutationPayload): EncryptedBringPayload {
@@ -139,6 +132,17 @@ export class BringMutationSecurity {
 
   private sign(value: string): string {
     return createHmac('sha256', this.hmacKey).update(value).digest('base64url');
+  }
+}
+
+export function peekBringConfirmationOperation(token: string): 'complete' | 'remove' | undefined {
+  const encoded = token.split('.')[0];
+  if (!encoded) return undefined;
+  try {
+    const claims: unknown = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    return isConfirmationClaims(claims) ? claims.operation : undefined;
+  } catch {
+    return undefined;
   }
 }
 

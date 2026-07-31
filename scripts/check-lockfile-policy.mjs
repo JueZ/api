@@ -6,14 +6,26 @@ import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-export function inspectDependencyFiles(packageJson, lockfile) {
+export const dependencyFilePairs = [
+  { packagePath: 'package.json', lockfilePath: 'package-lock.json' },
+  { packagePath: 'apps/api/package.json', lockfilePath: 'apps/api/package-lock.json' },
+];
+
+export function dependencyPairingFindings(changedPaths, pairs = dependencyFilePairs) {
+  const changed = changedPaths instanceof Set ? changedPaths : new Set(changedPaths);
+  return pairs
+    .filter(({ packagePath, lockfilePath }) => changed.has(packagePath) !== changed.has(lockfilePath))
+    .map(({ packagePath, lockfilePath }) => `${packagePath} and ${lockfilePath} must change together`);
+}
+
+export function inspectDependencyFiles(packageJson, lockfile, scope = 'root') {
   const findings = [];
   if (lockfile.lockfileVersion !== 3) {
-    findings.push('package-lock.json must use lockfileVersion 3');
+    findings.push(`${scope} package-lock.json must use lockfileVersion 3`);
   }
   for (const lifecycle of ['preinstall', 'install', 'postinstall']) {
     if (packageJson.scripts?.[lifecycle]) {
-      findings.push(`root lifecycle script ${lifecycle} is not allowed`);
+      findings.push(`${scope} lifecycle script ${lifecycle} is not allowed`);
     }
   }
   for (const [name, specifier] of Object.entries({
@@ -45,15 +57,17 @@ function changedFiles(baseRef) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const baseRef = process.env.BASE_REF || process.argv[2];
   if (baseRef) {
-    const changed = new Set(changedFiles(baseRef));
-    if (changed.has('package.json') !== changed.has('package-lock.json')) {
-      console.error('package.json and package-lock.json must change together.');
+    const pairingFindings = dependencyPairingFindings(changedFiles(baseRef));
+    if (pairingFindings.length > 0) {
+      console.error(`Dependency package/lock pairing failed:\n- ${pairingFindings.join('\n- ')}`);
       process.exit(1);
     }
   }
-  const packageJson = JSON.parse(readFileSync(resolve(repositoryRoot, 'package.json'), 'utf8'));
-  const lockfile = JSON.parse(readFileSync(resolve(repositoryRoot, 'package-lock.json'), 'utf8'));
-  const findings = inspectDependencyFiles(packageJson, lockfile);
+  const findings = dependencyFilePairs.flatMap(({ packagePath, lockfilePath }) => {
+    const packageJson = JSON.parse(readFileSync(resolve(repositoryRoot, packagePath), 'utf8'));
+    const lockfile = JSON.parse(readFileSync(resolve(repositoryRoot, lockfilePath), 'utf8'));
+    return inspectDependencyFiles(packageJson, lockfile, packagePath);
+  });
   if (findings.length) {
     console.error(`Dependency lock policy failed:\n- ${findings.join('\n- ')}`);
     process.exit(1);

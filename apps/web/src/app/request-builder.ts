@@ -3,23 +3,35 @@ import type { ApiOperationDoc } from './openapi';
 export type JsonObject = Record<string, unknown>;
 export type OperationFormValues = Record<string, string>;
 
+export const CONFIRMATION_TOKEN_FIELD = 'confirmationToken';
+export const CONFIRMATION_TOKEN_PLACEHOLDER = '<CONFIRMATION_TOKEN>';
+export const REDACTED_VALUE = '<REDACTED>';
+
 export function buildInitialBody(operation: ApiOperationDoc): OperationFormValues {
   const example = operation.requestExample ? parseJsonOrText(operation.requestExample) : {};
   return Object.fromEntries(
-    [...operation.parameterFields, ...operation.requestFields].map((field) => {
-      const exampleValue =
-        typeof example === 'object' && example !== null ? (example as JsonObject)[field.name] : undefined;
-      const value = exampleValue ?? field.defaultValue ?? '';
-      return [field.name, value === undefined || value === null ? '' : String(value)];
-    }),
+    [...operation.parameterFields, ...operation.requestFields]
+      .filter((field) => !isSensitiveRequestFieldName(field.name))
+      .map((field) => {
+        const exampleValue =
+          typeof example === 'object' && example !== null ? (example as JsonObject)[field.name] : undefined;
+        const value = exampleValue ?? field.defaultValue ?? '';
+        return [field.name, value === undefined || value === null ? '' : String(value)];
+      }),
   );
 }
 
-export function buildRequestBody(operation: ApiOperationDoc, values: OperationFormValues): JsonObject {
+export function buildRequestBody(
+  operation: ApiOperationDoc,
+  values: OperationFormValues,
+  sensitiveValues: OperationFormValues = {},
+): JsonObject {
   const body: JsonObject = {};
 
   for (const field of operation.requestFields) {
-    const rawValue = values[field.name] ?? '';
+    const rawValue = isSensitiveRequestFieldName(field.name)
+      ? (sensitiveValues[field.name] ?? '')
+      : (values[field.name] ?? '');
     if (!field.required && rawValue === '') {
       continue;
     }
@@ -82,5 +94,29 @@ export function parseJsonOrText(responseText: string): unknown {
 }
 
 export function formatBody(body: unknown, pretty = false): string {
-  return typeof body === 'string' ? body : JSON.stringify(body, null, pretty ? 2 : undefined);
+  const safeBody = redactSensitiveBodyFields(body);
+  return typeof safeBody === 'string' ? safeBody : JSON.stringify(safeBody, null, pretty ? 2 : undefined);
+}
+
+export function isSensitiveRequestFieldName(fieldName: string): boolean {
+  return normalizeFieldName(fieldName) === 'confirmationtoken';
+}
+
+export function withoutSensitiveFormValues(values: OperationFormValues): OperationFormValues {
+  return Object.fromEntries(Object.entries(values).filter(([fieldName]) => !isSensitiveRequestFieldName(fieldName)));
+}
+
+function redactSensitiveBodyFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactSensitiveBodyFields);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, nestedValue]) => [
+      key,
+      isSensitiveRequestFieldName(key) ? REDACTED_VALUE : redactSensitiveBodyFields(nestedValue),
+    ]),
+  );
+}
+
+function normalizeFieldName(fieldName: string): string {
+  return fieldName.toLowerCase().replace(/[_-]/g, '');
 }

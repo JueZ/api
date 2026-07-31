@@ -13,8 +13,8 @@ This note evaluates migration away from an account-key-based `AzureWebJobsStorag
 - Azure Functions runtime `~4`.
 - Linux Consumption hosting on the Node.js 22 stack.
 - A system-assigned managed identity on the Function App.
-- A general-purpose `StorageV2` storage account with HTTPS-only traffic, TLS 1.2 minimum, and blob public access disabled.
-- External run-from-package deployment using a private blob URL plus `WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID=SystemAssigned` in the deployment workflow, rather than Linux Consumption server-side build artifacts stored through `AzureWebJobsStorage`.
+- A dedicated general-purpose `StorageV2` host account plus separate immutable-release, public-static, and private-integration accounts. The repository target enforces HTTPS-only traffic, TLS 1.2 minimum, disabled blob public access, and disabled shared-key access on every account.
+- External run-from-package deployment from the immutable-release account using a private blob URL plus `WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID=SystemAssigned`, rather than Linux Consumption server-side build artifacts stored through `AzureWebJobsStorage`.
 
 The API currently registers HTTP-triggered functions only; it does not use Blob, Queue, Event Hubs, Timer, or Durable triggers that would add host-storage role requirements beyond host coordination and diagnostic events.
 
@@ -55,12 +55,13 @@ Do not set the legacy `AzureWebJobsStorage` connection string in the target stat
 
 Assign the Function App system-assigned managed identity at storage account scope:
 
-| Role                             | Role definition ID                     | Why it is needed                                                                                                                                                                                 |
-| -------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Storage Blob Data Owner`        | `b7e6dc6d-f1e8-4753-8033-0f276bb0955b` | Required by Azure Functions host storage for blob read/write access and host container creation; also covers package blob read access that was previously granted by `Storage Blob Data Reader`. |
-| `Storage Table Data Contributor` | `0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3` | Enables Functions diagnostic events to be written to table storage when startup or host-storage issues occur.                                                                                    |
+| Role                             | Role definition ID                     | Why it is needed                                                                                                                                     |
+| -------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Storage Blob Data Owner`        | `b7e6dc6d-f1e8-4753-8033-0f276bb0955b` | Required by Azure Functions host storage for blob read/write access and host container creation.                                                     |
+| `Storage Queue Data Contributor` | `974c5e8b-45b9-4653-ba55-5f855dd0fb88` | Supports the explicitly configured host queue service endpoint and keeps host coordination compatible with current Azure Functions runtime behavior. |
+| `Storage Table Data Contributor` | `0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3` | Enables Functions diagnostic events to be written to table storage when startup or host-storage issues occur.                                        |
 
-No `Storage Queue Data Contributor`, `Storage Account Contributor`, or Durable-specific roles are included because the current app has no Blob triggers, Queue triggers, Event Hubs triggers, Timer triggers, or Durable Functions. Add those roles only with a future trigger/binding change that requires them.
+No `Storage Account Contributor` or Durable-specific management role is included. Future trigger or binding changes must be reviewed against the extension's exact blob, queue, table, and management-plane requirements.
 
 ## Storage account configuration
 
@@ -69,8 +70,9 @@ The existing storage account settings are compatible with the migration:
 - `kind: StorageV2` satisfies Functions host storage's general-purpose storage requirement.
 - `supportsHttpsTrafficOnly: true` and `minimumTlsVersion: TLS1_2` should remain enforced.
 - `allowBlobPublicAccess: false` should remain enforced.
+- `allowSharedKeyAccess: false` and `defaultToOAuthAuthentication: true` should remain enforced on all Bicep-managed storage accounts.
 
-This migration does not disable storage account shared-key access yet. Disabling shared key is a separate hardening step that should happen only after validating every deployment, static web, diagnostic, operator, and recovery path uses Microsoft Entra/RBAC rather than account keys or connection strings.
+The current repository target uses Microsoft Entra/RBAC for host, package, static-web, private-state, diagnostic, operator, and recovery paths. Live environments can lag repository intent, so verify the deployed storage properties and role assignments before treating this document as runtime evidence.
 
 ## Feasibility conclusion
 
@@ -79,7 +81,7 @@ Migration is currently feasible because:
 1. The Function App runs Azure Functions runtime `~4`, which supports identity-based host storage.
 2. The app already has a system-assigned managed identity.
 3. The deployment workflow already uses external run-from-package deployment and managed-identity package reads, satisfying the Linux Consumption caution for identity-based host storage.
-4. The Function App only registers HTTP triggers, so host-only storage roles plus diagnostic table support are sufficient.
+4. The Function App only registers HTTP triggers; the repository grants the host blob, queue, and diagnostic table data roles without broader storage management access.
 5. Existing application code that reads WLH category blobs uses `DefaultAzureCredential` and `WLH_STORAGE_ACCOUNT_NAME`, not the `AzureWebJobsStorage` connection string.
 
 ## Rollout and validation evidence
@@ -91,14 +93,14 @@ PR #246 completed the migration through the normal protected delivery flow for m
 3. `Deploy Test` run `27229870948` succeeded for `677b1adfbe551c48525ef8b11a0722f5515d9989`, including Bicep deployment, Function package deployment, runtime smoke, authenticated smoke, telemetry gate, and release-ledger upload.
 4. `Promote Production` run `27229866903` succeeded for `677b1adfbe551c48525ef8b11a0722f5515d9989`, including Bicep deployment, Function package deployment, runtime smoke, authenticated smoke, telemetry gate, and release-ledger upload.
 
-Future validation should still confirm app-setting names and managed-identity role assignments without printing values if an operator changes storage, identity, or hosting configuration manually. Run authenticated smoke against `GET /api/hello` and `POST /api/reddit/thread` whenever this storage identity path is changed again.
+Subsequent repository hardening split storage by purpose, added the host queue role, and disabled shared-key access in Bicep. Those later repository changes are design intent, not proof of current production state. Future validation must confirm deployed app-setting names, storage properties, and managed-identity role assignments without printing secret values. Run authenticated smoke against `GET /api/hello` and `POST /api/reddit/thread` whenever this storage identity path changes.
 
-## Compensating controls and rollback
+## Recovery and rollback
 
-- Keep shared-key disablement out of this migration to avoid combining two storage-authentication changes.
-- Treat deployment identity role-assignment permissions as a known bootstrap prerequisite: the deployment identity must be able to create/update the Bicep-managed Function App storage role assignments, or the assignments must be pre-provisioned safely.
-
-Rollback is straightforward: restore the `AzureWebJobsStorage` connection string app setting in `infra/main.bicep` and redeploy. Do not roll back by manually pasting storage keys into logs, PRs, issues, or project memory.
+- Treat deployment identity role-assignment permissions as a bootstrap prerequisite: the deployment identity must be able to create or update the Bicep-managed Function App storage role assignments, or the assignments must be pre-provisioned safely.
+- Application-package rollback uses the protected rollback workflow and must not run Bicep or change storage authentication, identity, RBAC, or safety settings.
+- Infrastructure recovery is a reviewed forward fix through the normal staged Bicep workflow. Preserve identity-based settings and `allowSharedKeyAccess: false`; do not restore an `AzureWebJobsStorage` connection string or manually copy storage keys into app settings.
+- If a platform limitation ever requires reconsidering shared-key access, treat that as a new security architecture decision with test evidence and an explicit ADR, not an emergency package rollback step.
 
 ## Revisit triggers
 
@@ -106,6 +108,6 @@ Revisit this design if any of the following changes occur:
 
 - The app adds Blob, Queue, Event Hubs, Timer, or Durable triggers/bindings.
 - The deployment workflow changes away from external run-from-package packages.
-- The project decides to disable storage-account shared-key access.
+- A deployment, diagnostic, operator, or recovery path can no longer use Microsoft Entra/RBAC while shared-key access remains disabled.
 - The app moves to a sovereign cloud, custom storage DNS, Flex Consumption, Premium, or Dedicated App Service plan.
 - Azure Functions changes the documented role requirements for identity-based `AzureWebJobsStorage`.

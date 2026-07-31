@@ -122,10 +122,12 @@ fi
 
 if [ -z "$EFFECTIVE_BASE_URL" ]; then
   function_app_name="<function-app-name-from-workflow-summary-or-resource-discovery>"
-  default_host_name="$(az functionapp show \
+  default_host_name="$(az resource show \
     --resource-group rg-api-prod \
+    --resource-type Microsoft.Web/sites \
     --name "$function_app_name" \
-    --query defaultHostName \
+    --api-version 2023-12-01 \
+    --query properties.defaultHostName \
     --output tsv)"
   EFFECTIVE_BASE_URL="https://$default_host_name"
 fi
@@ -136,14 +138,11 @@ fi
 ```bash
 curl --fail --show-error --silent "$EFFECTIVE_BASE_URL/health"
 
-expected_hello_status="401"
-if [ "$(gh variable get AUTH_ENABLED --repo JueZ/api 2>/dev/null || echo true)" = "false" ]; then
-  expected_hello_status="200"
-fi
-
 hello_status="$(curl --show-error --silent --output /dev/null --write-out '%{http_code}' "$EFFECTIVE_BASE_URL/api/hello")"
-test "$hello_status" = "$expected_hello_status"
+test "$hello_status" = "401"
 ```
+
+Production authentication is a fail-closed safety invariant. An unauthenticated `200` is an incident and a failed rollback verification; never accept it by deriving an expected status from a mutable or missing `AUTH_ENABLED` variable.
 
 5. Verify `/health` reports the expected deployed commit/source ref when the response contains deployment metadata.
 

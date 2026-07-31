@@ -118,10 +118,12 @@ if [ -n "$PRODUCTION_BASE_URL" ]; then
   printf '%s\n' "$PRODUCTION_BASE_URL"
 else
   function_app_name="<function-app-name-from-workflow-summary-bicep-output-or-resource-discovery>"
-  default_host_name="$(az functionapp show \
+  default_host_name="$(az resource show \
     --resource-group rg-api-prod \
+    --resource-type Microsoft.Web/sites \
     --name "$function_app_name" \
-    --query defaultHostName \
+    --api-version 2023-12-01 \
+    --query properties.defaultHostName \
     --output tsv)"
   printf 'https://%s\n' "$default_host_name"
 fi
@@ -158,10 +160,12 @@ Do not paste long full logs into final summaries. Summarize the relevant lines.
 Inspect a Function App with a narrow query:
 
 ```bash
-az functionapp show \
+az resource show \
   --resource-group <resource-group> \
+  --resource-type Microsoft.Web/sites \
   --name <function-app-name> \
-  --query "{name:name,state:state,defaultHostName:defaultHostName,kind:kind,linuxFxVersion:siteConfig.linuxFxVersion,identityType:identity.type}" \
+  --api-version 2023-12-01 \
+  --query "{name:name,state:properties.state,defaultHostName:properties.defaultHostName,kind:kind,linuxFxVersion:properties.siteConfig.linuxFxVersion,identityType:identity.type}" \
   --output table
 ```
 
@@ -217,6 +221,8 @@ If this fails while the app is unhealthy, note that function discovery may fail 
 ## Application Insights diagnostics
 
 Prefer Application Insights and Azure Monitor for runtime diagnostics.
+
+Start with `scripts/collect-azure-diagnostics.sh`; its 30-minute baseline returns only aggregate request, failed-request, server-error, exception, and failed-dependency counts. It intentionally projects no payloads, messages, URLs, user identifiers, or `customDimensions`. Use detailed queries only after this baseline identifies a relevant signal, and keep every projection narrowly sanitized.
 
 Query telemetry with Application Insights if the CLI command is available. Use recent time windows and narrow KQL.
 
@@ -276,7 +282,7 @@ Example CLI shape:
 
 ```bash
 az monitor app-insights query \
-  --app <application-insights-app-id-or-name> \
+  --apps <application-insights-app-id-or-name> \
   --analytics-query "<KQL>" \
   --offset 30m \
   --output table
@@ -334,6 +340,17 @@ Activity Logs are for Azure management-plane events. They are not the same as ap
 ## Storage and package diagnostics
 
 For run-from-package issues, inspect storage without printing URLs that contain SAS tokens.
+
+Discover the release account by architecture tag and continue only when the result is unique:
+
+```bash
+az storage account list \
+  --resource-group <resource-group> \
+  --query "sort([?tags.purpose=='immutable-release-packages'].name)" \
+  --output tsv
+```
+
+Do not select the first storage account in a resource group. Zero or multiple matches are configuration drift; report the count and skip package queries until the ambiguity is resolved.
 
 List package container names and blob names only:
 
@@ -441,7 +458,7 @@ scripts/collect-azure-diagnostics.sh test
 scripts/collect-azure-diagnostics.sh prod
 ```
 
-The script prints resource group and Function App state, safe app setting names, recent failed Activity Log entries, Application Insights resource names, and package artifact metadata without printing app setting values or URLs.
+The script prints resource group and Function App state, safe app setting names, recent failed Activity Log entries, aggregate Application Insights health counts, and package artifact metadata from the uniquely tagged immutable-release account. It does not print app setting values, telemetry messages/payloads/custom dimensions, or URLs containing credentials.
 
 ## Incident reports
 

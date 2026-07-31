@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Project Memory Maintainer'
+  short_description: 'Preserve durable repository decisions and operations'
+  default_prompt: 'Use $project-memory-maintainer to record this durable repository knowledge.'

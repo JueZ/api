@@ -122,10 +122,12 @@ fi
 printf '%s\n' "$function_app"
 
 run_required "Function App state" \
-  az functionapp show \
+  az resource show \
     --resource-group "$resource_group" \
+    --resource-type Microsoft.Web/sites \
     --name "$function_app" \
-    --query "{name:name,state:state,defaultHostName:defaultHostName,kind:kind,linuxFxVersion:siteConfig.linuxFxVersion,identityType:identity.type}" \
+    --api-version 2023-12-01 \
+    --query "{name:name,state:properties.state,defaultHostName:properties.defaultHostName,kind:kind,linuxFxVersion:properties.siteConfig.linuxFxVersion,identityType:identity.type}" \
     --output table
 
 run_required "Function App runtime configuration" \
@@ -135,7 +137,7 @@ run_required "Function App runtime configuration" \
     --query "{linuxFxVersion:linuxFxVersion,ftpsState:ftpsState,alwaysOn:alwaysOn,minTlsVersion:minTlsVersion}" \
     --output table
 
-run_required "Function App app setting names only" \
+run_optional "Function App app setting names only" \
   az functionapp config appsettings list \
     --resource-group "$resource_group" \
     --name "$function_app" \
@@ -165,21 +167,61 @@ run_optional "Application Insights resources" \
     --query "[].{name:name,id:id,location:location}" \
     --output table
 
-section "Discover Storage account"
-storage_accounts=$(az resource list \
+section "Safe aggregate Application Insights metrics (last 30 minutes)"
+application_insights_resources=$(az resource list \
   --resource-group "$resource_group" \
-  --resource-type Microsoft.Storage/storageAccounts \
-  --query "[].name" \
+  --resource-type Microsoft.Insights/components \
+  --query "sort([].name)" \
   --output tsv)
 status=$?
 if [[ $status -ne 0 ]]; then
-  printf 'ERROR: failed to discover Storage accounts (exit code %s).\n' "$status" >&2
+  printf 'WARN: failed to discover Application Insights resources (exit code %s). Skipping aggregate metrics.\n' "$status" >&2
+else
+  mapfile -t discovered_application_insights < <(printf '%s\n' "$application_insights_resources" | sed '/^$/d')
+  if [[ ${#discovered_application_insights[@]} -eq 1 ]]; then
+    application_insights_name="${discovered_application_insights[0]}"
+    aggregate_query=$(cat <<'KQL'
+let since = ago(30m);
+print
+  requestCount=toscalar(requests | where timestamp > since | count),
+  failedRequestCount=toscalar(requests | where timestamp > since and success == false | count),
+  serverErrorCount=toscalar(requests | where timestamp > since and toint(resultCode) between (500 .. 599) | count),
+  exceptionCount=toscalar(exceptions | where timestamp > since | count),
+  failedDependencyCount=toscalar(dependencies | where timestamp > since and success == false | count)
+KQL
+)
+    run_optional "Application Insights aggregate health metrics" \
+      az monitor app-insights query \
+        --apps "$application_insights_name" \
+        --resource-group "$resource_group" \
+        --analytics-query "$aggregate_query" \
+        --offset 30m \
+        --query "{requestCount:tables[0].rows[0][0],failedRequestCount:tables[0].rows[0][1],serverErrorCount:tables[0].rows[0][2],exceptionCount:tables[0].rows[0][3],failedDependencyCount:tables[0].rows[0][4]}" \
+        --output table
+  else
+    printf 'WARN: expected exactly one Application Insights resource in %s, found %s. Skipping aggregate metrics.\n' \
+      "$resource_group" \
+      "${#discovered_application_insights[@]}" >&2
+  fi
+fi
+
+section "Discover immutable release package Storage account"
+storage_accounts=$(az storage account list \
+  --resource-group "$resource_group" \
+  --query "sort([?tags.purpose=='immutable-release-packages'].name)" \
+  --output tsv)
+status=$?
+if [[ $status -ne 0 ]]; then
+  printf 'ERROR: failed to discover immutable release package Storage accounts (exit code %s).\n' "$status" >&2
   exit "$status"
 fi
-storage_account=$(printf '%s\n' "$storage_accounts" | sed '/^$/d' | head -n 1)
-if [[ -z "$storage_account" ]]; then
-  printf 'WARN: no Storage account found in %s. Skipping package artifact diagnostics.\n' "$resource_group" >&2
+mapfile -t discovered_release_storage_accounts < <(printf '%s\n' "$storage_accounts" | sed '/^$/d')
+if [[ ${#discovered_release_storage_accounts[@]} -ne 1 ]]; then
+  printf 'WARN: expected exactly one Storage account tagged purpose=immutable-release-packages in %s, found %s. Skipping package artifact diagnostics.\n' \
+    "$resource_group" \
+    "${#discovered_release_storage_accounts[@]}" >&2
 else
+  storage_account="${discovered_release_storage_accounts[0]}"
   printf '%s\n' "$storage_account"
 
   run_optional "Storage container names" \
