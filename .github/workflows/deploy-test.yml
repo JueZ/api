@@ -25,7 +25,15 @@ on:
         type: boolean
       delivery_correlation:
         description: Unique delivery-controller correlation value.
-        required: false
+        required: true
+        type: string
+      ci_run_id:
+        description: Exact successful first-attempt main CI run that produced the release bundle.
+        required: true
+        type: string
+      ci_delivery_correlation:
+        description: Exact correlation in the selected main CI run title.
+        required: true
         type: string
 
 permissions:
@@ -61,4 +69,6 @@ jobs:
       controllerRef: ${{ github.sha }}
       controllerWorkflowSha: ${{ github.workflow_sha }}
       redditShareUrlSmokeEnabled: ${{ inputs.reddit_share_url_smoke }}
-      deliveryCorrelation: ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
+      deliveryCorrelation: ${{ inputs.delivery_correlation }}
+      ciRunId: ${{ inputs.ci_run_id }}
+      ciDeliveryCorrelation: ${{ inputs.ci_delivery_correlation }}

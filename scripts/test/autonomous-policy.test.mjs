@@ -38,6 +38,10 @@ const rollbackProductionWorkflow = readFileSync(
   new URL('../../.github/workflows/rollback-production.yml', import.meta.url),
   'utf8',
 );
+const runtimeSettingsPolicy = readFileSync(
+  new URL('../validate-deployed-runtime-settings.mjs', import.meta.url),
+  'utf8',
+);
 
 function pullRequest(overrides = {}) {
   return {
@@ -79,6 +83,12 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
   assert.match(mainDeliveryWorkflow, /wait_for_dispatch ci\.yml "\$ci_title" "\$ci_started_at" "\$SOURCE_REF" "CI"/);
   assert.match(mainDeliveryWorkflow, /Dispatch correlation matched more than one/);
   assert.match(mainDeliveryWorkflow, /\.path == \$path/);
+  assert.match(mainDeliveryWorkflow, /github\.run_attempt == 1/);
+  assert.match(mainDeliveryWorkflow, /github\.event\.workflow_run\.run_attempt == 1/);
+  assert.match(mainDeliveryWorkflow, /A main-delivery run already consumed trigger/);
+  assert.match(mainDeliveryWorkflow, /\.path == "\.github\/workflows\/codex-automerge\.yml"/);
+  assert.match(mainDeliveryWorkflow, /-f ci_run_id="\$CI_RUN_ID"/);
+  assert.match(mainDeliveryWorkflow, /-f ci_delivery_correlation="\$CI_DELIVERY_CORRELATION"/);
   assert.match(mainDeliveryWorkflow, /Pinned Deploy Test run did not emit matching successful provenance/);
   assert.match(mainDeliveryWorkflow, /Pinned production run did not emit matching successful runtime-truth evidence/);
   assert.equal(mainDeliveryWorkflow.match(/^\s+assert_current_main$/gm)?.length, 3);
@@ -86,8 +96,12 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
 
 test('environment deployment rechecks current main at mutation and acceptance boundaries', () => {
   assert.ok((deployEnvironmentWorkflow.match(/node scripts\/assert-current-main\.mjs/g) ?? []).length >= 9);
-  assert.match(deployEnvironmentWorkflow, /name: Verify deployed runtime safety settings/);
-  assert.match(deployEnvironmentWorkflow, /\.AUTH_ENABLED == "true"/);
+  assert.match(deployEnvironmentWorkflow, /name: Verify complete deployed runtime safety policy/);
+  assert.match(deployEnvironmentWorkflow, /node scripts\/validate-deployed-runtime-settings\.mjs --arm-response/);
+  assert.doesNotMatch(deployEnvironmentWorkflow, /runtime-setting-names\.json|runtime-safety-settings\.json/);
+  assert.match(deployEnvironmentWorkflow, /actions\/runs\/\$\{CI_RUN_ID\}/);
+  assert.match(deployEnvironmentWorkflow, /expected_ci_title="CI \$deployment_ref \$CI_DELIVERY_CORRELATION"/);
+  assert.doesNotMatch(deployEnvironmentWorkflow, /actions\/workflows\/ci\.yml\/runs\?branch=main/);
   assert.match(deployEnvironmentWorkflow, /effective_web_api_base_url="\$EFFECTIVE_BASE_URL"/);
   assert.match(deployEnvironmentWorkflow, /name: Checkout current deployment controller/);
   assert.match(deployEnvironmentWorkflow, /ref: \$\{\{ inputs\.controllerRef \}\}/);
@@ -120,6 +134,10 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.ok(mainDeliveryWorkflow.includes('--name "release-ledger-prod-$SOURCE_REF-$production_correlation"'));
   assert.match(mainDeliveryWorkflow, /-f test_delivery_correlation="\$test_correlation"/);
   assert.match(mainDeliveryWorkflow, /-f test_run_id="\$test_run_id"/);
+  assert.match(deployTestWorkflow, /ciRunId: \$\{\{ inputs\.ci_run_id \}\}/);
+  assert.match(deployTestWorkflow, /ciDeliveryCorrelation: \$\{\{ inputs\.ci_delivery_correlation \}\}/);
+  assert.match(promoteProductionWorkflow, /ciRunId: \$\{\{ inputs\.ci_run_id \}\}/);
+  assert.match(promoteProductionWorkflow, /ciDeliveryCorrelation: \$\{\{ inputs\.ci_delivery_correlation \}\}/);
   for (const workflow of [deployTestWorkflow, promoteProductionWorkflow, rollbackProductionWorkflow]) {
     assert.match(workflow, /controllerRef: \$\{\{ github\.sha \}\}/);
     assert.match(workflow, /controllerWorkflowSha: \$\{\{ github\.workflow_sha \}\}/);
@@ -136,7 +154,7 @@ test('rollback changes only accepted application packages and leaves infrastruct
   );
   assert.match(
     deployEnvironmentWorkflow,
-    /- name: Verify deployed runtime safety settings\n\s+if: \$\{\{ inputs\.deployFunctions && !inputs\.allowRollback \}\}/,
+    /- name: Verify complete deployed runtime safety policy\n\s+if: \$\{\{ inputs\.deployFunctions \}\}/,
   );
   assert.match(deployEnvironmentWorkflow, /resolve_storage_by_purpose immutable-release-packages/);
   assert.match(deployEnvironmentWorkflow, /resolve_storage_by_purpose public-static-site/);
@@ -154,14 +172,8 @@ test('rollback changes only accepted application packages and leaves infrastruct
     deployEnvironmentWorkflow,
     /Rollback requires the accepted digest-addressed Function package to already exist/,
   );
-  assert.match(
-    deployEnvironmentWorkflow,
-    /- name: Validate existing runtime safety settings for package-only rollback\n\s+if: \$\{\{ inputs\.deployFunctions && inputs\.allowRollback \}\}/,
-  );
-  assert.match(
-    deployEnvironmentWorkflow,
-    /Package-only rollback cannot repair or reconcile mismatched runtime safety settings/,
-  );
+  assert.match(runtimeSettingsPolicy, /required managed setting is missing/);
+  assert.match(runtimeSettingsPolicy, /unmanaged app setting is present/);
   assert.match(
     deployEnvironmentWorkflow,
     /Production promotion and rollback require both Function and frontend packages/,

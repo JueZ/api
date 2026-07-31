@@ -1,5 +1,5 @@
 name: Codex Main Delivery
-run-name: Deliver main ${{ github.event.workflow_run.head_sha }}
+run-name: Deliver trigger ${{ github.event.workflow_run.id }} attempt ${{ github.event.workflow_run.run_attempt }}
 
 on:
   workflow_run:
@@ -26,6 +26,8 @@ jobs:
     if: >-
       ${{
         github.event.workflow_run.conclusion == 'success' &&
+        github.run_attempt == 1 &&
+        github.event.workflow_run.run_attempt == 1 &&
         (
           (
             github.event.workflow_run.name == 'CI' &&
@@ -55,6 +57,7 @@ jobs:
           TRIGGER_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
           TRIGGER_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          TRIGGER_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         shell: bash
         run: |
           set -euo pipefail
@@ -74,7 +77,7 @@ jobs:
             local status=""
             local conclusion=""
             local url=""
-            local description="$expected_title"
+            local description="$expected_workflow_name: $expected_title"
 
             for attempt in {1..60}; do
               runs_json="$(gh run list \
@@ -117,13 +120,16 @@ jobs:
                 --arg title "$expected_title" \
                 --arg head "$expected_head" \
                 --arg path "$expected_path" \
-                --arg workflow_name "$expected_workflow_name" \
+                --arg repository "$REPOSITORY" \
                 '(.id | tostring) == $run_id
                   and .event == "workflow_dispatch"
                   and .head_sha == $head
                   and .display_title == $title
                   and .path == $path
-                  and .name == $workflow_name' <<<"$run_json" >/dev/null; then
+                  and .name == $title
+                  and .repository.full_name == $repository
+                  and .head_branch == "main"
+                  and .run_attempt == 1' <<<"$run_json" >/dev/null; then
                 echo "Pinned run $run_id no longer matches the authorized dispatch identity." >&2
                 return 1
               fi
@@ -160,9 +166,78 @@ jobs:
             echo "Triggering workflow did not provide an immutable source SHA." >&2
             exit 1
           fi
+          if [ "$GITHUB_RUN_ATTEMPT" != "1" ] || [ "$TRIGGER_RUN_ATTEMPT" != "1" ]; then
+            echo "Main delivery and its triggering workflow must both be first attempts." >&2
+            exit 1
+          fi
+
+          current_delivery_json="$(gh api "repos/$REPOSITORY/actions/runs/$GITHUB_RUN_ID")"
+          expected_delivery_title="Deliver trigger $TRIGGER_RUN_ID attempt $TRIGGER_RUN_ATTEMPT"
+          if ! jq -e \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg repository "$REPOSITORY" \
+            --arg title "$expected_delivery_title" \
+            '(.id | tostring) == $run_id
+              and .repository.full_name == $repository
+              and .path == ".github/workflows/codex-main-delivery.yml"
+              and .event == "workflow_run"
+              and .head_branch == "main"
+              and .display_title == $title
+              and .name == $title
+              and .run_attempt == 1
+              and (.status == "queued" or .status == "in_progress")' \
+            <<<"$current_delivery_json" >/dev/null; then
+            echo "Current main-delivery run identity is not the authorized first-attempt workflow generation." >&2
+            exit 1
+          fi
+
+          trigger_run_json="$(gh api "repos/$REPOSITORY/actions/runs/$TRIGGER_RUN_ID")"
+          if [ "$TRIGGER_WORKFLOW" = "Codex Auto-Merge" ]; then
+            # shellcheck disable=SC2016
+            trigger_identity_filter='(.id | tostring) == $run_id
+              and .repository.full_name == $repository
+              and .path == ".github/workflows/codex-automerge.yml"
+              and .name == "Codex Auto-Merge"
+              and .event == "pull_request_target"
+              and .conclusion == "success"
+              and .head_sha == $head_sha
+              and .run_attempt == 1'
+          else
+            # shellcheck disable=SC2016
+            trigger_identity_filter='(.id | tostring) == $run_id
+              and .repository.full_name == $repository
+              and .path == ".github/workflows/ci.yml"
+              and .event == "push"
+              and .conclusion == "success"
+              and .head_branch == "main"
+              and .head_sha == $head_sha
+              and .run_attempt == 1'
+          fi
+          if ! jq -e \
+            --arg run_id "$TRIGGER_RUN_ID" \
+            --arg repository "$REPOSITORY" \
+            --arg head_sha "$TRIGGER_HEAD_SHA" \
+            "$trigger_identity_filter" \
+            <<<"$trigger_run_json" >/dev/null; then
+            echo "Triggering workflow metadata does not match the exact authorized first-attempt run." >&2
+            exit 1
+          fi
+
+          prior_delivery_count="$(gh api --paginate --slurp \
+            "repos/$REPOSITORY/actions/workflows/codex-main-delivery.yml/runs?event=workflow_run&per_page=100" \
+            | jq \
+              --arg current_run_id "$GITHUB_RUN_ID" \
+              --arg title "$expected_delivery_title" \
+              '[.[]?.workflow_runs[]? | select((.id | tostring) != $current_run_id and .display_title == $title)] | length')"
+          if [ "$prior_delivery_count" -gt 0 ]; then
+            echo "A main-delivery run already consumed trigger $TRIGGER_RUN_ID; treating this duplicate event as a no-op."
+            exit 0
+          fi
 
           SOURCE_REF="$TRIGGER_HEAD_SHA"
           CI_RUN_URL="$TRIGGER_RUN_URL"
+          CI_RUN_ID=""
+          CI_DELIVERY_CORRELATION=""
           associated_pr=""
 
           if [ "$TRIGGER_WORKFLOW" = "Codex Auto-Merge" ]; then
@@ -228,7 +303,11 @@ jobs:
               -f delivery_correlation="$ci_correlation"
             wait_for_dispatch ci.yml "$ci_title" "$ci_started_at" "$SOURCE_REF" "CI"
             CI_RUN_URL="$(cat "$RUNNER_TEMP/ci.yml.url")"
+            CI_RUN_ID="$(cat "$RUNNER_TEMP/ci.yml.id")"
+            CI_DELIVERY_CORRELATION="$ci_correlation"
           else
+            CI_RUN_ID="$TRIGGER_RUN_ID"
+            CI_DELIVERY_CORRELATION="$TRIGGER_RUN_ID"
             associated_pr="$(gh api \
               -H 'Accept: application/vnd.github+json' \
               "repos/$REPOSITORY/commits/$SOURCE_REF/pulls" \
@@ -257,7 +336,9 @@ jobs:
             -f commit_sha="$SOURCE_REF" \
             -f deploy_frontend=true \
             -f deploy_functions=true \
-            -f delivery_correlation="$test_correlation"
+            -f delivery_correlation="$test_correlation" \
+            -f ci_run_id="$CI_RUN_ID" \
+            -f ci_delivery_correlation="$CI_DELIVERY_CORRELATION"
           wait_for_dispatch deploy-test.yml "$test_title" "$test_started_at" "$SOURCE_REF" "Deploy Test"
           test_url="$(cat "$RUNNER_TEMP/deploy-test.yml.url")"
           test_run_id="$(cat "$RUNNER_TEMP/deploy-test.yml.id")"
@@ -271,11 +352,15 @@ jobs:
             --arg source_ref "$SOURCE_REF" \
             --arg run_id "$test_run_id" \
             --arg correlation "$test_correlation" \
+            --arg ci_run_id "$CI_RUN_ID" \
+            --arg ci_correlation "$CI_DELIVERY_CORRELATION" \
             '.environmentName == "test"
               and .sourceRef == $source_ref
               and .resolvedHead == $source_ref
               and .runId == $run_id
               and .deliveryCorrelation == $correlation
+              and .ciRunId == $ci_run_id
+              and .ciDeliveryCorrelation == $ci_correlation
               and .workflow == "Deploy Test"
               and .deployFrontend == "true"
               and .deployFunctions == "true"
@@ -299,7 +384,9 @@ jobs:
             -f commit_sha="$SOURCE_REF" \
             -f delivery_correlation="$production_correlation" \
             -f test_delivery_correlation="$test_correlation" \
-            -f test_run_id="$test_run_id"
+            -f test_run_id="$test_run_id" \
+            -f ci_run_id="$CI_RUN_ID" \
+            -f ci_delivery_correlation="$CI_DELIVERY_CORRELATION"
           wait_for_dispatch promote-production.yml "$production_title" "$production_started_at" "$SOURCE_REF" "Promote Production"
           production_url="$(cat "$RUNNER_TEMP/promote-production.yml.url")"
           production_run_id="$(cat "$RUNNER_TEMP/promote-production.yml.id")"

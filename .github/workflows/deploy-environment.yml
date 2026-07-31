@@ -57,6 +57,16 @@ on:
         description: Unique value binding this deployment to one workflow dispatch and release ledger.
         required: true
         type: string
+      ciRunId:
+        description: Exact first-attempt successful main CI run that produced the immutable release bundle.
+        required: false
+        default: ''
+        type: string
+      ciDeliveryCorrelation:
+        description: Correlation embedded in the exact main CI run title.
+        required: false
+        default: ''
+        type: string
       testDeliveryCorrelation:
         description: Correlation from the exact successful Deploy Test run promoted to production.
         required: false
@@ -148,6 +158,8 @@ jobs:
       CONTROLLER_REF: ${{ inputs.controllerRef }}
       CONTROLLER_WORKFLOW_SHA: ${{ inputs.controllerWorkflowSha }}
       DELIVERY_CORRELATION: ${{ inputs.deliveryCorrelation }}
+      CI_RUN_ID: ${{ inputs.ciRunId }}
+      CI_DELIVERY_CORRELATION: ${{ inputs.ciDeliveryCorrelation }}
       TEST_DELIVERY_CORRELATION: ${{ inputs.testDeliveryCorrelation }}
       TEST_DELIVERY_RUN_ID: ${{ inputs.testDeliveryRunId }}
       ROLLBACK_RELEASE_RUN_ID: ${{ inputs.rollbackReleaseRunId }}
@@ -159,6 +171,7 @@ jobs:
       AUTH_ENABLED: ${{ vars.AUTH_ENABLED }}
       OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
       OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
+      OIDC_JWKS_URI: ${{ vars.OIDC_JWKS_URI }}
       OIDC_REQUIRED_SCOPES: ${{ vars.OIDC_REQUIRED_SCOPES }}
       OIDC_ALLOWED_OBJECT_IDS: ${{ vars.OIDC_ALLOWED_OBJECT_IDS }}
       OIDC_ALLOWED_SUBJECTS: ${{ vars.OIDC_ALLOWED_SUBJECTS }}
@@ -166,6 +179,7 @@ jobs:
       OIDC_ALLOWED_CLIENT_IDS: ${{ vars.OIDC_ALLOWED_CLIENT_IDS }}
       OIDC_ALLOWED_DELEGATED_CLIENT_IDS: ${{ vars.OIDC_ALLOWED_DELEGATED_CLIENT_IDS }}
       OIDC_ALLOWED_TENANTS: ${{ vars.OIDC_ALLOWED_TENANTS }}
+      AUTH_DEBUG: ${{ vars.AUTH_DEBUG }}
       MCP_RESOURCE_ORIGIN: ${{ vars.MCP_RESOURCE_ORIGIN }}
       MCP_ALLOWED_ORIGINS: ${{ vars.MCP_ALLOWED_ORIGINS }}
       OPERATOR_ALERT_EMAIL: ${{ vars.OPERATOR_ALERT_EMAIL }}
@@ -266,7 +280,6 @@ jobs:
             --arg repository "$GITHUB_REPOSITORY" \
             --arg controller_ref "$controller_ref" \
             --arg path "$expected_caller_path" \
-            --arg name "$expected_caller_name" \
             --arg title "$expected_caller_title" \
             '(.id | tostring) == $run_id
               and .repository.full_name == $repository
@@ -274,7 +287,7 @@ jobs:
               and .head_branch == "main"
               and .event == "workflow_dispatch"
               and .path == $path
-              and .name == $name
+              and .name == $title
               and .display_title == $title
               and .run_attempt == 1
               and (.status == "queued" or .status == "in_progress")' \
@@ -308,24 +321,34 @@ jobs:
             exit 1
           fi
 
-          ci_run_json=$(gh api \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&head_sha=${deployment_ref}&status=completed&per_page=20" \
-            --jq '.workflow_runs | map(select(.conclusion == "success" and (.event == "push" or .event == "workflow_dispatch") and .path == ".github/workflows/ci.yml" and .head_branch == "main")) | sort_by(.created_at) | last // {}')
-          ci_run_id="$(jq -r '.id // ""' <<<"$ci_run_json")"
-          if ! [[ "$ci_run_id" =~ ^[0-9]+$ ]]; then
-            echo "sourceRef must match a commit that completed CI successfully." >&2
-            exit 1
-          fi
-          echo "ci_run_id=$ci_run_id" >> "$GITHUB_OUTPUT"
-
-          if [ "${deployment_ref,,}" != "$controller_ref" ]; then
-            controller_ci_run_id=$(gh api \
-              "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&head_sha=${controller_ref}&status=completed&per_page=20" \
-              --jq '.workflow_runs | map(select(.conclusion == "success" and (.event == "push" or .event == "workflow_dispatch") and .path == ".github/workflows/ci.yml" and .head_branch == "main")) | sort_by(.created_at) | last | .id // ""')
-            if ! [[ "$controller_ci_run_id" =~ ^[0-9]+$ ]]; then
-              echo "Current main must complete CI before its infrastructure can control a rollback." >&2
+          if [ "$ROLLBACK_REQUESTED" != "true" ]; then
+            if ! [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]] ||
+               ! [[ "$CI_DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]; then
+              echo "Normal deployment requires one exact main CI run ID and correlation." >&2
               exit 1
             fi
+            ci_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}")"
+            expected_ci_title="CI $deployment_ref $CI_DELIVERY_CORRELATION"
+            if ! jq -e \
+              --arg run_id "$CI_RUN_ID" \
+              --arg repository "$GITHUB_REPOSITORY" \
+              --arg source_ref "$deployment_ref" \
+              --arg title "$expected_ci_title" \
+              '(.id | tostring) == $run_id
+                and .repository.full_name == $repository
+                and .path == ".github/workflows/ci.yml"
+                and .name == $title
+                and (.event == "push" or .event == "workflow_dispatch")
+                and .conclusion == "success"
+                and .head_branch == "main"
+                and .head_sha == $source_ref
+                and .display_title == $title
+                and .run_attempt == 1' \
+              <<<"$ci_run_json" >/dev/null; then
+              echo "Pinned CI run does not match the exact first-attempt main release authorization." >&2
+              exit 1
+            fi
+            echo "ci_run_id=$CI_RUN_ID" >> "$GITHUB_OUTPUT"
           fi
 
           if [ "$ENVIRONMENT_NAME" = "prod" ] &&
@@ -366,7 +389,7 @@ jobs:
                 '(.id | tostring) == $run_id
                   and .repository.full_name == $repository
                   and .path == ".github/workflows/promote-production.yml"
-                  and .name == "Promote Production"
+                  and .name == $title
                   and .event == "workflow_dispatch"
                   and .conclusion == "success"
                   and .head_branch == "main"
@@ -426,7 +449,7 @@ jobs:
                 '(.id | tostring) == $run_id
                   and .repository.full_name == $repository
                   and .path == ".github/workflows/deploy-test.yml"
-                  and .name == "Deploy Test"
+                  and .name == $title
                   and .event == "workflow_dispatch"
                   and .conclusion == "success"
                   and .head_branch == "main"
@@ -448,6 +471,8 @@ jobs:
                 --arg test_run_id "$TEST_DELIVERY_RUN_ID" \
                 --arg repository "$GITHUB_REPOSITORY" \
                 --arg correlation "$TEST_DELIVERY_CORRELATION" \
+                --arg ci_run_id "$CI_RUN_ID" \
+                --arg ci_correlation "$CI_DELIVERY_CORRELATION" \
                 '.environmentName == "test"
                   and .sourceRef == $source_ref
                   and .resolvedHead == $source_ref
@@ -455,6 +480,8 @@ jobs:
                   and .workflow == "Deploy Test"
                   and .repository == $repository
                   and .deliveryCorrelation == $correlation
+                  and .ciRunId == $ci_run_id
+                  and .ciDeliveryCorrelation == $ci_correlation
                   and .runAttempt == "1"
                   and .deployFrontend == "true"
                   and .deployFunctions == "true"
@@ -692,6 +719,7 @@ jobs:
                 authEnabled="$AUTH_ENABLED" \
                 oidcIssuer="${OIDC_ISSUER:-}" \
                 oidcAudience="${OIDC_AUDIENCE:-}" \
+                oidcJwksUri="${OIDC_JWKS_URI:-}" \
                 oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove}" \
                 oidcAllowedObjectIds="${OIDC_ALLOWED_OBJECT_IDS:-}" \
                 oidcAllowedSubjects="${OIDC_ALLOWED_SUBJECTS:-}" \
@@ -699,6 +727,7 @@ jobs:
                 oidcAllowedClientIds="${OIDC_ALLOWED_CLIENT_IDS:-}" \
                 oidcAllowedDelegatedClientIds="${OIDC_ALLOWED_DELEGATED_CLIENT_IDS:-}" \
                 oidcAllowedTenants="${OIDC_ALLOWED_TENANTS:-}" \
+                authDebug="${AUTH_DEBUG:-false}" \
                 apiCorsAllowedOrigins="$api_cors_allowed_origins" \
                 mcpResourceOrigin="$MCP_RESOURCE_ORIGIN" \
                 mcpAllowedOrigins="$MCP_ALLOWED_ORIGINS" \
@@ -747,55 +776,6 @@ jobs:
           else
             echo "No infra/main.bicep found; skipping infrastructure deployment."
           fi
-      - name: Verify deployed runtime safety settings
-        if: ${{ inputs.deployFunctions && !inputs.allowRollback }}
-        shell: bash
-        env:
-          DEPLOYED_FUNCTION_APP_NAME: ${{ steps.infra.outputs.function_app_name }}
-        run: |
-          set -euo pipefail
-          function_app_name="$DEPLOYED_FUNCTION_APP_NAME"
-          : "${function_app_name:?Function App name is required to verify runtime settings}"
-          settings_file="$RUNNER_TEMP/runtime-safety-settings.json"
-          az rest \
-            --method post \
-            --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$function_app_name/config/appsettings/list?api-version=2023-12-01" \
-            --body '{}' \
-            --query 'properties.{AUTH_ENABLED:AUTH_ENABLED,DEPLOYED_ENVIRONMENT_NAME:DEPLOYED_ENVIRONMENT_NAME,OIDC_ISSUER:OIDC_ISSUER,OIDC_AUDIENCE:OIDC_AUDIENCE,OIDC_REQUIRED_SCOPES:OIDC_REQUIRED_SCOPES,OIDC_ALLOWED_OBJECT_IDS:OIDC_ALLOWED_OBJECT_IDS,OIDC_ALLOWED_TENANTS:OIDC_ALLOWED_TENANTS,MCP_RESOURCE_ORIGIN:MCP_RESOURCE_ORIGIN,MCP_ALLOWED_ORIGINS:MCP_ALLOWED_ORIGINS,BRING_ENABLED:BRING_ENABLED,BRING_ADD_ENABLED:BRING_ADD_ENABLED,BRING_DESTRUCTIVE_ENABLED:BRING_DESTRUCTIVE_ENABLED,REPAIRABLE_ERRORS_LLM_ENABLED:REPAIRABLE_ERRORS_LLM_ENABLED,REPAIRABLE_ERRORS_LLM_MODEL:REPAIRABLE_ERRORS_LLM_MODEL}' \
-            --output json > "$settings_file"
-          if ! jq -e \
-            --arg environmentName "$ENVIRONMENT_NAME" \
-            --arg oidcIssuer "$OIDC_ISSUER" \
-            --arg oidcAudience "$OIDC_AUDIENCE" \
-            --arg oidcRequiredScopes "$OIDC_REQUIRED_SCOPES" \
-            --arg oidcAllowedObjectIds "$OIDC_ALLOWED_OBJECT_IDS" \
-            --arg oidcAllowedTenants "$OIDC_ALLOWED_TENANTS" \
-            --arg mcpResourceOrigin "$MCP_RESOURCE_ORIGIN" \
-            --arg mcpAllowedOrigins "$MCP_ALLOWED_ORIGINS" \
-            --arg bringEnabled "$BRING_ENABLED" \
-            --arg bringAddEnabled "$BRING_ADD_ENABLED" \
-            --arg bringDestructiveEnabled "$BRING_DESTRUCTIVE_ENABLED" \
-            --arg repairableErrorsLlmEnabled "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" \
-            --arg repairableErrorsLlmModel "${REPAIRABLE_ERRORS_LLM_MODEL:-}" \
-            '.AUTH_ENABLED == "true"
-              and .DEPLOYED_ENVIRONMENT_NAME == $environmentName
-              and .OIDC_ISSUER == $oidcIssuer
-              and .OIDC_AUDIENCE == $oidcAudience
-              and .OIDC_REQUIRED_SCOPES == $oidcRequiredScopes
-              and .OIDC_ALLOWED_OBJECT_IDS == $oidcAllowedObjectIds
-              and .OIDC_ALLOWED_TENANTS == $oidcAllowedTenants
-              and .MCP_RESOURCE_ORIGIN == $mcpResourceOrigin
-              and .MCP_ALLOWED_ORIGINS == $mcpAllowedOrigins
-              and .BRING_ENABLED == $bringEnabled
-              and .BRING_ADD_ENABLED == $bringAddEnabled
-              and .BRING_DESTRUCTIVE_ENABLED == $bringDestructiveEnabled
-              and .REPAIRABLE_ERRORS_LLM_ENABLED == $repairableErrorsLlmEnabled
-              and .REPAIRABLE_ERRORS_LLM_MODEL == $repairableErrorsLlmModel' \
-            "$settings_file" >/dev/null; then
-            echo "Effective Function App safety settings do not match the approved deployment inputs." >&2
-            exit 1
-          fi
-          echo "Effective Function App safety settings match the approved deployment inputs."
       - name: Resolve runtime settings
         id: resolve
         shell: bash
@@ -909,52 +889,19 @@ jobs:
             echo "- Application Insights: ${effective_app_insights:-<not resolved>}"
             echo "- Frontend URL: ${effective_frontend_url:-<not resolved>}"
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Validate existing runtime safety settings for package-only rollback
-        if: ${{ inputs.deployFunctions && inputs.allowRollback }}
+      - name: Verify complete deployed runtime safety policy
+        if: ${{ inputs.deployFunctions }}
         shell: bash
         run: |
           set -euo pipefail
-          : "${EFFECTIVE_FUNCTIONAPP_NAME:?Function App name is required to validate rollback safety settings}"
-          settings_file="$RUNNER_TEMP/rollback-runtime-safety-settings.json"
+          : "${EFFECTIVE_FUNCTIONAPP_NAME:?Function App name is required to validate runtime safety settings}"
+          settings_url="https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$EFFECTIVE_FUNCTIONAPP_NAME/config/appsettings/list?api-version=2023-12-01"
           az rest \
             --method post \
-            --url "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$EFFECTIVE_FUNCTIONAPP_NAME/config/appsettings/list?api-version=2023-12-01" \
+            --url "$settings_url" \
             --body '{}' \
-            --query 'properties.{AUTH_ENABLED:AUTH_ENABLED,DEPLOYED_ENVIRONMENT_NAME:DEPLOYED_ENVIRONMENT_NAME,OIDC_ISSUER:OIDC_ISSUER,OIDC_AUDIENCE:OIDC_AUDIENCE,OIDC_REQUIRED_SCOPES:OIDC_REQUIRED_SCOPES,OIDC_ALLOWED_OBJECT_IDS:OIDC_ALLOWED_OBJECT_IDS,OIDC_ALLOWED_TENANTS:OIDC_ALLOWED_TENANTS,MCP_RESOURCE_ORIGIN:MCP_RESOURCE_ORIGIN,MCP_ALLOWED_ORIGINS:MCP_ALLOWED_ORIGINS,BRING_ENABLED:BRING_ENABLED,BRING_ADD_ENABLED:BRING_ADD_ENABLED,BRING_DESTRUCTIVE_ENABLED:BRING_DESTRUCTIVE_ENABLED,REPAIRABLE_ERRORS_LLM_ENABLED:REPAIRABLE_ERRORS_LLM_ENABLED,REPAIRABLE_ERRORS_LLM_MODEL:REPAIRABLE_ERRORS_LLM_MODEL}' \
-            --output json > "$settings_file"
-          if ! jq -e \
-            --arg environmentName "$ENVIRONMENT_NAME" \
-            --arg oidcIssuer "$OIDC_ISSUER" \
-            --arg oidcAudience "$OIDC_AUDIENCE" \
-            --arg oidcRequiredScopes "$OIDC_REQUIRED_SCOPES" \
-            --arg oidcAllowedObjectIds "$OIDC_ALLOWED_OBJECT_IDS" \
-            --arg oidcAllowedTenants "$OIDC_ALLOWED_TENANTS" \
-            --arg mcpResourceOrigin "$MCP_RESOURCE_ORIGIN" \
-            --arg mcpAllowedOrigins "$MCP_ALLOWED_ORIGINS" \
-            --arg bringEnabled "$BRING_ENABLED" \
-            --arg bringAddEnabled "$BRING_ADD_ENABLED" \
-            --arg bringDestructiveEnabled "$BRING_DESTRUCTIVE_ENABLED" \
-            --arg repairableErrorsLlmEnabled "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" \
-            --arg repairableErrorsLlmModel "${REPAIRABLE_ERRORS_LLM_MODEL:-}" \
-            '.AUTH_ENABLED == "true"
-              and .DEPLOYED_ENVIRONMENT_NAME == $environmentName
-              and .OIDC_ISSUER == $oidcIssuer
-              and .OIDC_AUDIENCE == $oidcAudience
-              and .OIDC_REQUIRED_SCOPES == $oidcRequiredScopes
-              and .OIDC_ALLOWED_OBJECT_IDS == $oidcAllowedObjectIds
-              and .OIDC_ALLOWED_TENANTS == $oidcAllowedTenants
-              and .MCP_RESOURCE_ORIGIN == $mcpResourceOrigin
-              and .MCP_ALLOWED_ORIGINS == $mcpAllowedOrigins
-              and .BRING_ENABLED == $bringEnabled
-              and .BRING_ADD_ENABLED == $bringAddEnabled
-              and .BRING_DESTRUCTIVE_ENABLED == $bringDestructiveEnabled
-              and .REPAIRABLE_ERRORS_LLM_ENABLED == $repairableErrorsLlmEnabled
-              and .REPAIRABLE_ERRORS_LLM_MODEL == $repairableErrorsLlmModel' \
-            "$settings_file" >/dev/null; then
-            echo "Package-only rollback cannot repair or reconcile mismatched runtime safety settings." >&2
-            exit 1
-          fi
-          echo "Existing production runtime safety settings match the current rollback policy."
+            --output json \
+            | node scripts/validate-deployed-runtime-settings.mjs --arm-response
       - name: Verify private WLH reference data is present
         if: ${{ inputs.deployFunctions }}
         shell: bash
@@ -1348,6 +1295,8 @@ jobs:
             --arg runId "$GITHUB_RUN_ID" \
             --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
             --arg deliveryCorrelation "$DELIVERY_CORRELATION" \
+            --arg ciRunId "$CI_RUN_ID" \
+            --arg ciDeliveryCorrelation "$CI_DELIVERY_CORRELATION" \
             --arg functionappSha256 "$FUNCTION_ARTIFACT_SHA256" \
             --arg sourceFrontendSha256 "$FRONTEND_SOURCE_ARTIFACT_SHA256" \
             --arg frontendSha256 "$FRONTEND_ARTIFACT_SHA256" \
@@ -1366,6 +1315,8 @@ jobs:
               runId: $runId,
               runAttempt: $runAttempt,
               deliveryCorrelation: $deliveryCorrelation,
+              ciRunId: $ciRunId,
+              ciDeliveryCorrelation: $ciDeliveryCorrelation,
               artifacts: {
                 functionappSha256: $functionappSha256,
                 sourceFrontendSha256: $sourceFrontendSha256,

@@ -62,7 +62,10 @@ The normal path needs no routine human input. If the GitHub `production` environ
 gh workflow run deploy-test.yml \
   --ref main \
   --repo JueZ/api \
-  -f commit_sha=<commit-sha>
+  -f commit_sha=<commit-sha> \
+  -f delivery_correlation=<new-opaque-correlation> \
+  -f ci_run_id=<exact-successful-main-ci-run-id> \
+  -f ci_delivery_correlation=<correlation-from-that-ci-run>
 ```
 
 ### Promoting to production
@@ -74,8 +77,11 @@ gh workflow run promote-production.yml \
   --ref main \
   --repo JueZ/api \
   -f commit_sha=<commit-sha> \
+  -f delivery_correlation=<new-opaque-correlation> \
   -f test_delivery_correlation=<exact-successful-deploy-test-correlation> \
-  -f test_run_id=<exact-successful-deploy-test-run-id>
+  -f test_run_id=<exact-successful-deploy-test-run-id> \
+  -f ci_run_id=<exact-successful-main-ci-run-id> \
+  -f ci_delivery_correlation=<correlation-from-that-ci-run>
 ```
 
 ### Rolling back production

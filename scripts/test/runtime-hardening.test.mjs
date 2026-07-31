@@ -14,6 +14,13 @@ import {
   hasDuplicateTriageComment,
 } from '../triage-repair-issues.mjs';
 import { decideRuntimeTruth, summarizeLedger, validateWorkflowRunMetadata } from '../runtime-truth.mjs';
+import {
+  buildExpectedRuntimeSettings,
+  optionalReleaseSettingNames,
+  requiredManagedSettingNames,
+  validateArmRuntimeSettingsResponse,
+  validateDeployedRuntimeSettings,
+} from '../validate-deployed-runtime-settings.mjs';
 
 const sha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const ledger = {
@@ -35,6 +42,53 @@ const ledger = {
   telemetryCheckResult: { status: 'passed', checks: { smokeEvidenceCount: 1 } },
   verifiedAt: '2026-05-17T00:00:00.000Z',
 };
+
+const runtimeSettingsEnv = {
+  ENVIRONMENT_NAME: 'test',
+  EFFECTIVE_HOST_STORAGE_ACCOUNT: 'hosttest123',
+  EFFECTIVE_PRIVATE_STORAGE_ACCOUNT: 'privatetest123',
+  TEST_WEB_AUTH_REDIRECT_URI: 'https://test.example.test/auth/callback',
+  WEB_AUTH_REDIRECT_URI: 'https://prod.example.test/auth/callback',
+  OIDC_ISSUER: 'https://login.example.test/tenant/v2.0',
+  OIDC_AUDIENCE: 'api://catalogue',
+  OIDC_JWKS_URI: 'https://login.example.test/tenant/discovery/v2.0/keys',
+  OIDC_ALLOWED_OBJECT_IDS: 'user-object-id',
+  OIDC_ALLOWED_SUBJECTS: 'subject-id',
+  OIDC_ALLOWED_APP_OBJECT_IDS: 'app-object-id',
+  OIDC_ALLOWED_CLIENT_IDS: 'client-id',
+  OIDC_ALLOWED_DELEGATED_CLIENT_IDS: 'delegated-client-id',
+  OIDC_ALLOWED_TENANTS: 'tenant-id',
+  MCP_RESOURCE_ORIGIN: 'https://api.example.test',
+  MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
+  REDDIT_CLIENT_ID: 'reddit-client-id',
+  REDDIT_USER_AGENT: 'catalogue-test',
+};
+
+test('deployed runtime policy accepts the complete managed key set without reading secret values', () => {
+  const settings = buildExpectedRuntimeSettings(runtimeSettingsEnv);
+  const names = [...requiredManagedSettingNames, optionalReleaseSettingNames[0]];
+  assert.deepEqual(validateDeployedRuntimeSettings(settings, names, runtimeSettingsEnv), []);
+  const properties = Object.fromEntries(names.map((name) => [name, 'secret-value-not-reported']));
+  Object.assign(properties, settings);
+  assert.deepEqual(validateArmRuntimeSettingsResponse({ properties }, runtimeSettingsEnv), []);
+  assert.equal('OPENAI_API_KEY' in settings, false);
+  assert.equal('REDDIT_CLIENT_SECRET' in settings, false);
+});
+
+test('deployed runtime policy rejects security drift, missing managed keys, and unmanaged settings', () => {
+  const settings = {
+    ...buildExpectedRuntimeSettings(runtimeSettingsEnv),
+    OIDC_ALLOWED_DELEGATED_CLIENT_IDS: 'unexpected-client',
+  };
+  const names = [
+    ...requiredManagedSettingNames.filter((name) => name !== 'BRING_WRITABLE_LIST_UUIDS'),
+    'UNMANAGED_SECURITY_OVERRIDE',
+  ];
+  const errors = validateDeployedRuntimeSettings(settings, names, runtimeSettingsEnv);
+  assert.ok(errors.some((error) => error.endsWith('BRING_WRITABLE_LIST_UUIDS')));
+  assert.ok(errors.some((error) => error.endsWith('UNMANAGED_SECURITY_OVERRIDE')));
+  assert.ok(errors.some((error) => error.endsWith('OIDC_ALLOWED_DELEGATED_CLIENT_IDS')));
+});
 
 test('telemetry KQL sanitizes smoke run IDs', () => {
   assert.equal(sanitizeTelemetrySmokeRunId("smoke-prod'; drop table"), 'smoke-prod-drop-table');
@@ -335,7 +389,7 @@ test('runtime truth validates exact deployment workflow run metadata', () => {
     id: Number(ledger.workflowRunId),
     repository: { full_name: 'JueZ/api' },
     path: '.github/workflows/promote-production.yml',
-    name: 'Promote Production',
+    name: `Promote Production ${sha} ${ledger.deliveryCorrelation}`,
     event: 'workflow_dispatch',
     run_attempt: 1,
     conclusion: 'success',
@@ -345,6 +399,7 @@ test('runtime truth validates exact deployment workflow run metadata', () => {
   };
   assert.deepEqual(validateWorkflowRunMetadata(run, options), []);
   assert.ok(validateWorkflowRunMetadata({ ...run, head_sha: 'b'.repeat(40) }, options).length > 0);
+  assert.ok(validateWorkflowRunMetadata({ ...run, name: 'Promote Production' }, options).length > 0);
   assert.ok(validateWorkflowRunMetadata({ ...run, display_title: 'Promote Production' }, options).length > 0);
   assert.ok(validateWorkflowRunMetadata({ ...run, run_attempt: 2 }, options).length > 0);
 });
