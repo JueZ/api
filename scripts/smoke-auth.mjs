@@ -15,43 +15,9 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function summarizeTokenAuthorizationContext(token) {
-  try {
-    const segments = token.split('.');
-    if (segments.length < 2) return { tokenFormat: 'opaque_or_invalid' };
-    const payload = JSON.parse(Buffer.from(segments[1], 'base64url').toString('utf8'));
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      return { tokenFormat: 'opaque_or_invalid' };
-    }
-
-    const roles = Array.isArray(payload.roles) ? payload.roles.filter((value) => typeof value === 'string') : [];
-    const scopes =
-      typeof payload.scp === 'string'
-        ? payload.scp
-            .split(' ')
-            .map((value) => value.trim())
-            .filter(Boolean)
-        : [];
-    const recognizedRoles = [...new Set(roles.filter((value) => KNOWN_PERMISSIONS.has(value)))].sort();
-    const recognizedScopes = [...new Set(scopes.filter((value) => KNOWN_PERMISSIONS.has(value)))].sort();
-
-    return {
-      tokenFormat: 'jwt',
-      tokenTypeMarker: payload.idtyp === 'app' ? 'app' : typeof payload.idtyp === 'string' ? 'other' : 'absent',
-      hasClientCredentialAuthMethod: typeof payload.azpacr === 'string' || typeof payload.appidacr === 'string',
-      recognizedRoles,
-      recognizedScopes,
-      unrecognizedRoleCount: roles.length - recognizedRoles.length,
-      unrecognizedScopeCount: scopes.length - recognizedScopes.length,
-    };
-  } catch {
-    return { tokenFormat: 'opaque_or_invalid' };
-  }
-}
-
 function summarizeAuthorizationProblem(statusCode, problem) {
   if (!problem || typeof problem !== 'object' || Array.isArray(problem)) {
-    return { statusCode, problemFormat: 'missing_or_invalid' };
+    return { statusCode, evidenceFormat: 'unusable' };
   }
 
   const requiredPermissionMatch =
@@ -62,16 +28,26 @@ function summarizeAuthorizationProblem(statusCode, problem) {
     requiredPermissionMatch && KNOWN_PERMISSIONS.has(requiredPermissionMatch[1])
       ? requiredPermissionMatch[1]
       : undefined;
+  const retryPolicy = problem.retry_policy;
+  const retryPolicyValid =
+    retryPolicy !== null &&
+    typeof retryPolicy === 'object' &&
+    !Array.isArray(retryPolicy) &&
+    retryPolicy.can_retry === true &&
+    retryPolicy.same_request === false;
+  const permissionEvidenceValid =
+    statusCode === 403 &&
+    problem.status === 403 &&
+    problem.classification === 'authorization_context_mismatch' &&
+    problem.repairable === true &&
+    retryPolicyValid &&
+    requiredPermission !== undefined;
 
   return {
     statusCode,
-    problemFormat: problem.classification === 'authorization_context_mismatch' ? 'repairable_problem' : 'unexpected',
-    classification:
-      problem.classification === 'authorization_context_mismatch' ? 'authorization_context_mismatch' : undefined,
-    requiredPermission,
-    repairable: problem.repairable === true,
-    canRetry: problem.retry_policy?.can_retry === true,
-    sameRequest: problem.retry_policy?.same_request === true,
+    evidenceFormat: permissionEvidenceValid ? 'api_verified_permission_denial' : 'unusable',
+    classification: permissionEvidenceValid ? 'authorization_context_mismatch' : undefined,
+    requiredPermission: permissionEvidenceValid ? requiredPermission : undefined,
   };
 }
 
@@ -120,8 +96,6 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
       'AUTH_ACCESS_TOKEN was not minted for authenticated smoke; configure service OAuth variables and GitHub OIDC federation.';
     return { result: results, exitCode: requireAuthSmoke ? 2 : 0, output: 'stdout' };
   }
-
-  record('token-authorization-context', 'observed', summarizeTokenAuthorizationContext(token));
 
   try {
     const health = await fetchJsonWithRetry(

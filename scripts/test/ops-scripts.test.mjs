@@ -273,7 +273,7 @@ test('authenticated smoke retries transient health and protected endpoint 404s a
   }
 });
 
-test('authenticated smoke reports only safe REC and permission evidence for authorization failures', async () => {
+test('authenticated smoke reports only API-validated REC permission evidence for authorization failures', async () => {
   const originalFetch = globalThis.fetch;
   try {
     globalThis.fetch = async (url) => {
@@ -287,6 +287,7 @@ test('authenticated smoke reports only safe REC and permission evidence for auth
       if (path === '/api/hello') {
         return new Response(
           JSON.stringify({
+            status: 403,
             classification: 'authorization_context_mismatch',
             detail: 'Required permission is missing: catalogue.read.',
             repairable: true,
@@ -298,13 +299,10 @@ test('authenticated smoke reports only safe REC and permission evidence for auth
       throw new Error(`unexpected URL ${url}`);
     };
 
-    const tokenPayload = Buffer.from(
-      JSON.stringify({ idtyp: 'app', azpacr: '2', roles: ['api.service'], scp: '' }),
-    ).toString('base64url');
     const { result, exitCode } = await runAuthenticatedSmoke({
       env: {
         API_BASE_URL: 'https://api.example.test',
-        AUTH_ACCESS_TOKEN: `header.${tokenPayload}.signature`,
+        AUTH_ACCESS_TOKEN: 'opaque-token-never-emitted',
         ENVIRONMENT_NAME: 'test',
         EXPECTED_DEPLOYED_COMMIT_SHA: 'c'.repeat(40),
         SMOKE_RUN_ID: 'smoke-auth-denied',
@@ -314,34 +312,63 @@ test('authenticated smoke reports only safe REC and permission evidence for auth
     assert.equal(exitCode, 1);
     assert.equal(result.status, 'failed');
     assert.deepEqual(
-      result.checks.find((check) => check.name === 'token-authorization-context'),
+      result.checks.find((check) => check.name === 'authenticated-hello-authorization'),
       {
-        name: 'token-authorization-context',
-        status: 'observed',
-        tokenFormat: 'jwt',
-        tokenTypeMarker: 'app',
-        hasClientCredentialAuthMethod: true,
-        recognizedRoles: [],
-        recognizedScopes: [],
-        unrecognizedRoleCount: 1,
-        unrecognizedScopeCount: 0,
+        name: 'authenticated-hello-authorization',
+        status: 'failed',
+        statusCode: 403,
+        evidenceFormat: 'api_verified_permission_denial',
+        classification: 'authorization_context_mismatch',
+        requiredPermission: 'catalogue.read',
       },
     );
+    assert.equal(JSON.stringify(result).includes('opaque-token-never-emitted'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('authenticated smoke does not validate incomplete authorization REC metadata', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === '/health') {
+        return new Response(JSON.stringify({ status: 'ok', environmentName: 'test' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (path === '/api/hello') {
+        return new Response(JSON.stringify({ classification: 'authorization_context_mismatch', repairable: true }), {
+          status: 403,
+          headers: { 'content-type': 'application/problem+json' },
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    };
+
+    const { result, exitCode } = await runAuthenticatedSmoke({
+      env: {
+        API_BASE_URL: 'https://api.example.test',
+        AUTH_ACCESS_TOKEN: 'opaque-token-never-emitted',
+        ENVIRONMENT_NAME: 'test',
+        SMOKE_RUN_ID: 'smoke-invalid-rec',
+      },
+    });
+
+    assert.equal(exitCode, 1);
     assert.deepEqual(
       result.checks.find((check) => check.name === 'authenticated-hello-authorization'),
       {
         name: 'authenticated-hello-authorization',
         status: 'failed',
         statusCode: 403,
-        problemFormat: 'repairable_problem',
-        classification: 'authorization_context_mismatch',
-        requiredPermission: 'catalogue.read',
-        repairable: true,
-        canRetry: true,
-        sameRequest: false,
+        evidenceFormat: 'unusable',
+        classification: undefined,
+        requiredPermission: undefined,
       },
     );
-    assert.equal(JSON.stringify(result).includes('api.service'), false);
   } finally {
     globalThis.fetch = originalFetch;
   }
