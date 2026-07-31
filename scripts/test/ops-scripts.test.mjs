@@ -273,6 +273,80 @@ test('authenticated smoke retries transient health and protected endpoint 404s a
   }
 });
 
+test('authenticated smoke reports only safe REC and permission evidence for authorization failures', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === '/health') {
+        return new Response(
+          JSON.stringify({ status: 'ok', environmentName: 'test', deployedCommitSha: 'c'.repeat(40) }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (path === '/api/hello') {
+        return new Response(
+          JSON.stringify({
+            classification: 'authorization_context_mismatch',
+            detail: 'Required permission is missing: catalogue.read.',
+            repairable: true,
+            retry_policy: { can_retry: true, same_request: false },
+          }),
+          { status: 403, headers: { 'content-type': 'application/problem+json' } },
+        );
+      }
+      throw new Error(`unexpected URL ${url}`);
+    };
+
+    const tokenPayload = Buffer.from(
+      JSON.stringify({ idtyp: 'app', azpacr: '2', roles: ['api.service'], scp: '' }),
+    ).toString('base64url');
+    const { result, exitCode } = await runAuthenticatedSmoke({
+      env: {
+        API_BASE_URL: 'https://api.example.test',
+        AUTH_ACCESS_TOKEN: `header.${tokenPayload}.signature`,
+        ENVIRONMENT_NAME: 'test',
+        EXPECTED_DEPLOYED_COMMIT_SHA: 'c'.repeat(40),
+        SMOKE_RUN_ID: 'smoke-auth-denied',
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.equal(result.status, 'failed');
+    assert.deepEqual(
+      result.checks.find((check) => check.name === 'token-authorization-context'),
+      {
+        name: 'token-authorization-context',
+        status: 'observed',
+        tokenFormat: 'jwt',
+        tokenTypeMarker: 'app',
+        hasClientCredentialAuthMethod: true,
+        recognizedRoles: [],
+        recognizedScopes: [],
+        unrecognizedRoleCount: 1,
+        unrecognizedScopeCount: 0,
+      },
+    );
+    assert.deepEqual(
+      result.checks.find((check) => check.name === 'authenticated-hello-authorization'),
+      {
+        name: 'authenticated-hello-authorization',
+        status: 'failed',
+        statusCode: 403,
+        problemFormat: 'repairable_problem',
+        classification: 'authorization_context_mismatch',
+        requiredPermission: 'catalogue.read',
+        repairable: true,
+        canRetry: true,
+        sameRequest: false,
+      },
+    );
+    assert.equal(JSON.stringify(result).includes('api.service'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('authenticated share URL smoke passes only when expected post id matches', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];

@@ -1,8 +1,78 @@
 #!/usr/bin/env node
 import { getSmokeRunId, requireUrl, fetchJson, assertEqual, safeSummary } from './lib/smoke-utils.mjs';
 
+const KNOWN_PERMISSIONS = new Set([
+  'catalogue.read',
+  'reddit.read',
+  'wlh.read',
+  'bring.read',
+  'bring.write',
+  'bring.complete',
+  'bring.remove',
+]);
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function summarizeTokenAuthorizationContext(token) {
+  try {
+    const segments = token.split('.');
+    if (segments.length < 2) return { tokenFormat: 'opaque_or_invalid' };
+    const payload = JSON.parse(Buffer.from(segments[1], 'base64url').toString('utf8'));
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return { tokenFormat: 'opaque_or_invalid' };
+    }
+
+    const roles = Array.isArray(payload.roles) ? payload.roles.filter((value) => typeof value === 'string') : [];
+    const scopes =
+      typeof payload.scp === 'string'
+        ? payload.scp
+            .split(' ')
+            .map((value) => value.trim())
+            .filter(Boolean)
+        : [];
+    const recognizedRoles = [...new Set(roles.filter((value) => KNOWN_PERMISSIONS.has(value)))].sort();
+    const recognizedScopes = [...new Set(scopes.filter((value) => KNOWN_PERMISSIONS.has(value)))].sort();
+
+    return {
+      tokenFormat: 'jwt',
+      tokenTypeMarker: payload.idtyp === 'app' ? 'app' : typeof payload.idtyp === 'string' ? 'other' : 'absent',
+      hasClientCredentialAuthMethod: typeof payload.azpacr === 'string' || typeof payload.appidacr === 'string',
+      recognizedRoles,
+      recognizedScopes,
+      unrecognizedRoleCount: roles.length - recognizedRoles.length,
+      unrecognizedScopeCount: scopes.length - recognizedScopes.length,
+    };
+  } catch {
+    return { tokenFormat: 'opaque_or_invalid' };
+  }
+}
+
+function summarizeAuthorizationProblem(statusCode, problem) {
+  if (!problem || typeof problem !== 'object' || Array.isArray(problem)) {
+    return { statusCode, problemFormat: 'missing_or_invalid' };
+  }
+
+  const requiredPermissionMatch =
+    typeof problem.detail === 'string'
+      ? /Required permission is missing: ([A-Za-z0-9_:-]+(?:\.[A-Za-z0-9_:-]+)*)\.?/.exec(problem.detail)
+      : null;
+  const requiredPermission =
+    requiredPermissionMatch && KNOWN_PERMISSIONS.has(requiredPermissionMatch[1])
+      ? requiredPermissionMatch[1]
+      : undefined;
+
+  return {
+    statusCode,
+    problemFormat: problem.classification === 'authorization_context_mismatch' ? 'repairable_problem' : 'unexpected',
+    classification:
+      problem.classification === 'authorization_context_mismatch' ? 'authorization_context_mismatch' : undefined,
+    requiredPermission,
+    repairable: problem.repairable === true,
+    canRetry: problem.retry_policy?.can_retry === true,
+    sameRequest: problem.retry_policy?.same_request === true,
+  };
 }
 
 export async function runAuthenticatedSmoke({ env = process.env } = {}) {
@@ -51,6 +121,8 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
     return { result: results, exitCode: requireAuthSmoke ? 2 : 0, output: 'stdout' };
   }
 
+  record('token-authorization-context', 'observed', summarizeTokenAuthorizationContext(token));
+
   try {
     const health = await fetchJsonWithRetry(
       `${apiBaseUrl}/health`,
@@ -78,6 +150,13 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
         label: 'authenticated /api/hello',
       },
     );
+    if (hello.response.status === 401 || hello.response.status === 403) {
+      record(
+        'authenticated-hello-authorization',
+        'failed',
+        summarizeAuthorizationProblem(hello.response.status, hello.json),
+      );
+    }
     assertEqual('authenticated /api/hello status', hello.response.status, 200);
     assertEqual('authenticated /api/hello authenticated flag', hello.json?.authenticated, true);
     record('authenticated-hello', 'passed');
