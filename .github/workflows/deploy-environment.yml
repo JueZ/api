@@ -54,6 +54,11 @@ on:
         required: false
         default: ''
         type: string
+      testDeliveryRunId:
+        description: Exact successful Deploy Test workflow run promoted to production.
+        required: false
+        default: ''
+        type: string
       rollbackReleaseRunId:
         description: Exact prior successful Promote Production run containing the accepted rollback ledger.
         required: false
@@ -134,6 +139,7 @@ jobs:
       SOURCE_REF: ${{ inputs.sourceRef }}
       DELIVERY_CORRELATION: ${{ inputs.deliveryCorrelation }}
       TEST_DELIVERY_CORRELATION: ${{ inputs.testDeliveryCorrelation }}
+      TEST_DELIVERY_RUN_ID: ${{ inputs.testDeliveryRunId }}
       ROLLBACK_RELEASE_RUN_ID: ${{ inputs.rollbackReleaseRunId }}
       ROLLBACK_RELEASE_CORRELATION: ${{ inputs.rollbackReleaseCorrelation }}
       AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
@@ -293,8 +299,12 @@ jobs:
               expected_rollback_title="Promote Production $deployment_ref $ROLLBACK_RELEASE_CORRELATION"
               if ! jq -e \
                 --arg source_ref "$deployment_ref" \
+                --arg run_id "$ROLLBACK_RELEASE_RUN_ID" \
+                --arg repository "$GITHUB_REPOSITORY" \
                 --arg title "$expected_rollback_title" \
-                '.path == ".github/workflows/promote-production.yml"
+                '(.id | tostring) == $run_id
+                  and .repository.full_name == $repository
+                  and .path == ".github/workflows/promote-production.yml"
                   and .name == "Promote Production"
                   and .event == "workflow_dispatch"
                   and .conclusion == "success"
@@ -339,58 +349,67 @@ jobs:
               } >> "$GITHUB_OUTPUT"
               echo "Validated exact historical production ledger from run $ROLLBACK_RELEASE_RUN_ID."
             else
-              if ! [[ "$TEST_DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]; then
-                echo "Production promotion requires the exact Deploy Test delivery correlation." >&2
+              if ! [[ "$TEST_DELIVERY_RUN_ID" =~ ^[0-9]+$ ]] ||
+                 ! [[ "$TEST_DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]; then
+                echo "Production promotion requires the exact Deploy Test run ID and delivery correlation." >&2
                 exit 1
               fi
-              mapfile -t successful_test_run_ids < <(gh api \
-                "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-test.yml/runs?branch=main&status=completed&per_page=50" \
-                --jq '.workflow_runs[] | select(.conclusion == "success" and .event == "workflow_dispatch") | .id')
-              valid_test_run_id=""
+              test_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TEST_DELIVERY_RUN_ID}")"
+              expected_test_title="Deploy Test $deployment_ref $TEST_DELIVERY_CORRELATION"
+              if ! jq -e \
+                --arg source_ref "$deployment_ref" \
+                --arg run_id "$TEST_DELIVERY_RUN_ID" \
+                --arg repository "$GITHUB_REPOSITORY" \
+                --arg title "$expected_test_title" \
+                '(.id | tostring) == $run_id
+                  and .repository.full_name == $repository
+                  and .path == ".github/workflows/deploy-test.yml"
+                  and .name == "Deploy Test"
+                  and .event == "workflow_dispatch"
+                  and .conclusion == "success"
+                  and .head_branch == "main"
+                  and .head_sha == $source_ref
+                  and .display_title == $title' \
+                <<<"$test_run_json" >/dev/null; then
+                echo "Deploy Test run identity does not match the exact source and correlation being promoted." >&2
+                exit 1
+              fi
               provenance_dir="$(mktemp -d)"
-              for test_run_id in "${successful_test_run_ids[@]}"; do
-                find "$provenance_dir" -mindepth 1 -maxdepth 1 -delete
-                if gh run download "$test_run_id" \
-                  --repo "$GITHUB_REPOSITORY" \
-                  --name "deploy-test-provenance-${deployment_ref}" \
-                  --dir "$provenance_dir" >/dev/null 2>&1; then
-                  provenance_file="$provenance_dir/deploy-test-provenance.json"
-                  if [ -f "$provenance_file" ] && jq -e \
-                    --arg source_ref "$deployment_ref" \
-                    --arg test_run_id "$test_run_id" \
-                    --arg repository "$GITHUB_REPOSITORY" \
-                    --arg correlation "$TEST_DELIVERY_CORRELATION" \
-                    '.environmentName == "test"
-                      and .sourceRef == $source_ref
-                      and .resolvedHead == $source_ref
-                      and .runId == $test_run_id
-                      and .workflow == "Deploy Test"
-                      and .repository == $repository
-                      and .deliveryCorrelation == $correlation
-                      and .deployFrontend == "true"
-                      and .deployFunctions == "true"
-                      and .eventName == "workflow_dispatch"
-                      and (.artifacts.functionappSha256 | test("^[0-9a-f]{64}$"))
-                      and (.artifacts.frontendSha256 | test("^[0-9a-f]{64}$"))
-                      and (.artifacts.sbomSha256 | test("^[0-9a-f]{64}$"))
-                      and .authenticatedSmokeStatus == "passed"
-                      and .telemetryStatus == "passed"' \
-                    "$provenance_file" >/dev/null; then
-                    valid_test_run_id="$test_run_id"
-                    {
-                      echo "approved_function_digest=$(jq -r '.artifacts.functionappSha256' "$provenance_file")"
-                      echo "approved_frontend_digest=$(jq -r '.artifacts.frontendSha256' "$provenance_file")"
-                      echo "approved_sbom_digest=$(jq -r '.artifacts.sbomSha256' "$provenance_file")"
-                    } >> "$GITHUB_OUTPUT"
-                    break
-                  fi
-                fi
-              done
-              if [ -z "$valid_test_run_id" ]; then
-                echo "Production sourceRef must match the exact correlated successful Deploy Test provenance." >&2
+              gh run download "$TEST_DELIVERY_RUN_ID" \
+                --repo "$GITHUB_REPOSITORY" \
+                --name "deploy-test-provenance-${deployment_ref}" \
+                --dir "$provenance_dir"
+              provenance_file="$provenance_dir/deploy-test-provenance.json"
+              if ! jq -e \
+                --arg source_ref "$deployment_ref" \
+                --arg test_run_id "$TEST_DELIVERY_RUN_ID" \
+                --arg repository "$GITHUB_REPOSITORY" \
+                --arg correlation "$TEST_DELIVERY_CORRELATION" \
+                '.environmentName == "test"
+                  and .sourceRef == $source_ref
+                  and .resolvedHead == $source_ref
+                  and .runId == $test_run_id
+                  and .workflow == "Deploy Test"
+                  and .repository == $repository
+                  and .deliveryCorrelation == $correlation
+                  and .deployFrontend == "true"
+                  and .deployFunctions == "true"
+                  and .eventName == "workflow_dispatch"
+                  and (.artifacts.functionappSha256 | test("^[0-9a-f]{64}$"))
+                  and (.artifacts.frontendSha256 | test("^[0-9a-f]{64}$"))
+                  and (.artifacts.sbomSha256 | test("^[0-9a-f]{64}$"))
+                  and .authenticatedSmokeStatus == "passed"
+                  and .telemetryStatus == "passed"' \
+                "$provenance_file" >/dev/null; then
+                echo "Production sourceRef must match the exact pinned successful Deploy Test provenance." >&2
                 exit 1
               fi
-              echo "Validated exact Deploy Test provenance from run $valid_test_run_id."
+              {
+                echo "approved_function_digest=$(jq -r '.artifacts.functionappSha256' "$provenance_file")"
+                echo "approved_frontend_digest=$(jq -r '.artifacts.frontendSha256' "$provenance_file")"
+                echo "approved_sbom_digest=$(jq -r '.artifacts.sbomSha256' "$provenance_file")"
+              } >> "$GITHUB_OUTPUT"
+              echo "Validated exact Deploy Test provenance from run $TEST_DELIVERY_RUN_ID."
             fi
           fi
       - name: Setup Node.js
@@ -511,6 +530,7 @@ jobs:
           set -euo pipefail
           if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
       - name: Download immutable CI release bundle
+        if: ${{ !inputs.allowRollback }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
         with:
           name: release-${{ inputs.sourceRef || github.sha }}
@@ -518,6 +538,15 @@ jobs:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ steps.source.outputs.ci_run_id }}
+      - name: Download exact accepted production release bundle
+        if: ${{ inputs.allowRollback }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        with:
+          name: production-release-${{ inputs.sourceRef }}
+          path: ${{ runner.temp }}/release
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.rollbackReleaseRunId }}
       - name: Verify immutable release bundle
         shell: bash
         run: |
@@ -1068,6 +1097,14 @@ jobs:
         with:
           name: release-ledger-${{ inputs.environmentName }}-${{ inputs.sourceRef || github.sha }}
           path: ${{ runner.temp }}/smoke/release-ledger-${{ inputs.environmentName }}.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Preserve exact accepted production release bundle
+        if: ${{ inputs.environmentName == 'prod' && !inputs.allowRollback && success() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
+        with:
+          name: production-release-${{ inputs.sourceRef || github.sha }}
+          path: ${{ runner.temp }}/release
           if-no-files-found: error
           retention-days: 90
       - name: Record test deployment provenance

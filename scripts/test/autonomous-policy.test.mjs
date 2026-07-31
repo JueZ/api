@@ -87,9 +87,15 @@ test('environment deployment rechecks current main at mutation and acceptance bo
     /EXPECTED_DELIVERY_CORRELATION="\$ROLLBACK_RELEASE_CORRELATION"[\s\\]+node scripts\/validate-release-ledger\.mjs/,
   );
   assert.match(deployEnvironmentWorkflow, /\.deliveryCorrelation == \$correlation/);
+  assert.match(deployEnvironmentWorkflow, /actions\/runs\/\$\{TEST_DELIVERY_RUN_ID\}/);
+  assert.match(deployEnvironmentWorkflow, /name: Download exact accepted production release bundle/);
+  assert.match(deployEnvironmentWorkflow, /run-id: \$\{\{ inputs\.rollbackReleaseRunId \}\}/);
+  assert.match(deployEnvironmentWorkflow, /name: Preserve exact accepted production release bundle/);
+  assert.doesNotMatch(deployEnvironmentWorkflow, /successful_test_run_ids/);
   assert.doesNotMatch(deployEnvironmentWorkflow, /ROLLBACK_PROVENANCE_VERIFIED/);
   assert.match(deployEnvironmentWorkflow, /deliveryCorrelation: \$deliveryCorrelation/);
   assert.match(mainDeliveryWorkflow, /-f test_delivery_correlation="\$test_correlation"/);
+  assert.match(mainDeliveryWorkflow, /-f test_run_id="\$test_run_id"/);
 });
 
 test('policy glob matcher handles recursive and exact AGENTS paths', () => {

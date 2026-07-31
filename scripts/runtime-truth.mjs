@@ -41,6 +41,32 @@ function runGh(args, spawn = spawnSync) {
   return completed.stdout;
 }
 
+const workflowIdentities = {
+  'deploy-test.yml': { path: '.github/workflows/deploy-test.yml', name: 'Deploy Test' },
+  'promote-production.yml': { path: '.github/workflows/promote-production.yml', name: 'Promote Production' },
+};
+
+export function validateWorkflowRunMetadata(run = {}, options = {}) {
+  const errors = [];
+  const identity = workflowIdentities[options.workflow];
+  if (!identity) return [`unsupported deployment workflow: ${options.workflow || '<missing>'}`];
+  const expectedTitle = `${identity.name} ${options.expectedSha} ${options.expectedDeliveryCorrelation}`;
+  if (String(run.id || '') !== options.runId) errors.push('workflow run ID does not match the requested run');
+  if (run.repository?.full_name !== options.repo) errors.push('workflow repository does not match the requested repo');
+  if (run.path !== identity.path) errors.push(`workflow path must be ${identity.path}`);
+  if (run.name !== identity.name) errors.push(`workflow name must be ${identity.name}`);
+  if (run.event !== 'workflow_dispatch') errors.push('workflow event must be workflow_dispatch');
+  if (run.conclusion !== 'success') errors.push('workflow conclusion must be success');
+  if (run.head_branch !== 'main') errors.push('workflow head branch must be main');
+  if (String(run.head_sha || '').toLowerCase() !== options.expectedSha) {
+    errors.push('workflow head SHA does not match the expected deployed commit');
+  }
+  if (run.display_title !== expectedTitle) {
+    errors.push('workflow display title does not match the expected source and delivery correlation');
+  }
+  return errors;
+}
+
 async function findJsonFile(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
@@ -93,6 +119,9 @@ export function decideRuntimeTruth({ live = {}, ledger = null, options = {}, led
       if (options.expectedDeliveryCorrelation && ledger.deliveryCorrelation !== options.expectedDeliveryCorrelation) {
         failures.push('ledger deliveryCorrelation does not match the expected workflow dispatch');
       }
+      if (options.runId && ledger.workflowRunId !== options.runId) {
+        failures.push('ledger workflowRunId does not match the expected workflow run');
+      }
       if (
         live.runtime?.deployedCommitSha &&
         ledger.deployedCommit &&
@@ -140,7 +169,16 @@ export async function loadLedger(options, spawn = spawnSync) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/.test(options.expectedDeliveryCorrelation || '')) {
     throw new Error('Ledger mode requires the exact workflow delivery correlation via --delivery-correlation.');
   }
+  if (!/^[0-9a-f]{40}$/.test(options.expectedSha || '')) {
+    throw new Error('Ledger mode requires the exact lowercase deployed commit via --expected-sha.');
+  }
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(options.repo || '')) {
+    throw new Error('Ledger mode requires an owner/repository GitHub repository identifier.');
+  }
   const runId = options.runId;
+  const runMetadata = JSON.parse(runGh(['api', `repos/${options.repo}/actions/runs/${runId}`], spawn));
+  const runErrors = validateWorkflowRunMetadata(runMetadata, options);
+  if (runErrors.length > 0) throw new Error(`Workflow run identity rejected: ${runErrors.join('; ')}`);
   const artifactName = `release-ledger-${options.environment}-${options.expectedSha}`;
   const artifactDir = options.artifactDir || (await mkdtemp(join(tmpdir(), 'runtime-truth-ledger-')));
   if (!existsSync(artifactDir)) throw new Error(`artifact directory does not exist: ${artifactDir}`);
@@ -148,7 +186,15 @@ export async function loadLedger(options, spawn = spawnSync) {
   const ledgerPath = await findJsonFile(artifactDir);
   if (!ledgerPath) throw new Error(`Artifact ${artifactName} did not contain a JSON ledger.`);
   const ledger = JSON.parse(await readFile(ledgerPath, 'utf8'));
-  return { ledger, artifactName, runId, ledgerPath };
+  if (
+    ledger.workflowRunId !== runId ||
+    ledger.sourceRef !== options.expectedSha ||
+    ledger.deployedCommit !== options.expectedSha ||
+    ledger.deliveryCorrelation !== options.expectedDeliveryCorrelation
+  ) {
+    throw new Error('Release ledger identity does not match the exact inspected workflow run.');
+  }
+  return { ledger, artifactName, runId, ledgerPath, runMetadata };
 }
 
 export async function runRuntimeTruth({ argv = process.argv.slice(2), env = process.env, spawn = spawnSync } = {}) {

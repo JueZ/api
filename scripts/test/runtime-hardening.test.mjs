@@ -13,7 +13,7 @@ import {
   decideRepairIssueAction,
   hasDuplicateTriageComment,
 } from '../triage-repair-issues.mjs';
-import { decideRuntimeTruth, summarizeLedger } from '../runtime-truth.mjs';
+import { decideRuntimeTruth, summarizeLedger, validateWorkflowRunMetadata } from '../runtime-truth.mjs';
 
 const sha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const ledger = {
@@ -305,6 +305,46 @@ test('runtime truth decision rejects a ledger from another dispatch correlation'
     ledgerErrors: [],
   });
   assert.equal(decision.status, 'failed');
+});
+
+test('runtime truth decision rejects a ledger from another workflow run', () => {
+  const decision = decideRuntimeTruth({
+    live: { status: 'passed', runtime: { environmentName: 'prod', deployedCommitSha: sha } },
+    ledger,
+    options: {
+      includeLedger: true,
+      environment: 'prod',
+      expectedSha: sha,
+      expectedDeliveryCorrelation: ledger.deliveryCorrelation,
+      runId: '456',
+    },
+    ledgerErrors: [],
+  });
+  assert.equal(decision.status, 'failed');
+});
+
+test('runtime truth validates exact deployment workflow run metadata', () => {
+  const options = {
+    runId: ledger.workflowRunId,
+    repo: 'JueZ/api',
+    workflow: 'promote-production.yml',
+    expectedSha: sha,
+    expectedDeliveryCorrelation: ledger.deliveryCorrelation,
+  };
+  const run = {
+    id: Number(ledger.workflowRunId),
+    repository: { full_name: 'JueZ/api' },
+    path: '.github/workflows/promote-production.yml',
+    name: 'Promote Production',
+    event: 'workflow_dispatch',
+    conclusion: 'success',
+    head_branch: 'main',
+    head_sha: sha,
+    display_title: `Promote Production ${sha} ${ledger.deliveryCorrelation}`,
+  };
+  assert.deepEqual(validateWorkflowRunMetadata(run, options), []);
+  assert.ok(validateWorkflowRunMetadata({ ...run, head_sha: 'b'.repeat(40) }, options).length > 0);
+  assert.ok(validateWorkflowRunMetadata({ ...run, display_title: 'Promote Production' }, options).length > 0);
 });
 
 test('runtime truth decision blocks when ledger evidence is missing', () => {

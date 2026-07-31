@@ -12,8 +12,8 @@ Use this skill for JueZ/api production rollback requests.
 - Use the GitHub Actions `Rollback Production` workflow; do not invent a separate production deployment path.
 - Roll back only to a full 40-character known-good commit SHA from `main`.
 - The rollback source commit must have passed the repository deployment provenance gates required by the workflow.
-- Supply the exact prior successful `Promote Production` run ID and delivery correlation whose accepted release ledger matches the rollback SHA and artifact digests.
-- Current `main` remains authoritative for Bicep, identity, storage policy, and safety settings. Rollback may switch only to the ledger-bound historical Function/frontend artifacts.
+- Supply the exact prior successful `Promote Production` run ID and delivery correlation whose accepted release ledger and preserved release bundle match the rollback SHA and artifact digests.
+- Current `main` remains authoritative for Bicep, identity, storage policy, and safety settings. Rollback may switch only to the exact Function/frontend bytes preserved by that accepted production run.
 - `DEPLOY_PRODUCTION_ENABLED=true` is required for production rollback deployment.
 - Do not enable `DEPLOY_PRODUCTION_ENABLED=true` unless the operator/user explicitly requests enabling production deployment and the guardrails, approval posture, and risk are documented.
 - Do not print secrets, tokens, connection strings, SAS URLs, or full environment dumps.

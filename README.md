@@ -74,12 +74,13 @@ gh workflow run promote-production.yml \
   --ref main \
   --repo JueZ/api \
   -f commit_sha=<commit-sha> \
-  -f test_delivery_correlation=<exact-successful-deploy-test-correlation>
+  -f test_delivery_correlation=<exact-successful-deploy-test-correlation> \
+  -f test_run_id=<exact-successful-deploy-test-run-id>
 ```
 
 ### Rolling back production
 
-Rollback redeploys only the immutable Function/frontend artifacts from an exact previously accepted production release. Current `main` remains authoritative for Bicep, identity, storage policy, and security settings. Supply the full source SHA, exact successful `Promote Production` run ID, and that run's delivery correlation.
+Rollback redeploys only the preserved immutable Function/frontend bundle from an exact previously accepted production release. Current `main` remains authoritative for Bicep, identity, storage policy, and security settings. Supply the full source SHA, exact successful `Promote Production` run ID, and that run's delivery correlation.
 
 ```bash
 gh workflow run rollback-production.yml \

@@ -4,7 +4,7 @@
 
 - PR #264 and main CI/policy passed, and test run `30629930683` deployed exact commit `4d82ed8491a32440ec5495049ba39e8f73c6bbac`, but the runtime gate failed: unauthenticated `GET /api/hello` returned `200` as `local-dev-placeholder` instead of `401`.
 - The Azure deployment received `authEnabled=true`, while the effective Function worker behaved as if `AUTH_ENABLED` was false or missing. The focused repair makes app settings an explicit resource and adds a narrow post-deployment comparison of non-secret safety settings.
-- The focused repair loads `dist/index.js`, executes `assertRuntimeSafety()` before registration, and independently rejects disabled authentication outside local development. Local regression coverage and the full 258-test suite pass; live test deployment still must prove the behavior.
+- The focused repair loads `dist/index.js`, executes `assertRuntimeSafety()` before registration, and independently rejects disabled authentication outside local development. Local regression coverage and the full 260-test suite pass; live test deployment still must prove the behavior.
 - Test environment origin placeholders were corrected to the exact Function origin without reading or changing secrets. Infrastructure and workflow validation now reject `https://null` and the test frontend derives its API base from the deployed Function output.
 - Authenticated smoke, telemetry correlation, and accepted test provenance remain pending until the focused repair merges and deploys. Production must not be promoted from this release.
 

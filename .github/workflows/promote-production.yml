@@ -26,6 +26,10 @@ on:
         description: Exact correlation from the successful Deploy Test run being promoted.
         required: true
         type: string
+      test_run_id:
+        description: Exact successful Deploy Test workflow run being promoted.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -60,3 +64,4 @@ jobs:
       updateProductionVariables: true
       deliveryCorrelation: ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
       testDeliveryCorrelation: ${{ inputs.test_delivery_correlation }}
+      testDeliveryRunId: ${{ inputs.test_run_id }}
