@@ -1,5 +1,13 @@
 # Incident log
 
+## 2026-07-31 — Corrected auto-merge had no post-merge main CI handoff
+
+- Symptom: the corrected trusted controller automatically merged canary PR #271 as `d49833bb119001d930e00cd5400ba7d1badb7550`, but no main CI or `Codex Main Delivery` run started.
+- Root cause: GitHub-token merges do not create ordinary push-triggered workflow runs. The redesigned `Codex Main Delivery` subscribed only to completed `CI` runs and the trusted auto-merge workflow no longer had the required post-merge handoff, so there was no event capable of starting main CI.
+- Fix: subscribe the sole main-delivery controller to successful `Codex Auto-Merge` completions as well as successful push CI. Resolve and verify the exact reviewed PR head and merge SHA, require that SHA to be current `main`, explicitly dispatch and wait for CI with that exact `headSha`, and only then evaluate deployment skip or dispatch the staged test/production workflows.
+- Safety: auto-merge review/check gates remain unchanged; ambiguous or advanced main heads fail closed; workflow-dispatched CI cannot recursively deliver because the CI-triggered path accepts only `push` events.
+- Status: repair included in the PR containing this entry; successful delivery requires the post-merge job named `run main delivery after Codex auto-merge` to pass on the exact merge SHA.
+
 ## 2026-07-31 — Trusted merge controller rejected its own in-progress check state
 
 - Symptom: PR #270 passed every policy-required exact-head CI, Policy Check, CodeQL, and autonomous review check, but controller run `30630495729` rejected the PR because GitHub reported it as `unstable` while the controller's own merge job was in progress.
