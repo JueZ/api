@@ -4,13 +4,26 @@ The deployment workflow is intentionally infrastructure-only until all bootstrap
 
 ## GitHub
 
-Configure the exact required checks in `.github/autonomous-policy.yml`, squash merge, up-to-date branches, no direct/force push, no `main` deletion, and no admin bypass. Enable the trusted autonomous controller and repository `OPENAI_API_KEY` for independent high-risk review. Human approval is not required by the selected policy.
+Configure the exact required checks in `.github/autonomous-policy.yml`, squash merge, up-to-date branches, no direct/force push, no `main` deletion, and no admin bypass. Enable the trusted autonomous controller and repository `OPENAI_API_KEY` for independent high-risk review. Ordinary changes do not require human approval; `merge.autonomousExcludedPaths` are trust roots and cannot be autonomously reviewed or merged.
 
-Create `test` and `production` environments for variable separation and deployment history. Keep `DEPLOY_PRODUCTION_ENABLED=false` until test, identity, RBAC, migration, smoke, telemetry, and rollback posture are proven.
+Create `test` and `production` environments for variable separation and deployment history. Both must allow protected branches only and disable custom branch policies. Set the repository OIDC subject template to `use_default=false` with the exact ordered claims `repo`, `context`, and `job_workflow_ref`. Verify these controls with `npm run ops:verify-github-deployment-controls`. Keep `DEPLOY_PRODUCTION_ENABLED=false` until test, identity, RBAC, migration, smoke, telemetry, and rollback posture are proven.
+
+If `.github/security-deployment-hold.json` is active or any static credential-incident block remains, all test, production, rollback, private-storage migration, service-canary, and Azure OIDC diagnostic operations are intentionally unavailable. Static first steps exist in the shared deployment, migration, Bring canary, and Azure OIDC diagnostic workflows. Do not add an override or mutate Azure/providers locally. Repository Actions and native auto-merge, plus the seven enumerated OIDC/mutation entry workflows, must remain disabled. They may be re-enabled only after GitHub credential rotation and an independent check/workflow trust boundary are established.
+
+Revoke every old credential and rotate every replacement in GitHub, Azure, and every affected provider. A protected evidence change may keep the hold active and set `evidence-recorded` with only unique private-inventory/revocation/replacement audit references, real timestamps after discovery, and matching nonzero revoked/rotated counts. It cannot clear the incident. GitHub is an affected system and the only current collaborator is the implicated owner identity, so comments, labels, usernames, workflow outputs, and repository-local fields are not independent approval. `active=false` is rejected. After revocation, provision and verify an out-of-band trust root (separately controlled security principal or hardware-backed signing key) before proposing any recovery schema. Trust-root/hold/workflow changes are excluded from autonomous merge and require a controlled branch-protection bootstrap. Never record secret values, fragments, hashes, or settings dumps as evidence.
 
 ## Azure OIDC and RBAC
 
-Create a GitHub deployment identity with federated subjects for the trusted workflow/environment. Grant only:
+The custom OIDC template intentionally invalidates legacy Azure federated credentials that trusted only a repository environment subject. After credential rotation, create replacement federated credentials whose exact subjects bind repository, context, and `job_workflow_ref` for:
+
+- `.github/workflows/deploy-environment.yml@refs/heads/main` in `test` and `production`;
+- `.github/workflows/migrate-private-storage.yml@refs/heads/main` for each explicitly authorized environment;
+- `.github/workflows/bring-readonly-canary.yml@refs/heads/main` and every other service-token workflow using its own least-privilege application;
+- `.github/workflows/verify-azure-oidc.yml@refs/heads/main` only through a separate Reader-only diagnostic identity.
+
+Obtain the exact subject spelling from a safe first-attempt token claim inspection and compare it with the configured Azure federated credential; do not guess or restore the default GitHub subject. If the Azure platform supports a reviewed flexible federated identity expression, it must still bind repository owner/name, environment/ref context, and exact workflow path/ref.
+
+Grant the deployment identity only:
 
 - resource-group deployment permission;
 - documented role-assignment ability needed by Bicep;

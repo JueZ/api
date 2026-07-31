@@ -55,6 +55,8 @@ Complete repository-changing work through the required autonomous delivery loop 
 
    If a command cannot run because credentials, network, tools, or environment variables are unavailable, record it as blocked or skipped with the reason. Do not treat skipped checks as passing.
 
+   If `.github/security-deployment-hold.json` is active or a static credential-incident block remains in `deploy-environment.yml`, `migrate-private-storage.yml`, `bring-readonly-canary.yml`, or `verify-azure-oidc.yml`, report delivery as security-blocked. Run `npm run ops:verify-github-deployment-controls`; drift is also blocking. Never remove, override, or route around the hold, including with local cloud commands. The incident record is active-only because GitHub is affected and no independent security approver is configured. Evidence may be recorded while the hold remains active, but recovery requires external credential revocation and an out-of-band trust-root bootstrap. Security-control paths in `merge.autonomousExcludedPaths` cannot use autonomous merge.
+
 3. Confirm the PR evidence sections are ready: behavior/risk, tests, documentation/memory, deployment/rollback, and limitations. Commit the change if it is not already committed:
 
    ```bash
@@ -113,12 +115,14 @@ Complete repository-changing work through the required autonomous delivery loop 
 
 8. For Codex PRs, monitor the relevant delivery checks and workflows:
 
-   - `enable auto-merge`
+   - `merge exact PR head`
    - `run main delivery after Codex auto-merge`
    - `CI`
    - `Policy Check`
    - `Deploy Test`
    - `Promote Production`
+
+   A PR touching `merge.autonomousExcludedPaths` is expected to be rejected by the autonomous controller. Report the independent security-review/bootstrap requirement; do not relabel, split deceptively, or weaken policy to make it eligible.
 
 9. If checks fail, apply the smallest safe fix and repeat at most 2 repair attempts for the same failing area.
 

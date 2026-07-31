@@ -3,7 +3,12 @@ import { createHash } from 'node:crypto';
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import process from 'node:process';
 import OpenAI from 'openai';
-import { classifyRisk, isAutomergeCandidate, loadAutonomousPolicy } from './lib/autonomous-policy.mjs';
+import {
+  classifyRisk,
+  isAutomergeCandidate,
+  loadAutonomousPolicy,
+  pathsMatchingPatterns,
+} from './lib/autonomous-policy.mjs';
 
 const reviewSchema = {
   type: 'object',
@@ -31,7 +36,75 @@ const reviewSchema = {
   },
 };
 
-export function evaluateRequiredChecks(checkRuns, headSha, requiredChecks) {
+export function actionsRunCoordinates(detailsUrl, repository) {
+  if (typeof detailsUrl !== 'string' || typeof repository !== 'string') return null;
+  let url;
+  try {
+    url = new URL(detailsUrl);
+  } catch {
+    return null;
+  }
+  const [owner, repo] = repository.split('/');
+  const segments = url.pathname.split('/').filter(Boolean);
+  if (
+    url.protocol !== 'https:' ||
+    url.hostname !== 'github.com' ||
+    url.username ||
+    url.password ||
+    url.port ||
+    url.search ||
+    url.hash ||
+    segments.length !== 7 ||
+    segments[0] !== owner ||
+    segments[1] !== repo ||
+    segments[2] !== 'actions' ||
+    segments[3] !== 'runs' ||
+    segments[5] !== 'job' ||
+    !/^\d+$/.test(segments[4]) ||
+    !/^\d+$/.test(segments[6])
+  ) {
+    return null;
+  }
+  const runId = Number(segments[4]);
+  const jobId = Number(segments[6]);
+  return Number.isSafeInteger(runId) && Number.isSafeInteger(jobId) ? { runId, jobId } : null;
+}
+
+export function trustedWorkflowSourceChanges(files, trustedCheckSources) {
+  const protectedPaths = new Set(
+    Object.values(trustedCheckSources ?? {})
+      .filter((source) => source?.kind === 'actions')
+      .map((source) => source.workflowPath),
+  );
+  return pullRequestFilePaths(files).filter((filename) => protectedPaths.has(filename));
+}
+
+export function autonomousMergeExcludedChanges(files, patterns) {
+  return pathsMatchingPatterns(pullRequestFilePaths(files), patterns ?? []);
+}
+
+export function pullRequestFilePaths(files) {
+  const paths = [];
+  const seen = new Set();
+  for (const file of Array.isArray(files) ? files : []) {
+    const candidates = typeof file === 'string' ? [file] : [file?.filename, file?.previous_filename];
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string' || seen.has(candidate)) continue;
+      seen.add(candidate);
+      paths.push(candidate);
+    }
+  }
+  return paths;
+}
+
+export function evaluateRequiredChecks(
+  checkRuns,
+  headSha,
+  requiredChecks,
+  trustedCheckApps,
+  trustedCheckSources,
+  { repository, actionsRuns = new Map(), expectedControllerCheckRunId, expectedPrNumber } = {},
+) {
   const failures = [];
   const pending = [];
   const passed = [];
@@ -46,14 +119,40 @@ export function evaluateRequiredChecks(checkRuns, headSha, requiredChecks) {
       continue;
     }
 
-    const wrongApp = exactHead.filter((run) => run.app?.slug !== required.appSlug);
+    const expectedAppId = trustedCheckApps[required.appSlug];
+    const wrongApp = exactHead.filter((run) => run.app?.slug !== required.appSlug || run.app?.id !== expectedAppId);
     if (wrongApp.length > 0) {
       failures.push({ check: required.name, reason: 'wrong_app' });
       continue;
     }
 
-    const expectedAppRuns = exactHead.filter((run) => run.app?.slug === required.appSlug);
-    const latest = [...expectedAppRuns].sort((left, right) => Number(right.id) - Number(left.id))[0];
+    const expectedAppRuns = exactHead.filter(
+      (run) => run.app?.slug === required.appSlug && run.app?.id === expectedAppId,
+    );
+    const source = trustedCheckSources[required.source];
+    const wrongSource = expectedAppRuns.filter(
+      (run) =>
+        !checkRunMatchesTrustedSource(run, source, headSha, {
+          repository,
+          actionsRuns,
+          expectedControllerCheckRunId,
+          expectedPrNumber,
+        }),
+    );
+    if (wrongSource.length > 0) {
+      failures.push({ check: required.name, reason: 'wrong_source' });
+      continue;
+    }
+
+    const trustedRuns = expectedAppRuns.filter((run) =>
+      checkRunMatchesTrustedSource(run, source, headSha, {
+        repository,
+        actionsRuns,
+        expectedControllerCheckRunId,
+        expectedPrNumber,
+      }),
+    );
+    const latest = [...trustedRuns].sort((left, right) => Number(right.id) - Number(left.id))[0];
     if (!latest || latest.status !== 'completed') {
       pending.push({ check: required.name, reason: latest ? latest.status : 'missing' });
       continue;
@@ -66,6 +165,42 @@ export function evaluateRequiredChecks(checkRuns, headSha, requiredChecks) {
   }
 
   return { ok: failures.length === 0 && pending.length === 0, failures, pending, passed };
+}
+
+function checkRunMatchesTrustedSource(
+  checkRun,
+  source,
+  headSha,
+  { repository, actionsRuns, expectedControllerCheckRunId, expectedPrNumber },
+) {
+  if (!source || !Number.isSafeInteger(checkRun?.id)) return false;
+  if (source.kind === 'controller') {
+    return (
+      Number.isSafeInteger(expectedControllerCheckRunId) &&
+      checkRun.id === expectedControllerCheckRunId &&
+      checkRun.details_url === `https://github.com/${repository}/runs/${expectedControllerCheckRunId}`
+    );
+  }
+  if (source.kind !== 'actions' || !Number.isSafeInteger(expectedPrNumber)) return false;
+  const coordinates = actionsRunCoordinates(checkRun.details_url, repository);
+  if (!coordinates || coordinates.jobId !== checkRun.id) return false;
+  const actionsRun = actionsRuns instanceof Map ? actionsRuns.get(coordinates.runId) : actionsRuns?.[coordinates.runId];
+  return (
+    actionsRun?.id === coordinates.runId &&
+    actionsRun.workflow_id === source.workflowId &&
+    actionsRun.path === source.workflowPath &&
+    actionsRun.event === source.event &&
+    actionsRun.run_attempt === source.runAttempt &&
+    actionsRun.head_sha === headSha &&
+    actionsRun.head_repository?.full_name === repository &&
+    Array.isArray(actionsRun.pull_requests) &&
+    actionsRun.pull_requests.some(
+      (pullRequest) =>
+        pullRequest?.number === expectedPrNumber &&
+        pullRequest.head?.sha === headSha &&
+        pullRequest.base?.ref === 'main',
+    )
+  );
 }
 
 export function validateAutonomousReview(review, expectedHeadSha, policy) {
@@ -119,10 +254,27 @@ export async function runReview(options, policy, github, openAIClient) {
   assertExpectedHead(pullRequest, options.headSha);
   const files = await github.getPullRequestFiles(options.prNumber);
   assertExpectedHead(await github.getPullRequest(options.prNumber), options.headSha);
-  const risk = classifyRisk(
-    files.map((file) => file.filename),
-    policy,
-  );
+  const risk = classifyRisk(pullRequestFilePaths(files), policy);
+  const excludedChanges = autonomousMergeExcludedChanges(files, policy.merge.autonomousExcludedPaths);
+  if (excludedChanges.length > 0) {
+    const review = {
+      decision: 'reject',
+      reviewedHeadSha: options.headSha,
+      summary: 'This pull request changes an autonomous-delivery trust root and requires independent security review.',
+      findings: [
+        {
+          severity: 'high',
+          title: 'Autonomous merge is prohibited for security-control changes',
+          evidence: `Protected paths changed: ${excludedChanges.join(', ')}`,
+          remediation: 'Use the documented out-of-band security-control review and manual merge procedure.',
+        },
+      ],
+      risk,
+      modelInvoked: false,
+    };
+    await publishReview(review, options);
+    throw new Error('Autonomous review refused security-control changes.');
+  }
 
   if (!risk.highRisk) {
     const review = {
@@ -188,6 +340,7 @@ export async function runReview(options, policy, github, openAIClient) {
           body: pullRequest.body ?? '',
           changedFiles: files.map((file) => ({
             filename: file.filename,
+            previousFilename: file.previous_filename,
             status: file.status,
             additions: file.additions,
             deletions: file.deletions,
@@ -285,12 +438,56 @@ export async function runReview(options, policy, github, openAIClient) {
 
 async function runGate(options, policy, github) {
   let lastEvaluation;
+  const pullRequestFiles = await github.getPullRequestFiles(options.prNumber);
+  const trustedWorkflowChanges = trustedWorkflowSourceChanges(pullRequestFiles, policy.trustedCheckSources);
+  const excludedChanges = autonomousMergeExcludedChanges(pullRequestFiles, policy.merge.autonomousExcludedPaths);
+  const protectedChanges = [...new Set([...trustedWorkflowChanges, ...excludedChanges])];
+  if (protectedChanges.length > 0) {
+    throw new Error(
+      `Pull request changes an autonomous-delivery trust root and requires independent security review: ${protectedChanges.join(', ')}`,
+    );
+  }
+  const actionsRuns = new Map();
   const deadline = Date.now() + options.waitSeconds * 1000;
   do {
     const pullRequest = await github.getPullRequest(options.prNumber);
     assertExpectedHead(pullRequest, options.headSha);
     const checkRuns = await github.getCheckRuns(options.headSha);
-    lastEvaluation = evaluateRequiredChecks(checkRuns, options.headSha, policy.requiredChecks);
+    const requiredNames = new Set(policy.requiredChecks.map((required) => required.name));
+    const candidateCheckRuns = checkRuns.filter(
+      (run) =>
+        requiredNames.has(run.name) &&
+        run.head_sha === options.headSha &&
+        run.app?.id === policy.trustedCheckApps[run.app?.slug],
+    );
+    if (candidateCheckRuns.length > policy.requiredChecks.length * 10) {
+      throw new Error('Exact-head commit contains an excessive number of required-check candidates.');
+    }
+    const runIds = [
+      ...new Set(
+        candidateCheckRuns
+          .map((run) => actionsRunCoordinates(run.details_url, options.repository)?.runId)
+          .filter(Number.isSafeInteger),
+      ),
+    ];
+    await Promise.all(
+      runIds
+        .filter((runId) => !actionsRuns.has(runId))
+        .map(async (runId) => actionsRuns.set(runId, await github.getActionsRun(runId))),
+    );
+    lastEvaluation = evaluateRequiredChecks(
+      checkRuns,
+      options.headSha,
+      policy.requiredChecks,
+      policy.trustedCheckApps,
+      policy.trustedCheckSources,
+      {
+        repository: options.repository,
+        actionsRuns,
+        expectedControllerCheckRunId: options.reviewCheckRunId,
+        expectedPrNumber: options.prNumber,
+      },
+    );
     if (lastEvaluation.failures.length > 0) break;
     if (lastEvaluation.pending.length === 0) break;
     await delay(options.pollSeconds * 1000);
@@ -373,6 +570,10 @@ function createGithubClient(repository, token) {
       }
       throw new Error('Commit contains more than 10000 check runs.');
     },
+    async getActionsRun(runId) {
+      if (!Number.isSafeInteger(runId) || runId < 1) throw new Error('Actions run ID must be a positive integer.');
+      return (await request(`/actions/runs/${runId}`)).json();
+    },
     async mergePullRequest(prNumber, headSha, mergeMethod) {
       return (
         await request(`/pulls/${prNumber}/merge`, {
@@ -412,10 +613,14 @@ function parseOptions(argv) {
   const repository = values.get('--repository') ?? process.env.GITHUB_REPOSITORY;
   const prNumber = Number(values.get('--pr') ?? process.env.PR_NUMBER);
   const headSha = values.get('--head-sha') ?? process.env.HEAD_SHA;
+  const reviewCheckRunId = Number(values.get('--review-check-run-id') ?? process.env.REVIEW_CHECK_RUN_ID);
   if (!['review', 'gate'].includes(command)) throw new Error('command must be review or gate');
   if (!repository) throw new Error('--repository is required');
   if (!Number.isInteger(prNumber) || prNumber < 1) throw new Error('--pr must be a positive integer');
   if (!/^[0-9a-f]{40}$/i.test(headSha ?? '')) throw new Error('--head-sha must be a full commit SHA');
+  if (command === 'gate' && (!Number.isSafeInteger(reviewCheckRunId) || reviewCheckRunId < 1)) {
+    throw new Error('--review-check-run-id must be a positive integer for gate');
+  }
   return {
     command,
     repository,
@@ -425,6 +630,7 @@ function parseOptions(argv) {
     waitSeconds: Number(values.get('--wait-seconds') ?? 3600),
     pollSeconds: Number(values.get('--poll-seconds') ?? 15),
     merge: values.get('--merge') === 'true',
+    reviewCheckRunId,
   };
 }
 

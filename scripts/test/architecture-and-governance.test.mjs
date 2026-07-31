@@ -14,6 +14,7 @@ import {
   dependencyFilePairs,
   dependencyManifestChangesLockfile,
   dependencyPairingFindings,
+  forbiddenNpmControlFindings,
   inspectDependencyFiles,
   lockfileRelevantManifestChanges,
 } from '../check-lockfile-policy.mjs';
@@ -149,6 +150,26 @@ test('dependency policy rejects lifecycle scripts and non-registry dependencies'
   assert.ok(findings.some((finding) => finding.includes('non-registry')));
   assert.ok(findings.some((finding) => finding.includes('lockfileVersion 3')));
   assert.ok(findings.some((finding) => finding.includes('missing its root package entry')));
+});
+
+test('dependency policy and repository preflight reject npm lock/config precedence overrides', () => {
+  const overrides = ['npm-shrinkwrap.json', 'apps/api/npm-shrinkwrap.json', '.npmrc', 'apps/api/.npmrc'];
+  assert.equal(forbiddenNpmControlFindings(overrides).length, overrides.length);
+  const findings = repositoryHygieneFindings({
+    trackedFiles: [],
+    ignoredPaths: new Set([
+      '.codex/environments/environment.toml',
+      '.azure/accessTokens.json',
+      '.env',
+      '.env.local',
+      'local.settings.json',
+      'apps/api/local.settings.json',
+    ]),
+    presentFiles: overrides,
+  });
+  for (const path of overrides) {
+    assert.ok(findings.some((finding) => finding.includes(path)));
+  }
 });
 
 test('dependency policy rejects a manifest that disagrees with its lockfile root', () => {

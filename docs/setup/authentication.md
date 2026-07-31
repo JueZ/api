@@ -44,7 +44,7 @@ MCP uses the same API audience and per-tool permission. See `mcp-devmode.md`.
 
 Use `scripts/configure-entra-service-oauth.sh` with GitHub Environment federation. Default smoke roles are `catalogue.read,reddit.read`. Create a separate test canary identity with `bring.read` only. Each identity needs exact `OIDC_ALLOWED_APP_OBJECT_IDS`/`OIDC_ALLOWED_CLIENT_IDS`.
 
-The token-mint step validates these expected application roles from the short-lived Entra token before exposing it to smoke tests. It emits only missing role names, never the token or full claims. A missing-role failure is an Entra app-role assignment/configuration problem: rerun the configuration script under an operator with Microsoft Graph application-management permission, then start a new first-attempt test deployment. Do not work around it by accepting retired roles or weakening an operation policy.
+The token-mint step validates the exact application-role set and version-specific identity claims from the short-lived Entra token before exposing it to smoke tests. For a sole role-set mismatch it emits only bounded missing or unexpected role names, never the token or full claims; every other mismatch receives a generic safe error. A role failure is an Entra app-role assignment/configuration problem: rerun the configuration script under an operator with Microsoft Graph application-management permission, then start a new first-attempt test deployment. Do not work around it by accepting retired roles or weakening an operation policy.
 
 ## Repository/runtime variables
 

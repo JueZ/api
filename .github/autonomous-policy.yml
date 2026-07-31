@@ -2,64 +2,117 @@ version: 1
 
 # This file is the canonical repository policy consumed by CI, the autonomous
 # review workflow, documentation generation, and agent-instruction validation.
+trustedCheckApps:
+  github-actions: 15368
+
+trustedCheckSources:
+  ci:
+    kind: actions
+    workflowId: 276132079
+    workflowPath: .github/workflows/ci.yml
+    event: pull_request
+    runAttempt: 1
+  policy:
+    kind: actions
+    workflowId: 276132076
+    workflowPath: .github/workflows/policy-check.yml
+    event: pull_request
+    runAttempt: 1
+  codeql:
+    kind: actions
+    workflowId: 324431746
+    workflowPath: .github/workflows/codeql.yml
+    event: pull_request
+    runAttempt: 1
+  autonomous-review:
+    kind: controller
+
 requiredChecks:
   - name: install
     appSlug: github-actions
+    source: ci
   - name: lint
     appSlug: github-actions
+    source: ci
   - name: type-check
     appSlug: github-actions
+    source: ci
   - name: unit tests
     appSlug: github-actions
+    source: ci
   - name: API tests
     appSlug: github-actions
+    source: ci
   - name: Angular build
     appSlug: github-actions
+    source: ci
   - name: Azure Functions build
     appSlug: github-actions
+    source: ci
   - name: OpenAPI validation
     appSlug: github-actions
+    source: ci
   - name: Bicep validation
     appSlug: github-actions
+    source: ci
   - name: workflow and shell lint
     appSlug: github-actions
+    source: ci
   - name: architecture and agent validation
     appSlug: github-actions
+    source: ci
   - name: security scan
     appSlug: github-actions
+    source: ci
   - name: secret scan
     appSlug: github-actions
+    source: ci
   - name: dependency audit
     appSlug: github-actions
+    source: ci
   - name: CodeQL javascript-typescript
     appSlug: github-actions
+    source: codeql
   - name: CodeQL actions
     appSlug: github-actions
+    source: codeql
   - name: release artifacts
     appSlug: github-actions
+    source: ci
   - name: cost-policy check
     appSlug: github-actions
+    source: policy
   - name: guardrail policy check
     appSlug: github-actions
+    source: policy
   - name: dependency lock policy
     appSlug: github-actions
+    source: policy
   - name: CI complete
     appSlug: github-actions
+    source: ci
   - name: Policy complete
     appSlug: github-actions
+    source: policy
   - name: Autonomous review complete
     appSlug: github-actions
+    source: autonomous-review
 
 highRiskPaths:
   - .gitignore
   - package.json
   - package-lock.json
+  - .npmrc
+  - npm-shrinkwrap.json
+  - apps/api/.npmrc
+  - apps/api/npm-shrinkwrap.json
   - apps/api/package.json
   - apps/api/package-lock.json
   - .github/workflows/**
   - .github/actions/**
   - .github/autonomous-policy.yml
   - .github/pull_request_template.md
+  - .github/security-deployment-hold.json
   - infra/**
   - apps/api/src/shared/security/**
   - apps/api/src/shared/config/**
@@ -79,6 +132,9 @@ highRiskPaths:
   - scripts/check-repository-hygiene.mjs
   - scripts/check-agent-workflow-contracts.mjs
   - scripts/check-lockfile-policy.mjs
+  - scripts/enforce-security-deployment-hold.mjs
+  - scripts/assert-current-security-controller.mjs
+  - scripts/verify-github-deployment-controls.mjs
   - scripts/build-release-artifacts.sh
   - scripts/verify-release-artifacts.mjs
   - scripts/assert-current-main.mjs
@@ -106,6 +162,7 @@ riskClasses:
   workflow:
     - .github/workflows/**
     - .github/actions/**
+    - .github/security-deployment-hold.json
     - scripts/autonomous-merge-controller.mjs
     - scripts/render-branch-protection.mjs
   infrastructure:
@@ -125,15 +182,23 @@ riskClasses:
     - .agents/skills/**
     - scripts/check-agent-workflow-contracts.mjs
   softwareSupplyChain:
+    - .npmrc
+    - npm-shrinkwrap.json
     - package.json
     - package-lock.json
+    - apps/api/.npmrc
+    - apps/api/npm-shrinkwrap.json
     - apps/api/package.json
     - apps/api/package-lock.json
     - scripts/check-lockfile-policy.mjs
     - scripts/build-release-artifacts.sh
     - scripts/verify-release-artifacts.mjs
   deploymentRuntime:
+    - .github/security-deployment-hold.json
     - scripts/assert-current-main.mjs
+    - scripts/enforce-security-deployment-hold.mjs
+    - scripts/assert-current-security-controller.mjs
+    - scripts/verify-github-deployment-controls.mjs
     - scripts/frontend-inventory.mjs
     - scripts/validate-deployed-runtime-settings.mjs
     - scripts/mint-smoke-token.mjs
@@ -141,7 +206,9 @@ riskClasses:
   repositorySecurity:
     - .gitignore
     - .github/pull_request_template.md
+    - .github/security-deployment-hold.json
     - scripts/check-repository-hygiene.mjs
+    - scripts/verify-github-deployment-controls.mjs
 
 autonomousReview:
   checkName: Autonomous review complete
@@ -170,6 +237,39 @@ merge:
     - security-hold
   allowForks: false
   allowAdminBypass: false
+  # These files define the trust boundary of autonomous delivery. Changes to
+  # them require an independent security-control review and cannot be merged by
+  # the autonomous controller, even when the model review approves.
+  autonomousExcludedPaths:
+    - .github/autonomous-policy.yml
+    - .github/security-deployment-hold.json
+    - .github/workflows/**
+    - .github/actions/**
+    - package.json
+    - package-lock.json
+    - .npmrc
+    - npm-shrinkwrap.json
+    - apps/api/.npmrc
+    - apps/api/npm-shrinkwrap.json
+    - scripts/autonomous-merge-controller.mjs
+    - scripts/lib/autonomous-policy.mjs
+    - scripts/lib/smoke-utils.mjs
+    - scripts/render-branch-protection.mjs
+    - scripts/assert-current-main.mjs
+    - scripts/enforce-security-deployment-hold.mjs
+    - scripts/assert-current-security-controller.mjs
+    - scripts/verify-github-deployment-controls.mjs
+    - scripts/build-release-artifacts.sh
+    - scripts/verify-release-artifacts.mjs
+    - scripts/frontend-inventory.mjs
+    - scripts/validate-deployed-runtime-settings.mjs
+    - scripts/mint-smoke-token.mjs
+    - scripts/smoke-runtime.mjs
+    - scripts/smoke-auth.mjs
+    - scripts/check-telemetry.mjs
+    - scripts/write-release-ledger.mjs
+    - scripts/validate-release-ledger.mjs
+    - ops/release-ledger/**
   waitSeconds: 3600
   pollSeconds: 15
 

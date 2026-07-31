@@ -232,6 +232,7 @@ jobs:
             --repository "${{ github.repository }}" \
             --pr "${{ needs.resolve.outputs.pr_number }}" \
             --head-sha "${{ needs.resolve.outputs.head_sha }}" \
+            --review-check-run-id "${{ needs.resolve.outputs.review_check_run_id }}" \
             --review-file "$RUNNER_TEMP/autonomous-review/autonomous-review.json" \
             --wait-seconds 3600 \
             --poll-seconds 15 \

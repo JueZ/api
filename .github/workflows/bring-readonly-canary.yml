@@ -31,6 +31,12 @@ jobs:
       BRING_CANARY_BASE_URL: ${{ vars.BRING_CANARY_BASE_URL }}
       BRING_CANARY_LIST_UUID: ${{ vars.BRING_CANARY_LIST_UUID }}
     steps:
+      - name: Block deployments pending credential rotation
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::error title=Deployment security hold::Credential incident 2026-07-31 remains unresolved. Revoke and rotate every affected GitHub, Azure, and provider credential, then bootstrap an independently controlled clearance trust root."
+          exit 1
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
       - name: Setup Node.js

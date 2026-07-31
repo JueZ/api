@@ -3,6 +3,37 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 
 export const DEFAULT_POLICY_PATH = fileURLToPath(new URL('../../.github/autonomous-policy.yml', import.meta.url));
+export const REQUIRED_AUTONOMOUS_EXCLUSIONS = [
+  '.github/autonomous-policy.yml',
+  '.github/security-deployment-hold.json',
+  '.github/workflows/**',
+  '.github/actions/**',
+  'package.json',
+  'package-lock.json',
+  '.npmrc',
+  'npm-shrinkwrap.json',
+  'apps/api/.npmrc',
+  'apps/api/npm-shrinkwrap.json',
+  'scripts/autonomous-merge-controller.mjs',
+  'scripts/lib/autonomous-policy.mjs',
+  'scripts/lib/smoke-utils.mjs',
+  'scripts/render-branch-protection.mjs',
+  'scripts/assert-current-main.mjs',
+  'scripts/enforce-security-deployment-hold.mjs',
+  'scripts/assert-current-security-controller.mjs',
+  'scripts/verify-github-deployment-controls.mjs',
+  'scripts/build-release-artifacts.sh',
+  'scripts/verify-release-artifacts.mjs',
+  'scripts/frontend-inventory.mjs',
+  'scripts/validate-deployed-runtime-settings.mjs',
+  'scripts/mint-smoke-token.mjs',
+  'scripts/smoke-runtime.mjs',
+  'scripts/smoke-auth.mjs',
+  'scripts/check-telemetry.mjs',
+  'scripts/write-release-ledger.mjs',
+  'scripts/validate-release-ledger.mjs',
+  'ops/release-ledger/**',
+];
 
 export function loadAutonomousPolicy(policyPath = DEFAULT_POLICY_PATH) {
   const policy = parse(readFileSync(policyPath, 'utf8'));
@@ -18,17 +49,116 @@ export function validateAutonomousPolicy(policy) {
   if (!isRecord(policy)) return ['policy must be an object'];
   if (policy.version !== 1) errors.push('version must be 1');
 
+  const trustedCheckApps = isRecord(policy.trustedCheckApps) ? policy.trustedCheckApps : null;
+  if (!trustedCheckApps || Object.keys(trustedCheckApps).length === 0) {
+    errors.push('trustedCheckApps must map app slugs to positive integer GitHub App IDs');
+  } else {
+    const appIds = new Set();
+    for (const [slug, appId] of Object.entries(trustedCheckApps)) {
+      if (!nonEmptyString(slug) || !Number.isSafeInteger(appId) || appId < 1) {
+        errors.push(`trustedCheckApps.${slug || '<empty>'} must be a positive integer GitHub App ID`);
+      } else if (appIds.has(appId)) {
+        errors.push(`trustedCheckApps contains duplicate GitHub App ID: ${appId}`);
+      }
+      appIds.add(appId);
+    }
+  }
+
+  const trustedCheckSources = isRecord(policy.trustedCheckSources) ? policy.trustedCheckSources : null;
+  if (!trustedCheckSources || Object.keys(trustedCheckSources).length === 0) {
+    errors.push('trustedCheckSources must define trusted Actions workflows and the controller check');
+  } else {
+    const workflowIds = new Set();
+    const workflowPaths = new Set();
+    let controllerSources = 0;
+    for (const [name, source] of Object.entries(trustedCheckSources)) {
+      if (!nonEmptyString(name) || !isRecord(source)) {
+        errors.push(`trustedCheckSources.${name || '<empty>'} must be an object`);
+        continue;
+      }
+      if (source.kind === 'controller') {
+        controllerSources += 1;
+        if (Object.keys(source).some((key) => key !== 'kind')) {
+          errors.push(`controller check source ${name} may contain only kind`);
+        }
+        continue;
+      }
+      if (source.kind !== 'actions') {
+        errors.push(`trusted check source ${name} must use kind actions or controller`);
+        continue;
+      }
+      if (!Number.isSafeInteger(source.workflowId) || source.workflowId < 1) {
+        errors.push(`trusted check source ${name} must pin a positive workflowId`);
+      } else if (workflowIds.has(source.workflowId)) {
+        errors.push(`trusted check source workflowId is duplicated: ${source.workflowId}`);
+      }
+      if (!/^\.github\/workflows\/[A-Za-z0-9_.-]+\.ya?ml$/.test(source.workflowPath ?? '')) {
+        errors.push(`trusted check source ${name} must pin a repository workflowPath`);
+      } else if (workflowPaths.has(source.workflowPath)) {
+        errors.push(`trusted check source workflowPath is duplicated: ${source.workflowPath}`);
+      }
+      if (source.event !== 'pull_request') {
+        errors.push(`trusted check source ${name} event must be pull_request`);
+      }
+      if (source.runAttempt !== 1) {
+        errors.push(`trusted check source ${name} runAttempt must be 1`);
+      }
+      const allowedFields = new Set(['kind', 'workflowId', 'workflowPath', 'event', 'runAttempt']);
+      if (Object.keys(source).some((key) => !allowedFields.has(key))) {
+        errors.push(`trusted check source ${name} contains unsupported fields`);
+      }
+      workflowIds.add(source.workflowId);
+      workflowPaths.add(source.workflowPath);
+    }
+    if (controllerSources !== 1) errors.push('trustedCheckSources must contain exactly one controller source');
+  }
+
   if (!Array.isArray(policy.requiredChecks) || policy.requiredChecks.length === 0) {
     errors.push('requiredChecks must be a non-empty array');
   } else {
     const names = new Set();
     for (const [index, check] of policy.requiredChecks.entries()) {
-      if (!isRecord(check) || !nonEmptyString(check.name) || !nonEmptyString(check.appSlug)) {
-        errors.push(`requiredChecks[${index}] must contain non-empty name and appSlug`);
+      if (
+        !isRecord(check) ||
+        !nonEmptyString(check.name) ||
+        !nonEmptyString(check.appSlug) ||
+        !nonEmptyString(check.source)
+      ) {
+        errors.push(`requiredChecks[${index}] must contain non-empty name, appSlug, and source`);
         continue;
       }
       if (names.has(check.name)) errors.push(`required check name is duplicated: ${check.name}`);
+      if (!trustedCheckApps || !Object.hasOwn(trustedCheckApps, check.appSlug)) {
+        errors.push(`required check ${check.name} references unknown trusted app ${check.appSlug}`);
+      }
+      if (!trustedCheckSources || !Object.hasOwn(trustedCheckSources, check.source)) {
+        errors.push(`required check ${check.name} references unknown trusted source ${check.source}`);
+      }
+      if (Object.keys(check).some((key) => !['name', 'appSlug', 'source'].includes(key))) {
+        errors.push(`required check ${check.name} contains unsupported fields`);
+      }
       names.add(check.name);
+    }
+    if (trustedCheckApps) {
+      const usedAppSlugs = new Set(policy.requiredChecks.map((check) => check?.appSlug).filter(nonEmptyString));
+      for (const slug of Object.keys(trustedCheckApps)) {
+        if (!usedAppSlugs.has(slug)) errors.push(`trusted check app is unused: ${slug}`);
+      }
+    }
+    if (trustedCheckSources) {
+      const usedSources = new Set(policy.requiredChecks.map((check) => check?.source).filter(nonEmptyString));
+      for (const name of Object.keys(trustedCheckSources)) {
+        if (!usedSources.has(name)) errors.push(`trusted check source is unused: ${name}`);
+      }
+      for (const check of policy.requiredChecks) {
+        const source = trustedCheckSources[check?.source];
+        if (source?.kind === 'controller' && check?.name !== policy.autonomousReview?.checkName) {
+          errors.push(`controller source may only provide ${policy.autonomousReview?.checkName}`);
+        }
+        if (check?.name === policy.autonomousReview?.checkName && source?.kind !== 'controller') {
+          errors.push(`${policy.autonomousReview?.checkName} must use the controller source`);
+        }
+      }
     }
   }
 
@@ -36,6 +166,7 @@ export function validateAutonomousPolicy(policy) {
   validateStringArray(policy.merge?.allowedBranchPrefixes, 'merge.allowedBranchPrefixes', errors);
   validateStringArray(policy.merge?.allowedLabels, 'merge.allowedLabels', errors);
   validateStringArray(policy.merge?.blockedLabels, 'merge.blockedLabels', errors);
+  validateStringArray(policy.merge?.autonomousExcludedPaths, 'merge.autonomousExcludedPaths', errors);
   validateStringArray(policy.authorization?.permissions, 'authorization.permissions', errors);
   validateStringArray(
     policy.authorization?.serviceTokenDeniedPermissions,
@@ -66,6 +197,13 @@ export function validateAutonomousPolicy(policy) {
   if (policy.merge?.requireUpToDate !== true) errors.push('merge.requireUpToDate must be true');
   if (policy.merge?.allowAdminBypass !== false) errors.push('merge.allowAdminBypass must be false');
   if (policy.merge?.allowForks !== false) errors.push('merge.allowForks must be false');
+  if (Array.isArray(policy.merge?.autonomousExcludedPaths)) {
+    for (const requiredPath of REQUIRED_AUTONOMOUS_EXCLUSIONS) {
+      if (!policy.merge.autonomousExcludedPaths.includes(requiredPath)) {
+        errors.push(`merge.autonomousExcludedPaths must include ${requiredPath}`);
+      }
+    }
+  }
   if (policy.deployment?.productionEnabledByDefault !== false) {
     errors.push('deployment.productionEnabledByDefault must be false');
   }

@@ -155,6 +155,9 @@ Normal production promotion should happen through GitHub Actions, not from a loc
 
 Repository workflow promotion is allowed when:
 
+- the repository security deployment hold has been replaced only after external revocation and an independently reviewed out-of-band trust-root bootstrap; the current active-only record cannot be cleared by a GitHub comment or PR field
+- `npm run ops:verify-github-deployment-controls` passes: deployment environments are protected-branch-only, the OIDC subject is bound to `repo`, `context`, and `job_workflow_ref`, and incident-disabled workflows remain disabled while held
+- the old Azure federated credentials have been removed and exact workflow-bound replacements installed; never restore GitHub's default OIDC subject as a workaround
 - `DEPLOY_PRODUCTION_ENABLED=true`
 - required CI and Policy Check gates pass
 - Deploy Test succeeds for the same source ref
@@ -162,6 +165,8 @@ Repository workflow promotion is allowed when:
 - production smoke/runtime-truth gates pass
 
 Do not deploy production from local CLI unless the user explicitly requested operational production deployment. Even then, `DEPLOY_PRODUCTION_ENABLED=true`, required checks, deployment gates, and smoke/runtime verification still apply.
+
+During the credential incident, do not use local cached/cloud credentials to test around suspended GitHub federation. Permit only narrow read-only evidence collection and authoritative credential revocation/rotation; never read or print local credential files. The Azure OIDC diagnostic must remain disabled until it has a separate Reader-only identity.
 
 Do not set or enable `DEPLOY_PRODUCTION_ENABLED=true` unless the operator/user explicitly requests enabling production deployment and the guardrails, approval posture, and risk are documented.
 

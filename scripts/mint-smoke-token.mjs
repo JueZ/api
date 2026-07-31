@@ -6,6 +6,10 @@ const TOKEN_ENDPOINT_HOST = 'https://login.microsoftonline.com';
 const DEFAULT_GITHUB_OIDC_AUDIENCE = 'api://AzureADTokenExchange';
 const MAX_TOKEN_FETCH_TIMEOUT_MS = 120_000;
 const ROLE_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const JWT_SEGMENT_PATTERN = /^[A-Za-z0-9_-]+$/;
+const MAX_ACCESS_TOKEN_LENGTH = 131_072;
+const DEFAULT_SCOPE_SUFFIX = '/.default';
 
 export function sanitizeTokenEndpointErrorCode(value) {
   const normalized = String(value ?? '').trim();
@@ -34,24 +38,82 @@ export function selectServiceAuthConfig(env = process.env) {
 }
 
 function parseRequiredRoles(value) {
-  const roles = [
-    ...new Set(
-      String(value)
-        .split(',')
-        .map((role) => role.trim())
-        .filter(Boolean),
-    ),
-  ];
+  const roles = String(value)
+    .split(',')
+    .map((role) => role.trim())
+    .filter(Boolean);
   if (roles.some((role) => !ROLE_PATTERN.test(role))) {
     throw new Error('SERVICE_AUTH_REQUIRED_ROLES contains an invalid role name.');
   }
   return roles;
 }
 
+export function serviceTokenAudiences(scope) {
+  const normalized = typeof scope === 'string' ? scope.trim() : '';
+  if (
+    normalized !== scope ||
+    !normalized.endsWith(DEFAULT_SCOPE_SUFFIX) ||
+    normalized.length <= DEFAULT_SCOPE_SUFFIX.length ||
+    /\s/.test(normalized)
+  ) {
+    return [];
+  }
+  const resource = normalized.slice(0, -DEFAULT_SCOPE_SUFFIX.length);
+  let resourceUrl;
+  try {
+    resourceUrl = new URL(resource);
+  } catch {
+    return [];
+  }
+  if (
+    !['api:', 'https:'].includes(resourceUrl.protocol) ||
+    !resourceUrl.hostname ||
+    resourceUrl.username ||
+    resourceUrl.password ||
+    resourceUrl.search ||
+    resourceUrl.hash ||
+    resource.includes(',')
+  ) {
+    return [];
+  }
+  const audiences = [resource];
+  const apiGuid = /^api:\/\/([0-9a-f-]+)$/i.exec(resource)?.[1];
+  if (apiGuid && GUID_PATTERN.test(apiGuid)) audiences.push(apiGuid);
+  return audiences;
+}
+
+export function serviceAuthConfigProblems(config) {
+  const problems = [];
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return ['invalid_config'];
+  if (typeof config.tenantId !== 'string' || !GUID_PATTERN.test(config.tenantId)) problems.push('invalid_tenant_id');
+  if (typeof config.clientId !== 'string' || !GUID_PATTERN.test(config.clientId)) problems.push('invalid_client_id');
+  if (serviceTokenAudiences(config.scope).length !== 2) problems.push('invalid_scope');
+  if (!Array.isArray(config.requiredRoles) || config.requiredRoles.length === 0) {
+    problems.push('missing_required_roles');
+  } else {
+    if (config.requiredRoles.some((role) => typeof role !== 'string' || !ROLE_PATTERN.test(role))) {
+      problems.push('invalid_required_roles');
+    }
+    if (new Set(config.requiredRoles).size !== config.requiredRoles.length) {
+      problems.push('duplicate_required_roles');
+    }
+  }
+  return problems;
+}
+
 export function decodeAccessTokenClaims(accessToken) {
-  const segments = String(accessToken).split('.');
-  if (segments.length !== 3 || !segments[1]) {
-    throw new Error('Microsoft Entra access token was not a JWT.');
+  if (typeof accessToken !== 'string' || accessToken.length === 0 || accessToken.length > MAX_ACCESS_TOKEN_LENGTH) {
+    throw new Error('Microsoft Entra access token was not a compact JWT.');
+  }
+  const segments = accessToken.split('.');
+  if (
+    segments.length !== 3 ||
+    segments.some(
+      (segment) =>
+        !JWT_SEGMENT_PATTERN.test(segment) || Buffer.from(segment, 'base64url').toString('base64url') !== segment,
+    )
+  ) {
+    throw new Error('Microsoft Entra access token was not a compact JWT.');
   }
 
   let claims;
@@ -67,24 +129,90 @@ export function decodeAccessTokenClaims(accessToken) {
 }
 
 export function validateServiceTokenClaims(claims, config) {
+  const configProblems = serviceAuthConfigProblems(config);
+  if (configProblems.length > 0) return configProblems.map((problem) => `invalid_config:${problem}`);
+
   const problems = [];
-  const tenantId = typeof claims.tid === 'string' ? claims.tid : '';
-  if (tenantId && tenantId.toLowerCase() !== config.tenantId.toLowerCase()) {
+  const version = claims.ver === '1.0' || claims.ver === '2.0' ? claims.ver : '';
+  if (!version) problems.push('invalid_token_version');
+
+  const tenantId = typeof claims.tid === 'string' && GUID_PATTERN.test(claims.tid) ? claims.tid : '';
+  if (!tenantId) {
+    problems.push('missing_or_invalid_tenant');
+  } else if (tenantId.toLowerCase() !== config.tenantId.toLowerCase()) {
     problems.push('tenant_mismatch');
   }
 
-  const clientId =
-    typeof claims.azp === 'string' && claims.azp ? claims.azp : typeof claims.appid === 'string' ? claims.appid : '';
-  if (clientId && clientId.toLowerCase() !== config.clientId.toLowerCase()) {
-    problems.push('client_mismatch');
+  const requiredClientClaim = version === '1.0' ? 'appid' : version === '2.0' ? 'azp' : '';
+  if (
+    !requiredClientClaim ||
+    typeof claims[requiredClientClaim] !== 'string' ||
+    !GUID_PATTERN.test(claims[requiredClientClaim])
+  ) {
+    problems.push('missing_or_invalid_client');
+  }
+  for (const claimName of ['azp', 'appid']) {
+    if (
+      Object.hasOwn(claims, claimName) &&
+      (typeof claims[claimName] !== 'string' ||
+        !GUID_PATTERN.test(claims[claimName]) ||
+        claims[claimName].toLowerCase() !== config.clientId.toLowerCase())
+    ) {
+      problems.push(`${claimName}_mismatch`);
+    }
+  }
+  if (version === '1.0' && Object.hasOwn(claims, 'azp')) problems.push('unexpected_azp');
+  if (version === '2.0' && Object.hasOwn(claims, 'appid')) problems.push('unexpected_appid');
+
+  const expectedIssuer =
+    version === '1.0'
+      ? `https://sts.windows.net/${config.tenantId.toLowerCase()}/`
+      : version === '2.0'
+        ? `https://login.microsoftonline.com/${config.tenantId.toLowerCase()}/v2.0`
+        : '';
+  if (claims.iss !== expectedIssuer) {
+    problems.push('issuer_mismatch');
   }
 
-  const grantedRoles = new Set(
-    Array.isArray(claims.roles) ? claims.roles.filter((role) => typeof role === 'string') : [],
-  );
-  const missingRoles = config.requiredRoles.filter((role) => !grantedRoles.has(role));
-  if (missingRoles.length > 0) {
-    problems.push(`missing_roles:${missingRoles.join(',')}`);
+  const configuredAudiences = serviceTokenAudiences(config.scope);
+  const expectedAudiences = new Set(version === '2.0' ? configuredAudiences.slice(1) : configuredAudiences);
+  if (typeof claims.aud !== 'string' || !expectedAudiences.has(claims.aud)) {
+    problems.push('audience_mismatch');
+  }
+
+  if (typeof claims.sub !== 'string' || claims.sub.trim().length === 0) {
+    problems.push('missing_subject');
+  }
+  if (Object.hasOwn(claims, 'scp') && (typeof claims.scp !== 'string' || claims.scp.trim().length > 0)) {
+    problems.push('delegated_scope_present');
+  }
+  if (Object.hasOwn(claims, 'idtyp') && claims.idtyp !== 'app') {
+    problems.push('invalid_idtyp');
+  }
+  for (const markerName of ['azpacr', 'appidacr']) {
+    if (Object.hasOwn(claims, markerName) && claims[markerName] !== '1' && claims[markerName] !== '2') {
+      problems.push(`invalid_${markerName}`);
+    }
+  }
+  if (version === '1.0' && Object.hasOwn(claims, 'azpacr')) problems.push('unexpected_azpacr');
+  if (version === '2.0' && Object.hasOwn(claims, 'appidacr')) problems.push('unexpected_appidacr');
+  const confidentialClientMarker = version === '1.0' ? claims.appidacr : version === '2.0' ? claims.azpacr : '';
+  if (claims.idtyp !== 'app' && confidentialClientMarker !== '1' && confidentialClientMarker !== '2') {
+    problems.push('missing_confidential_client_marker');
+  }
+
+  if (
+    !Array.isArray(claims.roles) ||
+    claims.roles.some((role) => typeof role !== 'string' || !ROLE_PATTERN.test(role))
+  ) {
+    problems.push('invalid_roles_claim');
+  } else {
+    const grantedRoles = new Set(claims.roles);
+    if (grantedRoles.size !== claims.roles.length) problems.push('duplicate_roles_claim');
+    const missingRoles = config.requiredRoles.filter((role) => !grantedRoles.has(role));
+    const unexpectedRoles = [...grantedRoles].filter((role) => !config.requiredRoles.includes(role));
+    if (missingRoles.length > 0) problems.push(`missing_roles:${missingRoles.join(',')}`);
+    if (unexpectedRoles.length > 0) problems.push(`unexpected_roles:${unexpectedRoles.join(',')}`);
   }
   return problems;
 }
@@ -111,13 +239,15 @@ async function safeReadErrorCode(response) {
 }
 
 export function missingServiceAuthFields(config) {
-  return [
+  const missing = [
     ['clientId', config.clientId],
     ['tenantId', config.tenantId],
     ['scope', config.scope],
   ]
     .filter(([, value]) => !value)
     .map(([name]) => name);
+  if (!Array.isArray(config.requiredRoles) || config.requiredRoles.length === 0) missing.push('requiredRoles');
+  return missing;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -133,6 +263,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     }
     console.log(`Authenticated smoke token mint skipped: ${message}`);
     process.exit(0);
+  }
+
+  const configProblems = serviceAuthConfigProblems(config);
+  if (configProblems.length > 0) {
+    console.error(`${config.prefix}_SERVICE_AUTH_* variables are invalid: ${configProblems.join(', ')}`);
+    process.exit(2);
   }
 
   const githubRequestUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
@@ -249,12 +385,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const claimProblems = validateServiceTokenClaims(tokenClaims, config);
   if (claimProblems.length > 0) {
     const missingRoles = claimProblems.find((problem) => problem.startsWith('missing_roles:'));
-    if (missingRoles) {
+    const unexpectedRoles = claimProblems.find((problem) => problem.startsWith('unexpected_roles:'));
+    if (claimProblems.length === 1 && missingRoles) {
       console.error(
         `Microsoft Entra service token is missing required application roles: ${missingRoles.slice('missing_roles:'.length)}.`,
       );
+    } else if (claimProblems.length === 1 && unexpectedRoles) {
+      console.error(
+        `Microsoft Entra service token has unexpected application roles: ${unexpectedRoles.slice('unexpected_roles:'.length)}.`,
+      );
     } else {
-      console.error('Microsoft Entra service token identity does not match the configured smoke client.');
+      console.error('Microsoft Entra service token does not match the exact configured smoke identity and role set.');
     }
     process.exit(2);
   }

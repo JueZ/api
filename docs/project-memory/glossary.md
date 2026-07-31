@@ -14,4 +14,4 @@
 - CI complete: Aggregate GitHub Actions check indicating the CI workflow required jobs completed successfully.
 - Policy complete: Aggregate GitHub Actions check indicating cost and guardrail policy checks completed successfully.
 - Production failure repair issue: GitHub issue created only when production deployment or production smoke tests fail after merge, so the failure remains visible outside any completed PR.
-- Codex Auto-Merge: GitHub-native auto-merge workflow for eligible Codex branches or PRs labeled `codex-automerge` after required checks pass.
+- Codex Auto-Merge: Trusted exact-head controller for eligible Codex branches or PRs labeled `codex-automerge`; it reviews the recorded head, proves source-bound required checks, and requests a squash merge of only that SHA. It does not rely on GitHub-native auto-merge.

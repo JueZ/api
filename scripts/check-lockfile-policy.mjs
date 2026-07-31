@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -10,6 +10,12 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const dependencyFilePairs = [
   { packagePath: 'package.json', lockfilePath: 'package-lock.json' },
   { packagePath: 'apps/api/package.json', lockfilePath: 'apps/api/package-lock.json' },
+];
+export const forbiddenNpmControlPaths = [
+  '.npmrc',
+  'npm-shrinkwrap.json',
+  'apps/api/.npmrc',
+  'apps/api/npm-shrinkwrap.json',
 ];
 
 const lockfileRelevantManifestKeys = [
@@ -55,6 +61,13 @@ export function dependencyPairingFindings(
       return (lockfileChanged && !packageChanged) || (packageChanged && !lockfileChanged && relevant.has(packagePath));
     })
     .map(({ packagePath, lockfilePath }) => `${packagePath} and ${lockfilePath} must change together`);
+}
+
+export function forbiddenNpmControlFindings(paths) {
+  const present = paths instanceof Set ? paths : new Set(paths);
+  return forbiddenNpmControlPaths
+    .filter((path) => present.has(path))
+    .map((path) => `${path} is forbidden because it can override the reviewed npm lock/install policy`);
 }
 
 export function inspectDependencyFiles(packageJson, lockfile, scope = 'root') {
@@ -156,11 +169,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       process.exit(1);
     }
   }
-  const findings = dependencyFilePairs.flatMap(({ packagePath, lockfilePath }) => {
-    const packageJson = JSON.parse(readFileSync(resolve(repositoryRoot, packagePath), 'utf8'));
-    const lockfile = JSON.parse(readFileSync(resolve(repositoryRoot, lockfilePath), 'utf8'));
-    return inspectDependencyFiles(packageJson, lockfile, packagePath);
-  });
+  const findings = [
+    ...forbiddenNpmControlFindings(
+      forbiddenNpmControlPaths.filter((path) => existsSync(resolve(repositoryRoot, path))),
+    ),
+    ...dependencyFilePairs.flatMap(({ packagePath, lockfilePath }) => {
+      const packageJson = JSON.parse(readFileSync(resolve(repositoryRoot, packagePath), 'utf8'));
+      const lockfile = JSON.parse(readFileSync(resolve(repositoryRoot, lockfilePath), 'utf8'));
+      return inspectDependencyFiles(packageJson, lockfile, packagePath);
+    }),
+  ];
   if (findings.length) {
     console.error(`Dependency lock policy failed:\n- ${findings.join('\n- ')}`);
     process.exit(1);

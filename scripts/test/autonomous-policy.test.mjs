@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { parse as parseYaml } from 'yaml';
 import {
   classifyRisk,
   isAutomergeCandidate,
@@ -12,21 +13,33 @@ import {
   validateAutonomousPolicy,
 } from '../lib/autonomous-policy.mjs';
 import {
+  autonomousMergeExcludedChanges,
+  actionsRunCoordinates,
   evaluatePullRequestState,
   evaluateRequiredChecks,
   mergeGateDecision,
+  pullRequestFilePaths,
   runReview,
+  trustedWorkflowSourceChanges,
   validateAutonomousReview,
 } from '../autonomous-merge-controller.mjs';
-import { renderBranchProtection } from '../render-branch-protection.mjs';
+import { branchProtectionFindings, renderBranchProtection } from '../render-branch-protection.mjs';
+import {
+  deploymentHoldDecision,
+  loadDeploymentHold,
+  validateDeploymentHold,
+} from '../enforce-security-deployment-hold.mjs';
 
 const headSha = 'a'.repeat(40);
+const repository = 'JueZ/api';
+const pullRequestNumber = 285;
 const policy = loadAutonomousPolicy();
 const ciWorkflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const mainDeliveryWorkflow = readFileSync(
   new URL('../../.github/workflows/codex-main-delivery.yml', import.meta.url),
   'utf8',
 );
+const autoMergeWorkflow = readFileSync(new URL('../../.github/workflows/codex-automerge.yml', import.meta.url), 'utf8');
 const deployEnvironmentWorkflow = readFileSync(
   new URL('../../.github/workflows/deploy-environment.yml', import.meta.url),
   'utf8',
@@ -40,18 +53,54 @@ const rollbackProductionWorkflow = readFileSync(
   new URL('../../.github/workflows/rollback-production.yml', import.meta.url),
   'utf8',
 );
+const migratePrivateStorageWorkflow = readFileSync(
+  new URL('../../.github/workflows/migrate-private-storage.yml', import.meta.url),
+  'utf8',
+);
 const bringCanaryWorkflow = readFileSync(
   new URL('../../.github/workflows/bring-readonly-canary.yml', import.meta.url),
+  'utf8',
+);
+const verifyAzureOidcWorkflow = readFileSync(
+  new URL('../../.github/workflows/verify-azure-oidc.yml', import.meta.url),
   'utf8',
 );
 const runtimeSettingsPolicy = readFileSync(
   new URL('../validate-deployed-runtime-settings.mjs', import.meta.url),
   'utf8',
 );
+const deploymentHoldEnforcer = readFileSync(
+  new URL('../enforce-security-deployment-hold.mjs', import.meta.url),
+  'utf8',
+);
 const mainBicep = readFileSync(new URL('../../infra/main.bicep', import.meta.url), 'utf8');
 const dependabotConfig = readFileSync(new URL('../../.github/dependabot.yml', import.meta.url), 'utf8');
 const releaseArtifactBuilder = readFileSync(new URL('../build-release-artifacts.sh', import.meta.url), 'utf8');
 const azureDiagnostics = readFileSync(new URL('../collect-azure-diagnostics.sh', import.meta.url), 'utf8');
+const workflowsUrl = new URL('../../.github/workflows/', import.meta.url);
+const actionsUrl = new URL('../../.github/actions/', import.meta.url);
+const expectedIncidentBlockStep = {
+  name: 'Block deployments pending credential rotation',
+  shell: 'bash',
+  run:
+    'set -euo pipefail\n' +
+    'echo "::error title=Deployment security hold::Credential incident 2026-07-31 remains unresolved. Revoke and rotate every affected GitHub, Azure, and provider credential, then bootstrap an independently controlled clearance trust root."\n' +
+    'exit 1\n',
+};
+const expectedHoldPolicyStep = {
+  name: 'Enforce repository security deployment hold',
+  shell: 'bash',
+  run: 'node scripts/enforce-security-deployment-hold.mjs',
+};
+
+function readYamlTree(directoryUrl, prefix) {
+  if (!existsSync(directoryUrl)) return [];
+  return readdirSync(directoryUrl, { withFileTypes: true }).flatMap((entry) => {
+    const child = new URL(`${entry.name}${entry.isDirectory() ? '/' : ''}`, directoryUrl);
+    if (entry.isDirectory()) return readYamlTree(child, `${prefix}${entry.name}/`);
+    return /\.ya?ml$/.test(entry.name) ? [[`${prefix}${entry.name}`, readFileSync(child, 'utf8')]] : [];
+  });
+}
 
 function pullRequest(overrides = {}) {
   return {
@@ -66,35 +115,406 @@ function pullRequest(overrides = {}) {
   };
 }
 
+const actionsRunIds = { ci: 101, policy: 102, codeql: 103 };
+const controllerCheckRunId = 9001;
+
 function successfulChecks() {
-  return policy.requiredChecks.map((required, index) => ({
-    id: index + 1,
-    name: required.name,
-    head_sha: headSha,
-    status: 'completed',
-    conclusion: 'success',
-    app: { slug: required.appSlug },
-  }));
+  return policy.requiredChecks.map((required, index) => {
+    const id = policy.trustedCheckSources[required.source].kind === 'controller' ? controllerCheckRunId : index + 1;
+    const runId = actionsRunIds[required.source];
+    return {
+      id,
+      name: required.name,
+      head_sha: headSha,
+      status: 'completed',
+      conclusion: 'success',
+      details_url: runId
+        ? `https://github.com/${repository}/actions/runs/${runId}/job/${id}`
+        : `https://github.com/${repository}/runs/${id}`,
+      app: { slug: required.appSlug, id: policy.trustedCheckApps[required.appSlug] },
+    };
+  });
+}
+
+function successfulActionsRuns() {
+  return new Map(
+    Object.entries(actionsRunIds).map(([sourceName, runId]) => {
+      const source = policy.trustedCheckSources[sourceName];
+      return [
+        runId,
+        {
+          id: runId,
+          workflow_id: source.workflowId,
+          path: source.workflowPath,
+          event: source.event,
+          run_attempt: source.runAttempt,
+          head_sha: headSha,
+          head_repository: { full_name: repository },
+          pull_requests: [{ number: pullRequestNumber, head: { sha: headSha }, base: { ref: 'main' } }],
+        },
+      ];
+    }),
+  );
+}
+
+function evaluateChecks(checkRuns, overrides = {}) {
+  return evaluateRequiredChecks(
+    checkRuns,
+    headSha,
+    policy.requiredChecks,
+    policy.trustedCheckApps,
+    policy.trustedCheckSources,
+    {
+      repository,
+      actionsRuns: successfulActionsRuns(),
+      expectedControllerCheckRunId: controllerCheckRunId,
+      expectedPrNumber: pullRequestNumber,
+      ...overrides,
+    },
+  );
 }
 
 test('canonical autonomous policy is internally valid', () => {
   assert.deepEqual(validateAutonomousPolicy(policy), []);
+  assert.equal(policy.trustedCheckApps['github-actions'], 15368);
+  assert.equal(policy.trustedCheckSources.ci.workflowId, 276132079);
   assert.equal(policy.merge.allowAdminBypass, false);
   assert.equal(policy.autonomousReview.humanApprovalRequired, false);
+  assert.ok(policy.merge.autonomousExcludedPaths.includes('.github/workflows/**'));
+  assert.ok(policy.merge.autonomousExcludedPaths.includes('npm-shrinkwrap.json'));
+  assert.ok(policy.merge.autonomousExcludedPaths.includes('ops/release-ledger/**'));
+  assert.equal(classifyRisk(['npm-shrinkwrap.json'], policy).highRisk, true);
+  assert.deepEqual(
+    autonomousMergeExcludedChanges(
+      [{ filename: 'ops/release-ledger/schema.json' }],
+      policy.merge.autonomousExcludedPaths,
+    ),
+    ['ops/release-ledger/schema.json'],
+  );
+  assert.deepEqual(
+    autonomousMergeExcludedChanges(
+      [{ filename: '.github/security-deployment-hold.json' }, { filename: 'apps/api/src/index.ts' }],
+      policy.merge.autonomousExcludedPaths,
+    ),
+    ['.github/security-deployment-hold.json'],
+  );
+  const renamedTrustRoot = [
+    {
+      filename: 'docs/incident-record.json',
+      previous_filename: '.github/security-deployment-hold.json',
+      status: 'renamed',
+    },
+  ];
+  assert.deepEqual(pullRequestFilePaths(renamedTrustRoot), [
+    'docs/incident-record.json',
+    '.github/security-deployment-hold.json',
+  ]);
+  assert.deepEqual(autonomousMergeExcludedChanges(renamedTrustRoot, policy.merge.autonomousExcludedPaths), [
+    '.github/security-deployment-hold.json',
+  ]);
   assert.ok(policy.autonomousReview.maxDiffBytes >= 1_200_000);
+  const missingAppMapping = structuredClone(policy);
+  delete missingAppMapping.trustedCheckApps['github-actions'];
+  assert.ok(validateAutonomousPolicy(missingAppMapping).some((error) => error.includes('unknown trusted app')));
+
+  for (const invalidAppId of [0, -1, 1.5, '15368', null, Number.MAX_SAFE_INTEGER + 1]) {
+    const invalid = structuredClone(policy);
+    invalid.trustedCheckApps['github-actions'] = invalidAppId;
+    assert.ok(validateAutonomousPolicy(invalid).some((error) => error.includes('positive integer GitHub App ID')));
+  }
+
+  const unusedApp = structuredClone(policy);
+  unusedApp.trustedCheckApps.unused = 42;
+  assert.ok(validateAutonomousPolicy(unusedApp).some((error) => error.includes('unused')));
+
+  const duplicateAppId = structuredClone(policy);
+  duplicateAppId.trustedCheckApps.alias = duplicateAppId.trustedCheckApps['github-actions'];
+  duplicateAppId.requiredChecks[0].appSlug = 'alias';
+  assert.ok(validateAutonomousPolicy(duplicateAppId).some((error) => error.includes('duplicate GitHub App ID')));
+
+  const wrongWorkflowId = structuredClone(policy);
+  wrongWorkflowId.trustedCheckSources.ci.workflowId = -1;
+  assert.ok(validateAutonomousPolicy(wrongWorkflowId).some((error) => error.includes('workflowId')));
+  const unknownSource = structuredClone(policy);
+  unknownSource.requiredChecks[0].source = 'untrusted';
+  assert.ok(validateAutonomousPolicy(unknownSource).some((error) => error.includes('unknown trusted source')));
+
+  const missingSecurityExclusion = structuredClone(policy);
+  missingSecurityExclusion.merge.autonomousExcludedPaths =
+    missingSecurityExclusion.merge.autonomousExcludedPaths.filter(
+      (path) => path !== '.github/security-deployment-hold.json',
+    );
+  assert.ok(
+    validateAutonomousPolicy(missingSecurityExclusion).some((error) =>
+      error.includes('must include .github/security-deployment-hold.json'),
+    ),
+  );
 });
 
 test('branch-protection bootstrap is rendered from canonical required checks', () => {
   const protection = renderBranchProtection(policy);
   assert.deepEqual(
-    protection.required_status_checks.contexts,
-    policy.requiredChecks.map(({ name }) => name),
+    protection.required_status_checks.checks,
+    policy.requiredChecks.map(({ name, appSlug }) => ({
+      context: name,
+      app_id: policy.trustedCheckApps[appSlug],
+    })),
   );
+  assert.equal(Object.hasOwn(protection.required_status_checks, 'contexts'), false);
   assert.equal(protection.required_status_checks.strict, true);
   assert.equal(protection.allow_force_pushes, false);
   assert.equal(protection.allow_deletions, false);
+  assert.equal(protection.allow_fork_syncing, false);
   assert.equal(protection.required_linear_history, true);
   assert.equal(protection.required_conversation_resolution, true);
+});
+
+test('branch-protection verification rejects drift and wrong app bindings', () => {
+  const rendered = renderBranchProtection(policy);
+  const liveShape = {
+    required_status_checks: {
+      ...structuredClone(rendered.required_status_checks),
+      contexts: rendered.required_status_checks.checks.map(({ context }) => context),
+      contexts_url: 'https://api.github.test/required_status_checks/contexts',
+      url: 'https://api.github.test/required_status_checks',
+    },
+    enforce_admins: { enabled: rendered.enforce_admins },
+    required_pull_request_reviews: {
+      ...structuredClone(rendered.required_pull_request_reviews),
+      url: 'https://api.github.test/required_pull_request_reviews',
+    },
+    required_linear_history: { enabled: rendered.required_linear_history },
+    allow_force_pushes: { enabled: rendered.allow_force_pushes },
+    allow_deletions: { enabled: rendered.allow_deletions },
+    block_creations: { enabled: rendered.block_creations },
+    required_conversation_resolution: { enabled: rendered.required_conversation_resolution },
+    lock_branch: { enabled: rendered.lock_branch },
+    allow_fork_syncing: { enabled: rendered.allow_fork_syncing },
+  };
+  assert.deepEqual(branchProtectionFindings(liveShape, policy), []);
+
+  const wrongApp = structuredClone(liveShape);
+  wrongApp.required_status_checks.checks[0].app_id = null;
+  assert.ok(branchProtectionFindings(wrongApp, policy).some((finding) => finding.includes('wrong GitHub App')));
+
+  const missing = structuredClone(liveShape);
+  missing.required_status_checks.checks.pop();
+  assert.ok(branchProtectionFindings(missing, policy).some((finding) => finding.includes('is missing')));
+
+  const extra = structuredClone(liveShape);
+  extra.required_status_checks.checks.push({ context: 'untrusted check', app_id: 15368 });
+  assert.ok(branchProtectionFindings(extra, policy).some((finding) => finding.includes('unexpected')));
+
+  const duplicate = structuredClone(liveShape);
+  duplicate.required_status_checks.checks.push(structuredClone(duplicate.required_status_checks.checks[0]));
+  assert.ok(branchProtectionFindings(duplicate, policy).some((finding) => finding.includes('wrong GitHub App')));
+
+  const nonStrict = structuredClone(liveShape);
+  nonStrict.required_status_checks.strict = false;
+  assert.ok(branchProtectionFindings(nonStrict, policy).some((finding) => finding.includes('strict')));
+
+  const bypass = structuredClone(liveShape);
+  bypass.required_pull_request_reviews.bypass_pull_request_allowances = {
+    apps: [{ slug: 'example' }],
+    teams: [],
+    users: [],
+  };
+  assert.ok(branchProtectionFindings(bypass, policy).some((finding) => finding.includes('bypass allowances')));
+});
+
+test('trusted auto-merge workflow binds the controller review check to its exact created ID', () => {
+  assert.match(autoMergeWorkflow, /review_check_run_id: \$\{\{ steps\.resolve\.outputs\.review_check_run_id \}\}/);
+  assert.match(autoMergeWorkflow, /--review-check-run-id "\$\{\{ needs\.resolve\.outputs\.review_check_run_id \}\}"/);
+  assert.match(autoMergeWorkflow, /-f name='Autonomous review complete'/);
+});
+
+test('credential incident hold blocks every cloud mutation and has no repository-local clearance path', () => {
+  const hold = loadDeploymentHold();
+  assert.deepEqual(validateDeploymentHold(hold), []);
+  assert.deepEqual(deploymentHoldDecision(hold), { blocked: true, reason: 'active_incident', errors: [] });
+
+  const deployDocument = parseYaml(deployEnvironmentWorkflow);
+  const deploySteps = deployDocument.jobs.deploy.steps;
+  assert.deepEqual(deploySteps[0], expectedIncidentBlockStep);
+  assert.deepEqual(deploySteps[2], expectedHoldPolicyStep);
+  assert.ok(deploySteps.findIndex((step) => String(step.uses ?? '').startsWith('azure/login@')) > 2);
+
+  for (const workflow of [deployTestWorkflow, promoteProductionWorkflow, rollbackProductionWorkflow]) {
+    const reusableJobs = Object.values(parseYaml(workflow).jobs).filter((job) => job.uses);
+    assert.equal(reusableJobs.length, 1);
+    assert.equal(reusableJobs[0].uses, './.github/workflows/deploy-environment.yml');
+  }
+
+  const migrationSteps = parseYaml(migratePrivateStorageWorkflow).jobs.migrate.steps;
+  assert.equal(parseYaml(migratePrivateStorageWorkflow).concurrency['cancel-in-progress'], true);
+  assert.deepEqual(migrationSteps[0], expectedIncidentBlockStep);
+  assert.deepEqual(migrationSteps[1], {
+    name: 'Checkout current security controller',
+    uses: 'actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10',
+    with: { ref: 'main', 'fetch-depth': 1, 'persist-credentials': false },
+  });
+  assert.deepEqual(migrationSteps[2], {
+    name: 'Require the current main workflow generation',
+    shell: 'bash',
+    env: { GH_TOKEN: '${{ github.token }}' },
+    run:
+      'set -euo pipefail\n' +
+      'current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq \'.object.sha\')"\n' +
+      'checked_out="$(git rev-parse HEAD)"\n' +
+      'if [ "$GITHUB_REF" != "refs/heads/main" ] ||\n' +
+      '   [ "$GITHUB_WORKFLOW_SHA" != "$current_main" ] ||\n' +
+      '   [ "$checked_out" != "$current_main" ]; then\n' +
+      '  echo "Private storage migration requires the current main workflow generation." >&2\n' +
+      '  exit 1\n' +
+      'fi\n',
+  });
+  assert.deepEqual(migrationSteps[3], expectedHoldPolicyStep);
+  const migrationValidationIndex = migrationSteps.findIndex(
+    (step) => step.name === 'Validate bounded migration request',
+  );
+  const migrationPreLoginGuardIndex = migrationSteps.findIndex(
+    (step) => step.name === 'Revalidate current security controller before Azure login',
+  );
+  const migrationLoginIndex = migrationSteps.findIndex((step) => String(step.uses ?? '').startsWith('azure/login@'));
+  const migrationCopyIndex = migrationSteps.findIndex(
+    (step) => step.name === 'Copy one digest-verified reference blob',
+  );
+  assert.ok(
+    migrationValidationIndex < migrationPreLoginGuardIndex &&
+      migrationPreLoginGuardIndex < migrationLoginIndex &&
+      migrationLoginIndex < migrationCopyIndex,
+  );
+  assert.equal(migrationSteps[migrationPreLoginGuardIndex].run, 'node scripts/assert-current-security-controller.mjs');
+  const migrationCopy = migrationSteps[migrationCopyIndex].run;
+  assert.match(migrationCopy, /node scripts\/assert-current-security-controller\.mjs\n\s*az storage blob upload \\/);
+  assert.match(
+    migrationCopy,
+    /az storage blob upload[\s\S]*?--overwrite false \\\n\s*-o none\n\s*node scripts\/assert-current-security-controller\.mjs/,
+  );
+  assert.equal(
+    (migratePrivateStorageWorkflow.match(/node scripts\/assert-current-security-controller\.mjs/g) ?? []).length,
+    3,
+  );
+
+  assert.deepEqual(parseYaml(bringCanaryWorkflow).jobs['read-contract'].steps[0], expectedIncidentBlockStep);
+  assert.deepEqual(parseYaml(verifyAzureOidcWorkflow).jobs.verify.steps[0], expectedIncidentBlockStep);
+
+  const workflowSources = readdirSync(workflowsUrl)
+    .filter((name) => /\.ya?ml$/.test(name))
+    .map((name) => [name, readFileSync(new URL(name, workflowsUrl), 'utf8')]);
+  const idTokenWorkflows = workflowSources
+    .filter(([, source]) => /id-token:\s*write/.test(source))
+    .map(([name]) => name)
+    .sort();
+  assert.deepEqual(idTokenWorkflows, [
+    'bring-readonly-canary.yml',
+    'ci.yml',
+    'deploy-environment.yml',
+    'deploy-test.yml',
+    'migrate-private-storage.yml',
+    'promote-production.yml',
+    'rollback-production.yml',
+    'verify-azure-oidc.yml',
+  ]);
+  const environmentWorkflows = workflowSources
+    .filter(([, source]) => /^\s+environment:/m.test(source))
+    .map(([name]) => name)
+    .sort();
+  assert.deepEqual(environmentWorkflows, [
+    'bring-readonly-canary.yml',
+    'deploy-environment.yml',
+    'migrate-private-storage.yml',
+  ]);
+  const cloudCapabilityPattern =
+    /azure\/login@|ACTIONS_ID_TOKEN_REQUEST|az\s+(?:account\s+get-access-token|rest\b|deployment\b|storage\b|functionapp\b|webapp\b|resource\b|role\b|ad\b)/i;
+  const cloudYamlSources = [...workflowSources, ...readYamlTree(actionsUrl, '.github/actions/')];
+  const cloudCapableWorkflows = cloudYamlSources
+    .filter(([, source]) => cloudCapabilityPattern.test(source))
+    .map(([name]) => name)
+    .sort();
+  assert.deepEqual(cloudCapableWorkflows, [
+    'deploy-environment.yml',
+    'migrate-private-storage.yml',
+    'verify-azure-oidc.yml',
+  ]);
+  const privilegedScriptPaths = [
+    ...new Set(
+      workflowSources
+        .filter(([name]) => idTokenWorkflows.includes(name))
+        .flatMap(([, source]) => source.match(/scripts\/[A-Za-z0-9_./-]+\.(?:mjs|sh)/g) ?? []),
+    ),
+  ].sort();
+  for (const scriptPath of privilegedScriptPaths) {
+    assert.ok(
+      policy.merge.autonomousExcludedPaths.includes(scriptPath),
+      `${scriptPath} executes from an id-token workflow and must be excluded from autonomous merge`,
+    );
+  }
+  for (const [name, source] of workflowSources.filter(([, candidate]) => candidate.includes('azure/login@'))) {
+    if (name === 'verify-azure-oidc.yml') {
+      assert.doesNotMatch(
+        source,
+        /\baz\s+(?:deployment\s+group\s+(?:create|delete)|storage\s+blob\s+upload|functionapp\s+(?:config|deployment|restart|delete))/i,
+      );
+      continue;
+    }
+    const jobs = Object.values(parseYaml(source).jobs);
+    assert.ok(
+      jobs.some(
+        (job) => Array.isArray(job.steps) && JSON.stringify(job.steps[0]) === JSON.stringify(expectedIncidentBlockStep),
+      ),
+    );
+  }
+
+  const evidence = ['github', 'azure', 'providers'].map((system, index) => ({
+    system,
+    revokedAt: `2026-08-01T10:${String(index).padStart(2, '0')}:00Z`,
+    rotatedAt: `2026-08-01T10:${String(index + 10).padStart(2, '0')}:00Z`,
+    revokedCount: index + 1,
+    rotatedCount: index + 1,
+    inventoryReference: `audit/${system}-inventory-2026-001`,
+    revocationReference: `audit/${system}-revocation-2026-001`,
+    replacementReference: `audit/${system}-replacement-2026-001`,
+  }));
+  const evidenceCommit = 'b'.repeat(40);
+  const evidencePolicy = {
+    ...hold,
+    clearance: {
+      status: 'evidence-recorded',
+      verifiedAt: null,
+      verifiedBy: null,
+      evidence,
+      approval: null,
+    },
+  };
+  const now = new Date('2026-08-02T00:00:00Z');
+  assert.deepEqual(validateDeploymentHold(evidencePolicy, { now }), []);
+
+  const attemptedRepositoryClearance = {
+    ...hold,
+    active: false,
+    clearance: {
+      status: 'verified',
+      verifiedAt: '2026-08-01T12:00:00Z',
+      verifiedBy: 'JueZ',
+      evidence,
+      approval: { pullRequest: 321, evidenceCommit, commentId: 654 },
+    },
+  };
+  const attemptedDecision = deploymentHoldDecision(attemptedRepositoryClearance, { now });
+  assert.equal(attemptedDecision.blocked, true);
+  assert.equal(attemptedDecision.reason, 'invalid_policy');
+  assert.ok(attemptedDecision.errors.some((error) => error.includes('out-of-band trust root')));
+  assert.doesNotMatch(deploymentHoldEnforcer, /issues\/comments|comment\.user|verified_clearance/);
+
+  const duplicateReference = structuredClone(evidencePolicy);
+  duplicateReference.clearance.evidence[1].inventoryReference = evidence[0].inventoryReference;
+  assert.equal(deploymentHoldDecision(duplicateReference, { now }).blocked, true);
+  const invalidDate = structuredClone(evidencePolicy);
+  invalidDate.clearance.evidence[0].revokedAt = '2026-02-31T10:00:00Z';
+  assert.equal(deploymentHoldDecision(invalidDate, { now }).blocked, true);
+  const wrongIncident = { ...evidencePolicy, incidentId: 'credential-exposure-other' };
+  assert.equal(deploymentHoldDecision(wrongIncident, { now }).blocked, true);
 });
 
 test('Codex auto-merge completion dispatches exact main CI through one delivery controller', () => {
@@ -427,27 +847,99 @@ test('auto-merge candidates are scoped and blocked labels fail closed', () => {
 });
 
 test('required checks pass only for exact head and expected GitHub app', () => {
-  assert.equal(evaluateRequiredChecks(successfulChecks(), headSha, policy.requiredChecks).ok, true);
+  assert.equal(evaluateChecks(successfulChecks()).ok, true);
 
   const wrongApp = successfulChecks();
   wrongApp[0] = { ...wrongApp[0], app: { slug: 'untrusted-app' } };
-  assert.equal(evaluateRequiredChecks(wrongApp, headSha, policy.requiredChecks).failures[0].reason, 'wrong_app');
+  assert.equal(evaluateChecks(wrongApp).failures[0].reason, 'wrong_app');
+
+  const wrongAppId = successfulChecks();
+  wrongAppId[0] = { ...wrongAppId[0], app: { slug: 'github-actions', id: 1 } };
+  assert.equal(evaluateChecks(wrongAppId).failures[0].reason, 'wrong_app');
 
   const wrongHead = successfulChecks();
   wrongHead[0] = { ...wrongHead[0], head_sha: 'b'.repeat(40) };
-  const evaluation = evaluateRequiredChecks(wrongHead, headSha, policy.requiredChecks);
+  const evaluation = evaluateChecks(wrongHead);
   assert.ok(evaluation.failures.some((failure) => failure.reason === 'wrong_head_sha'));
   assert.ok(evaluation.pending.some((pending) => pending.reason === 'missing'));
+});
+
+test('required checks bind Actions workflow identity, event, PR, attempt, and controller check ID', () => {
+  assert.deepEqual(actionsRunCoordinates('https://github.com/JueZ/api/actions/runs/101/job/1', repository), {
+    runId: 101,
+    jobId: 1,
+  });
+  assert.equal(actionsRunCoordinates('https://github.com/Other/api/actions/runs/101/job/1', repository), null);
+  assert.equal(actionsRunCoordinates('https://attacker@github.com/JueZ/api/actions/runs/101/job/1', repository), null);
+  assert.equal(actionsRunCoordinates('https://github.com/JueZ/api/actions/runs/101/job/1?x=1', repository), null);
+
+  const wrongDetails = successfulChecks();
+  wrongDetails[0] = {
+    ...wrongDetails[0],
+    details_url: 'https://github.com/JueZ/api/actions/runs/101/job/999',
+  };
+  assert.equal(evaluateChecks(wrongDetails).failures[0].reason, 'wrong_source');
+
+  for (const [field, value] of [
+    ['workflow_id', 1],
+    ['path', '.github/workflows/untrusted.yml'],
+    ['event', 'pull_request_target'],
+    ['run_attempt', 2],
+    ['head_sha', 'b'.repeat(40)],
+  ]) {
+    const actionsRuns = successfulActionsRuns();
+    actionsRuns.set(actionsRunIds.ci, { ...actionsRuns.get(actionsRunIds.ci), [field]: value });
+    assert.equal(evaluateChecks(successfulChecks(), { actionsRuns }).failures[0].reason, 'wrong_source');
+  }
+
+  const wrongPullRequest = successfulActionsRuns();
+  wrongPullRequest.get(actionsRunIds.ci).pull_requests[0].number = 999;
+  assert.equal(
+    evaluateChecks(successfulChecks(), { actionsRuns: wrongPullRequest }).failures[0].reason,
+    'wrong_source',
+  );
+
+  const controllerIndex = policy.requiredChecks.findIndex(
+    (required) => policy.trustedCheckSources[required.source].kind === 'controller',
+  );
+  const wrongController = successfulChecks();
+  wrongController[controllerIndex] = {
+    ...wrongController[controllerIndex],
+    id: controllerCheckRunId + 1,
+    details_url: `https://github.com/${repository}/runs/${controllerCheckRunId + 1}`,
+  };
+  assert.equal(evaluateChecks(wrongController).failures.at(-1).reason, 'wrong_source');
+
+  assert.deepEqual(
+    trustedWorkflowSourceChanges(
+      [{ filename: '.github/workflows/ci.yml' }, { filename: 'README.md' }],
+      policy.trustedCheckSources,
+    ),
+    ['.github/workflows/ci.yml'],
+  );
+  assert.deepEqual(
+    trustedWorkflowSourceChanges(
+      [
+        {
+          filename: 'docs/retired-ci.yml',
+          previous_filename: '.github/workflows/ci.yml',
+          status: 'renamed',
+        },
+      ],
+      policy.trustedCheckSources,
+    ),
+    ['.github/workflows/ci.yml'],
+  );
 });
 
 test('required checks treat pending and failed checks as non-passing', () => {
   const pending = successfulChecks();
   pending[2] = { ...pending[2], status: 'in_progress', conclusion: null };
-  assert.equal(evaluateRequiredChecks(pending, headSha, policy.requiredChecks).ok, false);
+  assert.equal(evaluateChecks(pending).ok, false);
 
   const failed = successfulChecks();
   failed[3] = { ...failed[3], conclusion: 'failure' };
-  assert.equal(evaluateRequiredChecks(failed, headSha, policy.requiredChecks).failures[0].reason, 'failure');
+  assert.equal(evaluateChecks(failed).failures[0].reason, 'failure');
 });
 
 test('autonomous review is bound to the exact head and rejects blocking findings', () => {
@@ -496,6 +988,47 @@ test('autonomous review rechecks the mutable pull-request head after loading fil
   );
 });
 
+test('autonomous review rejects trust-root changes without invoking the model', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-trust-root-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const reviewFile = join(directory, 'review.json');
+  let modelCalls = 0;
+  const github = {
+    async getPullRequest() {
+      return { ...pullRequest(), title: 'Change deployment trust root', body: '' };
+    },
+    async getPullRequestFiles() {
+      return [
+        {
+          filename: 'docs/retired-deploy-test.yml',
+          previous_filename: '.github/workflows/deploy-test.yml',
+          status: 'renamed',
+          additions: 1,
+          deletions: 0,
+        },
+      ];
+    },
+  };
+  const client = {
+    responses: {
+      async create() {
+        modelCalls += 1;
+        return {};
+      },
+    },
+  };
+
+  await assert.rejects(
+    runReview({ repository, prNumber: pullRequestNumber, headSha, reviewFile }, policy, github, client),
+    /refused security-control changes/,
+  );
+  assert.equal(modelCalls, 0);
+  const review = JSON.parse(await readFile(reviewFile, 'utf8'));
+  assert.equal(review.decision, 'reject');
+  assert.equal(review.findings[0].severity, 'high');
+  assert.match(review.findings[0].evidence, /deploy-test\.yml/);
+});
+
 test('high-risk autonomous review retries an empty response with a larger output budget', async (context) => {
   const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-retry-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
@@ -505,7 +1038,7 @@ test('high-risk autonomous review retries an empty response with a larger output
       return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
     },
     async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
+      return [{ filename: 'apps/api/src/shared/security/example.ts', status: 'modified', additions: 1, deletions: 0 }];
     },
     async getPullRequestDiff() {
       return 'diff --git a/example b/example';
@@ -572,7 +1105,7 @@ test('high-risk autonomous review does not accept structured output from an inco
       return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
     },
     async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
+      return [{ filename: 'apps/api/src/shared/security/example.ts', status: 'modified', additions: 1, deletions: 0 }];
     },
     async getPullRequestDiff() {
       return 'diff --git a/example b/example';
@@ -620,7 +1153,7 @@ test('high-risk autonomous review retries a structurally invalid decision', asyn
       return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
     },
     async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
+      return [{ filename: 'apps/api/src/shared/security/example.ts', status: 'modified', additions: 1, deletions: 0 }];
     },
     async getPullRequestDiff() {
       return 'diff --git a/example b/example';
@@ -673,7 +1206,7 @@ test('persistent empty model output fails closed with sanitized review evidence'
       return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
     },
     async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
+      return [{ filename: 'apps/api/src/shared/security/example.ts', status: 'modified', additions: 1, deletions: 0 }];
     },
     async getPullRequestDiff() {
       return 'diff --git a/example b/example';
@@ -740,7 +1273,7 @@ test('pull request state rejects forks, stale heads, and behind branches', () =>
 });
 
 test('merge decision requires pull request state, checks, and review to all pass', () => {
-  const checkEvaluation = evaluateRequiredChecks(successfulChecks(), headSha, policy.requiredChecks);
+  const checkEvaluation = evaluateChecks(successfulChecks());
   const review = { decision: 'approve', reviewedHeadSha: headSha, summary: 'Approved.', findings: [] };
   assert.equal(
     mergeGateDecision({

@@ -29,6 +29,7 @@
     "ops:preflight-change": "node scripts/check-repository-hygiene.mjs",
     "ops:validate-autonomous-policy": "node -e \"import('./scripts/lib/autonomous-policy.mjs').then(({ loadAutonomousPolicy }) => { loadAutonomousPolicy(); console.log('Autonomous policy is valid.'); })\"",
     "ops:render-branch-protection": "node scripts/render-branch-protection.mjs",
+    "ops:verify-github-deployment-controls": "node scripts/verify-github-deployment-controls.mjs",
     "ops:write-release-ledger": "node scripts/write-release-ledger.mjs",
     "ops:mint-smoke-token": "node scripts/mint-smoke-token.mjs",
     "ops:resolve-reddit-share": "npm run build:api --silent && node scripts/resolve-reddit-share-url.mjs",

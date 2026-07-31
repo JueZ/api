@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { forbiddenNpmControlPaths } from './check-lockfile-policy.mjs';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sensitiveIgnoreProbes = [
@@ -19,13 +20,21 @@ const strongSecretSignatures = [
   { id: 'openai-key', pattern: /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/ },
 ];
 
-export function repositoryHygieneFindings({ trackedFiles = [], ignoredPaths = new Set() } = {}) {
+export function repositoryHygieneFindings({
+  trackedFiles = [],
+  ignoredPaths = new Set(),
+  presentFiles = trackedFiles,
+} = {}) {
   const findings = [];
   for (const path of trackedFiles) {
     if (isSensitiveRepositoryPath(path)) findings.push(`sensitive local path is tracked: ${path}`);
   }
   for (const path of sensitiveIgnoreProbes) {
     if (!ignoredPaths.has(path)) findings.push(`sensitive local path is not ignored: ${path}`);
+  }
+  const present = presentFiles instanceof Set ? presentFiles : new Set(presentFiles);
+  for (const path of forbiddenNpmControlPaths) {
+    if (present.has(path)) findings.push(`forbidden npm install override is present: ${path}`);
   }
   return findings;
 }
@@ -104,6 +113,9 @@ function untrackedTextDiff() {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const trackedFiles = git(['ls-files', '--']).stdout.split(/\r?\n/).filter(Boolean);
+  const presentForbiddenNpmControls = forbiddenNpmControlPaths.filter((path) =>
+    existsSync(resolve(repositoryRoot, path)),
+  );
   const stagedDiff = git([
     'diff',
     '--cached',
@@ -124,7 +136,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     ':(exclude)apps/api/package-lock.json',
   ]).stdout;
   const findings = [
-    ...repositoryHygieneFindings({ trackedFiles, ignoredPaths: ignoredProbePaths() }),
+    ...repositoryHygieneFindings({
+      trackedFiles,
+      ignoredPaths: ignoredProbePaths(),
+      presentFiles: [...trackedFiles, ...presentForbiddenNpmControls],
+    }),
     ...stagedSecretFindings(`${stagedDiff}\n${worktreeDiff}\n${untrackedTextDiff()}`),
     ...localPermissionFindings(),
   ];

@@ -43,7 +43,7 @@ permissions:
 
 concurrency:
   group: private-storage-migration
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   migrate:
@@ -56,6 +56,35 @@ jobs:
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
     steps:
+      - name: Block deployments pending credential rotation
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::error title=Deployment security hold::Credential incident 2026-07-31 remains unresolved. Revoke and rotate every affected GitHub, Azure, and provider credential, then bootstrap an independently controlled clearance trust root."
+          exit 1
+      - name: Checkout current security controller
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Require the current main workflow generation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          checked_out="$(git rev-parse HEAD)"
+          if [ "$GITHUB_REF" != "refs/heads/main" ] ||
+             [ "$GITHUB_WORKFLOW_SHA" != "$current_main" ] ||
+             [ "$checked_out" != "$current_main" ]; then
+            echo "Private storage migration requires the current main workflow generation." >&2
+            exit 1
+          fi
+      - name: Enforce repository security deployment hold
+        shell: bash
+        run: node scripts/enforce-security-deployment-hold.mjs
       - name: Validate bounded migration request
         shell: bash
         env:
@@ -93,6 +122,11 @@ jobs:
             echo "expected_sha256 must be a lowercase SHA-256 digest." >&2
             exit 1
           }
+      - name: Revalidate current security controller before Azure login
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/assert-current-security-controller.mjs
       - name: Azure login with GitHub OIDC
         uses: azure/login@2dd0bbf4064d5a1812889dc200bb8eed2597f82a # tag=v3
         with:
@@ -107,6 +141,7 @@ jobs:
           CONTAINER: ${{ inputs.container }}
           BLOB_NAME: ${{ inputs.blob_name }}
           EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           migration_dir="$(mktemp -d)"
@@ -156,6 +191,7 @@ jobs:
             exit 0
           fi
 
+          node scripts/assert-current-security-controller.mjs
           az storage blob upload \
             --auth-mode login \
             --account-name "$TARGET_ACCOUNT" \
@@ -164,4 +200,5 @@ jobs:
             --file "$source_file" \
             --overwrite false \
             -o none
+          node scripts/assert-current-security-controller.mjs
           echo "Migrated one WLH reference blob with verified digest $EXPECTED_SHA256."

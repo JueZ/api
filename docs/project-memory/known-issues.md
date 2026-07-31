@@ -5,12 +5,15 @@
 - PR #283 and test run `30652787906` resolved the preceding startup/auth-setting chain. Exact-SHA health, unauthenticated `401`, and CORS now pass.
 - Authenticated `/api/hello` returns `403` for the dedicated GitHub-OIDC-backed smoke identity. Effective tenant/client/issuer/audience/allowlist wiring correlates, leaving Entra app-role assignment as the unverified boundary.
 - The current Codex Azure service principal lacks Microsoft Graph directory permission and cannot inspect or assign the required `catalogue.read,reddit.read` application roles. Use `scripts/configure-entra-service-oauth.sh` from a trusted checkout under a privileged Entra operator.
-- A new token-role preflight will confirm missing role names without logging claims. Test telemetry/provenance and production promotion remain blocked until a new first-attempt run passes every gate.
+- The new preflight will confirm exact version-specific identity and role-set mismatches without logging claims. Test telemetry/provenance and production promotion remain blocked until a new first-attempt run passes every gate.
 
 ## Local plaintext credentials require external rotation
 
 - An untracked local Codex environment file was contained with owner-only permissions and is now covered by repository ignore/hygiene policy; it was not found in Git history.
 - Ignoring and permission-hardening do not revoke credentials. Rotate every affected GitHub, Azure, and provider credential externally, then replace the local values through the supported environment setup without committing them.
+- Repository delivery and Azure data migration are intentionally held by exact no-input static blocks and `.github/security-deployment-hold.json`. Production enablement is false. Repository Actions and native auto-merge are disabled; seven OIDC/mutation workflows remain manually disabled; both deployment environments accept protected branches only; and the custom GitHub OIDC subject intentionally invalidates the old Azure federation.
+- GitHub required status checks do not bind a workflow/event. All Actions workflows use App ID `15368`, and this user-owned repository rejected a required-workflow ruleset, so a same-repository workflow could otherwise access repository secrets and spoof check names. Do not re-enable Actions until the exposed GitHub credential is revoked and an independent trusted workflow/App/security approver boundary is available.
+- The hold cannot be cleared by repository-local data: GitHub is affected, and the only collaborator is the implicated owner identity. Evidence may be recorded while `active=true`; `active=false` is invalid until an independent out-of-band trust root is bootstrapped after GitHub credential revocation. Security-control paths cannot auto-merge. A privileged operator must then replace Azure FICs with exact repository/context/workflow-bound subjects, preserve a separate Reader-only diagnostic identity, enable test only, and require a fresh passing first-attempt test run before production is reconsidered.
 
 ## Explicit Log Analytics workspace migration is deferred
 

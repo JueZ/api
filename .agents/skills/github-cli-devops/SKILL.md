@@ -62,7 +62,7 @@ gh pr view <number> --repo JueZ/api --json headRefOid,mergeStateStatus,reviewDec
 gh api repos/JueZ/api/commits/<head-sha>/check-runs --paginate
 ```
 
-Re-read `headRefOid` after checks complete and immediately before merge. If it changed, discard the earlier review/check conclusion and evaluate the new head. Accept required checks only from the expected GitHub App and exact head SHA.
+Re-read `headRefOid` after checks complete and immediately before merge. If it changed, discard the earlier review/check conclusion and evaluate the new head. Accept required checks only from the expected GitHub App and exact head SHA. The trusted controller additionally resolves each Actions check details URL and requires the pinned workflow ID/path, `pull_request` event, attempt 1, repository, PR/base/head, and exact run/job identity; a same-name check from another workflow is untrusted. The autonomous review check must match the controller-created check-run ID.
 
 Inspect unresolved inline review threads through GitHub GraphQL when thread state matters; flat PR comments are not sufficient:
 
@@ -118,6 +118,25 @@ gh api repos/JueZ/api/rulesets --paginate
 
 Compare required check names and expected apps with `.github/autonomous-policy.yml`. Report drift; do not silently rewrite protection or rulesets. Any mutation requires explicit repository-configuration authority and must preserve no-direct-push, no-force-push, exact-head checks, linear history, and deletion protection.
 
+Paths under `merge.autonomousExcludedPaths` are autonomous-delivery trust roots. The controller must reject PRs that change them regardless of model decision. Do not split or relabel a change to evade the exclusion; use an independently controlled security review and branch-protection bootstrap.
+
+## Deployment containment controls
+
+Verify the live structural GitHub controls before any deployment-hold or Azure OIDC investigation:
+
+```bash
+npm run ops:verify-github-deployment-controls
+```
+
+The verifier reads only the `test`/`production` environment definitions, repository OIDC subject customization,
+aggregate nonterminal Actions-run status metadata,
+repository Actions/auto-merge settings, and workflow metadata. It never requests variable or secret endpoints. Both
+environments must accept protected branches only, and the OIDC subject must use exactly `repo`, `context`, and
+`job_workflow_ref`. While the repository security deployment hold is active, repository Actions and native auto-merge
+must remain disabled and all seven enumerated mutating and OIDC-capable workflows must remain `disabled_manually`.
+Treat any missing response or drift as a blocking finding; do not enable Actions/a workflow, enable auto-merge, or
+restore the default OIDC subject to make delivery proceed.
+
 ## Delivery evidence to collect
 
 For Codex PR delivery, collect:
@@ -126,7 +145,7 @@ For Codex PR delivery, collect:
 - PR branch and head SHA
 - CI status
 - Policy Check status
-- `enable auto-merge` status
+- `merge exact PR head` status
 - `run main delivery after Codex auto-merge` status when applicable
 - `Deploy Test` status when applicable
 - `Promote Production` status when applicable

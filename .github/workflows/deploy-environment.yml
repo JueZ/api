@@ -231,11 +231,21 @@ jobs:
       PROD_SERVICE_AUTH_TENANT_ID: ${{ vars.PROD_SERVICE_AUTH_TENANT_ID }}
       PROD_SERVICE_AUTH_SCOPE: ${{ vars.PROD_SERVICE_AUTH_SCOPE }}
     steps:
+      - name: Block deployments pending credential rotation
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::error title=Deployment security hold::Credential incident 2026-07-31 remains unresolved. Revoke and rotate every affected GitHub, Azure, and provider credential, then bootstrap an independently controlled clearance trust root."
+          exit 1
       - name: Checkout current deployment controller
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
           ref: ${{ inputs.controllerRef }}
           fetch-depth: 0
+          persist-credentials: false
+      - name: Enforce repository security deployment hold
+        shell: bash
+        run: node scripts/enforce-security-deployment-hold.mjs
       - name: Validate deployment source
         id: source
         shell: bash

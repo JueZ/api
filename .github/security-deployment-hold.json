@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "active": true,
+  "incidentId": "credential-exposure-2026-07-31",
+  "discoveredAt": "2026-07-31T00:00:00Z",
+  "reason": "External revocation and rotation of affected credentials is not yet verified.",
+  "clearance": {
+    "status": "pending",
+    "verifiedAt": null,
+    "verifiedBy": null,
+    "evidence": [],
+    "approval": null
+  }
+}

@@ -7,10 +7,12 @@ Autonomous delivery is allowed only when controls fail closed.
 - Privileged controller code comes only from `main`.
 - PR code never executes under `pull_request_target` write permissions.
 - Review, check runs, artifacts, and merge bind to the same full head SHA.
-- Required checks must have the canonical name and expected GitHub App.
+- Required checks must have the canonical name and expected GitHub App. Actions checks must also match the pinned
+  workflow ID/path, `pull_request` event, first attempt, repository, PR/base/head, exact run/job identity, and head SHA;
+  the controller review check must match its created check-run ID.
 - Forks, stale/behind heads, conflicts, blocked labels, and admin bypass are denied.
 
-High-risk paths are classified by `.github/autonomous-policy.yml` and require independent structured AI review. The review uses the repository OpenAI secret, configured model/reasoning, `store=false`, sanitized bounded diff input, and a schema-bound decision. Critical/high findings fail. No routine human approval is required.
+High-risk paths are classified by `.github/autonomous-policy.yml` and require independent structured AI review. Both the current and previous filename are classified for a GitHub rename, so moving a trust root cannot make it low-risk. The review uses the repository OpenAI secret, configured model/reasoning, `store=false`, sanitized bounded diff input, and a schema-bound decision. Critical/high findings fail. No routine human approval is required. Trust roots in `merge.autonomousExcludedPaths` are not ordinary high-risk changes: the autonomous controller always rejects them, and recovery requires an independently controlled security review/bootstrap. This set includes the controller's root dependency manifests/lock, every helper executed from an OIDC- or secret-capable delivery job, and the smoke/runtime evidence writers. Repository `npm-shrinkwrap.json` and `.npmrc` overrides are forbidden because they could supersede the reviewed npm install inputs.
 
 ## Required defenses
 
@@ -34,6 +36,10 @@ Checks must never be removed, bypassed, reclassified as optional, or made non-bl
 - Azure uses OIDC/managed identity, Key Vault references, shared-key-disabled storage, and least privilege.
 - Production builds once and promotes identical test-proven digests.
 - Production remains disabled unless explicitly enabled after guardrails are configured.
+- Deployment environments accept protected branches only, and the GitHub OIDC subject is bound to exact repository,
+  context, and workflow identity. Default subjects must not be restored to work around a federation failure.
+- The active credential incident cannot be cleared by repository-owner comments or workflow data. Until an out-of-band
+  trust root is established, seven OIDC/mutation workflows remain disabled and old Azure federation remains invalid.
 
 ## Failure handling
 

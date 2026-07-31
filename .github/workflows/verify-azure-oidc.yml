@@ -19,6 +19,12 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
+      - name: Block deployments pending credential rotation
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::error title=Deployment security hold::Credential incident 2026-07-31 remains unresolved. Revoke and rotate every affected GitHub, Azure, and provider credential, then bootstrap an independently controlled clearance trust root."
+          exit 1
       - name: Validate Azure OIDC configuration
         shell: bash
         run: |

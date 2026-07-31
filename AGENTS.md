@@ -79,6 +79,7 @@ npm run ops:policy-guardrails:worktree
 npm run ops:policy-guardrails:branch
 npm run ops:preflight-change
 npm run ops:triage-repair-issues
+npm run ops:verify-github-deployment-controls
 ```
 
 Use the smallest command set that validates the change. For example:
@@ -106,8 +107,8 @@ Normal autonomous delivery is:
 
 1. Codex opens or updates a PR.
 2. `CI` and `Policy Check` run on the PR.
-3. `Codex Auto-Merge` enables GitHub-native squash auto-merge for Codex branches or PRs labeled `codex-automerge`.
-4. Branch protection remains the merge gate.
+3. `Codex Auto-Merge` records the exact PR head, performs deterministic and independent review, proves every required check's trusted source, and requests a squash merge for only that reviewed SHA.
+4. Branch protection remains the final merge API gate. GitHub-native auto-merge is not part of this controller path.
 5. After a Codex auto-merge, `Codex Main Delivery` explicitly dispatches and waits for:
    - `CI` on `main`
    - `Deploy Test`
@@ -116,11 +117,19 @@ Normal autonomous delivery is:
 
 Normal repository-changing PRs may promote automatically through the repository delivery flow when all required checks pass, `DEPLOY_PRODUCTION_ENABLED=true`, and deployment is not skipped. Do not interpret this as requiring a separate user request for every routine production promotion.
 
+An active credential incident overrides normal delivery. The exact hard-coded first steps in `deploy-environment.yml`, `migrate-private-storage.yml`, `bring-readonly-canary.yml`, and `verify-azure-oidc.yml`, plus `.github/security-deployment-hold.json`, must block test, production, rollback, Azure OIDC diagnostics/canaries, and Azure data migration before cloud access. Repository Actions and native auto-merge must remain disabled because same-repository workflows share the GitHub Actions App identity and could otherwise read repository secrets or spoof required checks. No workflow input, repository/environment variable, retry, historical ref, local CLI command, or agent instruction may bypass the hold. While active, agents may perform narrow read-only evidence collection and authoritative credential revocation/rotation only; do not mutate Azure application/data resources or providers. Run `npm run ops:verify-github-deployment-controls`; drift or API failure is blocking.
+
+The incident record is deliberately active-only. GitHub is an affected credential system and the repository currently has no independent security approver, so a repository-owner comment, PR field, label, workflow result, or syntactic audit reference is not clearance. `active=false`, `verified`, or repository-local approval data is invalid. Evidence may be recorded while the hold stays active, but recovery requires revoking the exposed GitHub credential and then bootstrapping an independent out-of-band trust root (for example a separately controlled security principal or pre-pinned hardware-backed signing key). Every path in `merge.autonomousExcludedPaths` is ineligible for autonomous review/merge regardless of model output. Changing that exclusion, the hold, deployment workflows, or the trust root requires external security review and a controlled branch-protection bootstrap. Keep all seven OIDC/mutation entry workflows disabled and `DEPLOY_PRODUCTION_ENABLED=false` until this bootstrap is complete and a fresh first-attempt test deployment passes.
+
+Repository OIDC must remain customized with exactly `repo`, `context`, and `job_workflow_ref`, and the `test`/`production` environments must remain restricted to protected branches. Do not restore default OIDC subjects to repair federation. During this incident the custom template intentionally invalidates the old Azure federated credentials. A privileged operator must replace them after rotation with exact repository/context/workflow-bound subjects for the shared deployment workflow, the authorized migration, and each service-token workflow; the diagnostic workflow needs a separate Reader-only identity. Re-enable test only after those identities and RBAC are reviewed; production remains disabled through test acceptance.
+
 If a PR is merged manually or through a non-Codex path, Codex must still monitor and report any resulting `main` CI, `Deploy Test`, `Promote Production`, smoke, and runtime-truth status when available. If the expected post-merge delivery workflow does not start, report it as not started or blocked rather than marking deployment or production verification as successful.
 
 Production deployment must use GitHub Actions with Azure OIDC.
 
 Production deployment must not run unless `DEPLOY_PRODUCTION_ENABLED=true` and either the repository delivery flow reaches production promotion or the user explicitly requested operational production deployment.
+
+Production deployment and cloud data migration must never run while the repository security deployment hold is active, even if `DEPLOY_PRODUCTION_ENABLED=true`, rollback is requested, or an old workflow ref is selected.
 
 Do not set `DEPLOY_PRODUCTION_ENABLED=true` unless the operator/user explicitly requests enabling production deployment and the guardrails, approval posture, and risk are documented. Do not enable it merely because a promotion or rollback is blocked.
 
@@ -142,24 +151,29 @@ The repository must be configured so that:
 - Pull requests are required before merging to `main`.
 - Required status checks must pass before merge.
 - PRs use squash merge or linear history.
-- Routine human review is not required for low-risk autonomous changes when all required automated checks pass.
-- High-risk paths may require review or stronger policy if the repository owner chooses that gate.
+- Routine human review is not required for ordinary changes when all required automated checks pass.
+- Autonomous-delivery trust roots listed in `merge.autonomousExcludedPaths` are never autonomous-merge candidates and require an independently controlled security review/bootstrap.
 
 Codex must not weaken these settings to make delivery easier.
 
 ## Required checks and gates
 
 `.github/autonomous-policy.yml` is the authoritative protected-branch required-check list, including the expected
-GitHub App for each check. Do not maintain a second list in instructions. Use
+GitHub App and trusted workflow source for each check. The merge controller additionally binds Actions checks to the
+exact workflow ID/path, `pull_request` event, attempt 1, repository, PR/base/head, run/job IDs, and exact head SHA; it
+binds the review check to the controller-created check-run ID. A same-app, same-name check is insufficient. Do not
+maintain a second list in instructions. Use
 `npm run ops:render-branch-protection` to render a bootstrap payload and compare it with live branch protection before
-any authorized configuration change.
+any authorized configuration change. After applying an authorized payload, pipe the live branch-protection response to
+`node scripts/render-branch-protection.mjs --verify`; any missing, extra, wrong-app, or safety-setting drift must fail
+closed.
 
 Codex delivery checks to monitor for Codex PRs include:
 
-- `enable auto-merge`
+- `merge exact PR head`
 - `run main delivery after Codex auto-merge`
 
-`enable auto-merge` should pass for Codex PRs, but branch protection must still rely on CI and policy checks as the merge gate.
+`merge exact PR head` may succeed only after the source-bound CI, policy, CodeQL, and autonomous-review checks pass; branch protection remains the final gate.
 
 `run main delivery after Codex auto-merge` is the post-merge delivery chain that dispatches and waits for `CI` on `main`, `Deploy Test`, and `Promote Production` after a Codex auto-merge. It is not a PR merge gate, but Codex must monitor and report it when it applies.
 
@@ -274,7 +288,7 @@ Fail closed if a change would:
 
 GitHub Actions events caused by `GITHUB_TOKEN` usually do not trigger new workflow runs, except explicit `workflow_dispatch` and `repository_dispatch`.
 
-When chaining workflows, use explicit dispatches or GitHub-native auto-merge. Do not rely on accidental recursive `push` or `workflow_run` behavior.
+When chaining workflows, use the trusted exact-head controller and explicit dispatches. Treat `workflow_run` only as a bounded signal whose workflow identity, event, attempt, head, and resulting merge are revalidated; do not rely on accidental recursive `push` or `workflow_run` behavior.
 
 ## Project memory
 

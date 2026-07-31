@@ -18,6 +18,8 @@ import {
   parseSmokeTokenFetchTimeoutMs,
   sanitizeTokenEndpointErrorCode,
   selectServiceAuthConfig,
+  serviceAuthConfigProblems,
+  serviceTokenAudiences,
   validateServiceTokenClaims,
 } from '../mint-smoke-token.mjs';
 
@@ -139,65 +141,227 @@ test('policy guardrails distinguish OIDC hardening from client-secret authentica
 });
 
 test('smoke token mint config selects production service variables', () => {
+  const clientId = '22222222-2222-2222-2222-222222222222';
+  const tenantId = '11111111-1111-1111-1111-111111111111';
+  const audienceId = '33333333-3333-3333-3333-333333333333';
   const config = selectServiceAuthConfig({
     ENVIRONMENT_NAME: 'prod',
-    PROD_SERVICE_AUTH_CLIENT_ID: 'client-id',
-    PROD_SERVICE_AUTH_TENANT_ID: 'tenant-id',
-    PROD_SERVICE_AUTH_SCOPE: 'api://example/.default',
+    PROD_SERVICE_AUTH_CLIENT_ID: clientId,
+    PROD_SERVICE_AUTH_TENANT_ID: tenantId,
+    PROD_SERVICE_AUTH_SCOPE: `api://${audienceId}/.default`,
     SERVICE_AUTH_REQUIRED_ROLES: 'catalogue.read,reddit.read',
   });
 
   assert.equal(config.prefix, 'PROD');
   assert.deepEqual(config.requiredRoles, ['catalogue.read', 'reddit.read']);
   assert.deepEqual(missingServiceAuthFields(config), []);
+  assert.deepEqual(serviceAuthConfigProblems(config), []);
+  assert.deepEqual(serviceTokenAudiences(config.scope), [`api://${audienceId}`, audienceId]);
 });
 
 test('smoke token mint config detects missing service variables', () => {
   const config = selectServiceAuthConfig({ ENVIRONMENT_NAME: 'test', TEST_SERVICE_AUTH_CLIENT_ID: 'client-id' });
 
   assert.equal(config.prefix, 'TEST');
-  assert.deepEqual(missingServiceAuthFields(config), ['tenantId', 'scope']);
+  assert.deepEqual(missingServiceAuthFields(config), ['tenantId', 'scope', 'requiredRoles']);
 });
 
 test('smoke token mint supports a dedicated least-privilege canary identity', () => {
+  const clientId = '55555555-5555-5555-5555-555555555555';
+  const tenantId = '11111111-1111-1111-1111-111111111111';
+  const audienceId = '33333333-3333-3333-3333-333333333333';
   const config = selectServiceAuthConfig({
     ENVIRONMENT_NAME: 'test',
     SERVICE_AUTH_PREFIX: 'BRING_CANARY',
-    BRING_CANARY_SERVICE_AUTH_CLIENT_ID: 'canary-client',
-    BRING_CANARY_SERVICE_AUTH_TENANT_ID: 'canary-tenant',
-    BRING_CANARY_SERVICE_AUTH_SCOPE: 'api://example/.default',
+    BRING_CANARY_SERVICE_AUTH_CLIENT_ID: clientId,
+    BRING_CANARY_SERVICE_AUTH_TENANT_ID: tenantId,
+    BRING_CANARY_SERVICE_AUTH_SCOPE: `api://${audienceId}/.default`,
     SERVICE_AUTH_REQUIRED_ROLES: 'bring.read',
   });
   assert.equal(config.prefix, 'BRING_CANARY');
-  assert.equal(config.clientId, 'canary-client');
+  assert.equal(config.clientId, clientId);
   assert.deepEqual(missingServiceAuthFields(config), []);
+  assert.deepEqual(serviceAuthConfigProblems(config), []);
   assert.throws(() => selectServiceAuthConfig({ SERVICE_AUTH_PREFIX: '../../BAD' }), /SERVICE_AUTH_PREFIX/);
   assert.throws(
     () => selectServiceAuthConfig({ SERVICE_AUTH_REQUIRED_ROLES: 'bring.read,unsafe role' }),
     /SERVICE_AUTH_REQUIRED_ROLES/,
   );
+  const duplicateRoleConfig = selectServiceAuthConfig({
+    ENVIRONMENT_NAME: 'test',
+    TEST_SERVICE_AUTH_CLIENT_ID: clientId,
+    TEST_SERVICE_AUTH_TENANT_ID: tenantId,
+    TEST_SERVICE_AUTH_SCOPE: `api://${audienceId}/.default`,
+    SERVICE_AUTH_REQUIRED_ROLES: 'bring.read,bring.read',
+  });
+  assert.deepEqual(serviceAuthConfigProblems(duplicateRoleConfig), ['duplicate_required_roles']);
 });
 
-test('smoke token preflight requires the configured granular application roles', () => {
-  const claims = { tid: 'tenant-id', azp: 'client-id', roles: ['catalogue.read', 'reddit.read'] };
-  const token = `header.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`;
+test('smoke token preflight proves the exact v1 or v2 app identity and role set', () => {
+  const tenantId = '11111111-1111-1111-1111-111111111111';
+  const clientId = '22222222-2222-2222-2222-222222222222';
+  const audienceId = '33333333-3333-3333-3333-333333333333';
+  const config = {
+    tenantId,
+    clientId,
+    scope: `api://${audienceId}/.default`,
+    requiredRoles: ['catalogue.read', 'reddit.read'],
+  };
+  const claims = {
+    ver: '2.0',
+    tid: tenantId,
+    azp: clientId,
+    iss: `https://login.microsoftonline.com/${tenantId}/v2.0`,
+    aud: audienceId,
+    sub: 'service-principal-subject',
+    idtyp: 'app',
+    roles: ['reddit.read', 'catalogue.read'],
+  };
+  const jwtHeader = Buffer.from('{"alg":"RS256","typ":"JWT"}').toString('base64url');
+  const jwtSignature = Buffer.from('signature').toString('base64url');
+  const token = `${jwtHeader}.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.${jwtSignature}`;
+  const v1Claims = {
+    ver: '1.0',
+    tid: tenantId,
+    appid: clientId,
+    iss: `https://sts.windows.net/${tenantId}/`,
+    aud: `api://${audienceId}`,
+    sub: 'service-principal-subject',
+    appidacr: '2',
+    roles: ['catalogue.read', 'reddit.read'],
+  };
   assert.deepEqual(decodeAccessTokenClaims(token), claims);
-  assert.deepEqual(
-    validateServiceTokenClaims(claims, {
-      tenantId: 'tenant-id',
-      clientId: 'client-id',
-      requiredRoles: ['catalogue.read', 'reddit.read'],
-    }),
-    [],
-  );
-  assert.deepEqual(
-    validateServiceTokenClaims(
-      { ...claims, roles: ['catalogue.read'] },
-      { tenantId: 'tenant-id', clientId: 'client-id', requiredRoles: ['catalogue.read', 'reddit.read'] },
+  assert.deepEqual(validateServiceTokenClaims(claims, config), []);
+  assert.deepEqual(validateServiceTokenClaims(v1Claims, config), []);
+  assert.deepEqual(validateServiceTokenClaims({ ...v1Claims, aud: audienceId }, config), []);
+  assert.ok(validateServiceTokenClaims({ ...v1Claims, azp: clientId }, config).includes('unexpected_azp'));
+  assert.ok(validateServiceTokenClaims({ ...v1Claims, azpacr: '2' }, config).includes('unexpected_azpacr'));
+  assert.deepEqual(validateServiceTokenClaims({ ...claims, roles: ['catalogue.read'] }, config), [
+    'missing_roles:reddit.read',
+  ]);
+  assert.deepEqual(validateServiceTokenClaims({ ...claims, roles: [...claims.roles, 'bring.write'] }, config), [
+    'unexpected_roles:bring.write',
+  ]);
+  assert.ok(validateServiceTokenClaims({ ...claims, ver: undefined }, config).includes('invalid_token_version'));
+  assert.ok(validateServiceTokenClaims({ ...claims, ver: '3.0' }, config).includes('invalid_token_version'));
+  assert.ok(validateServiceTokenClaims({ ...claims, tid: undefined }, config).includes('missing_or_invalid_tenant'));
+  assert.ok(
+    validateServiceTokenClaims({ ...claims, tid: '44444444-4444-4444-4444-444444444444' }, config).includes(
+      'tenant_mismatch',
     ),
-    ['missing_roles:reddit.read'],
   );
-  assert.throws(() => decodeAccessTokenClaims('not-a-jwt'), /was not a JWT/);
+  assert.ok(validateServiceTokenClaims({ ...claims, azp: undefined }, config).includes('missing_or_invalid_client'));
+  assert.ok(
+    validateServiceTokenClaims({ ...claims, azp: '44444444-4444-4444-4444-444444444444' }, config).includes(
+      'azp_mismatch',
+    ),
+  );
+  assert.ok(validateServiceTokenClaims({ ...claims, azp: [clientId] }, config).includes('missing_or_invalid_client'));
+  assert.ok(validateServiceTokenClaims({ ...claims, appid: clientId }, config).includes('unexpected_appid'));
+  assert.ok(
+    validateServiceTokenClaims({ ...claims, appid: '44444444-4444-4444-4444-444444444444' }, config).includes(
+      'appid_mismatch',
+    ),
+  );
+  assert.ok(
+    validateServiceTokenClaims({ ...claims, iss: `https://sts.windows.net/${tenantId}/` }, config).includes(
+      'issuer_mismatch',
+    ),
+  );
+  assert.ok(
+    validateServiceTokenClaims({ ...claims, iss: 'https://login.microsoftonline.com/common/v2.0' }, config).includes(
+      'issuer_mismatch',
+    ),
+  );
+  assert.ok(validateServiceTokenClaims({ ...claims, iss: undefined }, config).includes('issuer_mismatch'));
+  assert.ok(
+    validateServiceTokenClaims(
+      { ...claims, iss: `https://LOGIN.microsoftonline.com/${tenantId}/v2.0` },
+      config,
+    ).includes('issuer_mismatch'),
+  );
+  assert.ok(
+    validateServiceTokenClaims({ ...claims, aud: 'https://graph.microsoft.com' }, config).includes('audience_mismatch'),
+  );
+  assert.ok(
+    validateServiceTokenClaims({ ...claims, aud: `api://${audienceId}` }, config).includes('audience_mismatch'),
+  );
+  assert.ok(validateServiceTokenClaims({ ...claims, aud: [audienceId] }, config).includes('audience_mismatch'));
+  assert.ok(validateServiceTokenClaims({ ...claims, aud: undefined }, config).includes('audience_mismatch'));
+  assert.ok(validateServiceTokenClaims({ ...claims, sub: '   ' }, config).includes('missing_subject'));
+  assert.ok(
+    validateServiceTokenClaims({ ...claims, roles: 'catalogue.read reddit.read' }, config).includes(
+      'invalid_roles_claim',
+    ),
+  );
+  assert.ok(
+    validateServiceTokenClaims({ ...claims, roles: ['catalogue.read', 3] }, config).includes('invalid_roles_claim'),
+  );
+  assert.ok(
+    validateServiceTokenClaims({ ...claims, roles: [...claims.roles, claims.roles[0]] }, config).includes(
+      'duplicate_roles_claim',
+    ),
+  );
+  assert.ok(
+    validateServiceTokenClaims({ ...claims, scp: 'catalogue.read' }, config).includes('delegated_scope_present'),
+  );
+  assert.ok(validateServiceTokenClaims({ ...claims, idtyp: 'user' }, config).includes('invalid_idtyp'));
+  assert.ok(validateServiceTokenClaims({ ...claims, azpacr: '0' }, config).includes('invalid_azpacr'));
+  assert.ok(validateServiceTokenClaims({ ...claims, appidacr: '2' }, config).includes('unexpected_appidacr'));
+  assert.ok(
+    validateServiceTokenClaims({ ...claims, idtyp: undefined, azpacr: undefined }, config).includes(
+      'missing_confidential_client_marker',
+    ),
+  );
+  assert.ok(
+    validateServiceTokenClaims({ ...claims, idtyp: undefined, azpacr: '0' }, config).includes(
+      'missing_confidential_client_marker',
+    ),
+  );
+  assert.ok(
+    validateServiceTokenClaims(
+      {
+        ver: '1.0',
+        tid: tenantId,
+        iss: `https://sts.windows.net/${tenantId}/`,
+        aud: `api://${audienceId}`,
+        sub: 'service-principal-subject',
+        appidacr: '2',
+        roles: claims.roles,
+      },
+      config,
+    ).includes('missing_or_invalid_client'),
+  );
+  assert.deepEqual(serviceAuthConfigProblems({ ...config, scope: `${config.scope} other/.default` }), [
+    'invalid_scope',
+  ]);
+  assert.deepEqual(serviceAuthConfigProblems({ ...config, requiredRoles: [] }), ['missing_required_roles']);
+  assert.deepEqual(serviceAuthConfigProblems({ ...config, requiredRoles: ['catalogue.read', 'catalogue.read'] }), [
+    'duplicate_required_roles',
+  ]);
+  assert.deepEqual(serviceAuthConfigProblems({ ...config, requiredRoles: ['invalid role'] }), [
+    'invalid_required_roles',
+  ]);
+  assert.deepEqual(validateServiceTokenClaims(claims, { ...config, requiredRoles: [] }), [
+    'invalid_config:missing_required_roles',
+  ]);
+  assert.deepEqual(serviceAuthConfigProblems({ ...config, tenantId: [tenantId], clientId: [clientId] }), [
+    'invalid_tenant_id',
+    'invalid_client_id',
+  ]);
+  assert.deepEqual(validateServiceTokenClaims(claims, { ...config, tenantId: [tenantId], clientId: [clientId] }), [
+    'invalid_config:invalid_tenant_id',
+    'invalid_config:invalid_client_id',
+  ]);
+  assert.deepEqual(serviceTokenAudiences(`${config.scope} `), []);
+  assert.deepEqual(serviceTokenAudiences(`${config.scope},https://graph.microsoft.com/.default`), []);
+  assert.throws(() => decodeAccessTokenClaims('not-a-jwt'), /was not a compact JWT/);
+  assert.throws(() => decodeAccessTokenClaims(`${token}\nAUTH_ACCESS_TOKEN=unsafe`), /was not a compact JWT/);
+  assert.throws(
+    () => decodeAccessTokenClaims(`${jwtHeader}.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.`),
+    /was not a compact JWT/,
+  );
+  assert.throws(() => decodeAccessTokenClaims(`${jwtHeader}.eyJhIjoieCJ9A.${jwtSignature}`), /compact JWT/);
 });
 
 test('smoke token timeout override defaults and validates safe bounds', () => {
