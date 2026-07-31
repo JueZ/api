@@ -61,6 +61,8 @@ jobs:
       deployFrontend: ${{ inputs.deploy_frontend }}
       deployFunctions: ${{ inputs.deploy_functions }}
       sourceRef: ${{ inputs.commit_sha || github.sha }}
+      controllerRef: ${{ github.sha }}
+      controllerWorkflowSha: ${{ github.workflow_sha }}
       updateProductionVariables: true
       deliveryCorrelation: ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
       testDeliveryCorrelation: ${{ inputs.test_delivery_correlation }}

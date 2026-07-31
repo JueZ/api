@@ -47,6 +47,8 @@ jobs:
       deployFrontend: true
       deployFunctions: true
       sourceRef: ${{ inputs.commit_sha }}
+      controllerRef: ${{ github.sha }}
+      controllerWorkflowSha: ${{ github.workflow_sha }}
       updateProductionVariables: true
       allowRollback: true
       deliveryCorrelation: rollback-${{ github.run_id }}-${{ github.run_attempt }}

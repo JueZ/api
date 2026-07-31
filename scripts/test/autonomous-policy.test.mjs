@@ -29,6 +29,15 @@ const deployEnvironmentWorkflow = readFileSync(
   new URL('../../.github/workflows/deploy-environment.yml', import.meta.url),
   'utf8',
 );
+const deployTestWorkflow = readFileSync(new URL('../../.github/workflows/deploy-test.yml', import.meta.url), 'utf8');
+const promoteProductionWorkflow = readFileSync(
+  new URL('../../.github/workflows/promote-production.yml', import.meta.url),
+  'utf8',
+);
+const rollbackProductionWorkflow = readFileSync(
+  new URL('../../.github/workflows/rollback-production.yml', import.meta.url),
+  'utf8',
+);
 
 function pullRequest(overrides = {}) {
   return {
@@ -81,6 +90,11 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.match(deployEnvironmentWorkflow, /\.AUTH_ENABLED == "true"/);
   assert.match(deployEnvironmentWorkflow, /effective_web_api_base_url="\$EFFECTIVE_BASE_URL"/);
   assert.match(deployEnvironmentWorkflow, /name: Checkout current deployment controller/);
+  assert.match(deployEnvironmentWorkflow, /ref: \$\{\{ inputs\.controllerRef \}\}/);
+  assert.match(deployEnvironmentWorkflow, /CONTROLLER_WORKFLOW_SHA/);
+  assert.match(deployEnvironmentWorkflow, /actions\/runs\/\$\{GITHUB_RUN_ID\}/);
+  assert.match(deployEnvironmentWorkflow, /\.head_sha == \$controller_ref/);
+  assert.doesNotMatch(deployEnvironmentWorkflow, /ref: main/);
   assert.match(deployEnvironmentWorkflow, /Historical production ledger is missing exact successful release evidence/);
   assert.match(
     deployEnvironmentWorkflow,
@@ -96,6 +110,10 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.match(deployEnvironmentWorkflow, /deliveryCorrelation: \$deliveryCorrelation/);
   assert.match(mainDeliveryWorkflow, /-f test_delivery_correlation="\$test_correlation"/);
   assert.match(mainDeliveryWorkflow, /-f test_run_id="\$test_run_id"/);
+  for (const workflow of [deployTestWorkflow, promoteProductionWorkflow, rollbackProductionWorkflow]) {
+    assert.match(workflow, /controllerRef: \$\{\{ github\.sha \}\}/);
+    assert.match(workflow, /controllerWorkflowSha: \$\{\{ github\.workflow_sha \}\}/);
+  }
 });
 
 test('policy glob matcher handles recursive and exact AGENTS paths', () => {
