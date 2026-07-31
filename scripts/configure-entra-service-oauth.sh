@@ -10,6 +10,9 @@ set -euo pipefail
 # Optional environment variables:
 #   REPOSITORY              GitHub repo owner/name. Default: JueZ/api.
 #   GITHUB_ENVIRONMENT      GitHub Environment subject to trust. Default: test.
+#   GITHUB_JOB_WORKFLOW_REF Exact reusable workflow identity trusted by the
+#                           repository OIDC subject. Defaults to the main-branch
+#                           deploy-environment.yml workflow.
 #   SERVICE_APP_DISPLAY_NAME Default: JueZ API Catalogue Service Test.
 #   SERVICE_APP_ROLE_VALUES Comma-separated granular roles. Default: catalogue.read,reddit.read.
 #   SERVICE_APP_ROLE_DISPLAY_NAME Prefix for created role display names.
@@ -29,12 +32,27 @@ require_command python3
 
 repository="${REPOSITORY:-JueZ/api}"
 github_environment="${GITHUB_ENVIRONMENT:-test}"
+github_job_workflow_ref="${GITHUB_JOB_WORKFLOW_REF:-${repository}/.github/workflows/deploy-environment.yml@refs/heads/main}"
 api_app_id="${API_APP_ID:?Set API_APP_ID to the API app registration client/application ID.}"
 service_display_name="${SERVICE_APP_DISPLAY_NAME:-JueZ API Catalogue Service Test}"
 role_values_csv="${SERVICE_APP_ROLE_VALUES:-${SERVICE_APP_ROLE_VALUE:-catalogue.read,reddit.read}}"
 role_display_name="${SERVICE_APP_ROLE_DISPLAY_NAME:-API service access}"
 set_github_variables="${SET_GITHUB_VARIABLES:-false}"
 oidc_required_scopes_value="${OIDC_REQUIRED_SCOPES_VALUE:-catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove}"
+
+if [[ ! "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  echo "REPOSITORY must be an owner/name pair." >&2
+  exit 1
+fi
+if [[ ! "$github_environment" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "GITHUB_ENVIRONMENT contains unsupported characters." >&2
+  exit 1
+fi
+if [[ ! "$github_job_workflow_ref" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml@refs/heads/[A-Za-z0-9._/-]+$ ]] ||
+   [[ "$github_job_workflow_ref" != "$repository/.github/workflows/"* ]]; then
+  echo "GITHUB_JOB_WORKFLOW_REF must bind a workflow in REPOSITORY to an exact branch ref." >&2
+  exit 1
+fi
 
 mapfile -t role_values < <(
   tr ',' '\n' <<<"$role_values_csv" |
@@ -144,20 +162,46 @@ for index in "${!role_ids[@]}"; do
 done
 
 credential_name="github-${github_environment}-service-tests"
-credential_subject="repo:${repository}:environment:${github_environment}"
-existing_credential="$(az ad app federated-credential list --id "$service_app_object_id" --query "[?name=='$credential_name'] | [0].name" -o tsv 2>/dev/null || true)"
-if [ -z "$existing_credential" ]; then
-  credential_file="$(mktemp)"
+credential_subject="repo:${repository}:environment:${github_environment}:job_workflow_ref:${github_job_workflow_ref}"
+credential_issuer="https://token.actions.githubusercontent.com"
+credential_audience="api://AzureADTokenExchange"
+existing_credential="$(az ad app federated-credential list --id "$service_app_object_id" --query "[?name=='$credential_name'] | [0]" -o json)"
+credential_file="$(mktemp)"
+cleanup_credential_file() {
+  rm -f "$credential_file"
+}
+trap cleanup_credential_file EXIT
+
+if [ "$(jq -r '.name // empty' <<<"$existing_credential")" = "" ]; then
   jq -n \
     --arg name "$credential_name" \
+    --arg issuer "$credential_issuer" \
     --arg subject "$credential_subject" \
-    '{name:$name, issuer:"https://token.actions.githubusercontent.com", subject:$subject, description:"GitHub Actions OIDC for service/e2e tests", audiences:["api://AzureADTokenExchange"]}' \
+    --arg audience "$credential_audience" \
+    '{name:$name, issuer:$issuer, subject:$subject, description:"GitHub Actions OIDC for service/e2e tests", audiences:[$audience]}' \
     > "$credential_file"
   az ad app federated-credential create --id "$service_app_object_id" --parameters "@$credential_file" -o none
-  rm -f "$credential_file"
   echo "Created federated credential subject: $credential_subject"
+elif jq -e \
+  --arg issuer "$credential_issuer" \
+  --arg subject "$credential_subject" \
+  --arg audience "$credential_audience" \
+  '.issuer == $issuer and .subject == $subject and .audiences == [$audience]' \
+  <<<"$existing_credential" >/dev/null; then
+  echo "Federated credential already matches the exact workflow subject: $credential_name"
 else
-  echo "Federated credential already exists: $credential_name"
+  jq -n \
+    --arg issuer "$credential_issuer" \
+    --arg subject "$credential_subject" \
+    --arg audience "$credential_audience" \
+    '{issuer:$issuer, subject:$subject, description:"GitHub Actions OIDC for service/e2e tests", audiences:[$audience]}' \
+    > "$credential_file"
+  az ad app federated-credential update \
+    --id "$service_app_object_id" \
+    --federated-credential-id "$credential_name" \
+    --parameters "@$credential_file" \
+    -o none
+  echo "Updated federated credential to exact workflow subject: $credential_subject"
 fi
 
 if [ "$set_github_variables" = "true" ]; then

@@ -1,5 +1,13 @@
 # Incident log
 
+## 2026-07-31 — Disabled Actions and legacy FIC subjects blocked test recovery
+
+- Symptom: run `30663819848` remained queued with zero jobs after a test dispatch while repository Actions was disabled. After Actions was restored, the replacement run instantiated but Azure login failed with `AADSTS700213` because GitHub emitted the strengthened workflow-bound subject and the Azure test credentials still trusted the former environment-only subject.
+- Root cause: enabling an individual workflow did not override the repository-wide Actions gate, and changing the repository OIDC claim template intentionally changed the assertion subject without rebinding the two existing test federated credentials.
+- Repair: re-enabled the repository gate only for the bounded test run, rebound the existing test deployment and smoke FICs in place to the exact repository/environment/workflow subject, and dispatched a new first-attempt run. No broad/default subject, long-lived secret, new trust root, production identity, or production workflow was enabled.
+- Verification: run `30666921988` passed every deployment, runtime, authenticated-smoke, telemetry, ledger, and provenance gate. Actions and Deploy Test were disabled again afterward. The original zero-job run still returns HTTP 500 to both cancel APIs and remains contained while Actions is disabled.
+- Status: test runtime incident resolved; orphaned GitHub run remains an operational cleanup item.
+
 ## 2026-07-31 — Entra GUID was rejected as a non-versioned UUID at Function startup
 
 - Symptom: test-only run `30651802409` passed infrastructure, complete settings reconciliation, immutable Function activation, and frontend activation, but every Function route returned `404`. Application Insights recorded the fail-closed entry-point error `OIDC_ALLOWED_OBJECT_IDS must contain at least one valid user object ID in test`.

@@ -1,5 +1,13 @@
 # Deployment log
 
+## 2026-07-31 — AI-native release accepted in test; production unchanged
+
+- PR #284 merged safe API-verified authorization diagnostics as `6cadc861954af706cd752c022b194c742c0aa6fd`; exact first-attempt main CI run `30654113519` passed.
+- A privileged Entra operator assigned the existing least-privilege `catalogue.read` and `reddit.read` roles to the existing smoke principal. The repository OIDC subject was already workflow-bound, while both test federated credentials still used the former environment-only subject. Both existing test records were updated in place to the exact deployment-workflow identity. The federation repair created no key, secret, identity, permission, RBAC grant, or production federation change.
+- First-attempt Deploy Test run `30666921988` passed Azure OIDC, immutable artifact verification, Bicep, runtime safety settings, private reference-data validation, immutable Function and activation-last frontend deployment, current-generation checks, runtime smoke, authenticated hello and Reddit smokes, telemetry, release ledger, and test provenance.
+- Live health and frontend metadata report exact commit `6cadc861954af706cd752c022b194c742c0aa6fd`, environment `test`, and deployment run `30666921988`. The bundled MCP server responds on the single `/mcp` route and returns deterministic structured REC for an unauthenticated protected tool call.
+- Result: test accepted. Repository Actions and Deploy Test were disabled again. Main Delivery, production promotion, rollback, and `DEPLOY_PRODUCTION_ENABLED` remain disabled; production was not dispatched or changed.
+
 ## 2026-07-31 — Lowercase settings passed; Entra GUID startup check failed closed
 
 - PR #282 exact head `7c637f8b29caddc81eef1946f6208d90751f0b24` passed CI run `30651446037`, Policy Check `30651446063`, CodeQL `30651446510`, and first-attempt independent review/merge run `30651447011`, then squash-merged as `a1d2249c9b8b997229158220b3ac38751f1da668`.

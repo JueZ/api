@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-07-31 — Preserve workflow-bound OIDC and repair only existing test federation
+
+- Decision: Keep GitHub's repository/environment/`job_workflow_ref` OIDC subject and rebind only the two existing test federated credentials to that exact subject. Do not restore the broader legacy subject.
+- Decision: The operator deferred credential rotation and an independent trust-root bootstrap. Open unmerged PR #285 remains a separate proposal and does not block the accepted test-only recovery requested by the operator.
+- Consequences: The federation repair creates no new identity, key, secret, permission, app role, or RBAC grant. Production federation and deployment remain unchanged and disabled. The Entra service helper must create or update its named FIC to the exact workflow-bound subject so future role maintenance cannot silently leave stale federation.
+- Status: Test recovery validated by first-attempt run `30666921988`; durable helper change pending PR gates.
+
 ## 2026-07-31 — Validate Entra identifiers as GUIDs, not versioned UUIDs
 
 - Decision: Validate `OIDC_ALLOWED_OBJECT_IDS` and `OIDC_ALLOWED_TENANTS` with the Microsoft GUID shape only. Retain the stricter RFC-versioned UUID pattern for Bring list identifiers.

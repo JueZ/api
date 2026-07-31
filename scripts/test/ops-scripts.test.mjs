@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { validateReleaseLedger } from '../validate-release-ledger.mjs';
 import { parseRepairIssueBody, decideRepairIssueAction } from '../triage-repair-issues.mjs';
@@ -94,6 +95,15 @@ test('policy guardrails distinguish OIDC hardening from client-secret authentica
   assert.ok(forbiddenDiffFindings('+ AZURE_CLIENT_' + 'SECRET=unsafe').includes('oidc-replaced-by-secret'));
   assert.ok(forbiddenDiffFindings('+ client-' + 'secret: unsafe').includes('oidc-replaced-by-secret'));
   assert.ok(!forbiddenDiffFindings('+ added: /^\\+.*print' + 'env/im').includes('secret-logging-risk'));
+});
+
+test('service OAuth bootstrap maintains exact workflow-bound federation', async () => {
+  const source = await readFile(new URL('../configure-entra-service-oauth.sh', import.meta.url), 'utf8');
+
+  assert.match(source, /job_workflow_ref:\$\{github_job_workflow_ref\}/);
+  assert.match(source, /federated-credential update/);
+  assert.match(source, /\.audiences == \[\$audience\]/);
+  assert.doesNotMatch(source, /credential_subject="repo:\$\{repository\}:environment:\$\{github_environment\}"\n/);
 });
 
 test('smoke token mint config selects production service variables', () => {

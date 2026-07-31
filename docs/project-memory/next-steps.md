@@ -2,19 +2,17 @@
 
 ## Current delivery boundary
 
-- PR #264 is merged and its exact commit was deployed to test, but runtime acceptance failed on the unauthenticated auth gate after the two permitted deployment repair attempts.
-- Bootstrap PR #274 repaired the trusted reviewer. Focused runtime/bootstrap/settings PR #275 and successors #276/#277/#278/#279 each exhausted two bounded high-risk reviews without bypass. PR #280 carried the accumulated package-only rollback, attempt rejection, correlation-bound artifact/provenance, immutable Function blob-version binding, activation-last frontend convergence, complete safety-policy, idempotent trigger, and exact CI authorization repairs to main. PR #281 moved the settings write behind a secure nested module and resolved the ARM cycle. PR #282 normalized boolean settings; test run `30651802409` passed that gate and both package deployments, then isolated an over-strict Entra GUID check in the fail-closed startup bootstrap.
-- Production deployment is not authorized for this rollout and remains blocked.
-- Do not change or reveal the shared repository `OPENAI_API_KEY`; verify only that deployment wiring and secret references succeed.
+- Test release `6cadc861954af706cd752c022b194c742c0aa6fd` is accepted by first-attempt Deploy Test run `30666921988`, including authenticated smoke, telemetry, ledger, and provenance.
+- Production deployment is not authorized for this rollout and remains disabled. Do not infer production acceptance from the successful test run.
+- The operator deferred credential rotation and an independent trust-root bootstrap. Keep the stronger workflow-bound GitHub OIDC subject; do not restore the legacy broad subject. Open PR #285 remains unmerged and is not the current delivery path.
+- Do not change or reveal the shared repository `OPENAI_API_KEY`; deployment verified its managed reference without exposing its value.
 
 ## Operational rollout
 
-1. Deliver the focused Entra GUID validation repair while retaining the `dist/index.js` fail-closed bootstrap, lowercase boolean settings, and secure nested reconciliation.
-2. Re-run the exact settings proof and require the worker to register all routes with the existing Entra object/tenant allowlists, without reading or exposing secret values.
-3. Have a privileged Entra operator verify or configure the granular delegated scopes/application roles and register the exact new test SPA redirect URI. Keep complete/remove unavailable to service tokens.
-4. Run the focused repair through exact-head PR CI, Policy Check, CodeQL, and the trusted merge controller. Require first-attempt/idempotent post-merge triggering, each deployment's immutable caller run/workflow SHA to remain current `main` at every Azure mutation boundary, and every downstream dispatch to validate the exact pinned main CI run/correlation plus matching test provenance. Production promotion/rollback must deploy both packages. Rollback must validate the complete existing managed app-setting policy and rendered bundle read-only before mutation, never reconcile safety settings, and download only the bundle preserved by its exact accepted production run. Function deployment must verify and activate one immutable blob-version URL. Normal and rollback static deployment must upload and verify replacement dependencies before activating `index.html`, remove only validated stale blobs after complete expected-content verification, and prove the active container has the exact approved names, sizes, and SHA-256 digests before acceptance.
-5. Start a fresh test deployment repair cycle. Require `/health` at the exact SHA, unauthenticated `GET /api/hello` returning `401`, authenticated `GET /api/hello` and `POST /api/reddit/thread` passing, MCP origin/auth checks, telemetry correlation, release ledger, and accepted provenance.
-6. Inventory any remaining Bring session/private data before enabling Bring. Enable the GET-only canary only after its dedicated `bring.read` identity and list fingerprint/allowlist are verified; never add a mutation canary.
-7. Prove intentionally failing and pending-check PRs cannot merge, and prove a high-risk PR cannot merge when its exact-head independent review fails or is absent.
-8. Stop after successful test verification. Production promotion requires a later explicit request for this rollout despite the repository enablement variable.
-9. Record the repair PR, CI, test, authenticated smoke, telemetry, artifact-digest, and runtime-truth evidence in project memory.
+1. Deliver the workflow-bound service-federation helper and this project-memory update through a no-deploy PR with exact-head CI, Policy Check, CodeQL, and high-risk review.
+2. Have a privileged Entra operator verify the granular delegated scopes/application roles and exact current test SPA redirect. Keep complete/remove unavailable to service tokens.
+3. Add a token-safe authenticated MCP smoke to the deployment workflow if live MCP provider execution must become a formal release gate; retain the existing REST authenticated smokes.
+4. Inventory remaining Bring session/private data before enabling Bring. Enable the GET-only canary only after its dedicated `bring.read` identity and target list are verified; never add a mutation canary.
+5. Retry cancellation of orphaned zero-job run `30663819848` through GitHub or support; do not delete the evidence without explicit approval.
+6. Prove intentionally failing and pending-check PRs cannot merge, and prove a high-risk PR cannot merge when its exact-head independent review fails or is absent.
+7. Keep production disabled until a later explicit request. Any future promotion must consume the exact accepted test evidence or run a fresh test if main changed, then pass production authenticated smoke, telemetry, ledger/runtime truth, and rollback-bundle verification.

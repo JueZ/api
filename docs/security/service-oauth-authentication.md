@@ -25,4 +25,4 @@ bring.remove
 
 Service tokens are recognized only by an app-only marker or roles-only client-credential evidence plus explicit service allowlists. Delegated tokens always remain on the user allowlist path. The code denies service tokens for destructive Bring operations even if a role is accidentally assigned.
 
-GitHub Actions obtains a GitHub OIDC assertion and exchanges it for a short-lived Entra access token. No static API bearer token or service client secret is stored. Use `scripts/configure-entra-service-oauth.sh` to configure non-destructive roles; it rejects destructive Bring roles.
+GitHub Actions obtains a GitHub OIDC assertion and exchanges it for a short-lived Entra access token. No static API bearer token or service client secret is stored. Use `scripts/configure-entra-service-oauth.sh` to configure non-destructive roles; it rejects destructive Bring roles and creates or updates the service federation to the exact repository/environment/`job_workflow_ref` subject used by the deployment workflow.
