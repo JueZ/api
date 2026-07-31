@@ -21,6 +21,7 @@ const ledger = {
   deployedCommit: sha,
   sourceRef: sha,
   workflowRunId: '123',
+  deliveryCorrelation: 'delivery-12345678',
   functionAppName: 'func-api',
   apiBaseUrl: 'https://example.test',
   artifacts: {

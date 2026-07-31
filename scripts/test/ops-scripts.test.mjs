@@ -24,6 +24,7 @@ test('release ledger validation accepts required runtime truth fields', () => {
     deployedCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     sourceRef: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     workflowRunId: '123',
+    deliveryCorrelation: 'delivery-12345678',
     functionAppName: 'func-api',
     apiBaseUrl: 'https://example.test',
     artifacts: {

@@ -66,8 +66,12 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
   assert.match(mainDeliveryWorkflow, /run main delivery after Codex auto-merge/);
   assert.match(mainDeliveryWorkflow, /gh run download "\$TRIGGER_RUN_ID"/);
   assert.match(mainDeliveryWorkflow, /\[ "\$pr_head" != "\$reviewed_head" \]/);
-  assert.match(mainDeliveryWorkflow, /gh workflow run ci\.yml --repo "\$REPOSITORY" --ref main/);
-  assert.match(mainDeliveryWorkflow, /wait_for_dispatch ci\.yml "" "\$ci_started_at" "\$SOURCE_REF"/);
+  assert.match(mainDeliveryWorkflow, /-f delivery_correlation="\$ci_correlation"/);
+  assert.match(mainDeliveryWorkflow, /wait_for_dispatch ci\.yml "\$ci_title" "\$ci_started_at" "\$SOURCE_REF" "CI"/);
+  assert.match(mainDeliveryWorkflow, /Dispatch correlation matched more than one/);
+  assert.match(mainDeliveryWorkflow, /\.path == \$path/);
+  assert.match(mainDeliveryWorkflow, /Pinned Deploy Test run did not emit matching successful provenance/);
+  assert.match(mainDeliveryWorkflow, /Pinned production run did not emit matching successful runtime-truth evidence/);
   assert.equal(mainDeliveryWorkflow.match(/^\s+assert_current_main$/gm)?.length, 3);
 });
 
@@ -76,6 +80,8 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.match(deployEnvironmentWorkflow, /name: Verify deployed runtime safety settings/);
   assert.match(deployEnvironmentWorkflow, /\.AUTH_ENABLED == "true"/);
   assert.match(deployEnvironmentWorkflow, /effective_web_api_base_url="\$EFFECTIVE_BASE_URL"/);
+  assert.match(deployEnvironmentWorkflow, /ROLLBACK_PROVENANCE_VERIFIED=true/);
+  assert.match(deployEnvironmentWorkflow, /deliveryCorrelation: \$deliveryCorrelation/);
 });
 
 test('policy glob matcher handles recursive and exact AGENTS paths', () => {

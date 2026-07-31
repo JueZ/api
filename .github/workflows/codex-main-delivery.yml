@@ -64,19 +64,19 @@ jobs:
             local expected_title="$2"
             local started_at="$3"
             local expected_head="$4"
+            local expected_workflow_name="$5"
+            local expected_path=".github/workflows/$workflow_file"
             local runs_json=""
+            local matches_json=""
             local run_json=""
             local run_id=""
+            local match_count="0"
             local status=""
             local conclusion=""
             local url=""
-            local description="$workflow_file"
+            local description="$expected_title"
 
-            if [ -n "$expected_title" ]; then
-              description="$expected_title"
-            fi
-
-            for attempt in {1..180}; do
+            for attempt in {1..60}; do
               runs_json="$(gh run list \
                 --repo "$REPOSITORY" \
                 --workflow "$workflow_file" \
@@ -84,45 +84,65 @@ jobs:
                 --event workflow_dispatch \
                 --limit 50 \
                 --json databaseId,status,conclusion,createdAt,displayTitle,headSha,url)"
-              run_json="$(jq -c \
+              matches_json="$(jq -c \
                 --arg title "$expected_title" \
                 --arg head "$expected_head" \
                 --argjson started_at "$started_at" \
                 'map(select(
                   ((.createdAt | fromdateiso8601) >= $started_at)
-                  and ($title == "" or .displayTitle == $title)
-                  and ($head == "" or .headSha == $head)
-                )) as $runs
-                | ((
-                    $runs
-                    | map(select(.status == "completed" and .conclusion == "success"))
-                    | sort_by(.createdAt)
-                    | last
-                  ) // (
-                    $runs
-                    | map(select(.status != "completed"))
-                    | sort_by(.createdAt)
-                    | last
-                  ) // ($runs | sort_by(.createdAt) | last) // {})' <<<"$runs_json")"
-              run_id="$(jq -r '.databaseId // ""' <<<"$run_json")"
-              status="$(jq -r '.status // ""' <<<"$run_json")"
-              conclusion="$(jq -r '.conclusion // ""' <<<"$run_json")"
-              url="$(jq -r '.url // ""' <<<"$run_json")"
-
-              if [ -z "$run_id" ]; then
-                echo "Waiting for $description to start (attempt $attempt/180)."
-              elif [ "$status" = "completed" ] && [ "$conclusion" = "success" ]; then
-                printf '%s' "$url" > "$RUNNER_TEMP/${workflow_file}.url"
-                return 0
-              elif [ "$status" = "completed" ]; then
-                echo "$description concluded '$conclusion': $url" >&2
+                  and .displayTitle == $title
+                  and .headSha == $head
+                ))' <<<"$runs_json")"
+              match_count="$(jq 'length' <<<"$matches_json")"
+              if [ "$match_count" -gt 1 ]; then
+                echo "Dispatch correlation matched more than one $workflow_file run; refusing ambiguity." >&2
                 return 1
-              else
-                echo "Waiting for $description run $run_id (status $status)."
               fi
+              if [ "$match_count" -eq 1 ]; then
+                run_id="$(jq -r '.[0].databaseId' <<<"$matches_json")"
+                break
+              fi
+              echo "Waiting for $description to start (attempt $attempt/60)."
               sleep 10
             done
-            echo "Timed out waiting for $description." >&2
+            if ! [[ "$run_id" =~ ^[0-9]+$ ]]; then
+              echo "Timed out waiting for one correlated $description run." >&2
+              return 1
+            fi
+
+            for attempt in {1..180}; do
+              run_json="$(gh api "repos/$REPOSITORY/actions/runs/$run_id")"
+              if ! jq -e \
+                --arg run_id "$run_id" \
+                --arg title "$expected_title" \
+                --arg head "$expected_head" \
+                --arg path "$expected_path" \
+                --arg workflow_name "$expected_workflow_name" \
+                '(.id | tostring) == $run_id
+                  and .event == "workflow_dispatch"
+                  and .head_sha == $head
+                  and .display_title == $title
+                  and .path == $path
+                  and .name == $workflow_name' <<<"$run_json" >/dev/null; then
+                echo "Pinned run $run_id no longer matches the authorized dispatch identity." >&2
+                return 1
+              fi
+              status="$(jq -r '.status // ""' <<<"$run_json")"
+              conclusion="$(jq -r '.conclusion // ""' <<<"$run_json")"
+              url="$(jq -r '.html_url // ""' <<<"$run_json")"
+              if [ "$status" = "completed" ] && [ "$conclusion" = "success" ]; then
+                printf '%s' "$url" > "$RUNNER_TEMP/${workflow_file}.url"
+                printf '%s' "$run_id" > "$RUNNER_TEMP/${workflow_file}.id"
+                return 0
+              fi
+              if [ "$status" = "completed" ]; then
+                echo "$description run $run_id concluded '$conclusion': $url" >&2
+                return 1
+              fi
+              echo "Waiting for pinned $description run $run_id (status $status, attempt $attempt/180)."
+              sleep 10
+            done
+            echo "Timed out waiting for pinned $description run $run_id." >&2
             return 1
           }
 
@@ -199,9 +219,14 @@ jobs:
             fi
 
             assert_current_main
+            ci_correlation="$(openssl rand -hex 24)"
+            ci_title="CI $SOURCE_REF $ci_correlation"
             ci_started_at="$(date -u +%s)"
-            gh workflow run ci.yml --repo "$REPOSITORY" --ref main
-            wait_for_dispatch ci.yml "" "$ci_started_at" "$SOURCE_REF"
+            gh workflow run ci.yml \
+              --repo "$REPOSITORY" \
+              --ref main \
+              -f delivery_correlation="$ci_correlation"
+            wait_for_dispatch ci.yml "$ci_title" "$ci_started_at" "$SOURCE_REF" "CI"
             CI_RUN_URL="$(cat "$RUNNER_TEMP/ci.yml.url")"
           else
             associated_pr="$(gh api \
@@ -223,30 +248,83 @@ jobs:
             exit 0
           fi
 
-          test_title="Deploy Test $SOURCE_REF"
+          test_correlation="$(openssl rand -hex 24)"
+          test_title="Deploy Test $SOURCE_REF $test_correlation"
           test_started_at="$(date -u +%s)"
           gh workflow run deploy-test.yml \
             --repo "$REPOSITORY" \
             --ref main \
             -f commit_sha="$SOURCE_REF" \
             -f deploy_frontend=true \
-            -f deploy_functions=true
-          wait_for_dispatch deploy-test.yml "$test_title" "$test_started_at" ""
+            -f deploy_functions=true \
+            -f delivery_correlation="$test_correlation"
+          wait_for_dispatch deploy-test.yml "$test_title" "$test_started_at" "$SOURCE_REF" "Deploy Test"
           test_url="$(cat "$RUNNER_TEMP/deploy-test.yml.url")"
+          test_run_id="$(cat "$RUNNER_TEMP/deploy-test.yml.id")"
+          test_provenance_dir="$RUNNER_TEMP/test-provenance-$test_correlation"
+          mkdir -p "$test_provenance_dir"
+          gh run download "$test_run_id" \
+            --repo "$REPOSITORY" \
+            --name "deploy-test-provenance-$SOURCE_REF" \
+            --dir "$test_provenance_dir"
+          if ! jq -e \
+            --arg source_ref "$SOURCE_REF" \
+            --arg run_id "$test_run_id" \
+            --arg correlation "$test_correlation" \
+            '.environmentName == "test"
+              and .sourceRef == $source_ref
+              and .resolvedHead == $source_ref
+              and .runId == $run_id
+              and .deliveryCorrelation == $correlation
+              and .workflow == "Deploy Test"
+              and .deployFrontend == "true"
+              and .deployFunctions == "true"
+              and .eventName == "workflow_dispatch"
+              and .authenticatedSmokeStatus == "passed"
+              and .telemetryStatus == "passed"' \
+            "$test_provenance_dir/deploy-test-provenance.json" >/dev/null; then
+            echo "Pinned Deploy Test run did not emit matching successful provenance." >&2
+            exit 1
+          fi
 
           # Production must not follow a successful older test generation after
           # another change has reached main.
           assert_current_main
-          production_title="Promote Production $SOURCE_REF"
+          production_correlation="$(openssl rand -hex 24)"
+          production_title="Promote Production $SOURCE_REF $production_correlation"
           production_started_at="$(date -u +%s)"
           gh workflow run promote-production.yml \
             --repo "$REPOSITORY" \
             --ref main \
             -f commit_sha="$SOURCE_REF" \
             -f deploy_frontend=true \
-            -f deploy_functions=true
-          wait_for_dispatch promote-production.yml "$production_title" "$production_started_at" ""
+            -f deploy_functions=true \
+            -f delivery_correlation="$production_correlation"
+          wait_for_dispatch promote-production.yml "$production_title" "$production_started_at" "$SOURCE_REF" "Promote Production"
           production_url="$(cat "$RUNNER_TEMP/promote-production.yml.url")"
+          production_run_id="$(cat "$RUNNER_TEMP/promote-production.yml.id")"
+          production_ledger_dir="$RUNNER_TEMP/production-ledger-$production_correlation"
+          mkdir -p "$production_ledger_dir"
+          gh run download "$production_run_id" \
+            --repo "$REPOSITORY" \
+            --name "release-ledger-prod-$SOURCE_REF" \
+            --dir "$production_ledger_dir"
+          if ! jq -e \
+            --arg source_ref "$SOURCE_REF" \
+            --arg run_id "$production_run_id" \
+            --arg correlation "$production_correlation" \
+            '.environment == "prod"
+              and .sourceRef == $source_ref
+              and .deployedCommit == $source_ref
+              and .workflowRunId == $run_id
+              and .deliveryCorrelation == $correlation
+              and .smokeResults.status == "passed"
+              and .authenticatedSmokeResults.status == "passed"
+              and .telemetryCheckResult.status == "passed"' \
+            "$production_ledger_dir/release-ledger-prod.json" >/dev/null; then
+            echo "Pinned production run did not emit matching successful runtime-truth evidence." >&2
+            exit 1
+          fi
 
           {
             echo "### Main delivery completed"

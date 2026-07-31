@@ -1,4 +1,5 @@
 name: CI
+run-name: CI ${{ github.sha }} ${{ inputs.delivery_correlation || github.run_id }}
 
 on:
   pull_request:
@@ -6,6 +7,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      delivery_correlation:
+        description: Unique delivery-controller correlation value.
+        required: false
+        type: string
 
 permissions:
   contents: read

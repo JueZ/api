@@ -20,6 +20,7 @@ export async function writeReleaseLedger({ env = process.env, argv = process.arg
     deployedCommit: String(env.EXPECTED_DEPLOYED_COMMIT_SHA || env.DEPLOYED_COMMIT_SHA || '').toLowerCase(),
     sourceRef: String(env.DEPLOYED_SOURCE_REF || env.EXPECTED_DEPLOYED_COMMIT_SHA || '').toLowerCase(),
     workflowRunId: String(env.GITHUB_RUN_ID || env.DEPLOYMENT_RUN_ID || 'unknown'),
+    deliveryCorrelation: String(env.DELIVERY_CORRELATION || ''),
     functionAppName: env.EFFECTIVE_FUNCTIONAPP_NAME || env.AZURE_FUNCTIONAPP_NAME || 'unknown',
     frontendUrl: env.FRONTEND_BASE_URL || '',
     apiBaseUrl: env.API_BASE_URL || env.EFFECTIVE_BASE_URL || '',

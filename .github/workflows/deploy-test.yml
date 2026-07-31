@@ -1,5 +1,5 @@
 name: Deploy Test
-run-name: Deploy Test ${{ inputs.commit_sha || github.sha }}
+run-name: Deploy Test ${{ inputs.commit_sha || github.sha }} ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
 
 on:
   workflow_dispatch:
@@ -23,6 +23,10 @@ on:
         required: false
         default: false
         type: boolean
+      delivery_correlation:
+        description: Unique delivery-controller correlation value.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -55,3 +59,4 @@ jobs:
       deployFunctions: ${{ inputs.deploy_functions }}
       sourceRef: ${{ inputs.commit_sha || github.sha }}
       redditShareUrlSmokeEnabled: ${{ inputs.reddit_share_url_smoke }}
+      deliveryCorrelation: ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}

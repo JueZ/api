@@ -647,13 +647,51 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
   }
 }
 
+// Preserve only settings owned by the immutable release deployment. The
+// appsettings resource uses PUT semantics, so dropping these values during an
+// infrastructure-only update would remove the active Functions package and
+// its provenance before the artifact deployment could restore them.
+var existingFunctionAppSettings = list('${functionApp.id}/config/appsettings', '2023-12-01').properties
+var preservedFunctionReleaseSettings = union(
+  contains(existingFunctionAppSettings, 'WEBSITE_RUN_FROM_PACKAGE')
+    ? { WEBSITE_RUN_FROM_PACKAGE: existingFunctionAppSettings.WEBSITE_RUN_FROM_PACKAGE }
+    : {},
+  contains(existingFunctionAppSettings, 'WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID')
+    ? { WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID: existingFunctionAppSettings.WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID }
+    : {},
+  contains(existingFunctionAppSettings, 'DEPLOYED_COMMIT_SHA')
+    ? { DEPLOYED_COMMIT_SHA: existingFunctionAppSettings.DEPLOYED_COMMIT_SHA }
+    : {},
+  contains(existingFunctionAppSettings, 'DEPLOYED_SOURCE_REF')
+    ? { DEPLOYED_SOURCE_REF: existingFunctionAppSettings.DEPLOYED_SOURCE_REF }
+    : {},
+  contains(existingFunctionAppSettings, 'DEPLOYMENT_RUN_ID')
+    ? { DEPLOYMENT_RUN_ID: existingFunctionAppSettings.DEPLOYMENT_RUN_ID }
+    : {},
+  contains(existingFunctionAppSettings, 'DEPLOYED_AT_UTC')
+    ? { DEPLOYED_AT_UTC: existingFunctionAppSettings.DEPLOYED_AT_UTC }
+    : {},
+  contains(existingFunctionAppSettings, 'BUILD_TIMESTAMP_UTC')
+    ? { BUILD_TIMESTAMP_UTC: existingFunctionAppSettings.BUILD_TIMESTAMP_UTC }
+    : {},
+  contains(existingFunctionAppSettings, 'RELEASE_FUNCTION_SHA256')
+    ? { RELEASE_FUNCTION_SHA256: existingFunctionAppSettings.RELEASE_FUNCTION_SHA256 }
+    : {},
+  contains(existingFunctionAppSettings, 'RELEASE_FRONTEND_SHA256')
+    ? { RELEASE_FRONTEND_SHA256: existingFunctionAppSettings.RELEASE_FRONTEND_SHA256 }
+    : {},
+  contains(existingFunctionAppSettings, 'RELEASE_SBOM_SHA256')
+    ? { RELEASE_SBOM_SHA256: existingFunctionAppSettings.RELEASE_SBOM_SHA256 }
+    : {}
+)
+
 // App settings are a first-class child resource so an infrastructure update
-// deterministically reconciles the complete runtime configuration instead of
-// relying on the parent site's partial siteConfig update semantics.
+// deterministically reconciles safety configuration without deleting the
+// separately owned immutable release settings above.
 resource functionAppSettings 'Microsoft.Web/sites/config@2023-12-01' = {
   parent: functionApp
   name: 'appsettings'
-  properties: {
+  properties: union(preservedFunctionReleaseSettings, {
     APPLICATIONINSIGHTS_CONNECTION_STRING: appInsights.properties.ConnectionString
     AzureWebJobsStorage__blobServiceUri: 'https://${hostStorage.name}.blob.${environment().suffixes.storage}'
     AzureWebJobsStorage__queueServiceUri: 'https://${hostStorage.name}.queue.${environment().suffixes.storage}'
@@ -707,7 +745,7 @@ resource functionAppSettings 'Microsoft.Web/sites/config@2023-12-01' = {
     OPENAI_API_KEY: repairableErrorsLlmEnabled ? '@Microsoft.KeyVault(SecretUri=${openAiSecret!.properties.secretUriWithVersion})' : ''
     REPAIRABLE_ERRORS_LLM_ENABLED: string(repairableErrorsLlmEnabled)
     REPAIRABLE_ERRORS_LLM_MODEL: repairableErrorsLlmModel
-  }
+  })
 }
 
 var storageBlobDataOwnerRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
