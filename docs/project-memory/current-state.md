@@ -1,8 +1,8 @@
 # Current state
 
-## 2026-07-31 AI-native hardening delivery in progress
+## 2026-07-31 AI-native hardening merged; test acceptance blocked by fail-open auth
 
-- Branch `codex/full-ai-native-remediation` contains the 2026-07 architecture and AI-native audit remediation. The user lifted the previous no-commit boundary and authorized PR delivery plus deployment to test only. Production deployment is explicitly out of scope for this rollout even though `DEPLOY_PRODUCTION_ENABLED=true`; delivery must use the repository skip-autodeploy control and manually dispatch only `Deploy Test` after merge.
+- PR #264 merged the 2026-07 architecture and AI-native audit remediation as `4d82ed8491a32440ec5495049ba39e8f73c6bbac`. Exact-head PR CI, Policy Check, and CodeQL passed; main CI, Policy Check, and CodeQL also passed. The PR used `[skip autodeploy]`, the main-delivery workflow honored it, and no production deployment was dispatched.
 - The repository `OPENAI_API_KEY` is intentionally shared by test and production deployment configuration. Its value was not read or recorded. Runtime REC analysis is enabled by repository variables and remains deterministic-first.
 - The local operation registry is the policy source for granular REST/MCP permissions, token types, environment access, idempotency, confirmation, and audit requirements. OpenAPI route/permission drift, registered MCP tool drift, generated operation docs, and mutation-governance evals are mechanically checked.
 - All MCP capabilities remain bundled behind one `/mcp` Azure Function route and one `McpServer` instance. An architecture check prevents a second MCP server or endpoint.
@@ -10,7 +10,11 @@
 - Bring test access deliberately uses the configured account in structurally read-only mode. Production mutations require explicit writable own-list UUIDs; shared/unlisted lists are denied. Add is durable and idempotent; complete/remove require a principal/list/payload-bound prepare/apply confirmation flow. Ambiguous and concurrent outcomes are never automatically replayed.
 - Local delivery code uses an exact-head trusted merge controller, deterministic policy, independent AI review for high-risk paths, one post-main delivery chain, build-once artifacts, digest/SBOM/attestation verification, and exact test-to-production artifact promotion.
 - Local infrastructure code separates host, release, static, and private storage; uses managed identity and Key Vault references; encodes auth/origin fail-closed rules; and adds lifecycle, alert, and budget policy.
-- Earlier full local validation passed formatting/ESLint, TypeScript and Angular development type checks, production builds, contracts, policy, workflow, Bicep, release-verifier, and audit checks. After the REC expansion, the full suite passes 242 tests including 156 API tests; the remaining workflow/Bicep/security checks are rerun before commit. CodeQL, Trivy, Gitleaks, commit-bound release packaging, exact-head review, remote CI, deployment, smoke, telemetry, and runtime truth remain delivery gates.
+- Local validation passed formatting/ESLint, TypeScript and Angular development type checks, production builds, contracts, policy, workflow, Bicep, release-verifier, and audit checks. The full suite passed 242 tests including 156 API tests. Remote CI also passed CodeQL, Trivy, Gitleaks, release packaging, attestation, and policy checks.
+- Test deployment run `30629930683` successfully applied Bicep, verified and deployed the immutable Function and web artifacts, and exposed `/health` at the exact merge SHA. It failed the first runtime security smoke because unauthenticated `GET /api/hello` returned `200` with the `local-dev-placeholder` principal instead of `401`; authenticated smoke, telemetry correlation, and accepted test provenance therefore did not run.
+- The Bicep deployment received `authEnabled=true`, but the worker behaved as if `AUTH_ENABLED` were false or absent. `apps/api/package.json` currently points Azure Functions at `dist/functions/*.js`, bypassing `dist/index.js` and its fail-closed `assertRuntimeSafety()` bootstrap. A focused runtime-bootstrap/app-settings repair is required before another test deployment can be accepted.
+- The required WLH reference blob was copied once into the new private test storage through a bounded no-overwrite workflow and independently digest-checked. Bring remains disabled in test until a safe account/list fingerprint and allowlist are available; no provider mutation was attempted.
+- The deployment repair limit was reached after two retries. Production remains unchanged and must not be promoted until test auth, authenticated smoke, telemetry, and runtime-truth gates all pass.
 
 ## Authoritative references
 

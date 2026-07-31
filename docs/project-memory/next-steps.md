@@ -2,18 +2,19 @@
 
 ## Current delivery boundary
 
-- Commit, push, PR, and a test deployment are authorized.
-- Production deployment is not authorized for this rollout. Apply `skip-autodeploy`, verify no production promotion starts, and manually dispatch only the exact merged commit to `Deploy Test`.
+- PR #264 is merged and its exact commit was deployed to test, but runtime acceptance failed on the unauthenticated auth gate after the two permitted deployment repair attempts.
+- Do not retry deployment again in the same repair loop. Open a focused repair PR first.
+- Production deployment is not authorized for this rollout and remains blocked.
 - Do not change or reveal the shared repository `OPENAI_API_KEY`; verify only that deployment wiring and secret references succeed.
 
 ## Operational rollout
 
-1. Commit on the existing non-`main` branch, generate commit-bound release evidence in CI, open a PR, and verify the PR exact-head checks.
-2. Bootstrap and verify the trusted autonomous controller, expected GitHub App/check identities, CodeQL, repository `OPENAI_API_KEY`, squash/no-bypass branch rules, and high-risk independent AI review.
-3. Create intentionally failing and pending-check test PRs and prove they cannot merge. Prove a high-risk PR cannot merge when its exact-head review fails or is absent.
-4. Configure granular Entra delegated scopes/application roles and least-privilege service/GitHub OIDC identities. Keep complete/remove unavailable to service tokens.
-5. Inventory and migrate existing WLH/session/private data into split storage with backup, digest validation, access tests, and rollback evidence.
-6. Run Azure what-if and deploy test. Verify fail-closed auth/origin, storage/Key Vault/RBAC boundaries, read-only Bring access, authenticated/unauthenticated smokes, telemetry correlation, release ledger, runtime SHA, and exactly one delivery chain.
-7. Enable the GET-only Bring canary only after its dedicated `bring.read` identity and list are verified. Never add a mutation canary.
-8. Stop after test verification for the current user-authorized rollout. Production promotion requires a later explicit request despite the repository enablement variable.
-9. Record PR, CI, test, smoke, telemetry, artifact-digest, and runtime-truth evidence in project memory after rollout.
+1. Repair the Azure Functions bootstrap so the deployed package loads `dist/index.js` and executes `assertRuntimeSafety()` before function registration. Add a regression check for the package entry point.
+2. Manage Function app settings through an explicit app-settings resource and add deployment verification that proves the effective `AUTH_ENABLED=true` value without exposing settings or secrets.
+3. Have a privileged Entra operator verify or configure the granular delegated scopes/application roles and register the exact new test SPA redirect URI. Keep complete/remove unavailable to service tokens.
+4. Run the focused repair through exact-head PR CI, Policy Check, CodeQL, and the trusted merge controller.
+5. Start a fresh test deployment repair cycle. Require `/health` at the exact SHA, unauthenticated `GET /api/hello` returning `401`, authenticated `GET /api/hello` and `POST /api/reddit/thread` passing, MCP origin/auth checks, telemetry correlation, release ledger, and accepted provenance.
+6. Inventory any remaining Bring session/private data before enabling Bring. Enable the GET-only canary only after its dedicated `bring.read` identity and list fingerprint/allowlist are verified; never add a mutation canary.
+7. Prove intentionally failing and pending-check PRs cannot merge, and prove a high-risk PR cannot merge when its exact-head independent review fails or is absent.
+8. Stop after successful test verification. Production promotion requires a later explicit request for this rollout despite the repository enablement variable.
+9. Record the repair PR, CI, test, authenticated smoke, telemetry, artifact-digest, and runtime-truth evidence in project memory.

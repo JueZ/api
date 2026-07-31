@@ -1,5 +1,14 @@
 # Deployment log
 
+## 2026-07-31 — AI-native remediation merged; test deployment rejected by auth smoke
+
+- PR #264 merged as `4d82ed8491a32440ec5495049ba39e8f73c6bbac` after exact-head CI, Policy Check, and CodeQL passed. Main CI run `30629053731`, Policy Check run `30629053800`, and CodeQL run `30629053791` passed.
+- Main delivery run `30629217969` honored `[skip autodeploy]`; no automatic test or production deployment ran. Production was never dispatched for this rollout.
+- Initial manual test run `30629256593` failed closed on missing non-secret deployment configuration. Retry `30629682712` passed Azure OIDC, artifact, and Bicep checks but stopped because the required WLH reference blob was absent from the new private storage.
+- Bounded migration run `30629886744` copied that single blob from the previous test storage without overwrite and verified its independently computed digest.
+- Final permitted retry `30629930683` applied infrastructure and deployed the immutable Function and web artifacts. `/health` proved the exact merge SHA, but the unauthenticated `/api/hello` smoke returned `200` with the local-development principal instead of `401`; authenticated smoke, telemetry, and accepted test provenance were therefore not produced.
+- Result: test infrastructure and code are physically deployed but the release is not accepted. The deployment repair limit is exhausted pending a focused bootstrap/app-settings fix. Production remains unchanged.
+
 ## 2026-06-09 — Identity-based Azure Functions host storage deployed
 
 - Event: PR #246 migrated `AzureWebJobsStorage` from an account-key connection string to identity-based host storage for merge commit `677b1adfbe551c48525ef8b11a0722f5515d9989`.

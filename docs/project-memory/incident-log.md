@@ -1,5 +1,14 @@
 # Incident log
 
+## 2026-07-31 — Test AI-native release failed open to the local-development auth principal
+
+- Symptom: `Deploy Test` run `30629930683` deployed exact main commit `4d82ed8491a32440ec5495049ba39e8f73c6bbac`; `/health` returned that SHA, but unauthenticated `GET /api/hello` returned `200` with subject `local-dev-placeholder` instead of the required `401`.
+- Impact: the test release is not accepted. Authenticated smoke, telemetry correlation, and accepted test provenance did not run. Production was not dispatched and remains unchanged.
+- Evidence: Bicep deployment succeeded with `authEnabled=true`, while runtime behavior followed the `AUTH_ENABLED=false` development path. The deployment principal cannot read effective Function app settings. Separately, the Functions package entry point is `dist/functions/*.js`, which bypasses `dist/index.js` and its fail-closed `assertRuntimeSafety()` bootstrap.
+- Preceding repairs: the first retry supplied missing safe test configuration. The second retry followed a bounded, no-overwrite migration of the required WLH reference blob into private test storage with independent SHA-256 verification. Both deployment repair attempts are exhausted for this loop.
+- Required fix: route Azure Functions startup through the fail-closed bootstrap, make app-settings deployment explicit and verifiable, add regressions, then start a fresh test deployment cycle. A privileged operator must also verify granular Entra scopes/roles and the new test SPA redirect URI.
+- Status: unresolved; production promotion blocked.
+
 ## 2026-07-25 — Bring batch writes used the wrong private payload and rejected valid empty success responses
 
 - Symptom: production Bring list reads succeeded, while `bring_add_items` reproducibly returned the generic MCP error `upstream_unavailable` and created no item.
