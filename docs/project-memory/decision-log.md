@@ -1,5 +1,20 @@
 # Decision log
 
+## 2026-07-31 — Pin immutable Function versions and activate the frontend entrypoint last
+
+- Decision: A digest-addressed Function blob name is insufficient by itself. Resolve its Azure Blob version ID, download and hash that exact immutable version, put the encoded `versionid` in `WEBSITE_RUN_FROM_PACKAGE`, and verify the exact setting through the management plane before restart.
+- Decision: Do not delete from the active static site before a complete replacement is available. Upload and verify all non-entrypoint files while the prior `index.html` remains active; upload `index.html` last; verify every expected byte; then delete only inventory-proven stale blobs and require a final exact name/content match.
+- Rationale: Azure blob versions are immutable, while a current blob URL can be rebound by overwrite. Activation-last frontend deployment prevents an upload failure from first removing dependencies required by the previously active site.
+- Status: Implemented on the fresh successor after PR #279 exhausted its two high-risk review attempts; fresh remote validation and test-only deployment remain pending.
+
+## 2026-07-31 — Bind deployment evidence to one attempt and preserve exact rendered packages
+
+- Decision: Deployment workflows accept only workflow attempt 1. A failed deployment must be diagnosed and newly dispatched with a new opaque correlation; GitHub reruns are rejected before Azure mutation.
+- Decision: Correlation is part of release-ledger, test-provenance, and accepted-production-bundle artifact names. Consumers also validate the exact run identity, source SHA, title, embedded run ID, and embedded correlation.
+- Decision: Test provenance separately records the immutable CI frontend-source digest and the environment-rendered frontend digest. Production promotes the exact Function, SBOM, and frontend-source digests, then hashes its own rendered archive before either Function or static deployment. The exact rendered production bundle is preserved for rollback.
+- Decision: Production promotion and rollback must deploy both Function and frontend packages. Rollback is strictly package-only. Current `main` supplies controller/validation code; existing resources, safety settings, and the complete rendered frontend are validated read-only before mutation; Bicep and safety-setting reconciliation are skipped; release blobs cannot be created; and the preserved frontend is uploaded unchanged.
+- Status: Implemented on the fresh successor branch after PR #276 exhausted its two high-risk review attempts; fresh remote validation and test-only deployment remain pending.
+
 ## 2026-07-31 — Use deterministic-first REC across REST and the bundled MCP server
 
 - Decision: Every service-generated failure uses REC. Predefined deterministic mappings run first; only `diagnostic_uncertain` sanitized capsules may use the OpenAI Responses API, and model output must pass schema and policy gates.

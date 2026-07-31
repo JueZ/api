@@ -66,11 +66,29 @@ function prEvidenceComplete(prStates = []) {
 export function productionVerificationPassed(verification = {}, options = {}) {
   const ledger = verification.ledger;
   if (!ledger) return { ok: false, reason: 'missing production release ledger evidence' };
-  const validationErrors = verification.validationErrors || validateReleaseLedger(ledger);
+  const validationErrors =
+    verification.validationErrors ||
+    validateReleaseLedger(ledger, {
+      expectedDeliveryCorrelation: verification.expectedDeliveryCorrelation,
+    });
   if (validationErrors.length > 0)
     return { ok: false, reason: `release ledger validation failed: ${validationErrors.join('; ')}` };
   if (verification.workflowConclusion && verification.workflowConclusion !== 'success')
     return { ok: false, reason: `Promote Production run conclusion is ${verification.workflowConclusion}` };
+  if (verification.workflowRunId && ledger.workflowRunId !== verification.workflowRunId)
+    return { ok: false, reason: 'release ledger workflowRunId does not match the inspected production run' };
+  if (
+    verification.workflowHeadSha &&
+    (ledger.deployedCommit !== verification.workflowHeadSha || ledger.sourceRef !== verification.workflowHeadSha)
+  ) {
+    return { ok: false, reason: 'release ledger source does not match the inspected production run head SHA' };
+  }
+  if (
+    verification.expectedDeliveryCorrelation &&
+    ledger.deliveryCorrelation !== verification.expectedDeliveryCorrelation
+  ) {
+    return { ok: false, reason: 'release ledger deliveryCorrelation does not match the inspected production run' };
+  }
   if (ledger.environment !== 'prod')
     return { ok: false, reason: `release ledger environment is ${ledger.environment}` };
   if (ledger.smokeResults?.status !== 'passed')
@@ -161,20 +179,26 @@ async function collectLatestProductionVerification({ repo, apiBaseUrl = '', requ
       '--limit',
       '20',
       '--json',
-      'databaseId,headSha,conclusion,status',
+      'databaseId,headSha,conclusion,status,displayTitle,attempt',
     ]),
   );
   for (const run of runs) {
     const sha = String(run.headSha || '').toLowerCase();
     if (!sha) continue;
-    const artifactName = `release-ledger-prod-${sha}`;
+    if (run.attempt !== 1) continue;
+    const titleMatch = String(run.displayTitle || '').match(
+      /^Promote Production ([0-9a-f]{40}) ([A-Za-z0-9][A-Za-z0-9._-]{7,127})$/,
+    );
+    const expectedDeliveryCorrelation = titleMatch?.[2] || '';
+    if (!expectedDeliveryCorrelation || titleMatch?.[1] !== sha) continue;
+    const artifactName = `release-ledger-prod-${sha}-${expectedDeliveryCorrelation}`;
     const dir = await mkdtemp(join(tmpdir(), 'repair-triage-ledger-'));
     try {
       gh(['run', 'download', String(run.databaseId), '--repo', repo, '--name', artifactName, '--dir', dir]);
       const ledgerPath = await findJsonFile(dir);
       if (!ledgerPath) continue;
       const ledger = JSON.parse(await readFile(ledgerPath, 'utf8'));
-      const validationErrors = validateReleaseLedger(ledger);
+      const validationErrors = [...validateReleaseLedger(ledger, { expectedDeliveryCorrelation })];
       let liveHealth;
       if (apiBaseUrl) {
         try {
@@ -187,6 +211,8 @@ async function collectLatestProductionVerification({ repo, apiBaseUrl = '', requ
       return {
         workflowRunId: String(run.databaseId),
         workflowConclusion: run.conclusion,
+        workflowHeadSha: sha,
+        expectedDeliveryCorrelation,
         artifactName,
         ledger,
         validationErrors,

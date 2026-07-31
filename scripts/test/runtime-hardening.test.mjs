@@ -13,7 +13,14 @@ import {
   decideRepairIssueAction,
   hasDuplicateTriageComment,
 } from '../triage-repair-issues.mjs';
-import { decideRuntimeTruth, summarizeLedger } from '../runtime-truth.mjs';
+import { decideRuntimeTruth, summarizeLedger, validateWorkflowRunMetadata } from '../runtime-truth.mjs';
+import {
+  buildExpectedRuntimeSettings,
+  optionalReleaseSettingNames,
+  requiredManagedSettingNames,
+  validateArmRuntimeSettingsResponse,
+  validateDeployedRuntimeSettings,
+} from '../validate-deployed-runtime-settings.mjs';
 
 const sha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const ledger = {
@@ -21,6 +28,7 @@ const ledger = {
   deployedCommit: sha,
   sourceRef: sha,
   workflowRunId: '123',
+  deliveryCorrelation: 'delivery-12345678',
   functionAppName: 'func-api',
   apiBaseUrl: 'https://example.test',
   artifacts: {
@@ -34,6 +42,91 @@ const ledger = {
   telemetryCheckResult: { status: 'passed', checks: { smokeEvidenceCount: 1 } },
   verifiedAt: '2026-05-17T00:00:00.000Z',
 };
+
+const runtimeSettingsEnv = {
+  ENVIRONMENT_NAME: 'test',
+  EFFECTIVE_HOST_STORAGE_ACCOUNT: 'hosttest123',
+  EFFECTIVE_PRIVATE_STORAGE_ACCOUNT: 'privatetest123',
+  TEST_WEB_AUTH_REDIRECT_URI: 'https://test.example.test/auth/callback',
+  WEB_AUTH_REDIRECT_URI: 'https://prod.example.test/auth/callback',
+  OIDC_ISSUER: 'https://login.example.test/tenant/v2.0',
+  OIDC_AUDIENCE: 'api://catalogue',
+  OIDC_JWKS_URI: 'https://login.example.test/tenant/discovery/v2.0/keys',
+  OIDC_ALLOWED_OBJECT_IDS: 'user-object-id',
+  OIDC_ALLOWED_SUBJECTS: 'subject-id',
+  OIDC_ALLOWED_APP_OBJECT_IDS: 'app-object-id',
+  OIDC_ALLOWED_CLIENT_IDS: 'client-id',
+  OIDC_ALLOWED_DELEGATED_CLIENT_IDS: 'delegated-client-id',
+  OIDC_ALLOWED_TENANTS: 'tenant-id',
+  MCP_RESOURCE_ORIGIN: 'https://api.example.test',
+  MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
+  REDDIT_CLIENT_ID: 'reddit-client-id',
+  REDDIT_USER_AGENT: 'catalogue-test',
+  REPAIRABLE_ERRORS_LLM_ENABLED: 'true',
+  EXPECTED_APPLICATIONINSIGHTS_CONNECTION_STRING: 'InstrumentationKey=metadata-only',
+  EXPECTED_REDDIT_CLIENT_SECRET_REFERENCE:
+    '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/reddit-client-secret/version)',
+  EXPECTED_WLH_BASE_URL_REFERENCE: '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/wlh-base-url/version)',
+  EXPECTED_BRING_CLIENT_API_KEY_REFERENCE:
+    '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/bring-client-api-key/version)',
+  EXPECTED_BRING_EMAIL_REFERENCE: '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/bring-email/version)',
+  EXPECTED_BRING_PASSWORD_REFERENCE: '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/bring-password/version)',
+  EXPECTED_BRING_CONFIRMATION_HMAC_KEY_REFERENCE:
+    '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/bring-confirmation-hmac-key/version)',
+  EXPECTED_BRING_MUTATION_ENCRYPTION_KEY_REFERENCE:
+    '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/bring-mutation-encryption-key/version)',
+  EXPECTED_OPENAI_API_KEY_REFERENCE: '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/openai-api-key/version)',
+};
+
+test('deployed runtime policy accepts the complete managed key set without reading secret values', () => {
+  const settings = buildExpectedRuntimeSettings(runtimeSettingsEnv);
+  const names = [...requiredManagedSettingNames, optionalReleaseSettingNames[0]];
+  assert.deepEqual(validateDeployedRuntimeSettings(settings, names, runtimeSettingsEnv), []);
+  const properties = Object.fromEntries(names.map((name) => [name, 'secret-value-not-reported']));
+  Object.assign(properties, settings);
+  assert.deepEqual(validateArmRuntimeSettingsResponse({ properties }, runtimeSettingsEnv), []);
+  assert.equal(settings.OPENAI_API_KEY, runtimeSettingsEnv.EXPECTED_OPENAI_API_KEY_REFERENCE);
+  assert.equal(settings.REDDIT_CLIENT_SECRET, runtimeSettingsEnv.EXPECTED_REDDIT_CLIENT_SECRET_REFERENCE);
+});
+
+test('deployed runtime policy rejects security drift, missing managed keys, and unmanaged settings', () => {
+  const settings = {
+    ...buildExpectedRuntimeSettings(runtimeSettingsEnv),
+    OIDC_ALLOWED_DELEGATED_CLIENT_IDS: 'unexpected-client',
+  };
+  const names = [
+    ...requiredManagedSettingNames.filter((name) => name !== 'BRING_WRITABLE_LIST_UUIDS'),
+    'UNMANAGED_SECURITY_OVERRIDE',
+  ];
+  const errors = validateDeployedRuntimeSettings(settings, names, runtimeSettingsEnv);
+  assert.ok(errors.some((error) => error.endsWith('BRING_WRITABLE_LIST_UUIDS')));
+  assert.ok(errors.some((error) => error.endsWith('UNMANAGED_SECURITY_OVERRIDE')));
+  assert.ok(errors.some((error) => error.endsWith('OIDC_ALLOWED_DELEGATED_CLIENT_IDS')));
+});
+
+test('deployed runtime policy rejects plaintext, wrong-version, and wrong-observability managed values', () => {
+  const properties = buildExpectedRuntimeSettings(runtimeSettingsEnv);
+  properties.APPLICATIONINSIGHTS_CONNECTION_STRING = 'InstrumentationKey=wrong-component';
+  properties.REDDIT_CLIENT_SECRET = 'plaintext-secret';
+  properties.OPENAI_API_KEY = '@Microsoft.KeyVault(SecretUri=https://other.test/secrets/openai-api-key/version)';
+
+  const errors = validateArmRuntimeSettingsResponse({ properties }, runtimeSettingsEnv);
+  assert.ok(errors.some((error) => error.endsWith('APPLICATIONINSIGHTS_CONNECTION_STRING')));
+  assert.ok(errors.some((error) => error.endsWith('REDDIT_CLIENT_SECRET')));
+  assert.ok(errors.some((error) => error.endsWith('OPENAI_API_KEY')));
+});
+
+test('deployed runtime policy requires expected metadata and enforces an empty disabled OpenAI setting', () => {
+  const disabledSettings = buildExpectedRuntimeSettings({
+    ...runtimeSettingsEnv,
+    REPAIRABLE_ERRORS_LLM_ENABLED: 'false',
+  });
+  assert.equal(disabledSettings.OPENAI_API_KEY, '');
+
+  const incompleteEnv = { ...runtimeSettingsEnv };
+  delete incompleteEnv.EXPECTED_BRING_PASSWORD_REFERENCE;
+  assert.throws(() => buildExpectedRuntimeSettings(incompleteEnv), /EXPECTED_BRING_PASSWORD_REFERENCE is required/);
+});
 
 test('telemetry KQL sanitizes smoke run IDs', () => {
   assert.equal(sanitizeTelemetrySmokeRunId("smoke-prod'; drop table"), 'smoke-prod-drop-table');
@@ -190,6 +283,39 @@ test('repair decision closes production issue with valid later production ledger
   assert.equal(decision.action, 'close');
 });
 
+test('repair decision requires ledger identity to match the inspected production run', () => {
+  const decision = decideRepairIssueAction(
+    { title: 'Production smoke failed', body: '' },
+    {
+      productionVerification: {
+        ledger,
+        workflowRunId: '456',
+        expectedDeliveryCorrelation: 'delivery-other123',
+        workflowConclusion: 'success',
+        validationErrors: [],
+      },
+    },
+  );
+  assert.equal(decision.action, 'comment');
+});
+
+test('repair decision requires ledger source to match the inspected production run head', () => {
+  const decision = decideRepairIssueAction(
+    { title: 'Production smoke failed', body: '' },
+    {
+      productionVerification: {
+        ledger,
+        workflowRunId: ledger.workflowRunId,
+        workflowHeadSha: 'b'.repeat(40),
+        expectedDeliveryCorrelation: ledger.deliveryCorrelation,
+        workflowConclusion: 'success',
+        validationErrors: [],
+      },
+    },
+  );
+  assert.equal(decision.action, 'comment');
+});
+
 test('repair decision leaves production issue open when auth smoke is blocked or failed', () => {
   const blockedLedger = { ...ledger, authenticatedSmokeResults: { status: 'blocked_auth_smoke' } };
   const decision = decideRepairIssueAction(
@@ -256,6 +382,65 @@ test('runtime truth decision detects live health mismatch', () => {
     ledgerErrors: [],
   });
   assert.equal(decision.status, 'failed');
+});
+
+test('runtime truth decision rejects a ledger from another dispatch correlation', () => {
+  const decision = decideRuntimeTruth({
+    live: { status: 'passed', runtime: { environmentName: 'prod', deployedCommitSha: sha } },
+    ledger,
+    options: {
+      includeLedger: true,
+      environment: 'prod',
+      expectedSha: sha,
+      expectedDeliveryCorrelation: 'delivery-other123',
+    },
+    ledgerErrors: [],
+  });
+  assert.equal(decision.status, 'failed');
+});
+
+test('runtime truth decision rejects a ledger from another workflow run', () => {
+  const decision = decideRuntimeTruth({
+    live: { status: 'passed', runtime: { environmentName: 'prod', deployedCommitSha: sha } },
+    ledger,
+    options: {
+      includeLedger: true,
+      environment: 'prod',
+      expectedSha: sha,
+      expectedDeliveryCorrelation: ledger.deliveryCorrelation,
+      runId: '456',
+    },
+    ledgerErrors: [],
+  });
+  assert.equal(decision.status, 'failed');
+});
+
+test('runtime truth validates exact deployment workflow run metadata', () => {
+  const options = {
+    runId: ledger.workflowRunId,
+    repo: 'JueZ/api',
+    workflow: 'promote-production.yml',
+    expectedSha: sha,
+    expectedDeliveryCorrelation: ledger.deliveryCorrelation,
+  };
+  const run = {
+    id: Number(ledger.workflowRunId),
+    repository: { full_name: 'JueZ/api' },
+    path: '.github/workflows/promote-production.yml',
+    name: `Promote Production ${sha} ${ledger.deliveryCorrelation}`,
+    event: 'workflow_dispatch',
+    run_attempt: 1,
+    conclusion: 'success',
+    head_branch: 'main',
+    head_sha: sha,
+    display_title: `Promote Production ${sha} ${ledger.deliveryCorrelation}`,
+  };
+  assert.deepEqual(validateWorkflowRunMetadata(run, options), []);
+  assert.deepEqual(validateWorkflowRunMetadata({ ...run, name: 'Promote Production' }, options), []);
+  assert.ok(validateWorkflowRunMetadata({ ...run, head_sha: 'b'.repeat(40) }, options).length > 0);
+  assert.ok(validateWorkflowRunMetadata({ ...run, name: 'unrelated workflow' }, options).length > 0);
+  assert.ok(validateWorkflowRunMetadata({ ...run, display_title: 'Promote Production' }, options).length > 0);
+  assert.ok(validateWorkflowRunMetadata({ ...run, run_attempt: 2 }, options).length > 0);
 });
 
 test('runtime truth decision blocks when ledger evidence is missing', () => {

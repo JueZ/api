@@ -9,7 +9,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   const ledger = JSON.parse(await readFile(ledgerPath, 'utf8'));
-  const errors = validateReleaseLedger(ledger);
+  const errors = validateReleaseLedger(ledger, {
+    expectedDeliveryCorrelation: process.env.EXPECTED_DELIVERY_CORRELATION,
+  });
   if (errors.length > 0) {
     console.error(errors.join('\n'));
     process.exit(1);
@@ -17,13 +19,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   console.log(`Release ledger valid: ${ledgerPath}`);
 }
 
-export function validateReleaseLedger(ledger) {
+export function validateReleaseLedger(ledger, { expectedDeliveryCorrelation = '' } = {}) {
   const errors = [];
   const required = [
     'environment',
     'deployedCommit',
     'sourceRef',
     'workflowRunId',
+    'deliveryCorrelation',
     'functionAppName',
     'apiBaseUrl',
     'artifacts',
@@ -38,6 +41,12 @@ export function validateReleaseLedger(ledger) {
   if (!['test', 'prod'].includes(ledger?.environment)) errors.push('environment must be test or prod');
   for (const key of ['deployedCommit', 'sourceRef'])
     if (!/^[0-9a-f]{40}$/.test(String(ledger?.[key] ?? ''))) errors.push(`${key} must be a lowercase 40-character SHA`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/.test(String(ledger?.deliveryCorrelation ?? ''))) {
+    errors.push('deliveryCorrelation must be an opaque 8-128 character identifier');
+  }
+  if (expectedDeliveryCorrelation && ledger?.deliveryCorrelation !== expectedDeliveryCorrelation) {
+    errors.push('deliveryCorrelation does not match the expected workflow dispatch');
+  }
   for (const key of ['functionappSha256', 'frontendSha256', 'sbomSha256']) {
     if (!/^[0-9a-f]{64}$/.test(String(ledger?.artifacts?.[key] ?? ''))) {
       errors.push(`artifacts.${key} must be a lowercase SHA-256 digest`);

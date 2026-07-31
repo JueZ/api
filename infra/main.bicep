@@ -171,9 +171,9 @@ param repairableErrorsLlmModel string = ''
 var validatedCorsOrigins = !empty(apiCorsAllowedOrigins) && !contains(apiCorsAllowedOrigins, '*')
   ? apiCorsAllowedOrigins
   : fail('API CORS origins must be non-empty and must not contain a wildcard.')
-var validatedMcpOrigin = startsWith(mcpResourceOrigin, 'https://') && !endsWith(mcpResourceOrigin, '/')
+var validatedMcpOrigin = startsWith(mcpResourceOrigin, 'https://') && !endsWith(mcpResourceOrigin, '/') && mcpResourceOrigin != 'https://null'
   ? mcpResourceOrigin
-  : fail('MCP_RESOURCE_ORIGIN must be one canonical HTTPS origin without a trailing slash.')
+  : fail('MCP_RESOURCE_ORIGIN must be one canonical non-placeholder HTTPS origin without a trailing slash.')
 var validatedMcpAllowedOrigins = !empty(mcpAllowedOrigins) && !contains(mcpAllowedOrigins, '*')
   ? mcpAllowedOrigins
   : fail('MCP allowed origins must be non-empty exact origins without a wildcard.')
@@ -643,63 +643,109 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         allowedOrigins: apiCorsAllowedOriginList
         supportCredentials: false
       }
-      appSettings: [
-        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsights.properties.ConnectionString }
-        { name: 'AzureWebJobsStorage__blobServiceUri', value: 'https://${hostStorage.name}.blob.${environment().suffixes.storage}' }
-        { name: 'AzureWebJobsStorage__queueServiceUri', value: 'https://${hostStorage.name}.queue.${environment().suffixes.storage}' }
-        { name: 'AzureWebJobsStorage__tableServiceUri', value: 'https://${hostStorage.name}.table.${environment().suffixes.storage}' }
-        { name: 'AzureWebJobsStorage__credential', value: 'managedidentity' }
-        { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
-        { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'node' }
-        { name: 'DEPLOYED_ENVIRONMENT_NAME', value: environmentName }
-        { name: 'AUTH_ENABLED', value: string(authEnabled) }
-        { name: 'OIDC_ISSUER', value: validatedOidcIssuer }
-        { name: 'OIDC_AUDIENCE', value: validatedOidcAudience }
-        { name: 'OIDC_JWKS_URI', value: oidcJwksUri }
-        { name: 'OIDC_REQUIRED_SCOPES', value: oidcRequiredScopes }
-        { name: 'OIDC_ALLOWED_OBJECT_IDS', value: validatedOidcObjectIds }
-        { name: 'OIDC_ALLOWED_SUBJECTS', value: oidcAllowedSubjects }
-        { name: 'OIDC_ALLOWED_APP_OBJECT_IDS', value: oidcAllowedAppObjectIds }
-        { name: 'OIDC_ALLOWED_CLIENT_IDS', value: oidcAllowedClientIds }
-        { name: 'OIDC_ALLOWED_DELEGATED_CLIENT_IDS', value: oidcAllowedDelegatedClientIds }
-        { name: 'OIDC_ALLOWED_TENANTS', value: validatedOidcTenants }
-        { name: 'AUTH_DEBUG', value: string(authDebug) }
-        { name: 'API_CORS_ALLOWED_ORIGINS', value: validatedCorsOrigins }
-        { name: 'MCP_RESOURCE_ORIGIN', value: validatedMcpOrigin }
-        { name: 'MCP_ALLOWED_ORIGINS', value: validatedMcpAllowedOrigins }
-        { name: 'REDDIT_CLIENT_ID', value: redditClientId }
-        { name: 'REDDIT_CLIENT_SECRET', value: '@Microsoft.KeyVault(SecretUri=${redditSecret.properties.secretUriWithVersion})' }
-        { name: 'REDDIT_USER_AGENT', value: redditUserAgent }
-        { name: 'WLH_BASE_URL', value: '@Microsoft.KeyVault(SecretUri=${wlhBaseUrlSecret.properties.secretUriWithVersion})' }
-        { name: 'WLH_STORAGE_ACCOUNT_NAME', value: privateStorage.name }
-        { name: 'WLH_CATEGORY_BLOB_CONTAINER', value: wlhCategoryBlobContainer }
-        { name: 'WLH_CATEGORY_BLOB_NAME', value: wlhCategoryBlobName }
-        { name: 'BRING_ENABLED', value: string(bringEnabled) }
-        { name: 'BRING_ADD_ENABLED', value: string(validatedBringAddEnabled) }
-        { name: 'BRING_DESTRUCTIVE_ENABLED', value: string(validatedBringDestructiveEnabled) }
-        { name: 'BRING_BASE_URL', value: bringBaseUrl }
-        { name: 'BRING_CLIENT_API_KEY', value: '@Microsoft.KeyVault(SecretUri=${bringClientApiKeySecret.properties.secretUriWithVersion})' }
-        { name: 'BRING_COUNTRY', value: bringCountry }
-        { name: 'BRING_EMAIL', value: '@Microsoft.KeyVault(SecretUri=${bringEmailSecret.properties.secretUriWithVersion})' }
-        { name: 'BRING_PASSWORD', value: '@Microsoft.KeyVault(SecretUri=${bringPasswordSecret.properties.secretUriWithVersion})' }
-        { name: 'BRING_EXPECTED_ACCOUNT_FINGERPRINT', value: validatedBringFingerprint }
-        { name: 'BRING_DEFAULT_LIST_UUID', value: bringDefaultListUuid }
-        { name: 'BRING_READABLE_LIST_UUIDS', value: validatedBringReadableLists }
-        { name: 'BRING_WRITABLE_LIST_UUIDS', value: validatedBringWritableLists }
-        { name: 'BRING_SESSION_CACHE_ENABLED', value: string(bringSessionCacheEnabled) }
-        { name: 'BRING_SESSION_CACHE_CONTAINER', value: bringSessionCacheContainer }
-        { name: 'BRING_SESSION_CACHE_BLOB', value: bringSessionCacheBlob }
-        { name: 'BRING_MUTATION_CONTAINER', value: bringMutationContainer }
-        { name: 'BRING_AUDIT_CONTAINER', value: bringAuditContainer }
-        { name: 'BRING_STORAGE_ACCOUNT_NAME', value: privateStorage.name }
-        { name: 'BRING_CONFIRMATION_HMAC_KEY', value: '@Microsoft.KeyVault(SecretUri=${bringConfirmationKeySecret.properties.secretUriWithVersion})' }
-        { name: 'BRING_MUTATION_ENCRYPTION_KEY', value: '@Microsoft.KeyVault(SecretUri=${bringEncryptionKeySecret.properties.secretUriWithVersion})' }
-        { name: 'OPENAI_API_KEY', value: repairableErrorsLlmEnabled ? '@Microsoft.KeyVault(SecretUri=${openAiSecret!.properties.secretUriWithVersion})' : '' }
-        { name: 'REPAIRABLE_ERRORS_LLM_ENABLED', value: string(repairableErrorsLlmEnabled) }
-        { name: 'REPAIRABLE_ERRORS_LLM_MODEL', value: repairableErrorsLlmModel }
-      ]
     }
   }
+}
+
+// Preserve only settings owned by the immutable release deployment. The
+// appsettings resource uses PUT semantics, so dropping these values during an
+// infrastructure-only update would remove the active Functions package and
+// its provenance before the artifact deployment could restore them.
+var existingFunctionAppSettings = list('${functionApp.id}/config/appsettings', '2023-12-01').properties
+var preservedFunctionReleaseSettings = union(
+  contains(existingFunctionAppSettings, 'WEBSITE_RUN_FROM_PACKAGE')
+    ? { WEBSITE_RUN_FROM_PACKAGE: existingFunctionAppSettings.WEBSITE_RUN_FROM_PACKAGE }
+    : {},
+  contains(existingFunctionAppSettings, 'WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID')
+    ? { WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID: existingFunctionAppSettings.WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID }
+    : {},
+  contains(existingFunctionAppSettings, 'DEPLOYED_COMMIT_SHA')
+    ? { DEPLOYED_COMMIT_SHA: existingFunctionAppSettings.DEPLOYED_COMMIT_SHA }
+    : {},
+  contains(existingFunctionAppSettings, 'DEPLOYED_SOURCE_REF')
+    ? { DEPLOYED_SOURCE_REF: existingFunctionAppSettings.DEPLOYED_SOURCE_REF }
+    : {},
+  contains(existingFunctionAppSettings, 'DEPLOYMENT_RUN_ID')
+    ? { DEPLOYMENT_RUN_ID: existingFunctionAppSettings.DEPLOYMENT_RUN_ID }
+    : {},
+  contains(existingFunctionAppSettings, 'DEPLOYED_AT_UTC')
+    ? { DEPLOYED_AT_UTC: existingFunctionAppSettings.DEPLOYED_AT_UTC }
+    : {},
+  contains(existingFunctionAppSettings, 'BUILD_TIMESTAMP_UTC')
+    ? { BUILD_TIMESTAMP_UTC: existingFunctionAppSettings.BUILD_TIMESTAMP_UTC }
+    : {},
+  contains(existingFunctionAppSettings, 'RELEASE_FUNCTION_SHA256')
+    ? { RELEASE_FUNCTION_SHA256: existingFunctionAppSettings.RELEASE_FUNCTION_SHA256 }
+    : {},
+  contains(existingFunctionAppSettings, 'RELEASE_FRONTEND_SHA256')
+    ? { RELEASE_FRONTEND_SHA256: existingFunctionAppSettings.RELEASE_FRONTEND_SHA256 }
+    : {},
+  contains(existingFunctionAppSettings, 'RELEASE_SBOM_SHA256')
+    ? { RELEASE_SBOM_SHA256: existingFunctionAppSettings.RELEASE_SBOM_SHA256 }
+    : {}
+)
+
+// App settings are a first-class child resource so an infrastructure update
+// deterministically reconciles safety configuration without deleting the
+// separately owned immutable release settings above.
+resource functionAppSettings 'Microsoft.Web/sites/config@2023-12-01' = {
+  parent: functionApp
+  name: 'appsettings'
+  properties: union(preservedFunctionReleaseSettings, {
+    APPLICATIONINSIGHTS_CONNECTION_STRING: appInsights.properties.ConnectionString
+    AzureWebJobsStorage__blobServiceUri: 'https://${hostStorage.name}.blob.${environment().suffixes.storage}'
+    AzureWebJobsStorage__queueServiceUri: 'https://${hostStorage.name}.queue.${environment().suffixes.storage}'
+    AzureWebJobsStorage__tableServiceUri: 'https://${hostStorage.name}.table.${environment().suffixes.storage}'
+    AzureWebJobsStorage__credential: 'managedidentity'
+    FUNCTIONS_EXTENSION_VERSION: '~4'
+    FUNCTIONS_WORKER_RUNTIME: 'node'
+    DEPLOYED_ENVIRONMENT_NAME: environmentName
+    AUTH_ENABLED: string(authEnabled)
+    OIDC_ISSUER: validatedOidcIssuer
+    OIDC_AUDIENCE: validatedOidcAudience
+    OIDC_JWKS_URI: oidcJwksUri
+    OIDC_REQUIRED_SCOPES: oidcRequiredScopes
+    OIDC_ALLOWED_OBJECT_IDS: validatedOidcObjectIds
+    OIDC_ALLOWED_SUBJECTS: oidcAllowedSubjects
+    OIDC_ALLOWED_APP_OBJECT_IDS: oidcAllowedAppObjectIds
+    OIDC_ALLOWED_CLIENT_IDS: oidcAllowedClientIds
+    OIDC_ALLOWED_DELEGATED_CLIENT_IDS: oidcAllowedDelegatedClientIds
+    OIDC_ALLOWED_TENANTS: validatedOidcTenants
+    AUTH_DEBUG: string(authDebug)
+    API_CORS_ALLOWED_ORIGINS: validatedCorsOrigins
+    MCP_RESOURCE_ORIGIN: validatedMcpOrigin
+    MCP_ALLOWED_ORIGINS: validatedMcpAllowedOrigins
+    REDDIT_CLIENT_ID: redditClientId
+    REDDIT_CLIENT_SECRET: '@Microsoft.KeyVault(SecretUri=${redditSecret.properties.secretUriWithVersion})'
+    REDDIT_USER_AGENT: redditUserAgent
+    WLH_BASE_URL: '@Microsoft.KeyVault(SecretUri=${wlhBaseUrlSecret.properties.secretUriWithVersion})'
+    WLH_STORAGE_ACCOUNT_NAME: privateStorage.name
+    WLH_CATEGORY_BLOB_CONTAINER: wlhCategoryBlobContainer
+    WLH_CATEGORY_BLOB_NAME: wlhCategoryBlobName
+    BRING_ENABLED: string(bringEnabled)
+    BRING_ADD_ENABLED: string(validatedBringAddEnabled)
+    BRING_DESTRUCTIVE_ENABLED: string(validatedBringDestructiveEnabled)
+    BRING_BASE_URL: bringBaseUrl
+    BRING_CLIENT_API_KEY: '@Microsoft.KeyVault(SecretUri=${bringClientApiKeySecret.properties.secretUriWithVersion})'
+    BRING_COUNTRY: bringCountry
+    BRING_EMAIL: '@Microsoft.KeyVault(SecretUri=${bringEmailSecret.properties.secretUriWithVersion})'
+    BRING_PASSWORD: '@Microsoft.KeyVault(SecretUri=${bringPasswordSecret.properties.secretUriWithVersion})'
+    BRING_EXPECTED_ACCOUNT_FINGERPRINT: validatedBringFingerprint
+    BRING_DEFAULT_LIST_UUID: bringDefaultListUuid
+    BRING_READABLE_LIST_UUIDS: validatedBringReadableLists
+    BRING_WRITABLE_LIST_UUIDS: validatedBringWritableLists
+    BRING_SESSION_CACHE_ENABLED: string(bringSessionCacheEnabled)
+    BRING_SESSION_CACHE_CONTAINER: bringSessionCacheContainer
+    BRING_SESSION_CACHE_BLOB: bringSessionCacheBlob
+    BRING_MUTATION_CONTAINER: bringMutationContainer
+    BRING_AUDIT_CONTAINER: bringAuditContainer
+    BRING_STORAGE_ACCOUNT_NAME: privateStorage.name
+    BRING_CONFIRMATION_HMAC_KEY: '@Microsoft.KeyVault(SecretUri=${bringConfirmationKeySecret.properties.secretUriWithVersion})'
+    BRING_MUTATION_ENCRYPTION_KEY: '@Microsoft.KeyVault(SecretUri=${bringEncryptionKeySecret.properties.secretUriWithVersion})'
+    OPENAI_API_KEY: repairableErrorsLlmEnabled ? '@Microsoft.KeyVault(SecretUri=${openAiSecret!.properties.secretUriWithVersion})' : ''
+    REPAIRABLE_ERRORS_LLM_ENABLED: string(repairableErrorsLlmEnabled)
+    REPAIRABLE_ERRORS_LLM_MODEL: repairableErrorsLlmModel
+  })
 }
 
 var storageBlobDataOwnerRole = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')

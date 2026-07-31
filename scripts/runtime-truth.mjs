@@ -21,6 +21,7 @@ function parseArgs(argv = process.argv.slice(2), env = process.env) {
     environment,
     apiBaseUrl: args.apiBaseUrl || env.API_BASE_URL || '',
     expectedSha: String(args.expectedSha || env.EXPECTED_DEPLOYED_COMMIT_SHA || '').toLowerCase(),
+    expectedDeliveryCorrelation: args.deliveryCorrelation || env.EXPECTED_DELIVERY_CORRELATION || '',
     repo: args.repo || env.GITHUB_REPOSITORY || 'JueZ/api',
     workflow: args.workflow || (environment === 'prod' ? 'promote-production.yml' : 'deploy-test.yml'),
     runId: args.runId || '',
@@ -38,6 +39,35 @@ function runGh(args, spawn = spawnSync) {
   const completed = spawn('gh', args, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
   if (completed.status !== 0) throw new Error(`gh ${args.join(' ')} failed`);
   return completed.stdout;
+}
+
+const workflowIdentities = {
+  'deploy-test.yml': { path: '.github/workflows/deploy-test.yml', name: 'Deploy Test' },
+  'promote-production.yml': { path: '.github/workflows/promote-production.yml', name: 'Promote Production' },
+};
+
+export function validateWorkflowRunMetadata(run = {}, options = {}) {
+  const errors = [];
+  const identity = workflowIdentities[options.workflow];
+  if (!identity) return [`unsupported deployment workflow: ${options.workflow || '<missing>'}`];
+  const expectedTitle = `${identity.name} ${options.expectedSha} ${options.expectedDeliveryCorrelation}`;
+  if (String(run.id || '') !== options.runId) errors.push('workflow run ID does not match the requested run');
+  if (run.repository?.full_name !== options.repo) errors.push('workflow repository does not match the requested repo');
+  if (run.path !== identity.path) errors.push(`workflow path must be ${identity.path}`);
+  if (run.name !== identity.name && run.name !== expectedTitle) {
+    errors.push(`workflow run name must be ${identity.name} or ${expectedTitle}`);
+  }
+  if (run.event !== 'workflow_dispatch') errors.push('workflow event must be workflow_dispatch');
+  if (run.run_attempt !== 1) errors.push('deployment evidence reruns are prohibited; dispatch a new workflow run');
+  if (run.conclusion !== 'success') errors.push('workflow conclusion must be success');
+  if (run.head_branch !== 'main') errors.push('workflow head branch must be main');
+  if (String(run.head_sha || '').toLowerCase() !== options.expectedSha) {
+    errors.push('workflow head SHA does not match the expected deployed commit');
+  }
+  if (run.display_title !== expectedTitle) {
+    errors.push('workflow display title does not match the expected source and delivery correlation');
+  }
+  return errors;
 }
 
 async function findJsonFile(dir) {
@@ -58,6 +88,7 @@ export function summarizeLedger(ledger) {
     workflowRunId: ledger.workflowRunId,
     deployedCommit: ledger.deployedCommit,
     sourceRef: ledger.sourceRef,
+    deliveryCorrelation: ledger.deliveryCorrelation,
     smokeRunId: ledger.smokeRunId,
     smokeResultsStatus: ledger.smokeResults?.status,
     authenticatedSmokeResultsStatus: ledger.authenticatedSmokeResults?.status,
@@ -88,6 +119,12 @@ export function decideRuntimeTruth({ live = {}, ledger = null, options = {}, led
         failures.push(`ledger environment expected ${options.environment}, got ${ledger.environment}`);
       if (options.expectedSha && ledger.deployedCommit !== options.expectedSha)
         failures.push(`ledger deployedCommit expected ${options.expectedSha}, got ${ledger.deployedCommit}`);
+      if (options.expectedDeliveryCorrelation && ledger.deliveryCorrelation !== options.expectedDeliveryCorrelation) {
+        failures.push('ledger deliveryCorrelation does not match the expected workflow dispatch');
+      }
+      if (options.runId && ledger.workflowRunId !== options.runId) {
+        failures.push('ledger workflowRunId does not match the expected workflow run');
+      }
       if (
         live.runtime?.deployedCommitSha &&
         ledger.deployedCommit &&
@@ -126,51 +163,41 @@ export async function checkLiveRuntime(options) {
   }
 }
 
-async function latestRunIdForLedger(options, spawn) {
-  if (options.runId) return options.runId;
-  const runs = JSON.parse(
-    runGh(
-      [
-        'run',
-        'list',
-        '--repo',
-        options.repo,
-        '--workflow',
-        options.workflow,
-        '--branch',
-        'main',
-        '--status',
-        'success',
-        '--limit',
-        '30',
-        '--json',
-        'databaseId,headSha,conclusion,status',
-      ],
-      spawn,
-    ),
-  );
-  const run = runs.find(
-    (candidate) => !options.expectedSha || String(candidate.headSha).toLowerCase() === options.expectedSha,
-  );
-  if (!run)
-    throw new Error(
-      `No successful ${options.workflow} run found${options.expectedSha ? ` for ${options.expectedSha}` : ''}.`,
-    );
-  return String(run.databaseId);
-}
-
 export async function loadLedger(options, spawn = spawnSync) {
   if (!options.includeLedger) return { ledger: null, artifactName: '', runId: '' };
   if (!ghAvailable(spawn)) throw new Error('gh CLI is unavailable; ledger mode requires GitHub CLI.');
-  const runId = await latestRunIdForLedger(options, spawn);
-  const artifactName = `release-ledger-${options.environment}-${options.expectedSha}`;
+  if (!/^\d+$/.test(options.runId || '')) {
+    throw new Error('Ledger mode requires the exact workflow run ID via --run-id.');
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/.test(options.expectedDeliveryCorrelation || '')) {
+    throw new Error('Ledger mode requires the exact workflow delivery correlation via --delivery-correlation.');
+  }
+  if (!/^[0-9a-f]{40}$/.test(options.expectedSha || '')) {
+    throw new Error('Ledger mode requires the exact lowercase deployed commit via --expected-sha.');
+  }
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(options.repo || '')) {
+    throw new Error('Ledger mode requires an owner/repository GitHub repository identifier.');
+  }
+  const runId = options.runId;
+  const runMetadata = JSON.parse(runGh(['api', `repos/${options.repo}/actions/runs/${runId}`], spawn));
+  const runErrors = validateWorkflowRunMetadata(runMetadata, options);
+  if (runErrors.length > 0) throw new Error(`Workflow run identity rejected: ${runErrors.join('; ')}`);
+  const artifactName = `release-ledger-${options.environment}-${options.expectedSha}-${options.expectedDeliveryCorrelation}`;
   const artifactDir = options.artifactDir || (await mkdtemp(join(tmpdir(), 'runtime-truth-ledger-')));
   if (!existsSync(artifactDir)) throw new Error(`artifact directory does not exist: ${artifactDir}`);
   runGh(['run', 'download', runId, '--repo', options.repo, '--name', artifactName, '--dir', artifactDir], spawn);
   const ledgerPath = await findJsonFile(artifactDir);
   if (!ledgerPath) throw new Error(`Artifact ${artifactName} did not contain a JSON ledger.`);
   const ledger = JSON.parse(await readFile(ledgerPath, 'utf8'));
-  return { ledger, artifactName, runId, ledgerPath };
+  if (
+    ledger.workflowRunId !== runId ||
+    ledger.sourceRef !== options.expectedSha ||
+    ledger.deployedCommit !== options.expectedSha ||
+    ledger.deliveryCorrelation !== options.expectedDeliveryCorrelation
+  ) {
+    throw new Error('Release ledger identity does not match the exact inspected workflow run.');
+  }
+  return { ledger, artifactName, runId, ledgerPath, runMetadata };
 }
 
 export async function runRuntimeTruth({ argv = process.argv.slice(2), env = process.env, spawn = spawnSync } = {}) {
@@ -184,7 +211,9 @@ export async function runRuntimeTruth({ argv = process.argv.slice(2), env = proc
     try {
       ledgerInfo = await loadLedger(options, spawn);
       ledger = ledgerInfo.ledger;
-      ledgerErrors = validateReleaseLedger(ledger);
+      ledgerErrors = validateReleaseLedger(ledger, {
+        expectedDeliveryCorrelation: options.expectedDeliveryCorrelation,
+      });
     } catch (error) {
       ledgerLoadError = error instanceof Error ? error.message : String(error);
     }
@@ -200,6 +229,7 @@ export async function runRuntimeTruth({ argv = process.argv.slice(2), env = proc
     checkedAt: new Date().toISOString(),
     environment: options.environment || undefined,
     expectedSha: options.expectedSha || undefined,
+    expectedDeliveryCorrelation: options.expectedDeliveryCorrelation || undefined,
     live,
     ledger: ledger ? summarizeLedger(ledger) : undefined,
     ledgerArtifact: ledgerInfo.artifactName,

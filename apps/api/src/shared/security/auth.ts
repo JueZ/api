@@ -107,6 +107,11 @@ export async function authorizeBearerToken(
   policy: OperationAuthorizationPolicy = defaultAuthorizationPolicy,
 ): Promise<AuthorizationResult> {
   if (!config.enabled) {
+    const environment = getDeployedEnvironmentName();
+    if (environment !== 'local') {
+      logAuthFailure(context, 'missing_config', config.debug);
+      return unauthorized('Authentication is not configured.');
+    }
     return authorizePrincipal(
       {
         subject: 'local-dev-placeholder',

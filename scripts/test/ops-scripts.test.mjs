@@ -24,6 +24,7 @@ test('release ledger validation accepts required runtime truth fields', () => {
     deployedCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     sourceRef: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     workflowRunId: '123',
+    deliveryCorrelation: 'delivery-12345678',
     functionAppName: 'func-api',
     apiBaseUrl: 'https://example.test',
     artifacts: {
@@ -38,6 +39,16 @@ test('release ledger validation accepts required runtime truth fields', () => {
     verifiedAt: '2026-05-17T00:00:00.000Z',
   };
   assert.deepEqual(validateReleaseLedger(ledger), []);
+  assert.ok(
+    validateReleaseLedger({ ...ledger, deliveryCorrelation: undefined }).includes(
+      'Missing required field: deliveryCorrelation',
+    ),
+  );
+  assert.ok(
+    validateReleaseLedger(ledger, { expectedDeliveryCorrelation: 'delivery-other123' }).includes(
+      'deliveryCorrelation does not match the expected workflow dispatch',
+    ),
+  );
 });
 
 test('repair issue parser finds PRs and workflow runs', () => {

@@ -1,5 +1,5 @@
 name: Deploy Test
-run-name: Deploy Test ${{ inputs.commit_sha || github.sha }}
+run-name: Deploy Test ${{ inputs.commit_sha || github.sha }} ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
 
 on:
   workflow_dispatch:
@@ -23,6 +23,18 @@ on:
         required: false
         default: false
         type: boolean
+      delivery_correlation:
+        description: Unique delivery-controller correlation value.
+        required: true
+        type: string
+      ci_run_id:
+        description: Exact successful first-attempt main CI run that produced the release bundle.
+        required: true
+        type: string
+      ci_delivery_correlation:
+        description: Exact correlation in the selected main CI run title.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -54,4 +66,9 @@ jobs:
       deployFrontend: ${{ inputs.deploy_frontend }}
       deployFunctions: ${{ inputs.deploy_functions }}
       sourceRef: ${{ inputs.commit_sha || github.sha }}
+      controllerRef: ${{ github.sha }}
+      controllerWorkflowSha: ${{ github.workflow_sha }}
       redditShareUrlSmokeEnabled: ${{ inputs.reddit_share_url_smoke }}
+      deliveryCorrelation: ${{ inputs.delivery_correlation }}
+      ciRunId: ${{ inputs.ci_run_id }}
+      ciDeliveryCorrelation: ${{ inputs.ci_delivery_correlation }}

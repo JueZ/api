@@ -1,10 +1,19 @@
 name: Rollback Production
+run-name: Rollback Production ${{ inputs.commit_sha }} rollback-${{ github.run_id }}-${{ github.run_attempt }}
 
 on:
   workflow_dispatch:
     inputs:
       commit_sha:
         description: Previous immutable 40-character commit SHA from main to redeploy to production.
+        required: true
+        type: string
+      release_run_id:
+        description: Exact prior successful Promote Production workflow run ID for this release.
+        required: true
+        type: string
+      release_delivery_correlation:
+        description: Exact delivery correlation recorded by that prior production release.
         required: true
         type: string
 
@@ -38,5 +47,10 @@ jobs:
       deployFrontend: true
       deployFunctions: true
       sourceRef: ${{ inputs.commit_sha }}
+      controllerRef: ${{ github.sha }}
+      controllerWorkflowSha: ${{ github.workflow_sha }}
       updateProductionVariables: true
       allowRollback: true
+      deliveryCorrelation: rollback-${{ github.run_id }}-${{ github.run_attempt }}
+      rollbackReleaseRunId: ${{ inputs.release_run_id }}
+      rollbackReleaseCorrelation: ${{ inputs.release_delivery_correlation }}

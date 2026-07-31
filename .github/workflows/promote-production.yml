@@ -1,5 +1,5 @@
 name: Promote Production
-run-name: Promote Production ${{ inputs.commit_sha || github.sha }}
+run-name: Promote Production ${{ inputs.commit_sha || github.sha }} ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
 
 on:
   workflow_dispatch:
@@ -8,16 +8,26 @@ on:
         description: Immutable 40-character commit SHA from main to promote. Defaults to the selected ref SHA.
         required: false
         type: string
-      deploy_frontend:
-        description: Deploy Angular static files.
+      delivery_correlation:
+        description: Unique delivery-controller correlation value.
         required: false
-        default: true
-        type: boolean
-      deploy_functions:
-        description: Deploy Azure Functions package.
-        required: false
-        default: true
-        type: boolean
+        type: string
+      test_delivery_correlation:
+        description: Exact correlation from the successful Deploy Test run being promoted.
+        required: true
+        type: string
+      test_run_id:
+        description: Exact successful Deploy Test workflow run being promoted.
+        required: true
+        type: string
+      ci_run_id:
+        description: Exact successful first-attempt main CI run that produced the release bundle.
+        required: true
+        type: string
+      ci_delivery_correlation:
+        description: Exact correlation in the selected main CI run title.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -46,7 +56,14 @@ jobs:
       environmentName: prod
       azureResourceGroup: rg-api-prod
       githubEnvironment: production
-      deployFrontend: ${{ inputs.deploy_frontend }}
-      deployFunctions: ${{ inputs.deploy_functions }}
+      deployFrontend: true
+      deployFunctions: true
       sourceRef: ${{ inputs.commit_sha || github.sha }}
+      controllerRef: ${{ github.sha }}
+      controllerWorkflowSha: ${{ github.workflow_sha }}
       updateProductionVariables: true
+      deliveryCorrelation: ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
+      testDeliveryCorrelation: ${{ inputs.test_delivery_correlation }}
+      testDeliveryRunId: ${{ inputs.test_run_id }}
+      ciRunId: ${{ inputs.ci_run_id }}
+      ciDeliveryCorrelation: ${{ inputs.ci_delivery_correlation }}

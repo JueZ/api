@@ -62,7 +62,10 @@ The normal path needs no routine human input. If the GitHub `production` environ
 gh workflow run deploy-test.yml \
   --ref main \
   --repo JueZ/api \
-  -f commit_sha=<commit-sha>
+  -f commit_sha=<commit-sha> \
+  -f delivery_correlation=<new-opaque-correlation> \
+  -f ci_run_id=<exact-successful-main-ci-run-id> \
+  -f ci_delivery_correlation=<correlation-from-that-ci-run>
 ```
 
 ### Promoting to production
@@ -73,18 +76,25 @@ gh workflow run deploy-test.yml \
 gh workflow run promote-production.yml \
   --ref main \
   --repo JueZ/api \
-  -f commit_sha=<commit-sha>
+  -f commit_sha=<commit-sha> \
+  -f delivery_correlation=<new-opaque-correlation> \
+  -f test_delivery_correlation=<exact-successful-deploy-test-correlation> \
+  -f test_run_id=<exact-successful-deploy-test-run-id> \
+  -f ci_run_id=<exact-successful-main-ci-run-id> \
+  -f ci_delivery_correlation=<correlation-from-that-ci-run>
 ```
 
 ### Rolling back production
 
-Rollback is intentionally simple: redeploy a previous known-good commit with `Rollback Production`. This reuses the same deployment path as promotion and runs production smoke tests before updating production variables.
+Rollback redeploys both preserved immutable Function/frontend packages from an exact previously accepted production release. Current `main` remains authoritative for the workflow controller and validation rules, while rollback leaves Bicep, identity, storage policy, and safety settings unchanged. Before mutation it validates the existing safety settings and complete rendered frontend read-only; it then switches only the existing digest-addressed Function package/provenance and uploads the preserved frontend bytes unchanged. Supply the full source SHA, exact first-attempt successful `Promote Production` run ID, and that run's delivery correlation.
 
 ```bash
 gh workflow run rollback-production.yml \
   --ref main \
   --repo JueZ/api \
-  -f commit_sha=<previous-good-commit-sha>
+  -f commit_sha=<previous-good-commit-sha> \
+  -f release_run_id=<previous-good-promote-production-run-id> \
+  -f release_delivery_correlation=<previous-good-release-correlation>
 ```
 
 This is enough for a small personal project because it proves the exact commit in a separate Azure resource group before production without adding always-on services or expensive routing infrastructure. Blue/green and canary deployments are overkill for v0. Azure Functions deployment slots could be a later hardening upgrade, but this task deliberately keeps the current low-cost consumption-style model and does not switch to a more expensive plan for slots.

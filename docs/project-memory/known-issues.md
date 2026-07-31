@@ -1,11 +1,12 @@
 # Known issues and unresolved risks
 
-## Test deployment is not accepted because protected auth fails open
+## Test deployment is not yet accepted after protected auth failed open
 
 - PR #264 and main CI/policy passed, and test run `30629930683` deployed exact commit `4d82ed8491a32440ec5495049ba39e8f73c6bbac`, but the runtime gate failed: unauthenticated `GET /api/hello` returned `200` as `local-dev-placeholder` instead of `401`.
-- The Azure deployment received `authEnabled=true`, while the effective Function worker behaves as if `AUTH_ENABLED` is false or missing. The deployment principal cannot read effective Function app settings, so an operator with the required Azure permission must confirm the live value.
-- `apps/api/package.json` loads `dist/functions/*.js` directly. That bypasses `dist/index.js`, so the intended startup `assertRuntimeSafety()` check is not executed by the deployed worker. The package entry point and app-setting deployment need a focused repair and regression coverage.
-- Authenticated smoke, telemetry correlation, and accepted test provenance remain blocked. Production must not be promoted from this release.
+- The Azure deployment received `authEnabled=true`, while the effective Function worker behaved as if `AUTH_ENABLED` was false or missing. The focused repair makes app settings an explicit resource and validates every Bicep-managed value, including the exact deployed Application Insights connection metadata and versioned Key Vault reference identities, after normal deployment and read-only before rollback. The streamed Azure response is never persisted, and secret values are never read or emitted.
+- The focused repair loads `dist/index.js`, executes `assertRuntimeSafety()` before registration, and independently rejects disabled authentication outside local development. Local regression coverage passes; live test deployment still must prove the behavior.
+- Test environment origin placeholders were corrected to the exact Function origin without reading or changing secrets. Infrastructure and workflow validation now reject `https://null` and the test frontend derives its API base from the deployed Function output.
+- Authenticated smoke, telemetry correlation, and accepted test provenance remain pending until the focused repair merges and deploys. Production must not be promoted from this release.
 
 ## Granular Entra configuration and new test SPA redirect need privileged verification
 
@@ -27,7 +28,8 @@
 
 - An intentionally failing or pending-check PR must be shown unable to merge.
 - High-risk exact-head independent review and no-bypass branch rules must be verified on GitHub.
-- Exactly one CI/test/production chain and identical test/production artifact digests must be observed.
+- Exactly one first-attempt CI/test chain must be observed. The exact CI run ID/correlation must remain pinned through test provenance and any later promotion. Function, SBOM, and frontend-source digests must match promotion evidence; each environment-rendered frontend digest must match its manifest, deployment settings, ledger, and preserved production bundle.
+- The fresh workflow repair must prove in test that the Function runtime points at the exact SHA-256-verified immutable blob version, and that the active static container contains exactly the approved frontend names and downloaded bytes after activation-last replacement and stale-blob removal. A mutable package URL, overwrite-only upload, or deleting the active site's stale files before replacement verification is not accepted as exact-release evidence.
 - Test runtime SHA is proven, but fail-closed auth, authenticated REST/MCP behavior, MCP origin, Bring read-only behavior, telemetry correlation, accepted provenance, storage/RBAC boundaries, and production promotion gates still require test/live evidence.
 
 ## Angular production bundle warning
