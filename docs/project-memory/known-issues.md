@@ -1,15 +1,21 @@
 # Known issues and unresolved risks
 
-## Local hardening is not operational
+## Test deployment is not accepted because protected auth fails open
 
-- The working tree is intentionally uncommitted and has no PR, remote CI, or exact-head review evidence.
-- Live branch/ruleset enforcement, high-risk review configuration, GitHub variables/environments, Entra scopes/roles/federation, Azure RBAC, Key Vault references, resource migration, and deployment behavior remain unverified.
-- Until those controls are configured and proven, the repository must not be treated as safe for unattended merge or production promotion.
+- PR #264 and main CI/policy passed, and test run `30629930683` deployed exact commit `4d82ed8491a32440ec5495049ba39e8f73c6bbac`, but the runtime gate failed: unauthenticated `GET /api/hello` returned `200` as `local-dev-placeholder` instead of `401`.
+- The Azure deployment received `authEnabled=true`, while the effective Function worker behaves as if `AUTH_ENABLED` is false or missing. The deployment principal cannot read effective Function app settings, so an operator with the required Azure permission must confirm the live value.
+- `apps/api/package.json` loads `dist/functions/*.js` directly. That bypasses `dist/index.js`, so the intended startup `assertRuntimeSafety()` check is not executed by the deployed worker. The package entry point and app-setting deployment need a focused repair and regression coverage.
+- Authenticated smoke, telemetry correlation, and accepted test provenance remain blocked. Production must not be promoted from this release.
 
-## Storage migration is required before infrastructure cutover
+## Granular Entra configuration and new test SPA redirect need privileged verification
 
-- Existing WLH reference data and Bring private/session state may reside in the current storage layout.
-- A reviewed inventory, backup, copy, digest comparison, access test, and rollback plan are required before switching to split storage. The local Bicep change alone does not migrate data.
+- The current operator identity lacks Microsoft Graph permissions needed to inspect or update the API application's delegated scopes/application roles and SPA redirect registrations.
+- The split-storage deployment created a new test web origin. A privileged Entra operator must verify the granular scope/role catalogue and register the exact current test redirect URI before browser authentication can be accepted.
+
+## Remaining private/session storage migration requires review
+
+- The required WLH reference blob was copied to the split private test storage with no overwrite and an independently verified digest before the final test deployment.
+- Bring private/session state may still reside in the previous storage layout. Bring is disabled in test; any future migration requires a reviewed inventory, backup, copy, digest comparison, access test, and rollback plan.
 
 ## Test reads the configured Bring account
 
@@ -17,12 +23,12 @@
 - Test may still see allowlisted real list metadata/items. The read-only canary must stay disabled until its dedicated `bring.read` identity and target list are verified.
 - Undocumented provider write compatibility is covered by sanitized fixtures and guarded production rollout, not by a live mutation canary.
 
-## Live acceptance criteria still require external proof
+## Remaining live acceptance criteria require external proof
 
 - An intentionally failing or pending-check PR must be shown unable to merge.
 - High-risk exact-head independent review and no-bypass branch rules must be verified on GitHub.
 - Exactly one CI/test/production chain and identical test/production artifact digests must be observed.
-- Test auth, MCP origin, Bring read-only behavior, telemetry correlation, release ledger, runtime SHA, storage/RBAC boundaries, and production promotion gates require test/live evidence.
+- Test runtime SHA is proven, but fail-closed auth, authenticated REST/MCP behavior, MCP origin, Bring read-only behavior, telemetry correlation, accepted provenance, storage/RBAC boundaries, and production promotion gates still require test/live evidence.
 
 ## Angular production bundle warning
 
