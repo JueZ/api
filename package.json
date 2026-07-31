@@ -55,7 +55,7 @@
   },
   "devDependencies": {
     "@angular/build": "21.2.19",
-    "@angular/cli": "21.2.19",
+    "@angular/cli": "22.0.8",
     "@angular/compiler-cli": "21.2.18",
     "@eslint/js": "10.0.1",
     "@redocly/cli": "2.40.0",
