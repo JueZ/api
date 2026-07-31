@@ -121,7 +121,7 @@ export function mergeGateDecision({ pullRequest, expectedHeadSha, checkEvaluatio
   return { ok: errors.length === 0, errors, pullRequestState, checkEvaluation, reviewState };
 }
 
-export async function runReview(options, policy, github) {
+export async function runReview(options, policy, github, openAIClient) {
   const pullRequest = await github.getPullRequest(options.prNumber);
   assertExpectedHead(pullRequest, options.headSha);
   const files = await github.getPullRequestFiles(options.prNumber);
@@ -145,7 +145,7 @@ export async function runReview(options, policy, github) {
     return review;
   }
 
-  if (!process.env.OPENAI_API_KEY) {
+  if (!openAIClient && !process.env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required for high-risk autonomous review.');
   }
 
@@ -158,13 +158,12 @@ export async function runReview(options, policy, github) {
     );
   }
 
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const response = await client.responses.create({
+  const client = openAIClient ?? new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const request = {
     model: policy.autonomousReview.model,
     reasoning: { effort: policy.autonomousReview.reasoningEffort },
     store: policy.autonomousReview.store,
     safety_identifier: safetyIdentifier(options.repository, options.prNumber),
-    max_output_tokens: 6000,
     text: {
       verbosity: 'medium',
       format: {
@@ -211,9 +210,57 @@ export async function runReview(options, policy, github) {
         }),
       },
     ],
-  });
+  };
 
-  const parsed = JSON.parse(response.output_text);
+  const outputTokenLimits = [6000, 12000];
+  let parsed;
+  let response;
+  let modelFailure;
+  for (const [attemptIndex, maxOutputTokens] of outputTokenLimits.entries()) {
+    try {
+      response = await client.responses.create({
+        ...request,
+        max_output_tokens: maxOutputTokens,
+      });
+      const outputText = typeof response.output_text === 'string' ? response.output_text.trim() : '';
+      if (!outputText) {
+        modelFailure = summarizeModelFailure(response, 'empty_output', attemptIndex + 1);
+        continue;
+      }
+      try {
+        parsed = JSON.parse(outputText);
+        break;
+      } catch {
+        modelFailure = summarizeModelFailure(response, 'invalid_structured_output', attemptIndex + 1);
+      }
+    } catch (error) {
+      modelFailure = summarizeModelFailure(error, 'request_error', attemptIndex + 1);
+    }
+  }
+
+  if (!parsed) {
+    const review = {
+      decision: 'reject',
+      reviewedHeadSha: options.headSha,
+      summary: 'Independent model review did not return a usable structured decision after two bounded attempts.',
+      findings: [
+        {
+          severity: 'high',
+          title: 'Autonomous review unavailable',
+          evidence: `The OpenAI Responses API review ended with ${modelFailure?.kind ?? 'an unknown failure'}.`,
+          remediation: 'Retry the exact-head autonomous review; do not merge without an approved review artifact.',
+        },
+      ],
+      risk,
+      modelInvoked: true,
+      model: policy.autonomousReview.model,
+      responseId: modelFailure?.responseId,
+      modelFailure,
+    };
+    await publishReview(review, options);
+    throw new Error(`Autonomous review unavailable: ${modelFailure?.kind ?? 'unknown_failure'}.`);
+  }
+
   const review = {
     ...parsed,
     risk,
@@ -386,6 +433,27 @@ function assertExpectedHead(pullRequest, expectedHeadSha) {
 
 function safetyIdentifier(repository, prNumber) {
   return createHash('sha256').update(`${repository}:pull:${prNumber}`).digest('hex');
+}
+
+function summarizeModelFailure(value, kind, attempts) {
+  const responseId = safeDiagnosticToken(value?.id ?? value?.request_id);
+  const responseStatus = safeDiagnosticToken(value?.status);
+  const incompleteReason = safeDiagnosticToken(value?.incomplete_details?.reason);
+  const errorCode = safeDiagnosticToken(value?.error?.code ?? value?.code);
+  const httpStatus = Number.isInteger(value?.status) ? value.status : undefined;
+  return {
+    kind,
+    attempts,
+    ...(responseId ? { responseId } : {}),
+    ...(responseStatus ? { responseStatus } : {}),
+    ...(incompleteReason ? { incompleteReason } : {}),
+    ...(errorCode ? { errorCode } : {}),
+    ...(httpStatus ? { httpStatus } : {}),
+  };
+}
+
+function safeDiagnosticToken(value) {
+  return typeof value === 'string' && /^[a-z0-9_.:-]{1,100}$/i.test(value) ? value : undefined;
 }
 
 function delay(milliseconds) {
