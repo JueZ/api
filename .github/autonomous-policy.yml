@@ -1,0 +1,165 @@
+version: 1
+
+# This file is the canonical repository policy consumed by CI, the autonomous
+# review workflow, documentation generation, and agent-instruction validation.
+requiredChecks:
+  - name: install
+    appSlug: github-actions
+  - name: lint
+    appSlug: github-actions
+  - name: type-check
+    appSlug: github-actions
+  - name: unit tests
+    appSlug: github-actions
+  - name: API tests
+    appSlug: github-actions
+  - name: Angular build
+    appSlug: github-actions
+  - name: Azure Functions build
+    appSlug: github-actions
+  - name: OpenAPI validation
+    appSlug: github-actions
+  - name: Bicep validation
+    appSlug: github-actions
+  - name: workflow and shell lint
+    appSlug: github-actions
+  - name: architecture and agent validation
+    appSlug: github-actions
+  - name: security scan
+    appSlug: github-actions
+  - name: secret scan
+    appSlug: github-actions
+  - name: dependency audit
+    appSlug: github-actions
+  - name: CodeQL javascript-typescript
+    appSlug: github-actions
+  - name: CodeQL actions
+    appSlug: github-actions
+  - name: release artifacts
+    appSlug: github-actions
+  - name: cost-policy check
+    appSlug: github-actions
+  - name: guardrail policy check
+    appSlug: github-actions
+  - name: dependency lock policy
+    appSlug: github-actions
+  - name: CI complete
+    appSlug: github-actions
+  - name: Policy complete
+    appSlug: github-actions
+  - name: Autonomous review complete
+    appSlug: github-actions
+
+highRiskPaths:
+  - .github/workflows/**
+  - .github/actions/**
+  - .github/autonomous-policy.yml
+  - infra/**
+  - apps/api/src/shared/security/**
+  - apps/api/src/shared/config/**
+  - apps/api/src/application/authorization/**
+  - apps/api/src/application/auditing/**
+  - apps/api/src/application/idempotency/**
+  - apps/api/src/application/operations/**
+  - apps/api/src/mcp/**
+  - apps/api/src/shared/bring/**
+  - apps/api/src/functions/bring.ts
+  - contracts/**
+  - scripts/policy-guardrails.mjs
+  - scripts/autonomous-merge-controller.mjs
+  - scripts/check-architecture.mjs
+  - scripts/validate-agent-skills.mjs
+  - scripts/smoke-**
+  - scripts/check-telemetry.mjs
+  - scripts/runtime-truth.mjs
+  - scripts/write-release-ledger.mjs
+  - scripts/validate-release-ledger.mjs
+  - scripts/triage-repair-issues.mjs
+  - apps/api/src/shared/runtimeProvenance.ts
+  - apps/api/src/shared/smokeCorrelation.ts
+  - ops/release-ledger/**
+  - docs/security/**
+  - docs/architecture/**
+  - docs/adr/**
+  - AGENTS.md
+  - '**/AGENTS.md'
+  - .agents/skills/**
+
+riskClasses:
+  workflow:
+    - .github/workflows/**
+    - .github/actions/**
+    - scripts/autonomous-merge-controller.mjs
+  infrastructure:
+    - infra/**
+  authentication:
+    - apps/api/src/shared/security/**
+    - apps/api/src/application/authorization/**
+  destructiveIntegration:
+    - apps/api/src/shared/bring/**
+    - apps/api/src/functions/bring.ts
+    - apps/api/src/mcp/**
+    - contracts/**
+  agentGovernance:
+    - .github/autonomous-policy.yml
+    - AGENTS.md
+    - '**/AGENTS.md'
+    - .agents/skills/**
+
+autonomousReview:
+  checkName: Autonomous review complete
+  requiredForHighRisk: true
+  model: gpt-5.6-sol
+  reasoningEffort: high
+  maxDiffBytes: 1500000
+  store: false
+  humanApprovalRequired: false
+  rejectSeverities:
+    - critical
+    - high
+
+merge:
+  method: squash
+  exactHeadSha: true
+  requireUpToDate: true
+  deleteHeadBranch: true
+  allowedBranchPrefixes:
+    - codex/
+    - codex-
+  allowedLabels:
+    - codex-automerge
+  blockedLabels:
+    - do-not-merge
+    - security-hold
+  allowForks: false
+  allowAdminBypass: false
+  waitSeconds: 3600
+  pollSeconds: 15
+
+deployment:
+  controllerWorkflow: codex-main-delivery.yml
+  productionConcurrencyGroup: production-deployment
+  buildOnce: true
+  requireExactArtifactDigest: true
+  productionEnabledByDefault: false
+
+authorization:
+  permissions:
+    - catalogue.read
+    - reddit.read
+    - wlh.read
+    - bring.read
+    - bring.write
+    - bring.complete
+    - bring.remove
+  destructivePermissions:
+    - bring.complete
+    - bring.remove
+  serviceTokenDeniedPermissions:
+    - bring.complete
+    - bring.remove
+
+retention:
+  auditDays: 365
+  idempotencyDays: 30
+  confirmationTokenMinutes: 5

@@ -55,7 +55,13 @@ components:
   assert.equal(operations.length, 1);
   assert.equal(operations[0].id, 'getThing');
   assert.equal(operations[0].requiresAuth, true);
-  assert.deepEqual(operations[0].parameterFields.map((field) => [field.name, field.parameterIn]), [['id', 'path'], ['verbose', 'query']]);
+  assert.deepEqual(
+    operations[0].parameterFields.map((field) => [field.name, field.parameterIn]),
+    [
+      ['id', 'path'],
+      ['verbose', 'query'],
+    ],
+  );
   assert.equal(operations[0].responses[0].schemaName, 'Thing');
 });
 
@@ -69,30 +75,36 @@ test('request body helper coerces form values into typed JSON', () => {
     ],
   });
 
-  assert.deepEqual(helpers.buildRequestBody(operation, {
-    limit: '3',
-    include_comments: 'true',
-    post: 'abc123',
-    optional: '',
-  }), {
-    limit: 3,
-    include_comments: true,
-    post: 'abc123',
-  });
+  assert.deepEqual(
+    helpers.buildRequestBody(operation, {
+      limit: '3',
+      include_comments: 'true',
+      post: 'abc123',
+      optional: '',
+    }),
+    {
+      limit: 3,
+      include_comments: true,
+      post: 'abc123',
+    },
+  );
 });
 
 test('problem response formatter exposes only sanitized RepairableProblem fields', () => {
-  const problem = helpers.formatProblemResponse({
-    title: 'Invalid Reddit post',
-    status: 400,
-    detail: 'The post field is required.',
-    caller_instruction: 'Move the Reddit URL into post and retry.',
-    retry_policy: { can_retry: true, same_request: false },
-    repair_patch: [{ op: 'add', path: '/post', value: 'abc123' }],
-    repair_plan: [{ action: 'provide_missing_value', path: '/post', reason: 'Required.' }],
-    diagnostic_id: 'diag_test',
-    unsafe_raw_detail: 'Authorization Bearer real-token',
-  }, 400);
+  const problem = helpers.formatProblemResponse(
+    {
+      title: 'Invalid Reddit post',
+      status: 400,
+      detail: 'The post field is required.',
+      caller_instruction: 'Move the Reddit URL into post and retry.',
+      retry_policy: { can_retry: true, same_request: false },
+      repair_patch: [{ op: 'add', path: '/post', value: 'abc123' }],
+      repair_plan: [{ action: 'provide_missing_value', path: '/post', reason: 'Required.' }],
+      diagnostic_id: 'diag_test',
+      unsafe_raw_detail: 'Authorization Bearer real-token',
+    },
+    400,
+  );
 
   assert.equal(problem.title, 'Invalid Reddit post');
   assert.equal(problem.status, '400');
@@ -133,7 +145,7 @@ test('OpenAPI contract drives the interactive API catalogue', () => {
 });
 
 test('API calls send bearer tokens for protected OpenAPI operations', () => {
-  assert.match(mainSource, /acquireAccessToken\(\{ msalClient, account, scope: config\.authApiScope \}\)/);
+  assert.match(mainSource, /resolveOperationScope\(operation, config\.authApiScope\)/);
   assert.match(mainSource, /Authentication is not configured\./);
   assert.match(mainSource, /operation\.requiresAuth/);
 });
@@ -164,9 +176,33 @@ test('OpenAPI request payload fields render interactive controls', () => {
 });
 
 test('complex OpenAPI request fields are parsed as JSON for Bring item batches', () => {
-  const operation = operationFixture({ requestFields: [{ name: 'items', type: 'BringItemInput[]', required: true, description: '', defaultValue: '', constraints: '', enumValues: [], example: '', inputType: 'textarea' }] });
-  assert.deepEqual(helpers.buildRequestBody(operation, { items: '[{"name":"Milch"}]' }), { items: [{ name: 'Milch' }] });
+  const operation = operationFixture({
+    requestFields: [
+      {
+        name: 'items',
+        type: 'BringItemInput[]',
+        required: true,
+        description: '',
+        defaultValue: '',
+        constraints: '',
+        enumValues: [],
+        example: '',
+        inputType: 'textarea',
+      },
+    ],
+  });
+  assert.deepEqual(helpers.buildRequestBody(operation, { items: '[{"name":"Milch"}]' }), {
+    items: [{ name: 'Milch' }],
+  });
   assert.throws(() => helpers.buildRequestBody(operation, { items: 'not json' }), /items must be valid JSON/);
+});
+
+test('Bring destructive writes use a separate prepared confirmation step', () => {
+  assert.match(mainSource, /bringPrepareItemMutation/);
+  assert.match(mainSource, /bringApplyItemMutation/);
+  assert.match(mainSource, /window\.confirm\('Apply this prepared Bring!/);
+  assert.match(mainSource, /captureBringConfirmation\(responseBody\)/);
+  assert.doesNotMatch(mainSource, /bringCompleteItems|bringRemoveItems/);
 });
 
 test('only the canonical OpenAPI YAML is committed while Angular copies it as an asset', () => {
@@ -193,6 +229,7 @@ function operationFixture(overrides = {}) {
     summary: 'Example operation',
     description: '',
     requiresAuth: false,
+    requiredScopes: [],
     requestRequired: true,
     requestContentType: 'application/json',
     requestSchemaName: 'ExampleRequest',
@@ -224,20 +261,26 @@ async function importWebHelpers() {
   const tempDirectory = await mkdtemp(join(process.cwd(), 'apps/web/test/.tmp-web-helper-tests-'));
   const sourceFiles = ['openapi.ts', 'request-builder.ts', 'problem-format.ts', 'curl.ts'];
 
-  await Promise.all(sourceFiles.map(async (fileName) => {
-    const source = await readFile(new URL(`../src/app/${fileName}`, import.meta.url), 'utf8');
-    const js = ts.transpileModule(source, {
-      compilerOptions: {
-        module: ts.ModuleKind.ESNext,
-        target: ts.ScriptTarget.ES2022,
-        moduleResolution: ts.ModuleResolutionKind.Bundler,
-        verbatimModuleSyntax: true,
-      },
-    }).outputText.replace(/from '(\.\/[^']+)'/g, "from '$1.js'");
-    await writeFile(join(tempDirectory, fileName.replace(/\.ts$/, '.js')), js);
-  }));
+  await Promise.all(
+    sourceFiles.map(async (fileName) => {
+      const source = await readFile(new URL(`../src/app/${fileName}`, import.meta.url), 'utf8');
+      const js = ts
+        .transpileModule(source, {
+          compilerOptions: {
+            module: ts.ModuleKind.ESNext,
+            target: ts.ScriptTarget.ES2022,
+            moduleResolution: ts.ModuleResolutionKind.Bundler,
+            verbatimModuleSyntax: true,
+          },
+        })
+        .outputText.replace(/from '(\.\/[^']+)'/g, "from '$1.js'");
+      await writeFile(join(tempDirectory, fileName.replace(/\.ts$/, '.js')), js);
+    }),
+  );
 
-  const modules = await Promise.all(sourceFiles.map((fileName) => import(join(tempDirectory, fileName.replace(/\.ts$/, '.js')))));
+  const modules = await Promise.all(
+    sourceFiles.map((fileName) => import(join(tempDirectory, fileName.replace(/\.ts$/, '.js')))),
+  );
   await rm(tempDirectory, { recursive: true, force: true });
   return Object.assign({}, ...modules);
 }

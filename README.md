@@ -12,7 +12,6 @@ v0 serverless foundation for a personal API catalogue platform.
 - Low-cost Bicep infrastructure skeleton in `infra/main.bicep`.
 - Setup documentation in `docs/setup/v0-hello-world.md`, authentication and GPT Actions OAuth setup in `docs/setup/authentication.md`, OAuth security guidance in `docs/security/service-oauth-authentication.md`, and staged deployment setup commands in `docs/setup/staged-deployment.md`.
 
-
 ## Project memory
 
 This repository keeps repo-based project memory in [`docs/project-memory/README.md`](docs/project-memory/README.md). Codex uses it to preserve important project context across sessions, including current state, decisions, deployment history, incidents, known issues, glossary terms, and next steps.
@@ -29,12 +28,14 @@ The v0 backend code exposes public `GET /health` and protected `GET /api/hello` 
 `AUTH_ENABLED=true`. Test and production deployments use the same OAuth/OIDC JWT
 configuration so authentication is validated before production promotion.
 
+All service-generated REST failures use the Repairable Error Contract with `application/problem+json`. The one bundled `/mcp` server retains stable MCP error codes and adds the same contract at `structuredContent.repairable_problem`. Known failures are deterministic; only sanitized, explicitly uncertain diagnostics may use the optional OpenAI Responses API analyzer, and its output must pass local schema and policy gates.
+
 Current deployment URLs, verified on 2026-05-14:
 
-| Environment | API base URL | Angular frontend |
-| --- | --- | --- |
-| Test | <https://func-api-catalogue-test-iwt54bovfzvrc.azurewebsites.net> | <https://stapicataloguetestiwt54b.z6.web.core.windows.net/> |
-| Production | <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net> | <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/> |
+| Environment | API base URL                                                      | Angular frontend                                            |
+| ----------- | ----------------------------------------------------------------- | ----------------------------------------------------------- |
+| Test        | <https://func-api-catalogue-test-iwt54bovfzvrc.azurewebsites.net> | <https://stapicataloguetestiwt54b.z6.web.core.windows.net/> |
+| Production  | <https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net> | <https://stapicatalogueprodbfjsts.z6.web.core.windows.net/> |
 
 For both environments, `GET /health` is public and unauthenticated
 `GET /api/hello` returns `401` when auth is enabled.

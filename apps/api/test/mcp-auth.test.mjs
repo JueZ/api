@@ -8,20 +8,26 @@ import { handleMcpHttpRequest } from '../dist/mcp/server.js';
 
 const baseEnv = {
   AUTH_ENABLED: 'true',
+  DEPLOYED_ENVIRONMENT_NAME: 'test',
   OIDC_AUDIENCE: 'api://catalogue-test',
-  OIDC_REQUIRED_SCOPES: 'api.access',
+  OIDC_REQUIRED_SCOPES: 'catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove',
   OIDC_ALLOWED_OBJECT_IDS: 'allowed-oid',
   OIDC_ALLOWED_SUBJECTS: '',
   OIDC_ALLOWED_APP_OBJECT_IDS: '',
   OIDC_ALLOWED_CLIENT_IDS: '',
   OIDC_ALLOWED_DELEGATED_CLIENT_IDS: '',
   MCP_RESOURCE_ORIGIN: 'https://mcp.example.test',
+  MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
 };
 
 test('authorizeBearerToken reuses existing JWT validation without an Azure HttpRequest', async () => {
   const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
   try {
-    const token = await signToken(privateKey, kid, issuer, { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'api.access' });
+    const token = await signToken(privateKey, kid, issuer, {
+      sub: 'allowed-subject',
+      oid: 'allowed-oid',
+      scp: 'catalogue.read',
+    });
     await withEnv({ ...baseEnv, OIDC_ISSUER: issuer, OIDC_JWKS_URI: jwksUri }, async () => {
       const result = await authorizeBearerToken(`Bearer ${token}`, contextStub());
       assert.equal(result.ok, true);
@@ -34,15 +40,64 @@ test('authorizeBearerToken reuses existing JWT validation without an Azure HttpR
 });
 
 test('protected resource metadata is generated from safe environment values', async () => {
-  await withEnv({ ...baseEnv, OIDC_ISSUER: 'https://login.example.test/tenant/v2.0', MCP_RESOURCE_DOCUMENTATION_URL: 'https://docs.example.test/mcp' }, async () => {
-    const response = await oauthProtectedResourceHandler(request('GET', 'https://ignored.test/.well-known/oauth-protected-resource'), contextStub());
-    assert.equal(response.status, 200);
-    assert.deepEqual(response.jsonBody, {
-      resource: 'api://catalogue-test',
-      authorization_servers: ['https://login.example.test/tenant/v2.0'],
-      scopes_supported: ['api://catalogue-test/api.access'],
-      resource_documentation: 'https://docs.example.test/mcp',
-    });
+  await withEnv(
+    {
+      ...baseEnv,
+      OIDC_ISSUER: 'https://login.example.test/tenant/v2.0',
+      MCP_RESOURCE_DOCUMENTATION_URL: 'https://docs.example.test/mcp',
+    },
+    async () => {
+      const response = await oauthProtectedResourceHandler(
+        request('GET', 'https://mcp.example.test/.well-known/oauth-protected-resource'),
+        contextStub(),
+      );
+      assert.equal(response.status, 200);
+      assert.deepEqual(response.jsonBody, {
+        resource: 'api://catalogue-test',
+        authorization_servers: ['https://login.example.test/tenant/v2.0'],
+        scopes_supported: [
+          'api://catalogue-test/catalogue.read',
+          'api://catalogue-test/reddit.read',
+          'api://catalogue-test/wlh.read',
+          'api://catalogue-test/bring.read',
+          'api://catalogue-test/bring.write',
+          'api://catalogue-test/bring.complete',
+          'api://catalogue-test/bring.remove',
+        ],
+        resource_documentation: 'https://docs.example.test/mcp',
+      });
+    },
+  );
+});
+
+test('deployed MCP rejects spoofed hosts, forwarded schemes, and browser origins', async () => {
+  await withEnv({ ...baseEnv, OIDC_ISSUER: 'https://login.example.test/tenant/v2.0' }, async () => {
+    const spoofedHost = request('POST', 'https://mcp.example.test/mcp', {});
+    spoofedHost.headers.set('x-forwarded-host', 'attacker.example');
+    const hostResponse = await handleMcpHttpRequest(spoofedHost, contextStub(), stubServices());
+    assert.equal(hostResponse.status, 403);
+    assert.equal(hostResponse.headers['Content-Type'], 'application/problem+json');
+    assert.equal(hostResponse.jsonBody.detail, 'MCP forwarded host is not allowed.');
+    assert.equal(hostResponse.jsonBody.classification, 'security_suspicious');
+
+    const conflictingHost = request('POST', 'https://mcp.example.test/mcp', {});
+    conflictingHost.headers.set('host', 'attacker.example');
+    conflictingHost.headers.set('x-forwarded-host', 'mcp.example.test');
+    const conflictingHostResponse = await handleMcpHttpRequest(conflictingHost, contextStub(), stubServices());
+    assert.equal(conflictingHostResponse.status, 403);
+    assert.equal(conflictingHostResponse.jsonBody.detail, 'MCP host is not allowed.');
+
+    const downgradedScheme = request('POST', 'https://mcp.example.test/mcp', {});
+    downgradedScheme.headers.set('x-forwarded-proto', 'http');
+    const schemeResponse = await handleMcpHttpRequest(downgradedScheme, contextStub(), stubServices());
+    assert.equal(schemeResponse.status, 403);
+    assert.equal(schemeResponse.jsonBody.detail, 'MCP forwarded scheme is not allowed.');
+
+    const blockedOrigin = request('POST', 'https://mcp.example.test/mcp', {});
+    blockedOrigin.headers.set('origin', 'https://attacker.example');
+    const originResponse = await handleMcpHttpRequest(blockedOrigin, contextStub(), stubServices());
+    assert.equal(originResponse.status, 403);
+    assert.equal(originResponse.jsonBody.detail, 'MCP browser origin is not allowed.');
   });
 });
 
@@ -53,6 +108,8 @@ test('unauthenticated private MCP tool fails closed with OAuth challenge metadat
     const result = response.jsonBody.result;
     assert.equal(result.isError, true);
     assert.equal(result.structuredContent.error, 'invalid_token');
+    assert.equal(result.structuredContent.repairable_problem.rec_version, '1.0');
+    assert.equal(result.structuredContent.repairable_problem.classification, 'authorization_context_mismatch');
     assertChallenge(result, {
       error: 'invalid_token',
       errorDescription: 'Missing bearer token.',
@@ -62,10 +119,14 @@ test('unauthenticated private MCP tool fails closed with OAuth challenge metadat
 
 test('MCP GET event stream without bearer returns HTTP 401 WWW-Authenticate', async () => {
   await withEnv({ ...baseEnv, OIDC_ISSUER: 'https://login.example.test/tenant/v2.0' }, async () => {
-    const response = await handleMcpHttpRequest(request('GET', 'https://mcp.example.test/mcp'), contextStub(), stubServices());
+    const response = await handleMcpHttpRequest(
+      request('GET', 'https://mcp.example.test/mcp'),
+      contextStub(),
+      stubServices(),
+    );
     assert.equal(response.status, 401);
     assert.match(response.headers['WWW-Authenticate'], /Bearer resource_metadata=/);
-    assert.match(response.headers['WWW-Authenticate'], /scope="api:\/\/catalogue-test\/api\.access"/);
+    assert.match(response.headers['WWW-Authenticate'], /scope="api:\/\/catalogue-test\/catalogue\.read"/);
     assert.match(response.headers['WWW-Authenticate'], /error="invalid_token"/);
     assert.match(response.headers['WWW-Authenticate'], /error_description="Missing bearer token\."/);
   });
@@ -74,7 +135,11 @@ test('MCP GET event stream without bearer returns HTTP 401 WWW-Authenticate', as
 test('AUTH_ENABLED=true plus a valid signed JWT can call hello_authenticated', async () => {
   const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
   try {
-    const token = await signToken(privateKey, kid, issuer, { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'api.access' });
+    const token = await signToken(privateKey, kid, issuer, {
+      sub: 'allowed-subject',
+      oid: 'allowed-oid',
+      scp: 'catalogue.read',
+    });
     await withEnv({ ...baseEnv, OIDC_ISSUER: issuer, OIDC_JWKS_URI: jwksUri }, async () => {
       const response = await mcpCall('hello_authenticated', {}, `Bearer ${token}`);
       assert.equal(response.status, 200);
@@ -93,7 +158,11 @@ test('AUTH_ENABLED=true plus a valid signed JWT can call hello_authenticated', a
 test('AUTH_ENABLED=true plus a valid signed JWT can call a protected data tool via stub services', async () => {
   const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
   try {
-    const token = await signToken(privateKey, kid, issuer, { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'api.access' });
+    const token = await signToken(privateKey, kid, issuer, {
+      sub: 'allowed-subject',
+      oid: 'allowed-oid',
+      scp: 'reddit.read',
+    });
     const calls = [];
     const services = stubServices(calls);
     await withEnv({ ...baseEnv, OIDC_ISSUER: issuer, OIDC_JWKS_URI: jwksUri }, async () => {
@@ -108,29 +177,76 @@ test('AUTH_ENABLED=true plus a valid signed JWT can call a protected data tool v
   }
 });
 
+test('MCP advertises the exact missing operation scope', async () => {
+  const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
+  try {
+    const token = await signToken(privateKey, kid, issuer, {
+      sub: 'allowed-subject',
+      oid: 'allowed-oid',
+      scp: 'catalogue.read',
+    });
+    await withEnv({ ...baseEnv, OIDC_ISSUER: issuer, OIDC_JWKS_URI: jwksUri }, async () => {
+      const response = await mcpCall('reddit_get_thread', { postId: 'abc' }, `Bearer ${token}`);
+      assertInsufficientScope(response, 'Required permission is missing: reddit.read.', token, 'reddit.read');
+    });
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test('wrong audience, missing scope, blocked user, and blocked delegated client fail closed', async () => {
   const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
   try {
     await withEnv({ ...baseEnv, OIDC_ISSUER: issuer, OIDC_JWKS_URI: jwksUri }, async () => {
-      const wrongAudience = await signToken(privateKey, kid, issuer, { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'api.access' }, 'api://wrong');
+      const wrongAudience = await signToken(
+        privateKey,
+        kid,
+        issuer,
+        { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'catalogue.read' },
+        'api://wrong',
+      );
       const wrongAudienceResponse = await mcpCall('hello_authenticated', {}, `Bearer ${wrongAudience}`);
       assert.equal(wrongAudienceResponse.jsonBody.result.isError, true);
       assert.equal(wrongAudienceResponse.jsonBody.result.structuredContent.error, 'invalid_token');
-      assertChallenge(wrongAudienceResponse.jsonBody.result, { error: 'invalid_token', errorDescription: 'Invalid bearer token.' });
+      assertChallenge(wrongAudienceResponse.jsonBody.result, {
+        error: 'invalid_token',
+        errorDescription: 'Invalid bearer token.',
+      });
       assert.doesNotMatch(JSON.stringify(wrongAudienceResponse.jsonBody), /api:\/\/wrong|allowed-oid|allowed-subject/);
 
-      const missingScope = await signToken(privateKey, kid, issuer, { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'wrong.scope' });
+      const missingScope = await signToken(privateKey, kid, issuer, {
+        sub: 'allowed-subject',
+        oid: 'allowed-oid',
+        scp: 'wrong.scope',
+      });
       const missingScopeResponse = await mcpCall('hello_authenticated', {}, `Bearer ${missingScope}`);
-      assertInsufficientScope(missingScopeResponse, 'Required scope or role is missing.', missingScope);
+      assertInsufficientScope(missingScopeResponse, 'Required permission is missing: catalogue.read.', missingScope);
 
-      const blockedUser = await signToken(privateKey, kid, issuer, { sub: 'blocked-subject', oid: 'blocked-oid', scp: 'api.access' });
+      const blockedUser = await signToken(privateKey, kid, issuer, {
+        sub: 'blocked-subject',
+        oid: 'blocked-oid',
+        scp: 'catalogue.read',
+      });
       const blockedUserResponse = await mcpCall('hello_authenticated', {}, `Bearer ${blockedUser}`);
       assertInsufficientScope(blockedUserResponse, 'User is not allowed.', blockedUser);
 
-      const blockedDelegatedClient = await signToken(privateKey, kid, issuer, { sub: 'allowed-subject', oid: 'allowed-oid', scp: 'api.access', azp: 'blocked-client-id' });
+      const blockedDelegatedClient = await signToken(privateKey, kid, issuer, {
+        sub: 'allowed-subject',
+        oid: 'allowed-oid',
+        scp: 'catalogue.read',
+        azp: 'blocked-client-id',
+      });
       await withEnv({ OIDC_ALLOWED_DELEGATED_CLIENT_IDS: 'allowed-client-id' }, async () => {
-        const blockedDelegatedClientResponse = await mcpCall('hello_authenticated', {}, `Bearer ${blockedDelegatedClient}`);
-        assertInsufficientScope(blockedDelegatedClientResponse, 'Delegated OAuth client is not allowed.', blockedDelegatedClient);
+        const blockedDelegatedClientResponse = await mcpCall(
+          'hello_authenticated',
+          {},
+          `Bearer ${blockedDelegatedClient}`,
+        );
+        assertInsufficientScope(
+          blockedDelegatedClientResponse,
+          'Delegated OAuth client is not allowed.',
+          blockedDelegatedClient,
+        );
       });
     });
   } finally {
@@ -138,30 +254,39 @@ test('wrong audience, missing scope, blocked user, and blocked delegated client 
   }
 });
 
-function assertInsufficientScope(response, errorDescription, token) {
+function assertInsufficientScope(response, errorDescription, token, scope = 'catalogue.read') {
   assert.equal(response.jsonBody.result.isError, true);
   assert.equal(response.jsonBody.result.structuredContent.error, 'insufficient_scope');
-  assertChallenge(response.jsonBody.result, { error: 'insufficient_scope', errorDescription });
+  assertChallenge(response.jsonBody.result, { error: 'insufficient_scope', errorDescription, scope });
   assert.doesNotMatch(JSON.stringify(response.jsonBody), tokenRegex(token));
 }
 
-function assertChallenge(result, { error, errorDescription }) {
+function assertChallenge(result, { error, errorDescription, scope = 'catalogue.read' }) {
   const challenge = result._meta['mcp/www_authenticate'][0];
   assert.match(challenge, /resource_metadata="https:\/\/mcp\.example\.test\/\.well-known\/oauth-protected-resource"/);
-  assert.match(challenge, /scope="api:\/\/catalogue-test\/api\.access"/);
+  assert.match(challenge, new RegExp(`scope="api:\\/\\/catalogue-test\\/${escapeRegExp(scope)}"`));
   assert.match(challenge, new RegExp(`error="${escapeRegExp(error)}"`));
   assert.match(challenge, new RegExp(`error_description="${escapeRegExp(errorDescription)}"`));
 }
 
 function request(method, url, body, authorization) {
-  const headers = new Headers({ accept: 'application/json, text/event-stream', 'content-type': 'application/json' });
+  const headers = new Headers({
+    accept: 'application/json, text/event-stream',
+    'content-type': 'application/json',
+    host: new URL(url).host,
+  });
   if (authorization) headers.set('authorization', authorization);
   return { method, url, headers, params: {}, json: async () => body };
 }
 
 async function mcpCall(name, args = {}, authorization, services = stubServices()) {
   return handleMcpHttpRequest(
-    request('POST', 'https://mcp.example.test/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, authorization),
+    request(
+      'POST',
+      'https://mcp.example.test/mcp',
+      { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
+      authorization,
+    ),
     contextStub(),
     services,
   );
@@ -178,7 +303,11 @@ function stubServices(calls = []) {
         calls.push(['fetchThread', args]);
         return { source: 'reddit', post: { id: args?.post ?? 'abc' }, stats: { commentsReturned: 0 } };
       },
-      fetchThreadOverview: async () => ({ source: 'reddit', post: { id: 'abc' }, stats: { loadedSnapshotCommentCount: 0 } }),
+      fetchThreadOverview: async () => ({
+        source: 'reddit',
+        post: { id: 'abc' },
+        stats: { loadedSnapshotCommentCount: 0 },
+      }),
     },
     wlh: {
       search: async () => ({ source: 'wlh', rowsReturned: 0, filteredRowsReturned: 0 }),
@@ -233,11 +362,17 @@ async function startJwksServer() {
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
-  return { server, issuer: 'https://login.example.test/tenant/v2.0', jwksUri: `http://127.0.0.1:${port}/jwks`, privateKey, kid };
+  return {
+    server,
+    issuer: 'https://login.example.test/tenant/v2.0',
+    jwksUri: `http://127.0.0.1:${port}/jwks`,
+    privateKey,
+    kid,
+  };
 }
 
 async function closeServer(server) {
-  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 }
 
 function tokenRegex(token) {

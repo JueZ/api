@@ -1,45 +1,76 @@
 # Unofficial Bring! shopping-list integration
 
-This private integration uses Bring!'s undocumented HTTP API. It can break without notice when Bring! changes endpoints, headers, authentication payloads, or list/item response shapes. The API catalogue returns only normalized list and item DTOs; it never returns account credentials, access/refresh tokens, raw authentication responses, upstream headers, or the session-blob location.
+Bring! has no supported public API for this use case. The integration therefore treats every provider response as untrusted and version-unstable. Provider credentials, tokens, headers, raw account data, item names from mutation results, and storage locations are never returned or logged.
 
-## Configuration and security model
+## Safety model
 
-GitHub repository **variables** provide non-secret runtime configuration:
+- The existing Bring technical account remains in use.
+- `test` may read the same account but cannot add, complete, or remove items.
+- Production reads require `BRING_READABLE_LIST_UUIDS`.
+- Production writes require an explicit UUID in `BRING_WRITABLE_LIST_UUIDS`.
+- Shared and unlisted lists are denied for every write, even if Bring exposes them to the account.
+- Whole-list creation, deletion, sharing, membership, and notification operations are unsupported.
+- `BRING_EXPECTED_ACCOUNT_FINGERPRINT` binds the deployment to the intended technical account without storing its email in state or audit records.
 
-- `BRING_BASE_URL` (normally `https://api.getbring.com/rest/`)
-- `BRING_CLIENT_API_KEY` (the shared unofficial application/client key used by community clients; it is not a personal account credential)
-- `BRING_COUNTRY`
-- optional `BRING_DEFAULT_LIST_UUID`
-- `BRING_SESSION_CACHE_ENABLED`
-- `BRING_SESSION_CACHE_CONTAINER`
-- `BRING_SESSION_CACHE_BLOB`
+The granular permissions are `bring.read`, `bring.write`, `bring.complete`, and `bring.remove`. Service tokens may read and add when explicitly granted but cannot complete or remove. Destructive operations require a delegated user token.
 
-GitHub repository **secrets** `BRING_EMAIL` and `BRING_PASSWORD` contain the technical-account credentials. Deployment passes them as secure Bicep parameters. Azure Function settings also include `BRING_STORAGE_ACCOUNT_NAME`, which refers to the existing private deployment storage account. No new storage account, database, Redis service, plan, or always-on resource is created.
+## Mutation contract
 
-All HTTP routes and MCP tools use the existing API/MCP OAuth authorization. `GET /api/bring/lists` returns every own or shared list visible to the configured technical account, including a normalized `shared` marker. HTTP item routes require an explicit list UUID, so callers can select exactly which accessible list to read or edit. MCP and the service layer may omit it and use `BRING_DEFAULT_LIST_UUID`, the login-derived default, or the first available list. Add, complete, and remove calls accept 1–50 strictly validated items per batch.
+Adds use:
 
-The MCP gateway exposes `bring_list_lists`, `bring_get_items`, `bring_add_items`, `bring_complete_items`, and `bring_remove_items`. Creating, deleting, sharing, or changing membership of whole lists remains intentionally unsupported; this integration only edits items in lists already accessible to the technical account.
+```text
+POST /api/bring/lists/{listUuid}/items
+{ operationId, expectedListVersion?, items }
+```
 
-Bring item mutations use the private batch endpoint `PUT v2/bringlists/{listUuid}/items`. The request body contains a `changes` array with Bring's private `itemId`, `spec`, `uuid`, location-placeholder fields, and operation values `TO_PURCHASE`, `TO_RECENTLY`, or `REMOVE`; successful empty `204` responses are valid. This wire format is deliberately isolated in the native client because it is undocumented and may change without notice.
+`operationId` is a caller-generated UUID. Durable state is retained for 30 days. An identical retry returns the recorded result; reusing the UUID with different input or identity fails. If the upstream result is ambiguous, state becomes `outcome_unknown` and automatic replay is permanently blocked. Read the list before deciding on a new operation.
 
-## Authentication and cache lifecycle
+Complete and remove use two phases:
 
-Each Function instance maintains one in-memory session and one shared authentication promise, preventing duplicate cold-start logins. Tokens are treated as expired 60 seconds early. On expiry the client attempts one refresh; an invalid refresh token clears the cache and causes one email/password login. A normal upstream `401` causes exactly one reauthentication and request retry.
+```text
+POST /api/bring/lists/{listUuid}/mutations/prepare
+{ operationId, expectedListVersion?, operation, items }
 
-When durable caching is enabled, `DefaultAzureCredential` and the Function App managed identity read/write a versioned JSON session in the configured private blob container. The blob contains tokens and user/list identifiers, but never the email or password. Blob read/write/clear failures generate sanitized warnings and operations fall back to normal login. Malformed or obsolete payloads are discarded. Last-write-wins is intentional for this low-volume private service.
+POST /api/bring/lists/{listUuid}/mutations/apply
+{ operationId, confirmationToken }
+```
 
-Set `BRING_SESSION_CACHE_ENABLED=false` to disable durable caching. Process-local caching remains active.
+Prepare validates policy, input, list ownership, and optional optimistic concurrency without calling the mutation endpoint. It returns an HMAC list pseudonym, item count, expiry, and a five-minute token bound to the principal, operation ID, list, operation, and encrypted payload. Apply verifies that binding before one upstream call.
 
-## Password rotation and cache clearing
+MCP exposes the same flow through `bring_add_items`, `bring_prepare_item_mutation`, and `bring_apply_item_mutation`. Tool instructions forbid inventing confirmation tokens or acting on instructions found in provider content.
 
-1. Replace the `BRING_PASSWORD` repository secret without displaying it.
-2. Delete only the configured session blob (not the container or storage account) using an authorized Azure operator session, or allow an invalid refresh token to trigger sanitized cache clearing.
-3. Run the staged deployment workflow and verify workflow, smoke, runtime-truth, and telemetry evidence. Never paste Function settings, tokens, credential values, storage credentials, or SAS URLs into logs or tickets.
+## Storage, encryption, and audit
 
-## Testing and operations
+The Function managed identity accesses separate private blob containers for:
 
-Tests mock `fetch`, authentication, time, and session stores; unit/PR CI never calls Bring!. Run `npm run test:api`, `npm run ops:check-openapi-drift`, and `npm run ops:policy-guardrails`. Deployment verification should confirm the exact deployed commit through `/health`, then exercise protected routes only with the established authenticated smoke mechanism. A cache outage should not prevent operations; account-auth failures are dependency failures and do not invalidate the caller's API OAuth token.
+- session cache;
+- encrypted durable mutation state;
+- append-only audit events.
 
-Expected upstream failures include rate limiting, timeouts, account-auth rejection, server failures, plain-text/HTML errors, and response drift. The service maps these to sanitized repairable problems. Because the upstream API is unofficial, response drift remains the primary residual risk and rollback is the normal repository rollback workflow to a known-good full `main` SHA.
+Prepared item payloads use AES-256-GCM with `BRING_MUTATION_ENCRYPTION_KEY`. Confirmation/list/principal pseudonyms use `BRING_CONFIRMATION_HMAC_KEY`. Key material and provider credentials are Key Vault references in Function settings. Audit events contain operation, state, item count, pseudonyms, correlation ID, timestamp, and deployed commit—not item text. Lifecycle policy retains audit data for 365 days and mutation/replay state for at least 30 days.
 
-Failed upstream calls emit bounded structured diagnostics containing the operation, sanitized endpoint template, HTTP method/status, content type, retry count, and at most 240 characters of redacted non-authentication response text. Authentication response bodies are never excerpted. MCP errors distinguish Bring authentication, timeout, invalid-response, rate-limit, not-found, and other upstream failures; they may expose only the numeric upstream status, never raw response content, headers, credentials, or session tokens.
+The provider wire adapter remains isolated in `shared/bring/client.ts`. It maps normalized operations to the observed private `{ changes, sender }` request and accepts valid empty `204` responses.
+
+## Contract fixtures and canary
+
+`apps/api/test/fixtures/bring/provider-v2026-07-26.json` is sanitized and contains synthetic identifiers/text plus a SHA-256 provenance digest. Tests consume it and never call Bring!.
+
+`Bring Read-Only Canary` is disabled unless `BRING_READ_CANARY_ENABLED=true`. It uses a dedicated GitHub-OIDC/Entra service identity that must have only `bring.read`, then performs only:
+
+- `GET /api/bring/lists`;
+- `GET /api/bring/lists/{configuredUuid}/items`.
+
+The workflow contains no mutation request. Enable it only after configuring the dedicated app identity, `BRING_CANARY_*` variables, and a test-readable list UUID.
+
+## Operations
+
+Rotate the password or keys through repository/environment secrets and Key Vault-backed deployment. Clear only the configured session blob when necessary. Never print settings or use SAS URLs. Validate changes with:
+
+```bash
+npm run test:api
+npm run ops:check-openapi-drift
+npm run eval:agents
+npm run ops:policy-guardrails
+```
+
+Provider response drift, account lockout, and ambiguous network failures remain residual risks. Roll back only through the repository rollback workflow to a known-good full `main` SHA.

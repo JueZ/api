@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { getSmokeRunId, requireUrl, fetchJson, assertEqual, safeSummary } from './lib/smoke-utils.mjs';
 
-function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export async function runAuthenticatedSmoke({ env = process.env } = {}) {
   const apiBaseUrl = requireUrl('API_BASE_URL', env.API_BASE_URL);
@@ -21,7 +23,9 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
   const protectedRetryAttempts = Number(env.AUTH_PROTECTED_RETRY_ATTEMPTS || healthRetryAttempts);
   const protectedRetryDelayMs = Number(env.AUTH_PROTECTED_RETRY_DELAY_MS || healthRetryDelayMs);
 
-  function record(name, status, details = {}) { results.checks.push({ name, status, ...details }); }
+  function record(name, status, details = {}) {
+    results.checks.push({ name, status, ...details });
+  }
 
   async function fetchJsonWithRetry(url, options, { attempts, delayMs, retryStatuses, label }) {
     let last;
@@ -42,42 +46,61 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
 
   if (!token) {
     results.status = requireAuthSmoke ? 'blocked_auth_smoke' : 'skipped_auth_smoke';
-    results.blockedReason = 'AUTH_ACCESS_TOKEN was not minted for authenticated smoke; configure service OAuth variables and GitHub OIDC federation.';
+    results.blockedReason =
+      'AUTH_ACCESS_TOKEN was not minted for authenticated smoke; configure service OAuth variables and GitHub OIDC federation.';
     return { result: results, exitCode: requireAuthSmoke ? 2 : 0, output: 'stdout' };
   }
 
   try {
-    const health = await fetchJsonWithRetry(`${apiBaseUrl}/health`, { headers: { 'X-Smoke-Run-Id': smokeRunId } }, {
-      attempts: healthRetryAttempts,
-      delayMs: healthRetryDelayMs,
-      retryStatuses: new Set([404, 502, 503]),
-      label: '/health',
-    });
+    const health = await fetchJsonWithRetry(
+      `${apiBaseUrl}/health`,
+      { headers: { 'X-Smoke-Run-Id': smokeRunId } },
+      {
+        attempts: healthRetryAttempts,
+        delayMs: healthRetryDelayMs,
+        retryStatuses: new Set([404, 502, 503]),
+        label: '/health',
+      },
+    );
     assertEqual('/health HTTP status', health.response.status, 200);
     if (environmentName) assertEqual('/health environmentName', health.json?.environmentName, environmentName);
-    if (expectedSha) assertEqual('/health deployedCommitSha', health.json?.deployedCommitSha, expectedSha.toLowerCase());
+    if (expectedSha)
+      assertEqual('/health deployedCommitSha', health.json?.deployedCommitSha, expectedSha.toLowerCase());
     record('runtime-health', 'passed', { deployedCommitSha: health.json?.deployedCommitSha });
 
-    const hello = await fetchJsonWithRetry(`${apiBaseUrl}/api/hello`, { headers }, {
-      attempts: protectedRetryAttempts,
-      delayMs: protectedRetryDelayMs,
-      retryStatuses: new Set([404, 502, 503]),
-      label: 'authenticated /api/hello',
-    });
+    const hello = await fetchJsonWithRetry(
+      `${apiBaseUrl}/api/hello`,
+      { headers },
+      {
+        attempts: protectedRetryAttempts,
+        delayMs: protectedRetryDelayMs,
+        retryStatuses: new Set([404, 502, 503]),
+        label: 'authenticated /api/hello',
+      },
+    );
     assertEqual('authenticated /api/hello status', hello.response.status, 200);
     assertEqual('authenticated /api/hello authenticated flag', hello.json?.authenticated, true);
     record('authenticated-hello', 'passed');
 
-    const reddit = await fetchJsonWithRetry(`${apiBaseUrl}/api/reddit/thread`, {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ post: 'https://www.reddit.com/r/reddit.com/comments/87/the_downing_street_memo/', sort: 'top', maxComments: 1, maxMoreChildrenRequests: 0 }),
-    }, {
-      attempts: protectedRetryAttempts,
-      delayMs: protectedRetryDelayMs,
-      retryStatuses: new Set([404, 502, 503]),
-      label: 'authenticated /api/reddit/thread',
-    });
+    const reddit = await fetchJsonWithRetry(
+      `${apiBaseUrl}/api/reddit/thread`,
+      {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          post: 'https://www.reddit.com/r/reddit.com/comments/87/the_downing_street_memo/',
+          sort: 'top',
+          maxComments: 1,
+          maxMoreChildrenRequests: 0,
+        }),
+      },
+      {
+        attempts: protectedRetryAttempts,
+        delayMs: protectedRetryDelayMs,
+        retryStatuses: new Set([404, 502, 503]),
+        label: 'authenticated /api/reddit/thread',
+      },
+    );
     if (reddit.response.status >= 500 || reddit.response.status === 429) {
       results.status = 'dependency_blocked';
       results.blockedReason = `Reddit upstream or API dependency returned ${reddit.response.status}`;
@@ -97,14 +120,18 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
           body: JSON.stringify({ post: shareSmokeUrl, sort: 'top', maxComments: 1, maxMoreChildrenRequests: 0 }),
         });
         const shareBody = JSON.stringify(shareReddit.json ?? {});
-        const shareResolutionBlocked = /REDDIT_SHARE_RESOLUTION_BLOCKED|Reddit \/s\/ share URL|\/s\/ share URL|comments<\/id>|comments\/<id>|without exposing a canonical|challenge/i.test(shareBody);
-        const shareResolutionHttpStatus = shareReddit.json?.redditFetchError?.status
-          ?? shareReddit.json?.safe_error?.original_status
-          ?? shareReddit.json?.safe_error?.httpStatus
-          ?? shareReddit.json?.resolution?.httpStatus;
+        const shareResolutionBlocked =
+          /REDDIT_SHARE_RESOLUTION_BLOCKED|Reddit \/s\/ share URL|\/s\/ share URL|comments<\/id>|comments\/<id>|without exposing a canonical|challenge/i.test(
+            shareBody,
+          );
+        const shareResolutionHttpStatus =
+          shareReddit.json?.redditFetchError?.status ??
+          shareReddit.json?.safe_error?.original_status ??
+          shareReddit.json?.safe_error?.httpStatus ??
+          shareReddit.json?.resolution?.httpStatus;
         if (
-          (shareReddit.response.status === 400 && shareResolutionBlocked)
-          || ([403, 429].includes(Number(shareResolutionHttpStatus)) && shareResolutionBlocked)
+          (shareReddit.response.status === 400 && shareResolutionBlocked) ||
+          ([403, 429].includes(Number(shareResolutionHttpStatus)) && shareResolutionBlocked)
         ) {
           results.status = 'dependency_blocked';
           results.blockedReason = 'reddit web share URL resolution blocked from server egress';
@@ -122,7 +149,12 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
           return { result: results, exitCode: shareSmokeRequired ? 3 : 0, output: 'stdout' };
         }
         assertEqual('authenticated Reddit share URL smoke status', shareReddit.response.status, 200);
-        if (shareSmokeExpectedPostId) assertEqual('authenticated Reddit share URL smoke post id', shareReddit.json?.post?.id, shareSmokeExpectedPostId);
+        if (shareSmokeExpectedPostId)
+          assertEqual(
+            'authenticated Reddit share URL smoke post id',
+            shareReddit.json?.post?.id,
+            shareSmokeExpectedPostId,
+          );
         record('reddit-share-url-resolution', 'passed', { postId: shareReddit.json?.post?.id });
       }
     }
@@ -138,6 +170,7 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const { result, exitCode, output } = await runAuthenticatedSmoke();
   const rendered = safeSummary(result);
-  if (output === 'stderr') console.error(rendered); else console.log(rendered);
+  if (output === 'stderr') console.error(rendered);
+  else console.log(rendered);
   process.exit(exitCode);
 }

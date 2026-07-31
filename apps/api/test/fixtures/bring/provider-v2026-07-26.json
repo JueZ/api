@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "capturedAtUtc": "2026-07-26T12:00:00.000Z",
+    "origin": "Sanitized Bring v2 provider contract observation",
+    "providerVersion": "unofficial-v2-observed-2026-07-26",
+    "sanitization": "All identifiers, tokens, account fields, and item text are synthetic.",
+    "responsesSha256": "361e09554eb86f9c64a33f7216df5a051388701b8e21c7178397f47d4924be3f"
+  },
+  "responses": {
+    "login": {
+      "access_token": "fixture-access-token",
+      "refresh_token": "fixture-refresh-token",
+      "uuid": "fixture-user",
+      "publicUuid": "fixture-public-user",
+      "expires_in": 3600,
+      "defaultListUuid": "11111111-1111-4111-8111-111111111111"
+    },
+    "lists": {
+      "lists": [
+        {
+          "listUuid": "11111111-1111-4111-8111-111111111111",
+          "name": "Fixture own list"
+        },
+        {
+          "listUuid": "22222222-2222-4222-8222-222222222222",
+          "name": "Fixture shared list",
+          "isShared": true
+        }
+      ]
+    },
+    "list": {
+      "items": {
+        "purchase": [
+          {
+            "itemId": "Fixture active item",
+            "specification": "Fixture specification"
+          }
+        ],
+        "recently": [
+          {
+            "itemId": "Fixture completed item"
+          }
+        ]
+      }
+    },
+    "mutationRequest": {
+      "changes": [
+        {
+          "accuracy": "0.0",
+          "altitude": "0.0",
+          "latitude": "0.0",
+          "longitude": "0.0",
+          "itemId": "Fixture active item",
+          "spec": "Fixture specification",
+          "uuid": null,
+          "operation": "TO_PURCHASE"
+        }
+      ],
+      "sender": ""
+    }
+  }
+}

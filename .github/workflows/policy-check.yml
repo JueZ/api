@@ -62,6 +62,11 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install policy dependencies
+        shell: bash
+        run: npm ci --ignore-scripts
       - name: Fail closed on forbidden security or automation changes
         shell: bash
         run: |
@@ -73,6 +78,24 @@ jobs:
           BASE_REF="$base_ref" npm run ops:policy-guardrails
           echo "Guardrail policy check passed."
 
+  dependency-lock-policy:
+    name: dependency lock policy
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          fetch-depth: 0
+      - name: Enforce reviewed registry-only lockfile changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_ref="${{ github.event.pull_request.base.sha || github.event.before || 'HEAD~1' }}"
+          if ! git cat-file -e "$base_ref^{commit}" 2>/dev/null; then
+            base_ref="HEAD~1"
+          fi
+          BASE_REF="$base_ref" node scripts/check-lockfile-policy.mjs
+
   policy-complete:
     name: Policy complete
     timeout-minutes: 5
@@ -80,6 +103,7 @@ jobs:
     needs:
       - cost-policy-check
       - guardrail-policy-check
+      - dependency-lock-policy
     if: always()
     steps:
       - name: Verify all policy jobs passed

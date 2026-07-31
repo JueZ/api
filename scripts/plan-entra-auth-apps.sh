@@ -14,7 +14,8 @@ Create manually or adapt these Azure CLI commands after reviewing tenant policy:
 
 2. Set an Application ID URI, commonly api://<api-app-client-id>.
 
-3. Expose delegated scope api.access on the API app registration.
+3. Expose delegated scopes catalogue.read, reddit.read, wlh.read, bring.read,
+   bring.write, bring.complete, and bring.remove on the API app registration.
    The Azure CLI command requires the API app object ID and an oauth2PermissionScopes
    manifest patch. Review generated GUIDs and tenant policy before applying.
 
@@ -24,7 +25,9 @@ Create manually or adapt these Azure CLI commands after reviewing tenant policy:
      --sign-in-audience AzureADMyOrg \
      --web-redirect-uris 'http://localhost:4200' '<production-frontend-origin>'
 
-5. Add the SPA platform redirect URIs and grant delegated access to the API scope.
+5. Add the SPA platform redirect URIs and grant only the delegated scopes the
+   browser client needs. Destructive Bring scopes should be consented only for
+   the allowlisted operator client.
 
 See docs/setup/authentication.md for exact required repository variables and validation steps.
 PLAN

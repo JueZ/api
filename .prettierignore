@@ -1,0 +1,11 @@
+.angular/
+.codex/
+coverage/
+dist/
+node_modules/
+ops/release-ledger/
+package-lock.json
+contracts/
+infra/
+docs/project-memory/
+docs/architecture/operation-catalogue.md

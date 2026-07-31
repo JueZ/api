@@ -53,9 +53,7 @@ export function formatProblemResponse(body: unknown, fallbackStatus: number): Sa
   }
 
   const safeProblem = Object.fromEntries(
-    SAFE_PROBLEM_KEYS
-      .filter((key) => body[key] !== undefined)
-      .map((key) => [key, body[key]]),
+    SAFE_PROBLEM_KEYS.filter((key) => body[key] !== undefined).map((key) => [key, body[key]]),
   ) as RepairableProblem;
 
   if (!safeProblem.title && !safeProblem.detail && !safeProblem.caller_instruction && !safeProblem.diagnostic_id) {

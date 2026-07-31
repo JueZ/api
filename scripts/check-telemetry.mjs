@@ -45,7 +45,16 @@ export function parseAzureMonitorQueryResult(parsed) {
   };
 }
 
-export function telemetryDecision({ environmentName = 'unknown', failClosed = false, requireSmokeCorrelation = false, smokeRunId = '', querySucceeded = true, checks = {}, queryAttempt = 1, blockedReason = '' }) {
+export function telemetryDecision({
+  environmentName = 'unknown',
+  failClosed = false,
+  requireSmokeCorrelation = false,
+  smokeRunId = '',
+  querySucceeded = true,
+  checks = {},
+  queryAttempt = 1,
+  blockedReason = '',
+}) {
   const productionRequired = failClosed || environmentName === 'prod';
   const normalized = {
     exceptions: Number(checks.exceptions || 0),
@@ -56,27 +65,63 @@ export function telemetryDecision({ environmentName = 'unknown', failClosed = fa
     smokeEvidenceCount: Number(checks.smokeEvidenceCount || 0),
   };
   if (!querySucceeded) {
-    return { status: 'blocked_telemetry', exitCode: productionRequired ? 2 : 0, checks: normalized, blockedReason: blockedReason || 'Azure Monitor query failed; verify OIDC permissions and Application Insights configuration.', queryAttempt };
+    return {
+      status: 'blocked_telemetry',
+      exitCode: productionRequired ? 2 : 0,
+      checks: normalized,
+      blockedReason:
+        blockedReason || 'Azure Monitor query failed; verify OIDC permissions and Application Insights configuration.',
+      queryAttempt,
+    };
   }
   if (normalized.exceptions > 0 || normalized.http5xx > 0 || normalized.failedRequests > 0) {
-    return { status: 'failed', exitCode: 1, checks: normalized, failureSummary: 'Critical runtime errors were observed after smoke tests.', queryAttempt };
+    return {
+      status: 'failed',
+      exitCode: 1,
+      checks: normalized,
+      failureSummary: 'Critical runtime errors were observed after smoke tests.',
+      queryAttempt,
+    };
   }
   if (smokeRunId && requireSmokeCorrelation && normalized.smokeEvidenceCount < 1) {
-    return { status: productionRequired ? 'failed' : 'blocked_telemetry', exitCode: productionRequired ? 1 : 0, checks: normalized, failureSummary: productionRequired ? 'Required smoke correlation telemetry was not observed after smoke tests.' : undefined, blockedReason: productionRequired ? undefined : 'Smoke correlation telemetry was not observed, but telemetry is not required to fail closed for this environment.', queryAttempt };
+    return {
+      status: productionRequired ? 'failed' : 'blocked_telemetry',
+      exitCode: productionRequired ? 1 : 0,
+      checks: normalized,
+      failureSummary: productionRequired
+        ? 'Required smoke correlation telemetry was not observed after smoke tests.'
+        : undefined,
+      blockedReason: productionRequired
+        ? undefined
+        : 'Smoke correlation telemetry was not observed, but telemetry is not required to fail closed for this environment.',
+      queryAttempt,
+    };
   }
   return { status: 'passed', exitCode: 0, checks: normalized, queryAttempt };
 }
 
-export function shouldRetryTelemetry({ decision, smokeRunId, requireSmokeCorrelation, attempt, maxAttempts, querySucceeded }) {
+export function shouldRetryTelemetry({
+  decision,
+  smokeRunId,
+  requireSmokeCorrelation,
+  attempt,
+  maxAttempts,
+  querySucceeded,
+}) {
   if (attempt >= maxAttempts) return false;
   if (!querySucceeded) return true;
-  const missingSmokeEvidence = smokeRunId && requireSmokeCorrelation && Number(decision?.checks?.smokeEvidenceCount || 0) < 1;
-  const runtimeErrors = Number(decision?.checks?.exceptions || 0) > 0 || Number(decision?.checks?.http5xx || 0) > 0 || Number(decision?.checks?.failedRequests || 0) > 0;
+  const missingSmokeEvidence =
+    smokeRunId && requireSmokeCorrelation && Number(decision?.checks?.smokeEvidenceCount || 0) < 1;
+  const runtimeErrors =
+    Number(decision?.checks?.exceptions || 0) > 0 ||
+    Number(decision?.checks?.http5xx || 0) > 0 ||
+    Number(decision?.checks?.failedRequests || 0) > 0;
   return Boolean(missingSmokeEvidence && !runtimeErrors);
 }
 
 function appInsightsArgs(env) {
-  const app = env.APPLICATIONINSIGHTS_APP_ID || env.APPLICATIONINSIGHTS_RESOURCE_ID || env.APPLICATIONINSIGHTS_NAME || '';
+  const app =
+    env.APPLICATIONINSIGHTS_APP_ID || env.APPLICATIONINSIGHTS_RESOURCE_ID || env.APPLICATIONINSIGHTS_NAME || '';
   const resourceGroup = env.AZURE_RESOURCE_GROUP || '';
   if (!app) return { app, args: [] };
   if (env.APPLICATIONINSIGHTS_RESOURCE_ID) return { app, args: ['--ids', app] };
@@ -89,12 +134,18 @@ function sleep(ms) {
 
 async function finish(result, outputPath) {
   const rendered = safeSummary(result);
-  if (result.status === 'passed') console.log(rendered); else console.error(rendered);
+  if (result.status === 'passed') console.log(rendered);
+  else console.error(rendered);
   if (outputPath) await writeFile(outputPath, `${rendered}\n`);
   return result;
 }
 
-export async function runTelemetryCheck({ env = process.env, spawn = spawnSync, now = () => new Date(), sleeper = sleep } = {}) {
+export async function runTelemetryCheck({
+  env = process.env,
+  spawn = spawnSync,
+  now = () => new Date(),
+  sleeper = sleep,
+} = {}) {
   const environmentName = env.ENVIRONMENT_NAME || 'unknown';
   const rawSmokeRunId = env.SMOKE_RUN_ID || '';
   const smokeRunId = sanitizeTelemetrySmokeRunId(rawSmokeRunId);
@@ -105,10 +156,24 @@ export async function runTelemetryCheck({ env = process.env, spawn = spawnSync, 
   const retryDelayMs = parsePositiveInt(env.TELEMETRY_QUERY_RETRY_DELAY_MS, 10_000);
   const outputPath = env.TELEMETRY_RESULTS_PATH || '';
   const { app, args } = appInsightsArgs(env);
-  const baseResult = { status: 'passed', environmentName, smokeRunId: smokeRunId || undefined, checkedAt: now().toISOString(), timespanMinutes, checks: {} };
+  const baseResult = {
+    status: 'passed',
+    environmentName,
+    smokeRunId: smokeRunId || undefined,
+    checkedAt: now().toISOString(),
+    timespanMinutes,
+    checks: {},
+  };
 
   if (!app) {
-    const decision = telemetryDecision({ environmentName, failClosed, querySucceeded: false, queryAttempt: 0, blockedReason: 'Application Insights identifier is not configured. Set APPLICATIONINSIGHTS_APP_ID, APPLICATIONINSIGHTS_RESOURCE_ID, or APPLICATIONINSIGHTS_NAME.' });
+    const decision = telemetryDecision({
+      environmentName,
+      failClosed,
+      querySucceeded: false,
+      queryAttempt: 0,
+      blockedReason:
+        'Application Insights identifier is not configured. Set APPLICATIONINSIGHTS_APP_ID, APPLICATIONINSIGHTS_RESOURCE_ID, or APPLICATIONINSIGHTS_NAME.',
+    });
     return finish({ ...baseResult, ...decision, checks: decision.checks }, outputPath);
   }
 
@@ -116,7 +181,11 @@ export async function runTelemetryCheck({ env = process.env, spawn = spawnSync, 
   let finalDecision;
   let lastBlockedReason = '';
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const completed = spawn('az', ['monitor', 'app-insights', 'query', ...args, '--analytics-query', query, '--output', 'json'], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
+    const completed = spawn(
+      'az',
+      ['monitor', 'app-insights', 'query', ...args, '--analytics-query', query, '--output', 'json'],
+      { encoding: 'utf8', maxBuffer: 1024 * 1024 },
+    );
     let querySucceeded = completed.status === 0;
     let checks = {};
     if (querySucceeded) {
@@ -129,8 +198,27 @@ export async function runTelemetryCheck({ env = process.env, spawn = spawnSync, 
     } else {
       lastBlockedReason = 'Azure Monitor query failed; verify OIDC permissions and Application Insights configuration.';
     }
-    finalDecision = telemetryDecision({ environmentName, failClosed, requireSmokeCorrelation, smokeRunId, querySucceeded, checks, queryAttempt: attempt, blockedReason: lastBlockedReason });
-    if (!shouldRetryTelemetry({ decision: finalDecision, smokeRunId, requireSmokeCorrelation, attempt, maxAttempts, querySucceeded })) break;
+    finalDecision = telemetryDecision({
+      environmentName,
+      failClosed,
+      requireSmokeCorrelation,
+      smokeRunId,
+      querySucceeded,
+      checks,
+      queryAttempt: attempt,
+      blockedReason: lastBlockedReason,
+    });
+    if (
+      !shouldRetryTelemetry({
+        decision: finalDecision,
+        smokeRunId,
+        requireSmokeCorrelation,
+        attempt,
+        maxAttempts,
+        querySucceeded,
+      })
+    )
+      break;
     await sleeper(retryDelayMs);
   }
 

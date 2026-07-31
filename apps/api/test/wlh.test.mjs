@@ -7,49 +7,220 @@ import { handler as wlhCategoriesHandler, setWlhCategoryServiceForTesting } from
 import { handler as wlhOfferHandler, setWlhOfferServiceForTesting } from '../dist/functions/wlhOffer.js';
 import { WlhService, searchUrlForCategory, wlhPathFromStoredUrl } from '../dist/shared/wlh/service.js';
 
-const cfg = { baseUrl: 'https://example.test', storageAccountName: 'x', categoryBlobContainer: 'wlh-reference', categoryBlobName: 'categories-marketplace.v1.json.gz', categoryFile: '', categoryVersion: 'v1' };
-const idx = { byId: new Map([['0',{id:'0',label:'root',path:'/',depth:0,hasChildren:true}],['10', { id: '10', label: 'Cars', path: '/cars', depth: 1, parentId: '0', hasChildren: true, url: 'https://evil.example/cars?x=1' }],['11',{id:'11',label:'SUV',path:'/cars/suv',depth:2,parentId:'10',hasChildren:false}]]), childrenByParentId: new Map([['0',[{id:'10',label:'Cars',path:'/cars',depth:1,parentId:'0',hasChildren:true}]],['10',[{id:'11',label:'SUV',path:'/cars/suv',depth:2,parentId:'10',hasChildren:false}]]]), top: [{ id: '10', label: 'Cars', path: '/cars', depth: 1, parentId: '0', hasChildren: true }] };
+const cfg = {
+  baseUrl: 'https://example.test',
+  storageAccountName: 'x',
+  categoryBlobContainer: 'wlh-reference',
+  categoryBlobName: 'categories-marketplace.v1.json.gz',
+  categoryFile: '',
+  categoryVersion: 'v1',
+};
+const idx = {
+  byId: new Map([
+    ['0', { id: '0', label: 'root', path: '/', depth: 0, hasChildren: true }],
+    [
+      '10',
+      {
+        id: '10',
+        label: 'Cars',
+        path: '/cars',
+        depth: 1,
+        parentId: '0',
+        hasChildren: true,
+        url: 'https://evil.example/cars?x=1',
+      },
+    ],
+    ['11', { id: '11', label: 'SUV', path: '/cars/suv', depth: 2, parentId: '10', hasChildren: false }],
+  ]),
+  childrenByParentId: new Map([
+    ['0', [{ id: '10', label: 'Cars', path: '/cars', depth: 1, parentId: '0', hasChildren: true }]],
+    ['10', [{ id: '11', label: 'SUV', path: '/cars/suv', depth: 2, parentId: '10', hasChildren: false }]],
+  ]),
+  top: [{ id: '10', label: 'Cars', path: '/cars', depth: 1, parentId: '0', hasChildren: true }],
+};
 
 test('stored category url origin is discarded', () => {
   assert.equal(wlhPathFromStoredUrl('https://evil.example/a/b?x=1'), '/a/b');
-  assert.equal(searchUrlForCategory('https://evil.example/a/b?x=1', cfg.baseUrl).toString(), 'https://example.test/a/b');
+  assert.equal(
+    searchUrlForCategory('https://evil.example/a/b?x=1', cfg.baseUrl).toString(),
+    'https://example.test/a/b',
+  );
 });
 
 test('search payload rowsFound/rowsRequested/rowsReturned/pageRequested and date-string attributes', async () => {
-  const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { searchResult: { rowsFound: 2, rowsRequested: 30, rowsReturned: 2, pageRequested: 1, advertSummaryList: { advertSummary: [{ id: '1', attributes: [{ name: 'HEADING', values: ['red bike'] }, { name: 'BODY_DYN', values: ['fast'] }, { name: 'SEO_URL', values: ['/ad/1'] }, { name: 'PUBLISHED_String', values: ['2026-05-20T10:00:00Z'] }, { name: 'CHANGED_String', values: ['2026-05-21T10:00:00Z'] }], advertImageList: { images: [{ mainImageUrl: 'u1' }] } }, { id: '2', attributes: [{ name: 'HEADING', values: ['blue car'] }, { name: 'BODY_DYN', values: ['slow'] }] }] } } } } })}</script>`;
+  const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+    props: {
+      pageProps: {
+        searchResult: {
+          rowsFound: 2,
+          rowsRequested: 30,
+          rowsReturned: 2,
+          pageRequested: 1,
+          advertSummaryList: {
+            advertSummary: [
+              {
+                id: '1',
+                attributes: [
+                  { name: 'HEADING', values: ['red bike'] },
+                  { name: 'BODY_DYN', values: ['fast'] },
+                  { name: 'SEO_URL', values: ['/ad/1'] },
+                  { name: 'PUBLISHED_String', values: ['2026-05-20T10:00:00Z'] },
+                  { name: 'CHANGED_String', values: ['2026-05-21T10:00:00Z'] },
+                ],
+                advertImageList: { images: [{ mainImageUrl: 'u1' }] },
+              },
+              {
+                id: '2',
+                attributes: [
+                  { name: 'HEADING', values: ['blue car'] },
+                  { name: 'BODY_DYN', values: ['slow'] },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  })}</script>`;
   let called = '';
-  const s = new WlhService({ config: cfg, getIndex: async () => idx, fetchImpl: async (input) => { called = String(input); return new Response(html, { status: 200 }); } });
-  const out = await s.search({ categoryId: '10', condition: 'used', delivery: ['pickup', 'shipping'], requiredTerms: ['bike'] });
-  assert.match(called, /treeAttributes=23/); assert.match(called, /treeAttributes=2536/); assert.match(called, /treeAttributes=2537/);
-  assert.equal(out.rowsFound, 2); assert.equal(out.rowsReturned, 2); assert.equal(out.filteredRowsReturned, 1);
+  const s = new WlhService({
+    config: cfg,
+    getIndex: async () => idx,
+    fetchImpl: async (input) => {
+      called = String(input);
+      return new Response(html, { status: 200 });
+    },
+  });
+  const out = await s.search({
+    categoryId: '10',
+    condition: 'used',
+    delivery: ['pickup', 'shipping'],
+    requiredTerms: ['bike'],
+  });
+  assert.match(called, /treeAttributes=23/);
+  assert.match(called, /treeAttributes=2536/);
+  assert.match(called, /treeAttributes=2537/);
+  assert.equal(out.rowsFound, 2);
+  assert.equal(out.rowsReturned, 2);
+  assert.equal(out.filteredRowsReturned, 1);
   assert.ok(out.results[0].publishedAt?.startsWith('2026-05-20'));
 });
 
 test('detail uses advert status/address/contact and paylivery false string not truthy', async () => {
-  const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { advertDetails: { attributes: [{ name: 'ADID', values: ['abc'] }, { name: 'HEADING', values: ['T'] }, { name: 'DESCRIPTION', values: ['<b>x</b>'] }, { name: 'PRICE', values: ['74,99'] }, { name: 'PAYLIVERY', values: ['false'] }], advertStatus: { id: 'ACTIVE' }, advertAddressDetails: { postCode: '1010', postalName: 'Vienna', district: 'D', province: 'W' }, advertContactDetails: { contactDetail:[{contactDetailField:[{name:'postalName',value:'Vienna2'}]}] }, advertImageList: { advertImage: [{ referenceImageUrl: 'i1' }, { mainImageUrl: 'i1' }, { thumbnailImageUrl: 'i2' }] }, p2ppOptions: { paymentOptions:[{id:'p'}], deliveryOptions: [{ carrier: { description: 'C' }, parcelSize: { size: 'M', longName: 'Medium' }, price: '1', originalPrice: '2', description: 'd', deliveryDays: 2, parcelInsurance: true }] } } } } })}</script>`;
-  const s = new WlhService({ config: cfg, getIndex: async () => idx, fetchImpl: async () => new Response(html, { status: 200 }) });
+  const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+    props: {
+      pageProps: {
+        advertDetails: {
+          attributes: [
+            { name: 'ADID', values: ['abc'] },
+            { name: 'HEADING', values: ['T'] },
+            { name: 'DESCRIPTION', values: ['<b>x</b>'] },
+            { name: 'PRICE', values: ['74,99'] },
+            { name: 'PAYLIVERY', values: ['false'] },
+          ],
+          advertStatus: { id: 'ACTIVE' },
+          advertAddressDetails: { postCode: '1010', postalName: 'Vienna', district: 'D', province: 'W' },
+          advertContactDetails: { contactDetail: [{ contactDetailField: [{ name: 'postalName', value: 'Vienna2' }] }] },
+          advertImageList: {
+            advertImage: [{ referenceImageUrl: 'i1' }, { mainImageUrl: 'i1' }, { thumbnailImageUrl: 'i2' }],
+          },
+          p2ppOptions: {
+            paymentOptions: [{ id: 'p' }],
+            deliveryOptions: [
+              {
+                carrier: { description: 'C' },
+                parcelSize: { size: 'M', longName: 'Medium' },
+                price: '1',
+                originalPrice: '2',
+                description: 'd',
+                deliveryDays: 2,
+                parcelInsurance: true,
+              },
+            ],
+          },
+        },
+      },
+    },
+  })}</script>`;
+  const s = new WlhService({
+    config: cfg,
+    getIndex: async () => idx,
+    fetchImpl: async () => new Response(html, { status: 200 }),
+  });
   const d = await s.offer('abc');
-  assert.equal(d.priceAmount, 74.99); assert.equal(d.status, 'ACTIVE'); assert.equal(d.location, 'Vienna'); assert.equal(d.paylivery, true); assert.equal(d.images.length, 2);
+  assert.equal(d.priceAmount, 74.99);
+  assert.equal(d.status, 'ACTIVE');
+  assert.equal(d.location, 'Vienna');
+  assert.equal(d.paylivery, true);
+  assert.equal(d.images.length, 2);
 });
 
 test('search listing SEO_URL prepends /iad for kaufen-und-verkaufen paths', async () => {
-  const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { searchResult: { rowsFound: 1, rowsRequested: 30, rowsReturned: 1, pageRequested: 1, advertSummaryList: { advertSummary: [{ id: '997764051', attributes: [{ name: 'HEADING', values: ['super mario'] }, { name: 'SEO_URL', values: ['/kaufen-und-verkaufen/d/super-mario-3d-all-stars-nintendo-switch-997764051'] }] }] } } } } })}</script>`;
-  const s = new WlhService({ config: cfg, getIndex: async () => idx, fetchImpl: async () => new Response(html, { status: 200 }) });
+  const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+    props: {
+      pageProps: {
+        searchResult: {
+          rowsFound: 1,
+          rowsRequested: 30,
+          rowsReturned: 1,
+          pageRequested: 1,
+          advertSummaryList: {
+            advertSummary: [
+              {
+                id: '997764051',
+                attributes: [
+                  { name: 'HEADING', values: ['super mario'] },
+                  {
+                    name: 'SEO_URL',
+                    values: ['/kaufen-und-verkaufen/d/super-mario-3d-all-stars-nintendo-switch-997764051'],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  })}</script>`;
+  const s = new WlhService({
+    config: cfg,
+    getIndex: async () => idx,
+    fetchImpl: async () => new Response(html, { status: 200 }),
+  });
   const out = await s.search({ categoryId: '10' });
-  assert.equal(out.results[0].url, 'https://example.test/iad/kaufen-und-verkaufen/d/super-mario-3d-all-stars-nintendo-switch-997764051');
+  assert.equal(
+    out.results[0].url,
+    'https://example.test/iad/kaufen-und-verkaufen/d/super-mario-3d-all-stars-nintendo-switch-997764051',
+  );
 });
 
 test('WLH category route detection uses metadata and ignores query strings', async () => {
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
     setWlhCategoryServiceForTesting(new WlhService({ config: cfg, getIndex: async () => idx }));
 
-    const top = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/top?x=1', {}, { functionName: 'wlhCategoriesTop' });
+    const top = await wlhCategoryHandlerRequest(
+      'GET',
+      'https://api.test/api/wlh/categories/top?x=1',
+      {},
+      { functionName: 'wlhCategoriesTop' },
+    );
     assert.equal(top.status, 200);
-    assert.deepEqual(top.jsonBody.map((category) => category.id), ['10']);
+    assert.deepEqual(
+      top.jsonBody.map((category) => category.id),
+      ['10'],
+    );
 
-    const children = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/10/children?x=1', { categoryId: '10' }, { functionName: 'wlhCategoryChildren' });
+    const children = await wlhCategoryHandlerRequest(
+      'GET',
+      'https://api.test/api/wlh/categories/10/children?x=1',
+      { categoryId: '10' },
+      { functionName: 'wlhCategoryChildren' },
+    );
     assert.equal(children.status, 200);
-    assert.deepEqual(children.jsonBody.map((category) => category.id), ['11']);
+    assert.deepEqual(
+      children.jsonBody.map((category) => category.id),
+      ['11'],
+    );
   });
 });
 
@@ -59,11 +230,19 @@ test('WLH category route detection still handles non-query pathname fallback rou
 
     const top = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/top', {});
     assert.equal(top.status, 200);
-    assert.deepEqual(top.jsonBody.map((category) => category.id), ['10']);
+    assert.deepEqual(
+      top.jsonBody.map((category) => category.id),
+      ['10'],
+    );
 
-    const children = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/10/children', { categoryId: '10' });
+    const children = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/10/children', {
+      categoryId: '10',
+    });
     assert.equal(children.status, 200);
-    assert.deepEqual(children.jsonBody.map((category) => category.id), ['11']);
+    assert.deepEqual(
+      children.jsonBody.map((category) => category.id),
+      ['11'],
+    );
   });
 });
 
@@ -71,11 +250,22 @@ test('WLH offer image route detection uses metadata and ignores query strings', 
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
     const calls = [];
     setWlhOfferServiceForTesting({
-      offer: async (adId) => { calls.push(['offer', adId]); return { source: 'wlh', adId }; },
-      offerImages: async (adId) => { calls.push(['offerImages', adId]); return { source: 'wlh', adId, images: [{ full: 'https://images.test/1.jpg' }] }; },
+      offer: async (adId) => {
+        calls.push(['offer', adId]);
+        return { source: 'wlh', adId };
+      },
+      offerImages: async (adId) => {
+        calls.push(['offerImages', adId]);
+        return { source: 'wlh', adId, images: [{ full: 'https://images.test/1.jpg' }] };
+      },
     });
 
-    const images = await wlhOfferHandlerRequest('GET', 'https://api.test/api/wlh/offers/123/images?x=1', { adId: '123' }, { functionName: 'wlhOfferImages' });
+    const images = await wlhOfferHandlerRequest(
+      'GET',
+      'https://api.test/api/wlh/offers/123/images?x=1',
+      { adId: '123' },
+      { functionName: 'wlhOfferImages' },
+    );
     assert.equal(images.status, 200);
     assert.deepEqual(images.jsonBody, { source: 'wlh', adId: '123', images: [{ full: 'https://images.test/1.jpg' }] });
     assert.deepEqual(calls, [['offerImages', '123']]);
@@ -86,8 +276,14 @@ test('WLH offer route detection still handles non-query pathname fallback image 
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
     const calls = [];
     setWlhOfferServiceForTesting({
-      offer: async (adId) => { calls.push(['offer', adId]); return { source: 'wlh', adId }; },
-      offerImages: async (adId) => { calls.push(['offerImages', adId]); return { source: 'wlh', adId, images: [] }; },
+      offer: async (adId) => {
+        calls.push(['offer', adId]);
+        return { source: 'wlh', adId };
+      },
+      offerImages: async (adId) => {
+        calls.push(['offerImages', adId]);
+        return { source: 'wlh', adId, images: [] };
+      },
     });
 
     const images = await wlhOfferHandlerRequest('GET', 'https://api.test/api/wlh/offers/123/images', { adId: '123' });
@@ -100,19 +296,38 @@ test('WLH offer route detection still handles non-query pathname fallback image 
 test('WLH route detection prefers Azure metadata when available', async () => {
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
     setWlhCategoryServiceForTesting(new WlhService({ config: cfg, getIndex: async () => idx }));
-    const children = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/10?view=children', { categoryId: '10' }, { functionName: 'wlhCategoryChildren' });
+    const children = await wlhCategoryHandlerRequest(
+      'GET',
+      'https://api.test/api/wlh/categories/10?view=children',
+      { categoryId: '10' },
+      { functionName: 'wlhCategoryChildren' },
+    );
     assert.equal(children.status, 200);
-    assert.deepEqual(children.jsonBody.map((category) => category.id), ['11']);
+    assert.deepEqual(
+      children.jsonBody.map((category) => category.id),
+      ['11'],
+    );
   });
 
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
     const calls = [];
     setWlhOfferServiceForTesting({
-      offer: async (adId) => { calls.push(['offer', adId]); return { source: 'wlh', adId }; },
-      offerImages: async (adId) => { calls.push(['offerImages', adId]); return { source: 'wlh', adId, images: [] }; },
+      offer: async (adId) => {
+        calls.push(['offer', adId]);
+        return { source: 'wlh', adId };
+      },
+      offerImages: async (adId) => {
+        calls.push(['offerImages', adId]);
+        return { source: 'wlh', adId, images: [] };
+      },
     });
 
-    const images = await wlhOfferHandlerRequest('GET', 'https://api.test/api/wlh/offers/123?view=images', { adId: '123' }, { functionName: 'wlhOfferImages' });
+    const images = await wlhOfferHandlerRequest(
+      'GET',
+      'https://api.test/api/wlh/offers/123?view=images',
+      { adId: '123' },
+      { functionName: 'wlhOfferImages' },
+    );
     assert.equal(images.status, 200);
     assert.deepEqual(images.jsonBody, { source: 'wlh', adId: '123', images: [] });
     assert.deepEqual(calls, [['offerImages', '123']]);
@@ -128,7 +343,11 @@ test('invalid JSON on WLH search returns RepairableProblem', async () => {
 
 test('invalid search body returns RepairableProblem', async () => {
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
-    const s = new WlhService({ config: cfg, getIndex: async () => idx, fetchImpl: async () => new Response('', { status: 500 }) });
+    const s = new WlhService({
+      config: cfg,
+      getIndex: async () => idx,
+      fetchImpl: async () => new Response('', { status: 500 }),
+    });
     setWlhSearchServiceForTesting(s);
     const response = await wlhSearchHandler(requestWithJson({ categoryId: '10', condition: 'broken' }), contextStub());
     assertRepairableProblem(response, 400, 'postWlhSearch', 'caller_contract_violation');
@@ -139,14 +358,20 @@ test('invalid search body returns RepairableProblem', async () => {
 test('unknown category returns RepairableProblem', async () => {
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
     setWlhCategoryServiceForTesting(new WlhService({ config: cfg, getIndex: async () => idx }));
-    const response = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/999', { categoryId: '999' });
+    const response = await wlhCategoryHandlerRequest('GET', 'https://api.test/api/wlh/categories/999', {
+      categoryId: '999',
+    });
     assertRepairableProblem(response, 404, 'getWlhCategory', 'caller_contract_violation');
   });
 });
 
 test('upstream 429 maps to capacity_or_timeout', async () => {
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
-    const s = new WlhService({ config: cfg, getIndex: async () => idx, fetchImpl: async () => new Response('<html></html>', { status: 429 }) });
+    const s = new WlhService({
+      config: cfg,
+      getIndex: async () => idx,
+      fetchImpl: async () => new Response('<html></html>', { status: 429 }),
+    });
     setWlhSearchServiceForTesting(s);
     const response = await wlhSearchHandler(requestWithJson({ categoryId: '10' }), contextStub());
     assertRepairableProblem(response, 429, 'postWlhSearch', 'capacity_or_timeout');
@@ -155,7 +380,11 @@ test('upstream 429 maps to capacity_or_timeout', async () => {
 
 test('parse failure maps to version_skew or dependency_failure', async () => {
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
-    const s = new WlhService({ config: cfg, getIndex: async () => idx, fetchImpl: async () => new Response('<html>shape changed</html>', { status: 200 }) });
+    const s = new WlhService({
+      config: cfg,
+      getIndex: async () => idx,
+      fetchImpl: async () => new Response('<html>shape changed</html>', { status: 200 }),
+    });
     setWlhSearchServiceForTesting(s);
     const response = await wlhSearchHandler(requestWithJson({ categoryId: '10' }), contextStub());
     assert.equal(response.status, 502);
@@ -165,13 +394,14 @@ test('parse failure maps to version_skew or dependency_failure', async () => {
   });
 });
 
-test('401/403 WLH auth failures keep auth envelope', async () => {
+test('401/403 WLH auth failures use deterministic repairable problems', async () => {
   await withWlhEnv({ AUTH_ENABLED: 'true' }, async () => {
     const unauthorized = await wlhSearchHandler(requestWithJson({ categoryId: '10' }, null), contextStub());
     assert.equal(unauthorized.status, 401);
-    assert.equal(unauthorized.jsonBody.error.code, 'unauthorized');
-    assert.equal(unauthorized.jsonBody.rec_version, undefined);
-    assert.notEqual(unauthorized.headers['Content-Type'], 'application/problem+json');
+    assert.equal(unauthorized.jsonBody.rec_version, '1.0');
+    assert.equal(unauthorized.jsonBody.classification, 'authorization_context_mismatch');
+    assert.equal(unauthorized.jsonBody.analysis_mode, 'deterministic');
+    assert.equal(unauthorized.headers['Content-Type'], 'application/problem+json');
   });
 
   const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
@@ -183,29 +413,39 @@ test('401/403 WLH auth failures keep auth envelope', async () => {
       .setIssuedAt()
       .setExpirationTime('5m')
       .sign(privateKey);
-    await withWlhEnv({
-      AUTH_ENABLED: 'true',
-      OIDC_ISSUER: issuer,
-      OIDC_AUDIENCE: 'api://catalogue-test',
-      OIDC_JWKS_URI: jwksUri,
-      OIDC_ALLOWED_OBJECT_IDS: 'allowed-oid',
-      OIDC_ALLOWED_SUBJECTS: '',
-      OIDC_ALLOWED_APP_OBJECT_IDS: '',
-      OIDC_ALLOWED_CLIENT_IDS: '',
-    }, async () => {
-      const forbidden = await wlhSearchHandler(requestWithJson({ categoryId: '10' }, `Bearer ${token}`), contextStub());
-      assert.equal(forbidden.status, 403);
-      assert.equal(forbidden.jsonBody.error.code, 'forbidden');
-      assert.equal(forbidden.jsonBody.rec_version, undefined);
-      assert.notEqual(forbidden.headers['Content-Type'], 'application/problem+json');
-    });
+    await withWlhEnv(
+      {
+        AUTH_ENABLED: 'true',
+        OIDC_ISSUER: issuer,
+        OIDC_AUDIENCE: 'api://catalogue-test',
+        OIDC_JWKS_URI: jwksUri,
+        OIDC_ALLOWED_OBJECT_IDS: 'allowed-oid',
+        OIDC_ALLOWED_SUBJECTS: '',
+        OIDC_ALLOWED_APP_OBJECT_IDS: '',
+        OIDC_ALLOWED_CLIENT_IDS: '',
+      },
+      async () => {
+        const forbidden = await wlhSearchHandler(
+          requestWithJson({ categoryId: '10' }, `Bearer ${token}`),
+          contextStub(),
+        );
+        assert.equal(forbidden.status, 403);
+        assert.equal(forbidden.jsonBody.rec_version, '1.0');
+        assert.equal(forbidden.jsonBody.classification, 'authorization_context_mismatch');
+        assert.equal(forbidden.jsonBody.analysis_mode, 'deterministic');
+        assert.equal(forbidden.headers['Content-Type'], 'application/problem+json');
+      },
+    );
   } finally {
-    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 });
 
 async function wlhCategoryHandlerRequest(method, url, params, context = {}) {
-  return wlhCategoriesHandler({ method, url, params, headers: new Headers(), json: async () => ({}) }, contextStub(context));
+  return wlhCategoriesHandler(
+    { method, url, params, headers: new Headers(), json: async () => ({}) },
+    contextStub(context),
+  );
 }
 
 async function wlhOfferHandlerRequest(method, url, params, context = {}) {
@@ -228,7 +468,9 @@ function requestThatThrowsJson(authorization = undefined) {
     url: 'https://api.test/api/wlh/search',
     params: {},
     headers: new Headers(authorization === undefined ? {} : authorization === null ? {} : { authorization }),
-    json: async () => { throw new Error('invalid json'); },
+    json: async () => {
+      throw new Error('invalid json');
+    },
   };
 }
 
@@ -288,5 +530,11 @@ async function startJwksServer() {
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
-  return { server, issuer: 'https://login.example.test/tenant/v2.0', jwksUri: `http://127.0.0.1:${port}/jwks`, privateKey, kid };
+  return {
+    server,
+    issuer: 'https://login.example.test/tenant/v2.0',
+    jwksUri: `http://127.0.0.1:${port}/jwks`,
+    privateKey,
+    kid,
+  };
 }

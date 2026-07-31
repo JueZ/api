@@ -5,7 +5,12 @@ export const DEFAULT_SMOKE_FETCH_TIMEOUT_MS = 30_000;
 export function sanitizeSmokeRunId(value) {
   const normalized = String(value ?? '').trim();
   if (!normalized) return undefined;
-  return normalized.replace(/[^A-Za-z0-9_.:-]/g, '-').replace(/-+/g, '-').slice(0, 96) || undefined;
+  return (
+    normalized
+      .replace(/[^A-Za-z0-9_.:-]/g, '-')
+      .replace(/-+/g, '-')
+      .slice(0, 96) || undefined
+  );
 }
 
 export function getSmokeRunId(value = process.env.SMOKE_RUN_ID) {
@@ -46,7 +51,8 @@ function combineAbortSignals(signals) {
     listeners.length = 0;
   };
   const abort = (signal) => {
-    if (!controller.signal.aborted) controller.abort(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+    if (!controller.signal.aborted)
+      controller.abort(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'));
     cleanup();
   };
 
@@ -100,7 +106,11 @@ export async function fetchJson(url, options = {}) {
   let json = null;
   const text = await response.text();
   if (text) {
-    try { json = JSON.parse(text); } catch { json = null; }
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
   }
   return { response, json, text };
 }

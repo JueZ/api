@@ -5,47 +5,80 @@ import { BringUpstreamError } from '../dist/shared/bring/client.js';
 
 const authEnv = {
   AUTH_ENABLED: 'false',
+  DEPLOYED_ENVIRONMENT_NAME: 'prod',
   OIDC_AUDIENCE: 'api://catalogue-test',
   MCP_RESOURCE_ORIGIN: 'https://mcp.example.test',
+  MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
 };
+const bringListUuid = '22222222-2222-4222-8222-222222222222';
+const bringAddOperationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const bringRemoveOperationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 test('MCP initialize and tools/list expose protected Bring reads and controlled writes', async () => {
   await withEnv(authEnv, async () => {
-    const initialize = await mcpRequest({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } } });
+    const initialize = await mcpRequest({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+    });
     assert.equal(initialize.status, 200);
     assert.equal(initialize.jsonBody.result.serverInfo.name, 'api-catalogue-private-mcp');
 
     const listed = await mcpRequest({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
     const tools = listed.jsonBody.result.tools;
     const names = tools.map((tool) => tool.name).sort();
-    assert.deepEqual(names, [
-      'bring_add_items',
-      'bring_complete_items',
-      'bring_get_items',
-      'bring_list_lists',
-      'bring_remove_items',
-      'health_check',
-      'hello_authenticated',
-      'reddit_get_thread',
-      'reddit_get_thread_overview',
-      'wlh_categories_top',
-      'wlh_category_children',
-      'wlh_find_category',
-      'wlh_get_offer',
-      'wlh_search',
-    ].sort());
+    assert.deepEqual(
+      names,
+      [
+        'bring_add_items',
+        'bring_apply_item_mutation',
+        'bring_get_items',
+        'bring_list_lists',
+        'bring_prepare_item_mutation',
+        'health_check',
+        'hello_authenticated',
+        'reddit_get_thread',
+        'reddit_get_thread_overview',
+        'wlh_categories_top',
+        'wlh_category_children',
+        'wlh_find_category',
+        'wlh_get_offer',
+        'wlh_search',
+      ].sort(),
+    );
 
     for (const tool of tools) {
-      if (tool.name === 'bring_add_items') assert.deepEqual(tool.annotations, { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true });
-      else if (tool.name === 'bring_complete_items' || tool.name === 'bring_remove_items') assert.deepEqual(tool.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
-      else { assert.equal(tool.annotations.readOnlyHint, true, `${tool.name} must be read-only`); assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`); assert.equal(tool.annotations.idempotentHint, true, `${tool.name} must be idempotent`); }
+      if (tool.name === 'bring_add_items')
+        assert.deepEqual(tool.annotations, {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        });
+      else if (tool.name === 'bring_prepare_item_mutation' || tool.name === 'bring_apply_item_mutation')
+        assert.deepEqual(tool.annotations, {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: true,
+        });
+      else {
+        assert.equal(tool.annotations.readOnlyHint, true, `${tool.name} must be read-only`);
+        assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`);
+        assert.equal(tool.annotations.idempotentHint, true, `${tool.name} must be idempotent`);
+      }
       assert.ok(tool.outputSchema, `${tool.name} must expose an output schema`);
       assert.equal(typeof tool._meta['openai/toolInvocation/invoking'], 'string');
       assert.equal(typeof tool._meta['openai/toolInvocation/invoked'], 'string');
       assert.ok(tool._meta['openai/toolInvocation/invoking'].length <= 64);
       assert.ok(tool._meta['openai/toolInvocation/invoked'].length <= 64);
       assert.equal(tool._meta.ui, undefined, `${tool.name} must not advertise UI metadata`);
-      assert.equal(tool._meta['openai/outputTemplate'], undefined, `${tool.name} must not advertise an output template`);
+      assert.equal(
+        tool._meta['openai/outputTemplate'],
+        undefined,
+        `${tool.name} must not advertise an output template`,
+      );
       assert.equal(tool._meta['openai/widgetAccessible'], undefined, `${tool.name} must not advertise widget access`);
       if (tool.name === 'wlh_search') {
         const inputProperties = tool.inputSchema.properties;
@@ -57,8 +90,14 @@ test('MCP initialize and tools/list expose protected Bring reads and controlled 
         assert.deepEqual(tool.securitySchemes, [{ type: 'noauth' }]);
         assert.deepEqual(tool._meta.securitySchemes, [{ type: 'noauth' }]);
       } else {
-        assert.deepEqual(tool.securitySchemes, [{ type: 'oauth2', scopes: ['api://catalogue-test/api.access'] }]);
-        assert.deepEqual(tool._meta.securitySchemes, [{ type: 'oauth2', scopes: ['api://catalogue-test/api.access'] }]);
+        const expectedSecurity = [
+          {
+            type: 'oauth2',
+            scopes: expectedScopes(tool.name).map((scope) => `api://catalogue-test/${scope}`),
+          },
+        ];
+        assert.deepEqual(tool.securitySchemes, expectedSecurity);
+        assert.deepEqual(tool._meta.securitySchemes, expectedSecurity);
       }
     }
   });
@@ -75,23 +114,61 @@ test('authenticated MCP hello returns safe user shape without full claims or tok
   });
 });
 
-test('MCP Bring tools select accessible lists and perform batch edits', async () => {
+test('MCP Bring tools expose idempotent add and two-phase destructive mutations without echoing item names', async () => {
   const services = stubServices();
-  const sharedListUuid = '22222222-2222-4222-8222-222222222222';
-  services.bring.listLists = async () => ({ source: 'bring', lists: [{ uuid: sharedListUuid, name: 'Family', isDefault: false, shared: true }] });
+  services.bring.listLists = async () => ({
+    source: 'bring',
+    lists: [{ uuid: bringListUuid, name: 'Home', isDefault: false, shared: false }],
+  });
   const items = [{ name: 'Äpfel & Milch', specification: '2 Stück' }];
 
   await withEnv(authEnv, async () => {
     const lists = await mcpCall('bring_list_lists', {}, 'Bearer local-dev-token', services);
-    assert.equal(lists.jsonBody.result.structuredContent.lists[0].shared, true);
-    const selected = await mcpCall('bring_get_items', { listUuid: sharedListUuid }, 'Bearer local-dev-token', services);
-    assert.equal(selected.jsonBody.result.structuredContent.uuid, sharedListUuid);
-    for (const [tool, operation] of [['bring_add_items', 'add'], ['bring_complete_items', 'complete'], ['bring_remove_items', 'remove']]) {
-      const response = await mcpCall(tool, { listUuid: sharedListUuid, items }, 'Bearer local-dev-token', services);
-      assert.equal(response.jsonBody.result.structuredContent.listUuid, sharedListUuid);
-      assert.equal(response.jsonBody.result.structuredContent.operation, operation);
-      assert.deepEqual(response.jsonBody.result.structuredContent.items, items);
-    }
+    assert.equal(lists.jsonBody.result.structuredContent.lists[0].shared, false);
+    const selected = await mcpCall('bring_get_items', { listUuid: bringListUuid }, 'Bearer local-dev-token', services);
+    assert.equal(selected.jsonBody.result.structuredContent.uuid, bringListUuid);
+
+    const added = await mcpCall(
+      'bring_add_items',
+      {
+        operationId: bringAddOperationId,
+        listUuid: bringListUuid,
+        items,
+      },
+      'Bearer local-dev-token',
+      services,
+    );
+    assert.equal(added.jsonBody.result.structuredContent.operation, 'add');
+    assert.equal(added.jsonBody.result.structuredContent.operationId, bringAddOperationId);
+
+    const prepared = await mcpCall(
+      'bring_prepare_item_mutation',
+      {
+        operationId: bringRemoveOperationId,
+        listUuid: bringListUuid,
+        operation: 'remove',
+        items,
+      },
+      'Bearer local-dev-token',
+      services,
+    );
+    assert.equal(prepared.jsonBody.result.structuredContent.state, 'prepared');
+    assert.equal(prepared.jsonBody.result.structuredContent.confirmationToken, 'remove.safe-token');
+    assert.doesNotMatch(JSON.stringify(prepared.jsonBody), /Äpfel|Milch|Stück/);
+
+    const applied = await mcpCall(
+      'bring_apply_item_mutation',
+      {
+        operationId: bringRemoveOperationId,
+        listUuid: bringListUuid,
+        confirmationToken: 'remove.safe-token',
+      },
+      'Bearer local-dev-token',
+      services,
+    );
+    assert.equal(applied.jsonBody.result.structuredContent.operation, 'remove');
+    assert.equal(applied.jsonBody.result.structuredContent.state, 'succeeded');
+    assert.doesNotMatch(JSON.stringify(applied.jsonBody), /Äpfel|Milch|Stück/);
   });
 });
 
@@ -99,7 +176,12 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
   const calls = [];
   const services = stubServices(calls);
   await withEnv(authEnv, async () => {
-    const reddit = await mcpCall('reddit_get_thread', { postId: 'abc', sort: 'top', maxComments: 2 }, 'Bearer local-dev-token', services);
+    const reddit = await mcpCall(
+      'reddit_get_thread',
+      { postId: 'abc', sort: 'top', maxComments: 2 },
+      'Bearer local-dev-token',
+      services,
+    );
     assert.equal(reddit.jsonBody.result.structuredContent.post.id, 'abc');
     assert.equal(reddit.jsonBody.result.structuredContent.comments[0].body, 'hello');
     assert.equal(reddit.jsonBody.result.structuredContent.stats.modelCommentsReturned, 1);
@@ -108,8 +190,16 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
     assert.equal(reddit.jsonBody.result.structuredContent.stats.modelTruncated, false);
     assert.equal(reddit.jsonBody.result.content[0].text, 'Fetched Reddit thread abc with 1 model-readable comments.');
 
-    const redditUrl = await mcpCall('reddit_get_thread', { url: 'https://www.reddit.com/r/test/comments/abc/example/' }, 'Bearer local-dev-token', services);
-    assert.equal(redditUrl.jsonBody.result.structuredContent.post.id, 'https://www.reddit.com/r/test/comments/abc/example/');
+    const redditUrl = await mcpCall(
+      'reddit_get_thread',
+      { url: 'https://www.reddit.com/r/test/comments/abc/example/' },
+      'Bearer local-dev-token',
+      services,
+    );
+    assert.equal(
+      redditUrl.jsonBody.result.structuredContent.post.id,
+      'https://www.reddit.com/r/test/comments/abc/example/',
+    );
 
     const overview = await mcpCall('reddit_get_thread_overview', { postId: 'abc' }, 'Bearer local-dev-token', services);
     assert.equal(overview.jsonBody.result.structuredContent.stats.loadedSnapshotCommentCount, 5);
@@ -121,12 +211,20 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
     assert.equal(search.jsonBody.result.structuredContent.filteredRowsReturned, 1);
     assert.equal(search.jsonBody.result.structuredContent.results[0].title, 'Bike');
     assert.equal(search.jsonBody.result.structuredContent.results[0].thumbnailUrl, 'thumb');
-    assert.deepEqual(search.jsonBody.result.structuredContent.filterApplications.map((entry) => [entry.field, entry.appliedAs]), [
-      ['keyword', 'sent_to_wlh'],
-      ['categoryId', 'sent_to_wlh'],
-    ]);
+    assert.deepEqual(
+      search.jsonBody.result.structuredContent.filterApplications.map((entry) => [entry.field, entry.appliedAs]),
+      [
+        ['keyword', 'sent_to_wlh'],
+        ['categoryId', 'sent_to_wlh'],
+      ],
+    );
 
-    const offer = await mcpCall('wlh_get_offer', { url: 'https://www.willhaben.at/iad/kaufen-und-verkaufen/d/bike-123456789' }, 'Bearer local-dev-token', services);
+    const offer = await mcpCall(
+      'wlh_get_offer',
+      { url: 'https://www.willhaben.at/iad/kaufen-und-verkaufen/d/bike-123456789' },
+      'Bearer local-dev-token',
+      services,
+    );
     assert.equal(offer.jsonBody.result.structuredContent.id, '123456789');
     assert.equal(offer.jsonBody.result.structuredContent.title, 'Offer');
     assert.equal(offer.jsonBody.result.structuredContent.images[0].full, 'image1');
@@ -153,8 +251,6 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
   ]);
 });
 
-
-
 test('MCP wlh_search exposes only effective filters and reports how each one is applied', async () => {
   const calls = [];
   const services = stubServices(calls);
@@ -167,30 +263,74 @@ test('MCP wlh_search exposes only effective filters and reports how each one is 
       filteredRowsReturned: 4,
       category: { id: args.categoryId, label: 'Bikes', path: '/bikes', depth: 1, hasChildren: false },
       results: [
-        { id: '1', title: 'Bike one', priceAmount: 100, location: 'Wien', postcode: '1010', state: 'Wien', publishedAt: '2026-06-02T10:00:00Z', imageCount: 1 },
-        { id: '2', title: 'Bike two', priceAmount: 250, location: 'Wien', postcode: '1010', state: 'Wien', publishedAt: '2026-06-03T10:00:00Z', imageCount: 2 },
-        { id: '3', title: 'Bike old', priceAmount: 300, location: 'Wien', postcode: '1010', state: 'Wien', publishedAt: '2026-05-01T10:00:00Z', imageCount: 3 },
-        { id: '4', title: 'Bike Graz', priceAmount: 400, location: 'Graz', postcode: '8010', state: 'Steiermark', publishedAt: '2026-06-04T10:00:00Z', imageCount: 4 },
+        {
+          id: '1',
+          title: 'Bike one',
+          priceAmount: 100,
+          location: 'Wien',
+          postcode: '1010',
+          state: 'Wien',
+          publishedAt: '2026-06-02T10:00:00Z',
+          imageCount: 1,
+        },
+        {
+          id: '2',
+          title: 'Bike two',
+          priceAmount: 250,
+          location: 'Wien',
+          postcode: '1010',
+          state: 'Wien',
+          publishedAt: '2026-06-03T10:00:00Z',
+          imageCount: 2,
+        },
+        {
+          id: '3',
+          title: 'Bike old',
+          priceAmount: 300,
+          location: 'Wien',
+          postcode: '1010',
+          state: 'Wien',
+          publishedAt: '2026-05-01T10:00:00Z',
+          imageCount: 3,
+        },
+        {
+          id: '4',
+          title: 'Bike Graz',
+          priceAmount: 400,
+          location: 'Graz',
+          postcode: '8010',
+          state: 'Steiermark',
+          publishedAt: '2026-06-04T10:00:00Z',
+          imageCount: 4,
+        },
       ],
     };
   };
 
   await withEnv(authEnv, async () => {
-    const response = await mcpCall('wlh_search', {
-      keyword: 'bike',
-      categoryId: '10',
-      requiredTerms: ['bike'],
-      locationText: 'Wien',
-      postcode: '101',
-      postedSince: '2026-06-01',
-      imageRequired: true,
-      sort: 'price_desc',
-    }, 'Bearer local-dev-token', services);
+    const response = await mcpCall(
+      'wlh_search',
+      {
+        keyword: 'bike',
+        categoryId: '10',
+        requiredTerms: ['bike'],
+        locationText: 'Wien',
+        postcode: '101',
+        postedSince: '2026-06-01',
+        imageRequired: true,
+        sort: 'price_desc',
+      },
+      'Bearer local-dev-token',
+      services,
+    );
 
     const content = response.jsonBody.result.structuredContent;
     assert.equal(response.status, 200);
     assert.equal(content.filteredRowsReturned, 2);
-    assert.deepEqual(content.results.map((result) => result.id), ['2', '1']);
+    assert.deepEqual(
+      content.results.map((result) => result.id),
+      ['2', '1'],
+    );
     assert.deepEqual(calls.at(-1), ['search', { keyword: 'bike', categoryId: '10', requiredTerms: ['bike'] }]);
     assert.deepEqual(Object.fromEntries(content.filterApplications.map((entry) => [entry.field, entry.appliedAs])), {
       keyword: 'sent_to_wlh',
@@ -208,21 +348,61 @@ test('MCP wlh_search exposes only effective filters and reports how each one is 
 test('MCP validation rejects invalid Reddit and WLH arguments with safe tool errors', async () => {
   await withEnv(authEnv, async () => {
     await assertToolError(await mcpCall('reddit_get_thread', {}, 'Bearer local-dev-token'), 'invalid_arguments');
-    await assertToolError(await mcpCall('reddit_get_thread', { postId: 'abc', url: 'https://www.reddit.com/r/test/comments/abc/example/' }, 'Bearer local-dev-token'), 'invalid_arguments');
+    await assertToolError(
+      await mcpCall(
+        'reddit_get_thread',
+        { postId: 'abc', url: 'https://www.reddit.com/r/test/comments/abc/example/' },
+        'Bearer local-dev-token',
+      ),
+      'invalid_arguments',
+    );
     const validPost = await mcpCall('reddit_get_thread', { postId: 'abc123' }, 'Bearer local-dev-token');
     assert.equal(validPost.jsonBody.result.structuredContent.post.id, 'abc123');
-    const validUrl = await mcpCall('reddit_get_thread_overview', { url: 'https://redd.it/abc123' }, 'Bearer local-dev-token');
+    const validUrl = await mcpCall(
+      'reddit_get_thread_overview',
+      { url: 'https://redd.it/abc123' },
+      'Bearer local-dev-token',
+    );
     assert.equal(validUrl.jsonBody.result.structuredContent.post.id, 'https://redd.it/abc123');
 
     await assertToolError(await mcpCall('wlh_get_offer', {}, 'Bearer local-dev-token'), 'invalid_arguments');
-    await assertToolError(await mcpCall('wlh_get_offer', { adId: '123456', url: 'https://www.willhaben.at/iad/kaufen-und-verkaufen/d/test-123456' }, 'Bearer local-dev-token'), 'invalid_arguments');
-    await assertToolError(await mcpCall('wlh_get_offer', { url: 'https://example.com/iad/kaufen-und-verkaufen/d/test-123456' }, 'Bearer local-dev-token'), 'unsupported_url');
+    await assertToolError(
+      await mcpCall(
+        'wlh_get_offer',
+        { adId: '123456', url: 'https://www.willhaben.at/iad/kaufen-und-verkaufen/d/test-123456' },
+        'Bearer local-dev-token',
+      ),
+      'invalid_arguments',
+    );
+    await assertToolError(
+      await mcpCall(
+        'wlh_get_offer',
+        { url: 'https://example.com/iad/kaufen-und-verkaufen/d/test-123456' },
+        'Bearer local-dev-token',
+      ),
+      'unsupported_url',
+    );
 
-    await assertToolError(await mcpCall('wlh_search', { keyword: 'bike', priceFrom: -1 }, 'Bearer local-dev-token'), 'invalid_arguments');
-    await assertToolError(await mcpCall('wlh_search', { keyword: 'bike', priceFrom: 100, priceTo: 10 }, 'Bearer local-dev-token'), 'invalid_arguments');
-    await assertToolError(await mcpCall('wlh_search', { keyword: 'bike', postedSince: 'not-a-date' }, 'Bearer local-dev-token'), 'invalid_arguments');
-    assertMcpValidationError(await mcpCall('wlh_search', { keyword: 'bike', radiusKm: 10 }, 'Bearer local-dev-token'), 'radiusKm');
-    assertMcpValidationError(await mcpCall('wlh_search', { keyword: 'bike', sellerType: 'private' }, 'Bearer local-dev-token'), 'sellerType');
+    await assertToolError(
+      await mcpCall('wlh_search', { keyword: 'bike', priceFrom: -1 }, 'Bearer local-dev-token'),
+      'invalid_arguments',
+    );
+    await assertToolError(
+      await mcpCall('wlh_search', { keyword: 'bike', priceFrom: 100, priceTo: 10 }, 'Bearer local-dev-token'),
+      'invalid_arguments',
+    );
+    await assertToolError(
+      await mcpCall('wlh_search', { keyword: 'bike', postedSince: 'not-a-date' }, 'Bearer local-dev-token'),
+      'invalid_arguments',
+    );
+    assertMcpValidationError(
+      await mcpCall('wlh_search', { keyword: 'bike', radiusKm: 10 }, 'Bearer local-dev-token'),
+      'radiusKm',
+    );
+    assertMcpValidationError(
+      await mcpCall('wlh_search', { keyword: 'bike', sellerType: 'private' }, 'Bearer local-dev-token'),
+      'sellerType',
+    );
   });
 });
 
@@ -252,12 +432,24 @@ test('MCP Bring errors preserve safe classifications and upstream status without
   const services = stubServices();
   services.bring.addItems = async () => {
     throw new BringUpstreamError('Bring dependency request failed.', 502, 'upstream', {
-      operation: 'add_items', method: 'PUT', path: 'v2/bringlists/{uuid}/items', upstreamStatus: 400,
+      operation: 'add_items',
+      method: 'PUT',
+      path: 'v2/bringlists/{uuid}/items',
+      upstreamStatus: 400,
       responseExcerpt: 'password=SHOULD_NOT_LEAK token=SHOULD_NOT_LEAK',
     });
   };
   await withEnv(authEnv, async () => {
-    const response = await mcpCall('bring_add_items', { listUuid: '22222222-2222-4222-8222-222222222222', items: [{ name: 'Milk' }] }, 'Bearer local-dev-token', services);
+    const response = await mcpCall(
+      'bring_add_items',
+      {
+        operationId: bringAddOperationId,
+        listUuid: bringListUuid,
+        items: [{ name: 'Milk' }],
+      },
+      'Bearer local-dev-token',
+      services,
+    );
     assertToolError(response, 'bring_upstream_error', 'bring');
     assert.equal(response.jsonBody.result.structuredContent.upstreamStatus, 400);
     assert.doesNotMatch(JSON.stringify(response.jsonBody), /SHOULD_NOT_LEAK|responseExcerpt|password|token/i);
@@ -269,7 +461,12 @@ async function mcpRequest(body, authorization = undefined, services = stubServic
     {
       method: 'POST',
       url: 'https://mcp.example.test/mcp',
-      headers: new Headers({ accept: 'application/json, text/event-stream', 'content-type': 'application/json', ...(authorization ? { authorization } : {}) }),
+      headers: new Headers({
+        accept: 'application/json, text/event-stream',
+        'content-type': 'application/json',
+        host: 'mcp.example.test',
+        ...(authorization ? { authorization } : {}),
+      }),
       params: {},
       json: async () => body,
     },
@@ -279,9 +476,12 @@ async function mcpRequest(body, authorization = undefined, services = stubServic
 }
 
 async function mcpCall(name, args = {}, authorization, services = stubServices()) {
-  return mcpRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, authorization, services);
+  return mcpRequest(
+    { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
+    authorization,
+    services,
+  );
 }
-
 
 function assertMcpValidationError(response, field) {
   assert.equal(response.status, 200);
@@ -289,7 +489,10 @@ function assertMcpValidationError(response, field) {
   const text = response.jsonBody.result.content[0].text;
   assert.match(text, /Input validation error/);
   assert.match(text, new RegExp(field));
-  assert.doesNotMatch(JSON.stringify(response.jsonBody), /Bearer|local-dev-token|claims|headers|cookie|secret|password|Authorization/i);
+  assert.doesNotMatch(
+    JSON.stringify(response.jsonBody),
+    /Bearer|local-dev-token|claims|headers|cookie|secret|password|Authorization/i,
+  );
 }
 
 function assertToolError(response, error, source = undefined) {
@@ -297,8 +500,14 @@ function assertToolError(response, error, source = undefined) {
   assert.equal(response.jsonBody.result.isError, true);
   assert.equal(response.jsonBody.result.structuredContent.error, error);
   if (source) assert.equal(response.jsonBody.result.structuredContent.source, source);
+  const problem = response.jsonBody.result.structuredContent.repairable_problem;
+  assert.equal(problem.rec_version, '1.0');
+  assert.match(problem.diagnostic_id, /^diag_/);
+  assert.equal(problem.instance, `urn:diagnostic:${problem.diagnostic_id}`);
+  assert.equal(typeof problem.caller_instruction, 'string');
+  assert.equal(problem.caller_instruction.length > 0, true);
   const serialized = JSON.stringify(response.jsonBody);
-  assert.doesNotMatch(serialized, /Bearer|local-dev-token|claims|headers|cookie|secret|password|Authorization/i);
+  assert.doesNotMatch(serialized, /Bearer|local-dev-token|claims|headers|cookie|secret|password|Authorization\s*:/i);
 }
 
 function stubServices(calls = []) {
@@ -307,22 +516,78 @@ function stubServices(calls = []) {
       fetchThread: async (args) => {
         calls.push(['fetchThread', args]);
         const id = args.post ?? args.url;
-        return { source: 'reddit', post: { id, title: 'Thread', subreddit: 'test', numComments: 1 }, comments: [{ id: 'c1', parentId: `t3_${id}`, author: 'a', body: 'hello', score: 1, depth: 0, createdUtc: 1, replies: [] }], commentContinuations: [], stats: { commentsReturned: 1 }, redditRateLimit: { used: null, remaining: null, resetSeconds: null } };
+        return {
+          source: 'reddit',
+          post: { id, title: 'Thread', subreddit: 'test', numComments: 1 },
+          comments: [
+            {
+              id: 'c1',
+              parentId: `t3_${id}`,
+              author: 'a',
+              body: 'hello',
+              score: 1,
+              depth: 0,
+              createdUtc: 1,
+              replies: [],
+            },
+          ],
+          commentContinuations: [],
+          stats: { commentsReturned: 1 },
+          redditRateLimit: { used: null, remaining: null, resetSeconds: null },
+        };
       },
       fetchThreadOverview: async (args) => {
         calls.push(['fetchThreadOverview', args]);
         const id = args.post ?? args.url;
-        return { source: 'reddit', post: { id, title: 'Thread', subreddit: 'test', numComments: 5 }, stats: { loadedSnapshotCommentCount: 5 }, availableSorts: ['top'], coverage: {}, redditRateLimit: { used: null, remaining: null, resetSeconds: null } };
+        return {
+          source: 'reddit',
+          post: { id, title: 'Thread', subreddit: 'test', numComments: 5 },
+          stats: { loadedSnapshotCommentCount: 5 },
+          availableSorts: ['top'],
+          coverage: {},
+          redditRateLimit: { used: null, remaining: null, resetSeconds: null },
+        };
       },
     },
     wlh: {
       search: async (args) => {
         calls.push(['search', args]);
-        return { source: 'wlh', rowsFound: 1, rowsReturned: 1, filteredRowsReturned: 1, category: { id: args.categoryId, label: 'Bikes', path: '/bikes', depth: 1, hasChildren: false }, results: [{ id: '123', title: 'Bike', priceAmount: 99, priceDisplay: '€ 99', location: 'Vienna', url: 'https://example.test/123', thumbnailUrl: 'thumb', paylivery: true, imageCount: 1 }] };
+        return {
+          source: 'wlh',
+          rowsFound: 1,
+          rowsReturned: 1,
+          filteredRowsReturned: 1,
+          category: { id: args.categoryId, label: 'Bikes', path: '/bikes', depth: 1, hasChildren: false },
+          results: [
+            {
+              id: '123',
+              title: 'Bike',
+              priceAmount: 99,
+              priceDisplay: '€ 99',
+              location: 'Vienna',
+              url: 'https://example.test/123',
+              thumbnailUrl: 'thumb',
+              paylivery: true,
+              imageCount: 1,
+            },
+          ],
+        };
       },
       offer: async (adId) => {
         calls.push(['offer', adId]);
-        return { source: 'wlh', id: adId, title: 'Offer', description: 'Nice bike', priceAmount: 99, location: 'Vienna', paylivery: true, images: [{ id: 'i1', url: 'image1' }, { id: 'i2', url: 'image1' }] };
+        return {
+          source: 'wlh',
+          id: adId,
+          title: 'Offer',
+          description: 'Nice bike',
+          priceAmount: 99,
+          location: 'Vienna',
+          paylivery: true,
+          images: [
+            { id: 'i1', url: 'image1' },
+            { id: 'i2', url: 'image1' },
+          ],
+        };
       },
       topCategories: async () => {
         calls.push(['topCategories']);
@@ -330,17 +595,70 @@ function stubServices(calls = []) {
       },
       children: async (categoryId) => {
         calls.push(['children', categoryId]);
-        return [{ id: '11', label: 'Bike parts', path: '/bikes/parts', depth: 1, parentId: categoryId, hasChildren: false }];
+        return [
+          { id: '11', label: 'Bike parts', path: '/bikes/parts', depth: 1, parentId: categoryId, hasChildren: false },
+        ];
       },
     },
     bring: {
-      listLists: async () => ({ source: 'bring', lists: [{ uuid: '11111111-1111-4111-8111-111111111111', name: 'Home', isDefault: true, shared: false }] }),
-      getList: async (listUuid) => ({ uuid: listUuid ?? '11111111-1111-4111-8111-111111111111', items: [{ name: 'Milch', status: 'active' }] }),
-      addItems: async (listUuid, items) => ({ source: 'bring', listUuid: listUuid ?? '11111111-1111-4111-8111-111111111111', operation: 'add', itemCount: items.length, items }),
-      completeItems: async (listUuid, items) => ({ source: 'bring', listUuid: listUuid ?? '11111111-1111-4111-8111-111111111111', operation: 'complete', itemCount: items.length, items }),
-      removeItems: async (listUuid, items) => ({ source: 'bring', listUuid: listUuid ?? '11111111-1111-4111-8111-111111111111', operation: 'remove', itemCount: items.length, items }),
+      listLists: async () => ({
+        source: 'bring',
+        lists: [{ uuid: '11111111-1111-4111-8111-111111111111', name: 'Home', isDefault: true, shared: false }],
+      }),
+      getList: async (listUuid) => ({
+        uuid: listUuid ?? '11111111-1111-4111-8111-111111111111',
+        version: '0'.repeat(64),
+        items: [{ name: 'Milch', status: 'active' }],
+      }),
+      addItems: async (_principal, command) => ({
+        source: 'bring',
+        listUuid: command.listUuid,
+        operation: 'add',
+        operationId: command.operationId,
+        itemCount: command.items.length,
+        state: 'succeeded',
+        replayed: false,
+      }),
+      prepareMutation: async (_principal, command) => ({
+        source: 'bring',
+        state: 'prepared',
+        operationId: command.operationId,
+        operation: command.operation,
+        listPseudonym: 'a'.repeat(64),
+        itemCount: command.items.length,
+        expiresAt: '2026-07-26T12:05:00.000Z',
+        confirmationToken: `${command.operation}.safe-token`,
+        replayed: false,
+      }),
+      applyMutation: async (_principal, command) => ({
+        source: 'bring',
+        listUuid: bringListUuid,
+        operation: command.confirmationToken.startsWith('complete') ? 'complete' : 'remove',
+        operationId: command.operationId,
+        itemCount: 1,
+        state: 'succeeded',
+        replayed: false,
+      }),
+      getMutationOperation: async () => 'remove',
+      getConfirmationOperation: (confirmationToken) => {
+        if (confirmationToken.startsWith('complete.')) return 'complete';
+        if (confirmationToken.startsWith('remove.')) return 'remove';
+        return undefined;
+      },
     },
   };
+}
+
+function expectedScopes(toolName) {
+  if (toolName === 'hello_authenticated') return ['catalogue.read'];
+  if (toolName.startsWith('reddit_')) return ['reddit.read'];
+  if (toolName.startsWith('wlh_')) return ['wlh.read'];
+  if (toolName === 'bring_add_items') return ['bring.write'];
+  if (toolName === 'bring_prepare_item_mutation' || toolName === 'bring_apply_item_mutation') {
+    return ['bring.complete', 'bring.remove'];
+  }
+  if (toolName.startsWith('bring_')) return ['bring.read'];
+  throw new Error(`Unhandled protected MCP tool: ${toolName}`);
 }
 
 async function withEnv(values, fn) {

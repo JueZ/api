@@ -2,14 +2,20 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import test from 'node:test';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
-import { authorizeRequest, readAuthConfig, verifyJwtWithJose } from '../dist/shared/security/auth.js';
+import {
+  authorizeRequest,
+  clearOidcCachesForTesting,
+  discoverJwksUri,
+  readAuthConfig,
+  verifyJwtWithJose,
+} from '../dist/shared/security/auth.js';
 
 const baseConfig = Object.freeze({
   enabled: true,
   issuer: 'https://login.example.test/tenant/v2.0',
   issuers: ['https://login.example.test/tenant/v2.0'],
   audience: 'api://catalogue-test',
-  requiredScopes: ['api.access'],
+  requiredScopes: ['catalogue.read'],
   allowedObjectIds: ['allowed-oid'],
   allowedSubjects: ['allowed-sub'],
   allowedAppObjectIds: ['allowed-app-oid'],
@@ -38,12 +44,13 @@ async function verifierReturning(payload) {
   return async () => payload;
 }
 
-async function authorize(authorization, payload, overrides = {}) {
+async function authorize(authorization, payload, overrides = {}, policy) {
   return authorizeRequest(
     requestWithAuthorization(authorization),
     context(),
     { ...baseConfig, ...overrides },
     await verifierReturning(payload),
+    policy,
   );
 }
 
@@ -92,11 +99,74 @@ test('valid token missing required scope or role returns 403', async () => {
   assert.equal(result.response.jsonBody.error.code, 'forbidden');
 });
 
+test('read permission cannot authorize a write operation', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'allowed-sub',
+      oid: 'allowed-oid',
+      scp: 'bring.read',
+    },
+    {},
+    {
+      permission: 'bring.write',
+      allowedTokenTypes: ['user'],
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.message, 'Required permission is missing: bring.write.');
+});
+
+test('operation policy rejects an otherwise authorized operation in the wrong environment', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'allowed-sub',
+      oid: 'allowed-oid',
+      scp: 'bring.write',
+    },
+    {},
+    {
+      permission: 'bring.write',
+      allowedTokenTypes: ['user'],
+      environment: 'test',
+      allowedEnvironments: ['local', 'prod'],
+    },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.message, 'Operation is not allowed in this environment.');
+});
+
+test('service token is denied for destructive Bring operations even with the matching role', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'service-subject',
+      oid: 'allowed-app-oid',
+      idtyp: 'app',
+      azp: 'service-client-id',
+      roles: ['bring.remove'],
+    },
+    {},
+    {
+      permission: 'bring.remove',
+      allowedTokenTypes: ['user'],
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.message, 'Token type is not allowed for this operation.');
+});
+
 test('valid token for user outside allowlist returns 403', async () => {
   const result = await authorize('Bearer valid-token', {
     sub: 'blocked-sub',
     oid: 'blocked-oid',
-    scp: 'api.access',
+    scp: 'catalogue.read',
   });
 
   assert.equal(result.ok, false);
@@ -109,7 +179,7 @@ test('valid token for allowed object ID returns 200 authorization result', async
     sub: 'user-subject',
     oid: 'allowed-oid',
     tid: 'tenant-id',
-    scp: 'api.access',
+    scp: 'catalogue.read',
     preferred_username: 'martin@example.test',
   });
 
@@ -118,14 +188,17 @@ test('valid token for allowed object ID returns 200 authorization result', async
     subject: 'user-subject',
     objectId: 'allowed-oid',
     tenantId: 'tenant-id',
+    clientId: undefined,
     tokenType: 'user',
+    scopes: ['catalogue.read'],
+    roles: [],
   });
 });
 
 test('allowed subject fallback works only when oid is absent', async () => {
   const result = await authorize('Bearer valid-token', {
     sub: 'allowed-sub',
-    roles: ['api.access'],
+    roles: ['catalogue.read'],
   });
 
   assert.equal(result.ok, true);
@@ -133,10 +206,12 @@ test('allowed subject fallback works only when oid is absent', async () => {
     subject: 'allowed-sub',
     objectId: undefined,
     tenantId: undefined,
+    clientId: undefined,
     tokenType: 'user',
+    scopes: [],
+    roles: ['catalogue.read'],
   });
 });
-
 
 test('app-only service token with allowed app object ID returns service authorization result', async () => {
   const result = await authorize('Bearer valid-token', {
@@ -146,7 +221,7 @@ test('app-only service token with allowed app object ID returns service authoriz
     idtyp: 'app',
     azp: 'service-client-id',
     azpacr: '2',
-    roles: ['api.access'],
+    roles: ['catalogue.read'],
   });
 
   assert.equal(result.ok, true);
@@ -156,6 +231,8 @@ test('app-only service token with allowed app object ID returns service authoriz
     tenantId: 'tenant-id',
     clientId: 'service-client-id',
     tokenType: 'service',
+    scopes: [],
+    roles: ['catalogue.read'],
   });
 });
 
@@ -169,7 +246,7 @@ test('app-only service token can be allowed by client ID', async () => {
       idtyp: 'app',
       azp: 'allowed-client-id',
       azpacr: '2',
-      roles: ['api.access'],
+      roles: ['catalogue.read'],
     },
     { allowedAppObjectIds: [] },
   );
@@ -179,7 +256,6 @@ test('app-only service token can be allowed by client ID', async () => {
   assert.equal(result.user.clientId, 'allowed-client-id');
 });
 
-
 test('roles-only service token without idtyp but with client-credential marker can be allowed by app object ID', async () => {
   const result = await authorize('Bearer valid-token', {
     sub: 'service-subject',
@@ -187,7 +263,7 @@ test('roles-only service token without idtyp but with client-credential marker c
     tid: 'tenant-id',
     azp: 'service-client-id',
     azpacr: '2',
-    roles: ['api.access'],
+    roles: ['catalogue.read'],
   });
 
   assert.equal(result.ok, true);
@@ -197,6 +273,8 @@ test('roles-only service token without idtyp but with client-credential marker c
     tenantId: 'tenant-id',
     clientId: 'service-client-id',
     tokenType: 'service',
+    scopes: [],
+    roles: ['catalogue.read'],
   });
 });
 
@@ -209,7 +287,7 @@ test('roles-only service token without idtyp but with client-credential marker c
       tid: 'tenant-id',
       azp: 'allowed-client-id',
       azpacr: '2',
-      roles: ['api.access'],
+      roles: ['catalogue.read'],
     },
     { allowedAppObjectIds: [] },
   );
@@ -225,7 +303,7 @@ test('delegated user token keeps accepting any OAuth client when delegated clien
     oid: 'allowed-oid',
     tid: 'tenant-id',
     azp: 'unlisted-delegated-client-id',
-    scp: 'api.access',
+    scp: 'catalogue.read',
   });
 
   assert.equal(result.ok, true);
@@ -240,7 +318,7 @@ test('delegated user token with allowed azp passes delegated client allowlist', 
       oid: 'allowed-oid',
       tid: 'tenant-id',
       azp: 'allowed-delegated-client-id',
-      scp: 'api.access',
+      scp: 'catalogue.read',
     },
     { allowedDelegatedClientIds: ['allowed-delegated-client-id'] },
   );
@@ -257,7 +335,7 @@ test('delegated user token with allowed appid passes delegated client allowlist'
       oid: 'allowed-oid',
       tid: 'tenant-id',
       appid: 'allowed-delegated-client-id',
-      scp: 'api.access',
+      scp: 'catalogue.read',
     },
     { allowedDelegatedClientIds: ['allowed-delegated-client-id'] },
   );
@@ -274,7 +352,7 @@ test('delegated user token from blocked OAuth client returns 403 after user allo
       oid: 'allowed-oid',
       tid: 'tenant-id',
       azp: 'blocked-delegated-client-id',
-      scp: 'api.access',
+      scp: 'catalogue.read',
     },
     { allowedDelegatedClientIds: ['allowed-delegated-client-id'] },
   );
@@ -291,7 +369,7 @@ test('delegated user token without client claim returns 403 when delegated clien
       sub: 'user-subject',
       oid: 'allowed-oid',
       tid: 'tenant-id',
-      scp: 'api.access',
+      scp: 'catalogue.read',
     },
     { allowedDelegatedClientIds: ['allowed-delegated-client-id'] },
   );
@@ -307,7 +385,7 @@ test('roles-only token without app-only marker cannot bypass user allowlist via 
     oid: 'blocked-user-oid',
     tid: 'tenant-id',
     azp: 'allowed-client-id',
-    roles: ['api.access'],
+    roles: ['catalogue.read'],
   });
 
   assert.equal(result.ok, false);
@@ -325,7 +403,7 @@ test('app-only service token ignores delegated client allowlist', async () => {
       tid: 'tenant-id',
       idtyp: 'app',
       azp: 'service-client-id',
-      roles: ['api.access'],
+      roles: ['catalogue.read'],
     },
     { allowedDelegatedClientIds: ['different-delegated-client-id'] },
   );
@@ -341,7 +419,7 @@ test('app-only service token outside app allowlists returns 403', async () => {
     tid: 'tenant-id',
     idtyp: 'app',
     azp: 'blocked-client-id',
-    roles: ['api.access'],
+    roles: ['catalogue.read'],
   });
 
   assert.equal(result.ok, false);
@@ -358,7 +436,7 @@ test('app-only service token from wrong tenant returns 403 before service allowl
       tid: 'wrong-tenant',
       idtyp: 'app',
       azp: 'allowed-client-id',
-      roles: ['api.access'],
+      roles: ['catalogue.read'],
     },
     { allowedTenants: ['expected-tenant'] },
   );
@@ -374,7 +452,7 @@ test('allowed tenants are enforced when configured', async () => {
       sub: 'user-subject',
       oid: 'allowed-oid',
       tid: 'wrong-tenant',
-      scp: 'api.access',
+      scp: 'catalogue.read',
     },
     { allowedTenants: ['expected-tenant'] },
   );
@@ -388,13 +466,12 @@ test('missing required OIDC config fails closed when auth is enabled', async () 
     requestWithAuthorization('Bearer valid-token'),
     context(),
     { ...baseConfig, issuer: undefined, issuers: [] },
-    await verifierReturning({ sub: 'allowed-sub', scp: 'api.access' }),
+    await verifierReturning({ sub: 'allowed-sub', scp: 'catalogue.read' }),
   );
 
   assert.equal(result.ok, false);
   assert.equal(result.response.status, 401);
 });
-
 
 test('readAuthConfig supports multiple comma-separated issuers', () => {
   const config = readAuthConfig({
@@ -417,6 +494,43 @@ test('readAuthConfig supports multiple comma-separated issuers', () => {
   assert.deepEqual(config.allowedDelegatedClientIds, ['allowed-delegated-client-id', 'second-delegated-client-id']);
 });
 
+test('failed OIDC discovery is evicted so a later request can recover', async () => {
+  clearOidcCachesForTesting();
+  let requests = 0;
+  const issuer = 'https://recoverable-issuer.example.test';
+  const fetchStub = async () => {
+    requests += 1;
+    if (requests === 1) {
+      return new Response('temporarily unavailable', { status: 503 });
+    }
+    return Response.json({ jwks_uri: 'https://recoverable-issuer.example.test/jwks' });
+  };
+
+  await assert.rejects(discoverJwksUri(issuer, fetchStub, { maxAttempts: 1, retryDelayMs: 0 }), /HTTP 503/);
+  assert.equal(
+    await discoverJwksUri(issuer, fetchStub, { maxAttempts: 1, retryDelayMs: 0 }),
+    'https://recoverable-issuer.example.test/jwks',
+  );
+  assert.equal(requests, 2);
+  clearOidcCachesForTesting();
+});
+
+test('OIDC discovery rejects non-local HTTP JWKS endpoints', async () => {
+  clearOidcCachesForTesting();
+  await assert.rejects(
+    discoverJwksUri(
+      'https://issuer-with-insecure-jwks.example.test',
+      async () =>
+        new Response(JSON.stringify({ jwks_uri: 'http://keys.example.test/jwks' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      { maxAttempts: 1 },
+    ),
+    /unsupported jwks_uri/,
+  );
+  clearOidcCachesForTesting();
+});
 
 test('verifyJwtWithJose discovers JWKS for the matching configured issuer', async () => {
   const issuerAKeys = await generateKeyPair('RS256');
@@ -455,7 +569,7 @@ test('verifyJwtWithJose discovers JWKS for the matching configured issuer', asyn
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
-    const token = await new SignJWT({ scp: 'api.access' })
+    const token = await new SignJWT({ scp: 'catalogue.read' })
       .setProtectedHeader({ alg: 'RS256', kid: 'issuer-b' })
       .setIssuer(`${baseUrl}/issuer-b`)
       .setAudience('api://catalogue-test')
@@ -512,7 +626,7 @@ test('tenant-specific Microsoft Entra v2 issuer also accepts v1 access token iss
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
-    const token = await new SignJWT({ scp: 'api.access' })
+    const token = await new SignJWT({ scp: 'catalogue.read' })
       .setProtectedHeader({ alg: 'RS256', kid: 'entra-v1' })
       .setIssuer(`${baseUrl}/${entraTenantId}/`)
       .setAudience('api://catalogue-test')

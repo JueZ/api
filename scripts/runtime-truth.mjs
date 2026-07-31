@@ -71,19 +71,39 @@ export function decideRuntimeTruth({ live = {}, ledger = null, options = {}, led
   const blockers = [];
   if (live.status === 'blocked') blockers.push(live.blockedReason || 'live runtime check was not configured');
   if (live.status === 'failed') failures.push(live.failureSummary || 'live runtime check failed');
-  if (options.environment && live.runtime?.environmentName && live.runtime.environmentName !== options.environment) failures.push(`live environmentName expected ${options.environment}, got ${live.runtime.environmentName}`);
-  if (options.expectedSha && live.runtime?.deployedCommitSha && String(live.runtime.deployedCommitSha).toLowerCase() !== options.expectedSha) failures.push(`live deployedCommitSha expected ${options.expectedSha}, got ${live.runtime.deployedCommitSha}`);
+  if (options.environment && live.runtime?.environmentName && live.runtime.environmentName !== options.environment)
+    failures.push(`live environmentName expected ${options.environment}, got ${live.runtime.environmentName}`);
+  if (
+    options.expectedSha &&
+    live.runtime?.deployedCommitSha &&
+    String(live.runtime.deployedCommitSha).toLowerCase() !== options.expectedSha
+  )
+    failures.push(`live deployedCommitSha expected ${options.expectedSha}, got ${live.runtime.deployedCommitSha}`);
 
   if (options.includeLedger) {
     if (!ledger) blockers.push('release ledger artifact was not available');
     if (ledgerErrors.length > 0) failures.push(...ledgerErrors);
     if (ledger) {
-      if (options.environment && ledger.environment !== options.environment) failures.push(`ledger environment expected ${options.environment}, got ${ledger.environment}`);
-      if (options.expectedSha && ledger.deployedCommit !== options.expectedSha) failures.push(`ledger deployedCommit expected ${options.expectedSha}, got ${ledger.deployedCommit}`);
-      if (live.runtime?.deployedCommitSha && ledger.deployedCommit && String(live.runtime.deployedCommitSha).toLowerCase() !== ledger.deployedCommit) failures.push(`live deployedCommitSha ${live.runtime.deployedCommitSha} does not match ledger deployedCommit ${ledger.deployedCommit}`);
-      if (ledger.smokeResults?.status !== 'passed') failures.push(`ledger smokeResults.status is ${ledger.smokeResults?.status || '<missing>'}`);
-      if (ledger.authenticatedSmokeResults?.status !== 'passed') failures.push(`ledger authenticatedSmokeResults.status is ${ledger.authenticatedSmokeResults?.status || '<missing>'}`);
-      if (!['passed'].includes(ledger.telemetryCheckResult?.status)) failures.push(`ledger telemetryCheckResult.status is ${ledger.telemetryCheckResult?.status || '<missing>'}`);
+      if (options.environment && ledger.environment !== options.environment)
+        failures.push(`ledger environment expected ${options.environment}, got ${ledger.environment}`);
+      if (options.expectedSha && ledger.deployedCommit !== options.expectedSha)
+        failures.push(`ledger deployedCommit expected ${options.expectedSha}, got ${ledger.deployedCommit}`);
+      if (
+        live.runtime?.deployedCommitSha &&
+        ledger.deployedCommit &&
+        String(live.runtime.deployedCommitSha).toLowerCase() !== ledger.deployedCommit
+      )
+        failures.push(
+          `live deployedCommitSha ${live.runtime.deployedCommitSha} does not match ledger deployedCommit ${ledger.deployedCommit}`,
+        );
+      if (ledger.smokeResults?.status !== 'passed')
+        failures.push(`ledger smokeResults.status is ${ledger.smokeResults?.status || '<missing>'}`);
+      if (ledger.authenticatedSmokeResults?.status !== 'passed')
+        failures.push(
+          `ledger authenticatedSmokeResults.status is ${ledger.authenticatedSmokeResults?.status || '<missing>'}`,
+        );
+      if (!['passed'].includes(ledger.telemetryCheckResult?.status))
+        failures.push(`ledger telemetryCheckResult.status is ${ledger.telemetryCheckResult?.status || '<missing>'}`);
     }
   }
   const status = failures.length > 0 ? 'failed' : blockers.length > 0 ? 'blocked' : 'verified';
@@ -91,7 +111,11 @@ export function decideRuntimeTruth({ live = {}, ledger = null, options = {}, led
 }
 
 export async function checkLiveRuntime(options) {
-  if (!options.apiBaseUrl) return { status: 'blocked', blockedReason: 'API base URL is required for live runtime truth. Set --api-base-url or API_BASE_URL.' };
+  if (!options.apiBaseUrl)
+    return {
+      status: 'blocked',
+      blockedReason: 'API base URL is required for live runtime truth. Set --api-base-url or API_BASE_URL.',
+    };
   const apiBaseUrl = requireUrl('API_BASE_URL', options.apiBaseUrl);
   try {
     const health = await fetchJson(`${apiBaseUrl}/health`);
@@ -104,9 +128,34 @@ export async function checkLiveRuntime(options) {
 
 async function latestRunIdForLedger(options, spawn) {
   if (options.runId) return options.runId;
-  const runs = JSON.parse(runGh(['run', 'list', '--repo', options.repo, '--workflow', options.workflow, '--branch', 'main', '--status', 'success', '--limit', '30', '--json', 'databaseId,headSha,conclusion,status'], spawn));
-  const run = runs.find((candidate) => !options.expectedSha || String(candidate.headSha).toLowerCase() === options.expectedSha);
-  if (!run) throw new Error(`No successful ${options.workflow} run found${options.expectedSha ? ` for ${options.expectedSha}` : ''}.`);
+  const runs = JSON.parse(
+    runGh(
+      [
+        'run',
+        'list',
+        '--repo',
+        options.repo,
+        '--workflow',
+        options.workflow,
+        '--branch',
+        'main',
+        '--status',
+        'success',
+        '--limit',
+        '30',
+        '--json',
+        'databaseId,headSha,conclusion,status',
+      ],
+      spawn,
+    ),
+  );
+  const run = runs.find(
+    (candidate) => !options.expectedSha || String(candidate.headSha).toLowerCase() === options.expectedSha,
+  );
+  if (!run)
+    throw new Error(
+      `No successful ${options.workflow} run found${options.expectedSha ? ` for ${options.expectedSha}` : ''}.`,
+    );
   return String(run.databaseId);
 }
 
@@ -115,7 +164,7 @@ export async function loadLedger(options, spawn = spawnSync) {
   if (!ghAvailable(spawn)) throw new Error('gh CLI is unavailable; ledger mode requires GitHub CLI.');
   const runId = await latestRunIdForLedger(options, spawn);
   const artifactName = `release-ledger-${options.environment}-${options.expectedSha}`;
-  const artifactDir = options.artifactDir || await mkdtemp(join(tmpdir(), 'runtime-truth-ledger-'));
+  const artifactDir = options.artifactDir || (await mkdtemp(join(tmpdir(), 'runtime-truth-ledger-')));
   if (!existsSync(artifactDir)) throw new Error(`artifact directory does not exist: ${artifactDir}`);
   runGh(['run', 'download', runId, '--repo', options.repo, '--name', artifactName, '--dir', artifactDir], spawn);
   const ledgerPath = await findJsonFile(artifactDir);
@@ -164,6 +213,7 @@ export async function runRuntimeTruth({ argv = process.argv.slice(2), env = proc
 if (import.meta.url === `file://${process.argv[1]}`) {
   const { result, exitCode } = await runRuntimeTruth();
   const rendered = safeSummary(result);
-  if (exitCode === 0) console.log(rendered); else console.error(rendered);
+  if (exitCode === 0) console.log(rendered);
+  else console.error(rendered);
   process.exit(exitCode);
 }

@@ -1,0 +1,17 @@
+# Ownership documents accountability. Repository rules do not require routine
+# human approval; exact-head automated policy and independent AI review remain
+# the merge gates unless the owner explicitly changes the ruleset.
+
+* @JueZ
+
+/.github/ @JueZ
+/infra/ @JueZ
+/apps/api/src/application/authorization/ @JueZ
+/apps/api/src/application/idempotency/ @JueZ
+/apps/api/src/application/operations/bring/ @JueZ
+/apps/api/src/mcp/ @JueZ
+/apps/api/src/shared/security/ @JueZ
+/apps/api/src/shared/bring/ @JueZ
+/contracts/ @JueZ
+/docs/security/ @JueZ
+/.agents/skills/ @JueZ

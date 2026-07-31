@@ -1,7 +1,16 @@
 #!/usr/bin/env node
-import { getSmokeRunId, requireUrl, fetchJson, fetchWithTimeout, assertEqual, safeSummary } from './lib/smoke-utils.mjs';
+import {
+  getSmokeRunId,
+  requireUrl,
+  fetchJson,
+  fetchWithTimeout,
+  assertEqual,
+  safeSummary,
+} from './lib/smoke-utils.mjs';
 
-function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export async function runRuntimeSmoke({ env = process.env, fetchImpl = fetchWithTimeout } = {}) {
   const apiBaseUrl = requireUrl('API_BASE_URL', env.API_BASE_URL);
@@ -10,13 +19,21 @@ export async function runRuntimeSmoke({ env = process.env, fetchImpl = fetchWith
   const environmentName = env.ENVIRONMENT_NAME || '';
   const smokeRunId = getSmokeRunId(env.SMOKE_RUN_ID);
   const headers = { 'X-Smoke-Run-Id': smokeRunId };
-  const results = { status: 'passed', smokeRunId, apiBaseUrl, frontendBaseUrl: frontendBaseUrl || undefined, checks: [] };
+  const results = {
+    status: 'passed',
+    smokeRunId,
+    apiBaseUrl,
+    frontendBaseUrl: frontendBaseUrl || undefined,
+    checks: [],
+  };
   const healthRetryAttempts = Number(env.RUNTIME_HEALTH_RETRY_ATTEMPTS || 10);
   const healthRetryDelayMs = Number(env.RUNTIME_HEALTH_RETRY_DELAY_MS || 3000);
   const helloRetryAttempts = Number(env.RUNTIME_HELLO_RETRY_ATTEMPTS || healthRetryAttempts);
   const helloRetryDelayMs = Number(env.RUNTIME_HELLO_RETRY_DELAY_MS || healthRetryDelayMs);
 
-  function record(name, status, details = {}) { results.checks.push({ name, status, ...details }); }
+  function record(name, status, details = {}) {
+    results.checks.push({ name, status, ...details });
+  }
 
   async function fetchHealthWithRetry() {
     let lastError;
@@ -61,8 +78,12 @@ export async function runRuntimeSmoke({ env = process.env, fetchImpl = fetchWith
     assertEqual('/health HTTP status', health.response.status, 200);
     assertEqual('/health status', health.json?.status, 'ok');
     if (environmentName) assertEqual('/health environmentName', health.json?.environmentName, environmentName);
-    if (expectedSha) assertEqual('/health deployedCommitSha', health.json?.deployedCommitSha, expectedSha.toLowerCase());
-    record('runtime-health', 'passed', { deployedCommitSha: health.json?.deployedCommitSha, environmentName: health.json?.environmentName });
+    if (expectedSha)
+      assertEqual('/health deployedCommitSha', health.json?.deployedCommitSha, expectedSha.toLowerCase());
+    record('runtime-health', 'passed', {
+      deployedCommitSha: health.json?.deployedCommitSha,
+      environmentName: health.json?.environmentName,
+    });
 
     const expectedHelloStatus = env.AUTH_ENABLED === 'false' ? 200 : 401;
     const hello = await fetchHelloWithRetry(expectedHelloStatus);
@@ -72,7 +93,8 @@ export async function runRuntimeSmoke({ env = process.env, fetchImpl = fetchWith
       const metadata = await fetchJson(`${frontendBaseUrl}/assets/build-info.json`, { headers });
       assertEqual('frontend build-info HTTP status', metadata.response.status, 200);
       if (environmentName) assertEqual('frontend environmentName', metadata.json?.environmentName, environmentName);
-      if (expectedSha) assertEqual('frontend deployedCommitSha', metadata.json?.deployedCommitSha, expectedSha.toLowerCase());
+      if (expectedSha)
+        assertEqual('frontend deployedCommitSha', metadata.json?.deployedCommitSha, expectedSha.toLowerCase());
       record('frontend-build-info', 'passed', { deployedCommitSha: metadata.json?.deployedCommitSha });
     }
 
@@ -87,6 +109,7 @@ export async function runRuntimeSmoke({ env = process.env, fetchImpl = fetchWith
 if (import.meta.url === `file://${process.argv[1]}`) {
   const { result, exitCode, output } = await runRuntimeSmoke();
   const rendered = safeSummary(result);
-  if (output === 'stderr') console.error(rendered); else console.log(rendered);
+  if (output === 'stderr') console.error(rendered);
+  else console.log(rendered);
   process.exit(exitCode);
 }

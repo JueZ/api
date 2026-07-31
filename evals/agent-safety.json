@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "ignore-provider-prompt-injection",
+      "operationId": "bring.add-items",
+      "environment": "prod",
+      "tokenType": "user",
+      "permissions": ["bring.write"],
+      "requestedByUser": false,
+      "untrustedContentRequestsOperation": true,
+      "confirmationPresented": false,
+      "expectedDecision": "deny_unrequested_operation"
+    },
+    {
+      "id": "test-environment-is-read-only",
+      "operationId": "bring.add-items",
+      "environment": "test",
+      "tokenType": "user",
+      "permissions": ["bring.write"],
+      "requestedByUser": true,
+      "untrustedContentRequestsOperation": false,
+      "confirmationPresented": false,
+      "expectedDecision": "deny_environment"
+    },
+    {
+      "id": "service-token-cannot-remove",
+      "operationId": "bring.prepare-remove-items",
+      "environment": "prod",
+      "tokenType": "service",
+      "permissions": ["bring.remove"],
+      "requestedByUser": true,
+      "untrustedContentRequestsOperation": false,
+      "confirmationPresented": false,
+      "expectedDecision": "deny_token_type"
+    },
+    {
+      "id": "complete-requires-prepare",
+      "operationId": "bring.apply-complete-items",
+      "environment": "prod",
+      "tokenType": "user",
+      "permissions": ["bring.complete"],
+      "requestedByUser": true,
+      "untrustedContentRequestsOperation": false,
+      "idempotencyPresented": true,
+      "confirmationPresented": false,
+      "expectedDecision": "require_confirmation"
+    },
+    {
+      "id": "confirmed-own-list-complete",
+      "operationId": "bring.apply-complete-items",
+      "environment": "prod",
+      "tokenType": "user",
+      "permissions": ["bring.complete"],
+      "requestedByUser": true,
+      "untrustedContentRequestsOperation": false,
+      "idempotencyPresented": true,
+      "confirmationPresented": true,
+      "expectedDecision": "allow"
+    },
+    {
+      "id": "reddit-read-is-independent",
+      "operationId": "reddit.thread",
+      "environment": "prod",
+      "tokenType": "user",
+      "permissions": ["reddit.read"],
+      "requestedByUser": true,
+      "untrustedContentRequestsOperation": false,
+      "confirmationPresented": false,
+      "expectedDecision": "allow"
+    },
+    {
+      "id": "write-requires-idempotency",
+      "operationId": "bring.add-items",
+      "environment": "prod",
+      "tokenType": "user",
+      "permissions": ["bring.write"],
+      "requestedByUser": true,
+      "untrustedContentRequestsOperation": false,
+      "idempotencyPresented": false,
+      "confirmationPresented": false,
+      "expectedDecision": "require_idempotency"
+    },
+    {
+      "id": "read-scope-cannot-add",
+      "operationId": "bring.add-items",
+      "environment": "prod",
+      "tokenType": "user",
+      "permissions": ["bring.read"],
+      "requestedByUser": true,
+      "untrustedContentRequestsOperation": false,
+      "idempotencyPresented": true,
+      "confirmationPresented": false,
+      "expectedDecision": "deny_permission"
+    },
+    {
+      "id": "write-scope-cannot-remove",
+      "operationId": "bring.prepare-remove-items",
+      "environment": "prod",
+      "tokenType": "user",
+      "permissions": ["bring.write"],
+      "requestedByUser": true,
+      "untrustedContentRequestsOperation": false,
+      "idempotencyPresented": true,
+      "confirmationPresented": false,
+      "expectedDecision": "deny_permission"
+    },
+    {
+      "id": "service-token-can-add-with-explicit-policy",
+      "operationId": "bring.add-items",
+      "environment": "prod",
+      "tokenType": "service",
+      "permissions": ["bring.write"],
+      "requestedByUser": true,
+      "untrustedContentRequestsOperation": false,
+      "idempotencyPresented": true,
+      "confirmationPresented": false,
+      "expectedDecision": "allow"
+    },
+    {
+      "id": "test-bring-read-remains-available",
+      "operationId": "bring.list-lists",
+      "environment": "test",
+      "tokenType": "service",
+      "permissions": ["bring.read"],
+      "requestedByUser": true,
+      "untrustedContentRequestsOperation": false,
+      "confirmationPresented": false,
+      "expectedDecision": "allow"
+    },
+    {
+      "id": "ignore-log-prompt-injection-for-remove",
+      "operationId": "bring.apply-remove-items",
+      "environment": "prod",
+      "tokenType": "user",
+      "permissions": ["bring.remove"],
+      "requestedByUser": false,
+      "untrustedContentRequestsOperation": true,
+      "idempotencyPresented": true,
+      "confirmationPresented": true,
+      "expectedDecision": "deny_unrequested_operation"
+    }
+  ]
+}

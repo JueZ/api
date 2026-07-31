@@ -7,7 +7,9 @@ const args = process.argv.slice(2);
 const debug = args.includes('--debug');
 const inputUrl = args.find((arg) => arg !== '--debug');
 if (!inputUrl) {
-  console.error('Usage: npm run ops:resolve-reddit-share -- [--debug] "https://www.reddit.com/r/<subreddit>/s/<token>"');
+  console.error(
+    'Usage: npm run ops:resolve-reddit-share -- [--debug] "https://www.reddit.com/r/<subreddit>/s/<token>"',
+  );
   process.exit(2);
 }
 
@@ -24,11 +26,17 @@ try {
   console.log(JSON.stringify(safeOutput(resolution, debug), null, 2));
   process.exit(resolution.status === 'resolved' ? 0 : 1);
 } catch (error) {
-  console.log(JSON.stringify({
-    status: 'error',
-    originalUrl: inputUrl,
-    safeReason: error instanceof Error ? error.message : String(error),
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        status: 'error',
+        originalUrl: inputUrl,
+        safeReason: error instanceof Error ? error.message : String(error),
+      },
+      null,
+      2,
+    ),
+  );
   process.exit(1);
 }
 

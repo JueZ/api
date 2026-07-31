@@ -8,27 +8,13 @@ import YAML from 'yaml';
 const DEFAULT_FUNCTIONS_GLOB_DIR = 'apps/api/src/functions';
 const CANONICAL_CONTRACT = 'contracts/openapi.yaml';
 const GPT_CONTRACT = 'contracts/openapi.gpt.yaml';
-const REMOVED_SPLIT_GPT_CONTRACTS = [
-  'contracts/openapi.gpt.reddit.yaml',
-  'contracts/openapi.gpt.wlh.yaml',
-];
+const REMOVED_SPLIT_GPT_CONTRACTS = ['contracts/openapi.gpt.reddit.yaml', 'contracts/openapi.gpt.wlh.yaml'];
 const HTTP_METHODS = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace']);
 const DOCUMENTED_METHODS = new Set(['get', 'put', 'post', 'delete', 'head', 'patch', 'trace']);
 const AUTH_RESPONSE_STATUSES = ['401', '403'];
-const STALE_SPLIT_CONTRACT_PATTERNS = [
-  /(?:contracts\/)?openapi\.gpt\.(?:wlh|reddit)\.ya?ml/i,
-];
-const STALE_SPLIT_OPERATION_IDS = new Set([
-  'health',
-  'hello',
-  'redditThread',
-  'getWlhTopCategories',
-  'searchWlh',
-]);
-const INTENTIONAL_NON_OPENAPI_ROUTES = new Set([
-  '/mcp',
-  '/.well-known/oauth-protected-resource',
-]);
+const STALE_SPLIT_CONTRACT_PATTERNS = [/(?:contracts\/)?openapi\.gpt\.(?:wlh|reddit)\.ya?ml/i];
+const STALE_SPLIT_OPERATION_IDS = new Set(['health', 'hello', 'redditThread', 'getWlhTopCategories', 'searchWlh']);
+const INTENTIONAL_NON_OPENAPI_ROUTES = new Set(['/mcp', '/.well-known/oauth-protected-resource']);
 
 function isStringLiteralLike(node) {
   return ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node);
@@ -58,10 +44,12 @@ function stringArrayInitializer(initializer) {
 function isAppHttpCall(node) {
   if (!ts.isCallExpression(node)) return false;
   const expression = node.expression;
-  return ts.isPropertyAccessExpression(expression)
-    && expression.name.text === 'http'
-    && ts.isIdentifier(expression.expression)
-    && expression.expression.text === 'app';
+  return (
+    ts.isPropertyAccessExpression(expression) &&
+    expression.name.text === 'http' &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === 'app'
+  );
 }
 
 function normalizeRoute(route) {
@@ -124,7 +112,8 @@ export function extractRoutesFromSource(sourceText, filePath = '<inline>') {
 }
 
 export function extractRoutesFromFunctions(functionsDir = DEFAULT_FUNCTIONS_GLOB_DIR) {
-  return fs.readdirSync(functionsDir)
+  return fs
+    .readdirSync(functionsDir)
     .filter((entry) => entry.endsWith('.ts'))
     .sort()
     .flatMap((entry) => {
@@ -167,11 +156,13 @@ function hasAuthResponses(operation) {
 }
 
 function isPlainObjectSchema(schema) {
-  return schema
-    && typeof schema === 'object'
-    && !Array.isArray(schema)
-    && Object.keys(schema).length === 1
-    && schema.type === 'object';
+  return (
+    schema &&
+    typeof schema === 'object' &&
+    !Array.isArray(schema) &&
+    Object.keys(schema).length === 1 &&
+    schema.type === 'object'
+  );
 }
 
 function hasJsonSchema(media) {
@@ -214,11 +205,15 @@ export function findDuplicateOperationIds(contract, contractName = 'contract') {
       continue;
     }
     if (!/^[a-z][A-Za-z0-9]*$/.test(operationId)) {
-      issues.push(`${contractName}: ${entry.method.toUpperCase()} ${entry.path} operationId '${operationId}' is not stable lower-camel-case ASCII.`);
+      issues.push(
+        `${contractName}: ${entry.method.toUpperCase()} ${entry.path} operationId '${operationId}' is not stable lower-camel-case ASCII.`,
+      );
     }
     const previous = seen.get(operationId);
     if (previous) {
-      issues.push(`${contractName}: duplicate operationId '${operationId}' on ${previous.method.toUpperCase()} ${previous.path} and ${entry.method.toUpperCase()} ${entry.path}.`);
+      issues.push(
+        `${contractName}: duplicate operationId '${operationId}' on ${previous.method.toUpperCase()} ${previous.path} and ${entry.method.toUpperCase()} ${entry.path}.`,
+      );
     } else {
       seen.set(operationId, entry);
     }
@@ -229,7 +224,9 @@ export function findDuplicateOperationIds(contract, contractName = 'contract') {
 export function findMissingCanonicalRoutes(implementationRoutes, canonicalContract) {
   return implementationRoutes
     .filter((route) => !operationFor(canonicalContract, route))
-    .map((route) => `canonical OpenAPI is missing implementation route ${describeRoute(route)} from ${route.filePath}.`);
+    .map(
+      (route) => `canonical OpenAPI is missing implementation route ${describeRoute(route)} from ${route.filePath}.`,
+    );
 }
 
 export function findMissingGptRoutes(gptIntendedRoutes, gptContract) {
@@ -249,7 +246,9 @@ export function findProtectedRouteAuthIssues(implementationRoutes, contracts) {
         issues.push(`${name}: protected implementation route ${describeRoute(route)} is missing operation security.`);
       }
       if (!hasAuthResponses(operation)) {
-        issues.push(`${name}: protected implementation route ${describeRoute(route)} must document 401 and 403 auth responses.`);
+        issues.push(
+          `${name}: protected implementation route ${describeRoute(route)} must document 401 and 403 auth responses.`,
+        );
       }
     }
   }
@@ -262,17 +261,21 @@ export function findUnstableSharedOperationIds(canonicalContract, gptContract) {
     const gptOperation = gptContract.paths?.[canonicalEntry.path]?.[canonicalEntry.method];
     if (!gptOperation) continue;
     if (canonicalEntry.operation?.operationId !== gptOperation.operationId) {
-      issues.push(`operationId drift for ${canonicalEntry.method.toUpperCase()} ${canonicalEntry.path}: canonical '${canonicalEntry.operation?.operationId}' vs GPT '${gptOperation.operationId}'.`);
+      issues.push(
+        `operationId drift for ${canonicalEntry.method.toUpperCase()} ${canonicalEntry.path}: canonical '${canonicalEntry.operation?.operationId}' vs GPT '${gptOperation.operationId}'.`,
+      );
     }
   }
   return issues;
 }
 
 export function findUnexpectedSplitContractFiles(baseDir = '.') {
-  return REMOVED_SPLIT_GPT_CONTRACTS
-    .map((contractPath) => path.join(baseDir, contractPath))
+  return REMOVED_SPLIT_GPT_CONTRACTS.map((contractPath) => path.join(baseDir, contractPath))
     .filter((contractPath) => fs.existsSync(contractPath))
-    .map((contractPath) => `${path.relative(baseDir, contractPath) || contractPath} was removed; use ${GPT_CONTRACT} as the only GPT Actions contract.`);
+    .map(
+      (contractPath) =>
+        `${path.relative(baseDir, contractPath) || contractPath} was removed; use ${GPT_CONTRACT} as the only GPT Actions contract.`,
+    );
 }
 
 export function findStaleSplitContractReferences(gptContract, rawText = '') {
@@ -288,7 +291,9 @@ export function findStaleSplitContractReferences(gptContract, rawText = '') {
   for (const entry of operationEntries(gptContract)) {
     const operationId = entry.operation?.operationId;
     if (STALE_SPLIT_OPERATION_IDS.has(operationId)) {
-      issues.push(`GPT Actions contract contains stale split-contract operationId '${operationId}' on ${entry.method.toUpperCase()} ${entry.path}.`);
+      issues.push(
+        `GPT Actions contract contains stale split-contract operationId '${operationId}' on ${entry.method.toUpperCase()} ${entry.path}.`,
+      );
     }
   }
   return issues;
@@ -302,13 +307,20 @@ export function findGptWlhThinSchemaIssues(canonicalContract, gptContract) {
     if (!gptOperation) continue;
 
     if (isRicherCanonicalRequest(canonicalEntry.operation) && isPlainObjectSchema(jsonRequestSchema(gptOperation))) {
-      issues.push(`GPT WLH operation ${canonicalEntry.method.toUpperCase()} ${canonicalEntry.path} uses only { type: object } request schema while canonical has a richer schema.`);
+      issues.push(
+        `GPT WLH operation ${canonicalEntry.method.toUpperCase()} ${canonicalEntry.path} uses only { type: object } request schema while canonical has a richer schema.`,
+      );
     }
 
     const gpt200 = response(gptOperation, '200');
     const gptJson = jsonResponseMedia(gptOperation, '200');
-    if (isRicherCanonicalResponse(canonicalEntry.operation) && (gpt200?.description === 'OK' || !hasJsonSchema(gptJson))) {
-      issues.push(`GPT WLH operation ${canonicalEntry.method.toUpperCase()} ${canonicalEntry.path} uses a thin 200 response while canonical has a richer response schema.`);
+    if (
+      isRicherCanonicalResponse(canonicalEntry.operation) &&
+      (gpt200?.description === 'OK' || !hasJsonSchema(gptJson))
+    ) {
+      issues.push(
+        `GPT WLH operation ${canonicalEntry.method.toUpperCase()} ${canonicalEntry.path} uses a thin 200 response while canonical has a richer response schema.`,
+      );
     }
   }
   return issues;

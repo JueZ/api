@@ -13,7 +13,11 @@ export function sanitizeTokenEndpointErrorCode(value) {
 
 export function selectServiceAuthConfig(env = process.env) {
   const environmentName = (env.ENVIRONMENT_NAME || '').trim().toLowerCase();
-  const prefix = environmentName === 'prod' ? 'PROD' : 'TEST';
+  const configuredPrefix = (env.SERVICE_AUTH_PREFIX || '').trim().toUpperCase();
+  if (configuredPrefix && !/^[A-Z][A-Z0-9_]{0,63}$/.test(configuredPrefix)) {
+    throw new Error('SERVICE_AUTH_PREFIX must contain only uppercase letters, numbers, and underscores.');
+  }
+  const prefix = configuredPrefix || (environmentName === 'prod' ? 'PROD' : 'TEST');
 
   return {
     environmentName,
@@ -51,7 +55,9 @@ export function missingServiceAuthFields(config) {
     ['clientId', config.clientId],
     ['tenantId', config.tenantId],
     ['scope', config.scope],
-  ].filter(([, value]) => !value).map(([name]) => name);
+  ]
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -73,7 +79,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const githubRequestToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
   const githubEnv = process.env.GITHUB_ENV;
   if (!githubRequestUrl || !githubRequestToken || !githubEnv) {
-    const message = 'GitHub OIDC runtime variables are unavailable. Ensure workflow permissions include id-token: write.';
+    const message =
+      'GitHub OIDC runtime variables are unavailable. Ensure workflow permissions include id-token: write.';
     if (requireToken) {
       console.error(message);
       process.exit(2);
@@ -94,12 +101,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   oidcUrl.searchParams.set('audience', config.githubOidcAudience);
   let oidcResponse;
   try {
-    oidcResponse = await fetchWithTimeout(oidcUrl, {
-      headers: {
-        Authorization: `bearer ${githubRequestToken}`,
-        Accept: 'application/json',
+    oidcResponse = await fetchWithTimeout(
+      oidcUrl,
+      {
+        headers: {
+          Authorization: `bearer ${githubRequestToken}`,
+          Accept: 'application/json',
+        },
       },
-    }, tokenFetchTimeoutMs);
+      tokenFetchTimeoutMs,
+    );
   } catch (error) {
     const message = isTimeoutError(error)
       ? `GitHub OIDC token request timed out after ${tokenFetchTimeoutMs}ms.`
@@ -133,11 +144,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
   let tokenResponse;
   try {
-    tokenResponse = await fetchWithTimeout(`${TOKEN_ENDPOINT_HOST}/${encodeURIComponent(config.tenantId)}/oauth2/v2.0/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: form,
-    }, tokenFetchTimeoutMs);
+    tokenResponse = await fetchWithTimeout(
+      `${TOKEN_ENDPOINT_HOST}/${encodeURIComponent(config.tenantId)}/oauth2/v2.0/token`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form,
+      },
+      tokenFetchTimeoutMs,
+    );
   } catch (error) {
     const message = isTimeoutError(error)
       ? `Microsoft Entra token exchange timed out after ${tokenFetchTimeoutMs}ms.`

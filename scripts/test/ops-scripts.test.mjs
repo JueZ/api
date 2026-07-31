@@ -3,7 +3,13 @@ import test from 'node:test';
 import { validateReleaseLedger } from '../validate-release-ledger.mjs';
 import { parseRepairIssueBody, decideRepairIssueAction } from '../triage-repair-issues.mjs';
 import { forbiddenDiffFindings, highRiskPaths } from '../policy-guardrails.mjs';
-import { DEFAULT_SMOKE_FETCH_TIMEOUT_MS, fetchJson, fetchWithTimeout, getSmokeFetchTimeoutMs, isTimeoutError } from '../lib/smoke-utils.mjs';
+import {
+  DEFAULT_SMOKE_FETCH_TIMEOUT_MS,
+  fetchJson,
+  fetchWithTimeout,
+  getSmokeFetchTimeoutMs,
+  isTimeoutError,
+} from '../lib/smoke-utils.mjs';
 import { runAuthenticatedSmoke } from '../smoke-auth.mjs';
 import {
   missingServiceAuthFields,
@@ -20,6 +26,11 @@ test('release ledger validation accepts required runtime truth fields', () => {
     workflowRunId: '123',
     functionAppName: 'func-api',
     apiBaseUrl: 'https://example.test',
+    artifacts: {
+      functionappSha256: 'b'.repeat(64),
+      frontendSha256: 'c'.repeat(64),
+      sbomSha256: 'd'.repeat(64),
+    },
     smokeRunId: 'smoke-1',
     smokeResults: { status: 'passed' },
     authenticatedSmokeResults: { status: 'blocked_auth_smoke', blockedReason: 'token missing' },
@@ -36,7 +47,13 @@ test('repair issue parser finds PRs and workflow runs', () => {
 });
 
 test('repair issue decision closes PR-check issues only with merged PR and check evidence', () => {
-  assert.equal(decideRepairIssueAction({ title: 'CI check failed', body: 'PR #1' }, { prStates: [{ number: 1, merged: true, checksPassed: true }] }).action, 'close');
+  assert.equal(
+    decideRepairIssueAction(
+      { title: 'CI check failed', body: 'PR #1' },
+      { prStates: [{ number: 1, merged: true, checksPassed: true }] },
+    ).action,
+    'close',
+  );
 });
 
 test('policy guardrails detect high-risk paths and removed telemetry', () => {
@@ -45,11 +62,28 @@ test('policy guardrails detect high-risk paths and removed telemetry', () => {
 });
 
 test('policy guardrails ignore negated disable warnings while blocking actual disable changes', () => {
-  assert.ok(!forbiddenDiffFindings('- Do not disable tests, weaken authentication, remove policy checks, or commit secrets.').includes('ci-policy-disabled'));
-  assert.ok(!forbiddenDiffFindings('+ Repair must happen without disabling CI or policy checks.').includes('ci-policy-disabled'));
+  assert.ok(
+    !forbiddenDiffFindings(
+      '- Do not disable tests, weaken authentication, remove policy checks, or commit secrets.',
+    ).includes('ci-policy-disabled'),
+  );
+  assert.ok(
+    !forbiddenDiffFindings('+ Repair must happen without disabling CI or policy checks.').includes(
+      'ci-policy-disabled',
+    ),
+  );
   assert.ok(forbiddenDiffFindings('+ dis' + 'able CI=true').includes('ci-policy-disabled'));
+  assert.ok(forbiddenDiffFindings('+ continue-on-error: true').includes('ci-policy-disabled'));
+  assert.ok(!forbiddenDiffFindings('+ return new BringDisabledError() || new BringPolicyError()').length);
 });
 
+test('policy guardrails distinguish OIDC hardening from client-secret authentication', () => {
+  assert.ok(!forbiddenDiffFindings('+ persist-credentials: false').includes('oidc-replaced-by-secret'));
+  assert.ok(!forbiddenDiffFindings("+ name: 'reddit-client-secret'").includes('oidc-replaced-by-secret'));
+  assert.ok(forbiddenDiffFindings('+ AZURE_CLIENT_' + 'SECRET=unsafe').includes('oidc-replaced-by-secret'));
+  assert.ok(forbiddenDiffFindings('+ client-' + 'secret: unsafe').includes('oidc-replaced-by-secret'));
+  assert.ok(!forbiddenDiffFindings('+ added: /^\\+.*print' + 'env/im').includes('secret-logging-risk'));
+});
 
 test('smoke token mint config selects production service variables', () => {
   const config = selectServiceAuthConfig({
@@ -70,14 +104,36 @@ test('smoke token mint config detects missing service variables', () => {
   assert.deepEqual(missingServiceAuthFields(config), ['tenantId', 'scope']);
 });
 
+test('smoke token mint supports a dedicated least-privilege canary identity', () => {
+  const config = selectServiceAuthConfig({
+    ENVIRONMENT_NAME: 'test',
+    SERVICE_AUTH_PREFIX: 'BRING_CANARY',
+    BRING_CANARY_SERVICE_AUTH_CLIENT_ID: 'canary-client',
+    BRING_CANARY_SERVICE_AUTH_TENANT_ID: 'canary-tenant',
+    BRING_CANARY_SERVICE_AUTH_SCOPE: 'api://example/.default',
+  });
+  assert.equal(config.prefix, 'BRING_CANARY');
+  assert.equal(config.clientId, 'canary-client');
+  assert.deepEqual(missingServiceAuthFields(config), []);
+  assert.throws(() => selectServiceAuthConfig({ SERVICE_AUTH_PREFIX: '../../BAD' }), /SERVICE_AUTH_PREFIX/);
+});
 
 test('smoke token timeout override defaults and validates safe bounds', () => {
   assert.equal(parseSmokeTokenFetchTimeoutMs({}), DEFAULT_SMOKE_FETCH_TIMEOUT_MS);
   assert.equal(parseSmokeTokenFetchTimeoutMs({ SMOKE_FETCH_TIMEOUT_MS: '2500' }), 2500);
   assert.equal(parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '1500' }), 1500);
-  assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '0' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
-  assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '120001' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
-  assert.throws(() => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: 'secret-ish' }), /SMOKE_TOKEN_FETCH_TIMEOUT_MS/);
+  assert.throws(
+    () => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '0' }),
+    /SMOKE_TOKEN_FETCH_TIMEOUT_MS/,
+  );
+  assert.throws(
+    () => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: '120001' }),
+    /SMOKE_TOKEN_FETCH_TIMEOUT_MS/,
+  );
+  assert.throws(
+    () => parseSmokeTokenFetchTimeoutMs({ SMOKE_TOKEN_FETCH_TIMEOUT_MS: 'secret-ish' }),
+    /SMOKE_TOKEN_FETCH_TIMEOUT_MS/,
+  );
 });
 
 test('smoke token endpoint error code sanitizer avoids unsafe response text', () => {
@@ -89,15 +145,13 @@ test('smoke token endpoint error code sanitizer avoids unsafe response text', ()
 test('fetchWithTimeout aborts slow fetch calls', async () => {
   const originalFetch = globalThis.fetch;
   const keepAlive = setTimeout(() => {}, 50);
-  globalThis.fetch = async (_url, options) => new Promise((_resolve, reject) => {
-    options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
-  });
+  globalThis.fetch = async (_url, options) =>
+    new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    });
 
   try {
-    await assert.rejects(
-      fetchWithTimeout('https://example.test', {}, 1),
-      (error) => isTimeoutError(error),
-    );
+    await assert.rejects(fetchWithTimeout('https://example.test', {}, 1), (error) => isTimeoutError(error));
   } finally {
     clearTimeout(keepAlive);
     globalThis.fetch = originalFetch;
@@ -144,8 +198,6 @@ test('fetchJson applies timeouts while preserving caller fetch options', async (
   }
 });
 
-
-
 test('authenticated smoke retries transient health and protected endpoint 404s after deployment', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -159,32 +211,46 @@ test('authenticated smoke retries transient health and protected endpoint 404s a
       if (path === '/api/hello' && calls.filter((call) => new URL(call).pathname === '/api/hello').length === 1) {
         return new Response('not ready', { status: 404 });
       }
-      if (path === '/api/reddit/thread' && calls.filter((call) => new URL(call).pathname === '/api/reddit/thread').length === 1) {
+      if (
+        path === '/api/reddit/thread' &&
+        calls.filter((call) => new URL(call).pathname === '/api/reddit/thread').length === 1
+      ) {
         return new Response('not ready', { status: 404 });
       }
       if (path === '/health') {
-        return new Response(JSON.stringify({ status: 'ok', environmentName: 'prod', deployedCommitSha: 'a'.repeat(40) }), { status: 200, headers: { 'content-type': 'application/json' } });
+        return new Response(
+          JSON.stringify({ status: 'ok', environmentName: 'prod', deployedCommitSha: 'a'.repeat(40) }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
       }
       if (path === '/api/hello') {
-        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+        return new Response(JSON.stringify({ authenticated: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
       }
       if (path === '/api/reddit/thread') {
-        return new Response(JSON.stringify({ source: 'reddit' }), { status: 200, headers: { 'content-type': 'application/json' } });
+        return new Response(JSON.stringify({ source: 'reddit' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
       }
       throw new Error(`unexpected URL ${url}`);
     };
 
-    const { result, exitCode } = await runAuthenticatedSmoke({ env: {
-      API_BASE_URL: 'https://api.example.test',
-      AUTH_ACCESS_TOKEN: 'token',
-      ENVIRONMENT_NAME: 'prod',
-      EXPECTED_DEPLOYED_COMMIT_SHA: 'a'.repeat(40),
-      SMOKE_RUN_ID: 'smoke-test',
-      AUTH_HEALTH_RETRY_ATTEMPTS: '2',
-      AUTH_HEALTH_RETRY_DELAY_MS: '0',
-      AUTH_PROTECTED_RETRY_ATTEMPTS: '2',
-      AUTH_PROTECTED_RETRY_DELAY_MS: '0',
-    } });
+    const { result, exitCode } = await runAuthenticatedSmoke({
+      env: {
+        API_BASE_URL: 'https://api.example.test',
+        AUTH_ACCESS_TOKEN: 'token',
+        ENVIRONMENT_NAME: 'prod',
+        EXPECTED_DEPLOYED_COMMIT_SHA: 'a'.repeat(40),
+        SMOKE_RUN_ID: 'smoke-test',
+        AUTH_HEALTH_RETRY_ATTEMPTS: '2',
+        AUTH_HEALTH_RETRY_DELAY_MS: '0',
+        AUTH_PROTECTED_RETRY_ATTEMPTS: '2',
+        AUTH_PROTECTED_RETRY_DELAY_MS: '0',
+      },
+    });
 
     assert.equal(exitCode, 0);
     assert.equal(result.status, 'passed');
@@ -196,7 +262,6 @@ test('authenticated smoke retries transient health and protected endpoint 404s a
   }
 });
 
-
 test('authenticated share URL smoke passes only when expected post id matches', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -205,29 +270,40 @@ test('authenticated share URL smoke passes only when expected post id matches', 
       const path = new URL(String(url)).pathname;
       calls.push({ path, body: options.body ? JSON.parse(String(options.body)) : null });
       if (path === '/health') {
-        return new Response(JSON.stringify({ status: 'ok', environmentName: 'test', deployedCommitSha: 'b'.repeat(40) }), { status: 200, headers: { 'content-type': 'application/json' } });
+        return new Response(
+          JSON.stringify({ status: 'ok', environmentName: 'test', deployedCommitSha: 'b'.repeat(40) }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
       }
       if (path === '/api/hello') {
-        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+        return new Response(JSON.stringify({ authenticated: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
       }
       if (path === '/api/reddit/thread') {
         const body = JSON.parse(String(options.body));
         const postId = body.post.includes('/s/') ? '1tryldy' : '87';
-        return new Response(JSON.stringify({ post: { id: postId } }), { status: 200, headers: { 'content-type': 'application/json' } });
+        return new Response(JSON.stringify({ post: { id: postId } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
       }
       throw new Error(`unexpected URL ${url}`);
     };
 
-    const { result, exitCode } = await runAuthenticatedSmoke({ env: {
-      API_BASE_URL: 'https://api.example.test',
-      AUTH_ACCESS_TOKEN: 'token',
-      ENVIRONMENT_NAME: 'test',
-      EXPECTED_DEPLOYED_COMMIT_SHA: 'b'.repeat(40),
-      SMOKE_RUN_ID: 'smoke-test',
-      REDDIT_SHARE_URL_SMOKE_ENABLED: 'true',
-      REDDIT_SHARE_URL_SMOKE_URL: 'https://www.reddit.com/r/macbookpro/s/nnlryuZCNX',
-      REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID: '1tryldy',
-    } });
+    const { result, exitCode } = await runAuthenticatedSmoke({
+      env: {
+        API_BASE_URL: 'https://api.example.test',
+        AUTH_ACCESS_TOKEN: 'token',
+        ENVIRONMENT_NAME: 'test',
+        EXPECTED_DEPLOYED_COMMIT_SHA: 'b'.repeat(40),
+        SMOKE_RUN_ID: 'smoke-test',
+        REDDIT_SHARE_URL_SMOKE_ENABLED: 'true',
+        REDDIT_SHARE_URL_SMOKE_URL: 'https://www.reddit.com/r/macbookpro/s/nnlryuZCNX',
+        REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID: '1tryldy',
+      },
+    });
 
     assert.equal(exitCode, 0);
     assert.equal(result.status, 'passed');
@@ -248,34 +324,48 @@ test('authenticated share URL smoke records Reddit challenge as dependency block
     globalThis.fetch = async (url, options = {}) => {
       const path = new URL(String(url)).pathname;
       if (path === '/health') {
-        return new Response(JSON.stringify({ status: 'ok', environmentName: 'test' }), { status: 200, headers: { 'content-type': 'application/json' } });
+        return new Response(JSON.stringify({ status: 'ok', environmentName: 'test' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
       }
       if (path === '/api/hello') {
-        return new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+        return new Response(JSON.stringify({ authenticated: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
       }
       if (path === '/api/reddit/thread') {
         const body = JSON.parse(String(options.body));
         if (body.post.includes('/s/')) {
-          return new Response(JSON.stringify({
-            code: 'REDDIT_SHARE_RESOLUTION_BLOCKED',
-            detail: 'Reddit web returned HTTP 403 challenge without exposing a canonical /comments/<id> redirect.',
-            resolution: { httpStatus: 403 },
-          }), { status: 400, headers: { 'content-type': 'application/json' } });
+          return new Response(
+            JSON.stringify({
+              code: 'REDDIT_SHARE_RESOLUTION_BLOCKED',
+              detail: 'Reddit web returned HTTP 403 challenge without exposing a canonical /comments/<id> redirect.',
+              resolution: { httpStatus: 403 },
+            }),
+            { status: 400, headers: { 'content-type': 'application/json' } },
+          );
         }
-        return new Response(JSON.stringify({ post: { id: '87' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+        return new Response(JSON.stringify({ post: { id: '87' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
       }
       throw new Error(`unexpected URL ${url}`);
     };
 
-    const { result, exitCode } = await runAuthenticatedSmoke({ env: {
-      API_BASE_URL: 'https://api.example.test',
-      AUTH_ACCESS_TOKEN: 'token',
-      ENVIRONMENT_NAME: 'test',
-      SMOKE_RUN_ID: 'smoke-test',
-      REDDIT_SHARE_URL_SMOKE_ENABLED: 'true',
-      REDDIT_SHARE_URL_SMOKE_URL: 'https://www.reddit.com/r/macbookpro/s/nnlryuZCNX',
-      REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID: '1tryldy',
-    } });
+    const { result, exitCode } = await runAuthenticatedSmoke({
+      env: {
+        API_BASE_URL: 'https://api.example.test',
+        AUTH_ACCESS_TOKEN: 'token',
+        ENVIRONMENT_NAME: 'test',
+        SMOKE_RUN_ID: 'smoke-test',
+        REDDIT_SHARE_URL_SMOKE_ENABLED: 'true',
+        REDDIT_SHARE_URL_SMOKE_URL: 'https://www.reddit.com/r/macbookpro/s/nnlryuZCNX',
+        REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID: '1tryldy',
+      },
+    });
 
     assert.equal(exitCode, 0);
     assert.equal(result.status, 'dependency_blocked');
@@ -311,7 +401,8 @@ test('smoke and release ledger modules import without operational side effects',
   t.after(async () => {
     process.chdir(originalCwd);
     globalThis.fetch = originalFetch;
-    if (originalApiBaseUrl === undefined) delete process.env.API_BASE_URL; else process.env.API_BASE_URL = originalApiBaseUrl;
+    if (originalApiBaseUrl === undefined) delete process.env.API_BASE_URL;
+    else process.env.API_BASE_URL = originalApiBaseUrl;
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -323,9 +414,13 @@ test('smoke and release ledger modules import without operational side effects',
   };
 
   const cacheBust = `?importSafety=${Date.now()}`;
-  const runtimeSmoke = await import(`${pathToFileURL(resolve(originalCwd, 'scripts/smoke-runtime.mjs')).href}${cacheBust}`);
+  const runtimeSmoke = await import(
+    `${pathToFileURL(resolve(originalCwd, 'scripts/smoke-runtime.mjs')).href}${cacheBust}`
+  );
   const authSmoke = await import(`${pathToFileURL(resolve(originalCwd, 'scripts/smoke-auth.mjs')).href}${cacheBust}`);
-  const releaseLedger = await import(`${pathToFileURL(resolve(originalCwd, 'scripts/write-release-ledger.mjs')).href}${cacheBust}`);
+  const releaseLedger = await import(
+    `${pathToFileURL(resolve(originalCwd, 'scripts/write-release-ledger.mjs')).href}${cacheBust}`
+  );
 
   assert.equal(typeof runtimeSmoke.runRuntimeSmoke, 'function');
   assert.equal(typeof authSmoke.runAuthenticatedSmoke, 'function');

@@ -1,3 +1,15 @@
 import type { WlhConfig } from './types.js';
 export class WlhConfigError extends Error {}
-export function readWlhConfig(env: NodeJS.ProcessEnv = process.env): WlhConfig { const c={ baseUrl:(env['WLH_BASE_URL']??'').trim(), storageAccountName:(env['WLH_STORAGE_ACCOUNT_NAME']??'').trim(), categoryBlobContainer:(env['WLH_CATEGORY_BLOB_CONTAINER']??'wlh-reference').trim(), categoryBlobName:(env['WLH_CATEGORY_BLOB_NAME']??'categories-marketplace.v1.json.gz').trim(), categoryFile:(env['WLH_CATEGORY_FILE']??'').trim(), categoryVersion:(env['WLH_CATEGORY_VERSION']??'').trim()}; if(!c.baseUrl) throw new WlhConfigError('WLH_BASE_URL missing'); if(!c.categoryFile&&!c.storageAccountName) throw new WlhConfigError('WLH_STORAGE_ACCOUNT_NAME missing'); return c; }
+export function readWlhConfig(env: NodeJS.ProcessEnv = process.env): WlhConfig {
+  const c = {
+    baseUrl: (env['WLH_BASE_URL'] ?? '').trim(),
+    storageAccountName: (env['WLH_STORAGE_ACCOUNT_NAME'] ?? '').trim(),
+    categoryBlobContainer: (env['WLH_CATEGORY_BLOB_CONTAINER'] ?? 'wlh-reference').trim(),
+    categoryBlobName: (env['WLH_CATEGORY_BLOB_NAME'] ?? 'categories-marketplace.v1.json.gz').trim(),
+    categoryFile: (env['WLH_CATEGORY_FILE'] ?? '').trim(),
+    categoryVersion: (env['WLH_CATEGORY_VERSION'] ?? '').trim(),
+  };
+  if (!c.baseUrl) throw new WlhConfigError('WLH_BASE_URL missing');
+  if (!c.categoryFile && !c.storageAccountName) throw new WlhConfigError('WLH_STORAGE_ACCOUNT_NAME missing');
+  return c;
+}

@@ -1,4 +1,5 @@
 import type { HttpRequest, HttpResponseInit } from '@azure/functions';
+import { getDeployedEnvironmentName } from '../config/runtime.js';
 
 export const API_CORS_ALLOWED_ORIGINS_ENV = 'API_CORS_ALLOWED_ORIGINS';
 
@@ -52,16 +53,25 @@ export function getConfiguredCorsAllowedOrigins(env: NodeJS.ProcessEnv = process
   return splitOriginList(env[API_CORS_ALLOWED_ORIGINS_ENV]);
 }
 
-function resolveAllowedOrigin(request: Pick<HttpRequest, 'headers'> | undefined, env: NodeJS.ProcessEnv): string | undefined {
+function resolveAllowedOrigin(
+  request: Pick<HttpRequest, 'headers'> | undefined,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
   const configuredOrigins = getConfiguredCorsAllowedOrigins(env);
-  if (configuredOrigins.length === 0) return '*';
-  if (configuredOrigins.includes('*')) return '*';
+  if (configuredOrigins.length === 0) {
+    return getDeployedEnvironmentName(env) === 'local' ? '*' : undefined;
+  }
+  if (configuredOrigins.includes('*')) {
+    return getDeployedEnvironmentName(env) === 'local' ? '*' : undefined;
+  }
 
   const requestOrigin = request?.headers?.get('origin');
   const normalizedRequestOrigin = normalizeOrigin(requestOrigin ?? undefined);
   if (!normalizedRequestOrigin) return undefined;
 
-  const allowedOrigins = new Set(configuredOrigins.map(normalizeOrigin).filter((origin): origin is string => Boolean(origin)));
+  const allowedOrigins = new Set(
+    configuredOrigins.map(normalizeOrigin).filter((origin): origin is string => Boolean(origin)),
+  );
   return allowedOrigins.has(normalizedRequestOrigin) ? normalizedRequestOrigin : undefined;
 }
 

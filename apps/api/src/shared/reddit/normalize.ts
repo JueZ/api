@@ -1,4 +1,14 @@
-import type { RedditCommentContinuationDto, RedditCommentDto, RedditCommentTreeResponse, RedditCommentTreeStats, RedditPostDto, RedditRateLimit, RedditSort, RedditThreadResponse, RedditThreadStats } from './types.js';
+import type {
+  RedditCommentContinuationDto,
+  RedditCommentDto,
+  RedditCommentTreeResponse,
+  RedditCommentTreeStats,
+  RedditPostDto,
+  RedditRateLimit,
+  RedditSort,
+  RedditThreadResponse,
+  RedditThreadStats,
+} from './types.js';
 
 export interface RedditListing<T = unknown> {
   kind?: string;
@@ -192,7 +202,14 @@ export function normalizeCommentBlockFromThings(
       collectMore(thing.data, parentId, depth, state);
     }
   }
-  return { comments, commentByFullname: state.commentByFullname, more: state.more, commentsReturned: state.commentsReturned, truncated: state.truncated, warnings: state.warnings };
+  return {
+    comments,
+    commentByFullname: state.commentByFullname,
+    more: state.more,
+    commentsReturned: state.commentsReturned,
+    truncated: state.truncated,
+    warnings: state.warnings,
+  };
 }
 
 export function normalizeFocusedCommentBlock(
@@ -263,11 +280,7 @@ function normalizePost(data: Record<string, unknown>): RedditPostDto {
   };
 }
 
-function normalizeCommentChildren(
-  things: RedditThing[],
-  depth: number,
-  state: NormalizeState,
-): RedditCommentDto[] {
+function normalizeCommentChildren(things: RedditThing[], depth: number, state: NormalizeState): RedditCommentDto[] {
   const comments: RedditCommentDto[] = [];
   for (const thing of things) {
     if (state.commentsReturned >= state.maxComments) {
@@ -326,7 +339,9 @@ function collectMore(data: unknown, fallbackParentId: string, fallbackDepth: num
     return;
   }
   const more = data as Record<string, unknown>;
-  const children = Array.isArray(more['children']) ? more['children'].filter((child): child is string => typeof child === 'string') : [];
+  const children = Array.isArray(more['children'])
+    ? more['children'].filter((child): child is string => typeof child === 'string')
+    : [];
   if (children.length === 0) {
     return;
   }
@@ -388,7 +403,12 @@ export function commentsQuery(sort: RedditSort, maxComments: number): Record<str
   };
 }
 
-export function focusedCommentsQuery(sort: RedditSort, commentId: string, depth: number, limit: number): Record<string, string | number> {
+export function focusedCommentsQuery(
+  sort: RedditSort,
+  commentId: string,
+  depth: number,
+  limit: number,
+): Record<string, string | number> {
   return {
     raw_json: 1,
     sort,

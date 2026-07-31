@@ -1,54 +1,238 @@
 name: Codex Auto-Merge
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
   workflow_dispatch:
     inputs:
       pr_number:
-        description: Pull request number to enable auto-merge for
+        description: Pull request number to evaluate and merge if every exact-head gate passes.
         required: true
         type: number
 
+# pull_request_target is intentional: this workflow executes only the trusted
+# controller from main and never checks out or executes pull-request code.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: codex-automerge-${{ github.event.pull_request.number || inputs.pr_number }}
   cancel-in-progress: true
 
 jobs:
-  enable-auto-merge:
-    name: enable auto-merge
-    timeout-minutes: 10
+  resolve:
+    name: resolve autonomous merge candidate
+    timeout-minutes: 5
     runs-on: ubuntu-latest
-    if: >-
-      ${{
-        github.event_name == 'workflow_dispatch' ||
-        (
-          github.event.pull_request.draft == false &&
-          (
-            startsWith(github.event.pull_request.head.ref, 'codex/') ||
-            startsWith(github.event.pull_request.head.ref, 'codex-') ||
-            github.event.pull_request.head.ref == 'work' ||
-            contains(github.event.pull_request.labels.*.name, 'codex-automerge')
-          )
-        )
-      }}
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: read
+    outputs:
+      eligible: ${{ steps.resolve.outputs.eligible }}
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+      review_check_run_id: ${{ steps.resolve.outputs.review_check_run_id }}
     steps:
-      - name: Enable GitHub-native auto-merge
+      - name: Resolve immutable pull-request identity
+        id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          PR_NUMBER: ${{ inputs.pr_number }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
           REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ -n "${PR_NUMBER:-}" ]; then
-            gh pr merge "$PR_NUMBER" --repo "$REPOSITORY" --auto --squash --delete-branch
-          else
-            gh pr merge "$PR_URL" --auto --squash --delete-branch
+          pr_number="${INPUT_PR_NUMBER:-${EVENT_PR_NUMBER:-}}"
+          if ! [[ "$pr_number" =~ ^[0-9]+$ ]]; then
+            echo "A positive pull-request number is required." >&2
+            exit 1
           fi
+
+          pr_json="$(gh api "repos/$REPOSITORY/pulls/$pr_number")"
+          head_sha="$(jq -r '.head.sha' <<<"$pr_json")"
+          head_ref="$(jq -r '.head.ref' <<<"$pr_json")"
+          draft="$(jq -r '.draft' <<<"$pr_json")"
+          labels="$(jq -r '[.labels[].name] | join(",")' <<<"$pr_json")"
+          head_repo="$(jq -r '.head.repo.full_name // ""' <<<"$pr_json")"
+          base_repo="$(jq -r '.base.repo.full_name // ""' <<<"$pr_json")"
+
+          eligible=false
+          if [ "$draft" = "false" ] && [ "$head_repo" = "$base_repo" ] && {
+            [[ "$head_ref" == codex/* ]] ||
+            [[ "$head_ref" == codex-* ]] ||
+            grep -Eq '(^|,)codex-automerge(,|$)' <<<"$labels"
+          }; then
+            eligible=true
+          fi
+          if grep -Eq '(^|,)(do-not-merge|security-hold)(,|$)' <<<"$labels"; then
+            eligible=false
+          fi
+
+          {
+            echo "eligible=$eligible"
+            echo "pr_number=$pr_number"
+            echo "head_sha=$head_sha"
+          } >> "$GITHUB_OUTPUT"
+
+          check_run_id="$(gh api \
+            --method POST \
+            "repos/$REPOSITORY/check-runs" \
+            -f name='Autonomous review complete' \
+            -f head_sha="$head_sha" \
+            -f status='in_progress' \
+            -f 'output[title]=Autonomous review started' \
+            -f 'output[summary]=The trusted default-branch controller is evaluating this exact pull-request head.' \
+            --jq '.id')"
+          echo "review_check_run_id=$check_run_id" >> "$GITHUB_OUTPUT"
+
+  autonomous-review:
+    name: perform autonomous review
+    needs: resolve
+    if: needs.resolve.outputs.eligible == 'true'
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      decision: ${{ steps.review.outputs.decision }}
+      reviewed_head_sha: ${{ steps.review.outputs.reviewed_head_sha }}
+      high_risk: ${{ steps.review.outputs.high_risk }}
+      model_invoked: ${{ steps.review.outputs.model_invoked }}
+    steps:
+      - name: Checkout trusted controller
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install trusted controller dependencies
+        shell: bash
+        run: npm ci --ignore-scripts
+      - name: Run deterministic classification and independent review
+        id: review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/autonomous-merge-controller.mjs review \
+            --repository "${{ github.repository }}" \
+            --pr "${{ needs.resolve.outputs.pr_number }}" \
+            --head-sha "${{ needs.resolve.outputs.head_sha }}" \
+            --review-file "$RUNNER_TEMP/autonomous-review.json"
+      - name: Upload sanitized review evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
+        with:
+          name: autonomous-review-${{ needs.resolve.outputs.head_sha }}
+          path: ${{ runner.temp }}/autonomous-review.json
+          if-no-files-found: error
+          retention-days: 365
+
+  publish-review-check:
+    name: publish autonomous review check
+    needs: [resolve, autonomous-review]
+    if: always() && needs.resolve.result == 'success'
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+    steps:
+      - name: Complete exact-head review check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CHECK_RUN_ID: ${{ needs.resolve.outputs.review_check_run_id }}
+          REVIEW_RESULT: ${{ needs.autonomous-review.result }}
+          REVIEW_DECISION: ${{ needs.autonomous-review.outputs.decision }}
+          REVIEWED_HEAD_SHA: ${{ needs.autonomous-review.outputs.reviewed_head_sha }}
+          EXPECTED_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          HIGH_RISK: ${{ needs.autonomous-review.outputs.high_risk }}
+          MODEL_INVOKED: ${{ needs.autonomous-review.outputs.model_invoked }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          conclusion=failure
+          title='Autonomous review failed'
+          summary='The review workflow did not approve this exact pull-request head.'
+          if [ "$REVIEW_RESULT" = "success" ] &&
+             [ "$REVIEW_DECISION" = "approve" ] &&
+             [ "$REVIEWED_HEAD_SHA" = "$EXPECTED_HEAD_SHA" ]; then
+            conclusion=success
+            title='Autonomous review approved'
+            summary="Exact head $EXPECTED_HEAD_SHA passed autonomous review (high-risk: ${HIGH_RISK:-unknown}, model invoked: ${MODEL_INVOKED:-unknown})."
+          fi
+
+          gh api \
+            --method PATCH \
+            "repos/$REPOSITORY/check-runs/$CHECK_RUN_ID" \
+            -f status=completed \
+            -f conclusion="$conclusion" \
+            -f "output[title]=$title" \
+            -f "output[summary]=$summary" >/dev/null
+
+          if [ "$conclusion" != "success" ]; then
+            exit 1
+          fi
+
+  exact-head-gate:
+    name: merge exact PR head
+    needs: [resolve, autonomous-review, publish-review-check]
+    if: >-
+      ${{
+        needs.resolve.outputs.eligible == 'true' &&
+        needs.autonomous-review.result == 'success' &&
+        needs.publish-review-check.result == 'success'
+      }}
+    timeout-minutes: 70
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      checks: read
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout trusted controller
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install trusted controller dependencies
+        shell: bash
+        run: npm ci --ignore-scripts
+      - name: Download exact-head review evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        with:
+          name: autonomous-review-${{ needs.resolve.outputs.head_sha }}
+          path: ${{ runner.temp }}/autonomous-review
+      - name: Wait for required checks and merge the exact reviewed head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/autonomous-merge-controller.mjs gate \
+            --repository "${{ github.repository }}" \
+            --pr "${{ needs.resolve.outputs.pr_number }}" \
+            --head-sha "${{ needs.resolve.outputs.head_sha }}" \
+            --review-file "$RUNNER_TEMP/autonomous-review/autonomous-review.json" \
+            --wait-seconds 3600 \
+            --poll-seconds 15 \
+            --merge true

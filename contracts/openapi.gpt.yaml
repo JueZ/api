@@ -4,9 +4,28 @@ info:
   version: 0.1.0
   description: Minimal GPT Actions contract for the JueZ API Catalogue. Health is public; Hello and Reddit thread actions
     require Microsoft Entra OAuth.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
 servers:
   - url: https://func-api-catalogue-prod-bfjstshehpbfk.azurewebsites.net
     description: Production API
+x-repairable-error:
+  recVersion: "1.0"
+  appliesTo: all-service-generated-http-errors
+  contentType: application/problem+json
+  analyzerOrder:
+    - deterministic
+    - llm_assisted_for_diagnostic_uncertain
+    - validated_fallback
+  llm:
+    api: OpenAI Responses API
+    enabledByEnv: REPAIRABLE_ERRORS_LLM_ENABLED
+    input: sanitized_diagnostic_capsule
+    output: RepairableProblem
+    requiresSchemaValidation: true
+    requiresPolicyGate: true
+    modelGeneratedRepairPatchAllowed: false
 paths:
   /health:
     get:
@@ -21,6 +40,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+        "404":
+          description: Endpoint was not found on the current host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: The health response could not be generated.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
   /api/hello:
     get:
       operationId: getHello
@@ -28,7 +59,7 @@ paths:
       description: Protected endpoint used to confirm the GPT Action OAuth token can call the API.
       security:
         - entraOAuth2:
-            - api.access
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/catalogue.read
       responses:
         "200":
           description: Authenticated hello response.
@@ -39,15 +70,21 @@ paths:
         "401":
           description: Missing or invalid OAuth bearer token.
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
+                $ref: "#/components/schemas/RepairableProblem"
         "403":
           description: Valid token, but caller, tenant, client, scope, or role is not allowed.
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
+                $ref: "#/components/schemas/RepairableProblem"
+        "500":
+          description: The authenticated response could not be generated.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
   /api/reddit/thread:
     post:
       operationId: postRedditThread
@@ -56,14 +93,15 @@ paths:
         not to Reddit.
       security:
         - entraOAuth2:
-            - api.access
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/reddit.read
       x-repairable-error:
         recVersion: "1.0"
         analyzer:
           supportedModes:
+            - deterministic
             - llm_assisted
             - fallback
-          defaultMode: llm_assisted
+          defaultMode: deterministic
           llm:
             enabledByEnv: REPAIRABLE_ERRORS_LLM_ENABLED
             input: sanitized_diagnostic_capsule
@@ -135,7 +173,7 @@ paths:
                     caller_instruction: Send valid JSON with a post field containing a Reddit article ID, t3 fullname, redd.it URL, or
                       canonical reddit.com /comments/<id> URL.
                     safe_debug_summary: Sanitized invalid JSON diagnosis.
-                    analysis_mode: fallback
+                    analysis_mode: deterministic
                 aliasUrlInsteadOfPost:
                   summary: Alias URL supplied instead of post
                   value:
@@ -161,7 +199,7 @@ paths:
                         path: /url
                     caller_instruction: Move the Reddit URL into post and retry.
                     safe_debug_summary: Sanitized alias-field contract diagnosis.
-                    analysis_mode: llm_assisted
+                    analysis_mode: deterministic
                 unresolvedShareUrl:
                   summary: Unresolved Reddit share URL
                   value:
@@ -187,13 +225,13 @@ paths:
                     caller_instruction: Do not retry the same /s/ share URL. Use a canonical reddit.com /comments/<id> URL, redd.it URL, t3
                       fullname, or raw article/comment ID instead.
                     safe_debug_summary: Sanitized unresolved share URL diagnosis.
-                    analysis_mode: fallback
+                    analysis_mode: deterministic
         "401":
           description: Missing or invalid OAuth bearer token.
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
+                $ref: "#/components/schemas/RepairableProblem"
         "403":
           description: Valid token, but caller, tenant, client, scope, or role is not allowed.
           content:
@@ -227,7 +265,7 @@ paths:
                     caller_instruction: Check that post references an existing public Reddit thread and retry with the corrected identifier
                       or canonical URL.
                     safe_debug_summary: Sanitized Reddit 404 diagnosis.
-                    analysis_mode: fallback
+                    analysis_mode: deterministic
         "429":
           description: Reddit rate limit or upstream throttling.
           content:
@@ -258,7 +296,7 @@ paths:
                         reason: The upstream service asked callers to slow down.
                     caller_instruction: Retry later with the same request. Do not change request parameters solely to bypass rate limiting.
                     safe_debug_summary: Sanitized Reddit rate-limit diagnosis.
-                    analysis_mode: fallback
+                    analysis_mode: deterministic
         "502":
           description: Reddit upstream request failed.
           content:
@@ -289,14 +327,14 @@ paths:
                     caller_instruction: Retry later with the same request. Do not invent alternative request parameters for this upstream
                       failure.
                     safe_debug_summary: Sanitized Reddit dependency failure diagnosis.
-                    analysis_mode: fallback
+                    analysis_mode: deterministic
   /api/wlh/categories/top:
     get:
       operationId: getWlhCategoriesTop
       summary: List top wlh categories
       security:
         - entraOAuth2:
-            - api.access
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/wlh.read
       responses:
         "200":
           description: Top-level categories
@@ -327,36 +365,22 @@ paths:
         "401":
           description: Unauthorized
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
-              examples:
-                missingBearerToken:
-                  summary: Missing bearer token
-                  value:
-                    error:
-                      code: unauthorized
-                      message: Missing bearer token.
+                $ref: "#/components/schemas/RepairableProblem"
         "403":
           description: Forbidden
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
-              examples:
-                insufficientScope:
-                  summary: Caller lacks the required scope
-                  value:
-                    error:
-                      code: forbidden
-                      message: Insufficient scope for WLH access.
+                $ref: "#/components/schemas/RepairableProblem"
   /api/wlh/categories/{categoryId}:
     get:
       operationId: getWlhCategory
       summary: Get one wlh category
       security:
         - entraOAuth2:
-            - api.access
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/wlh.read
       parameters:
         - name: categoryId
           in: path
@@ -385,29 +409,15 @@ paths:
         "401":
           description: Unauthorized
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
-              examples:
-                missingBearerToken:
-                  summary: Missing bearer token
-                  value:
-                    error:
-                      code: unauthorized
-                      message: Missing bearer token.
+                $ref: "#/components/schemas/RepairableProblem"
         "403":
           description: Forbidden
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
-              examples:
-                insufficientScope:
-                  summary: Caller lacks the required scope
-                  value:
-                    error:
-                      code: forbidden
-                      message: Insufficient scope for WLH access.
+                $ref: "#/components/schemas/RepairableProblem"
         "404":
           description: Not found
           content:
@@ -420,7 +430,7 @@ paths:
       summary: List child wlh categories
       security:
         - entraOAuth2:
-            - api.access
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/wlh.read
       parameters:
         - name: categoryId
           in: path
@@ -459,29 +469,15 @@ paths:
         "401":
           description: Unauthorized
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
-              examples:
-                missingBearerToken:
-                  summary: Missing bearer token
-                  value:
-                    error:
-                      code: unauthorized
-                      message: Missing bearer token.
+                $ref: "#/components/schemas/RepairableProblem"
         "403":
           description: Forbidden
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
-              examples:
-                insufficientScope:
-                  summary: Caller lacks the required scope
-                  value:
-                    error:
-                      code: forbidden
-                      message: Insufficient scope for WLH access.
+                $ref: "#/components/schemas/RepairableProblem"
         "404":
           description: Not found
           content:
@@ -494,7 +490,7 @@ paths:
       summary: Search wlh offers
       security:
         - entraOAuth2:
-            - api.access
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/wlh.read
       requestBody:
         required: true
         content:
@@ -569,29 +565,15 @@ paths:
         "401":
           description: Unauthorized
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
-              examples:
-                missingBearerToken:
-                  summary: Missing bearer token
-                  value:
-                    error:
-                      code: unauthorized
-                      message: Missing bearer token.
+                $ref: "#/components/schemas/RepairableProblem"
         "403":
           description: Forbidden
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
-              examples:
-                insufficientScope:
-                  summary: Caller lacks the required scope
-                  value:
-                    error:
-                      code: forbidden
-                      message: Insufficient scope for WLH access.
+                $ref: "#/components/schemas/RepairableProblem"
         "404":
           description: Not found
           content:
@@ -616,7 +598,7 @@ paths:
       summary: Get wlh offer detail
       security:
         - entraOAuth2:
-            - api.access
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/wlh.read
       parameters:
         - name: adId
           in: path
@@ -665,29 +647,15 @@ paths:
         "401":
           description: Unauthorized
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
-              examples:
-                missingBearerToken:
-                  summary: Missing bearer token
-                  value:
-                    error:
-                      code: unauthorized
-                      message: Missing bearer token.
+                $ref: "#/components/schemas/RepairableProblem"
         "403":
           description: Forbidden
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
-              examples:
-                insufficientScope:
-                  summary: Caller lacks the required scope
-                  value:
-                    error:
-                      code: forbidden
-                      message: Insufficient scope for WLH access.
+                $ref: "#/components/schemas/RepairableProblem"
         "429":
           description: Rate limited
           content:
@@ -706,7 +674,7 @@ paths:
       summary: Get wlh offer images
       security:
         - entraOAuth2:
-            - api.access
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/wlh.read
       parameters:
         - name: adId
           in: path
@@ -749,29 +717,15 @@ paths:
         "401":
           description: Unauthorized
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
-              examples:
-                missingBearerToken:
-                  summary: Missing bearer token
-                  value:
-                    error:
-                      code: unauthorized
-                      message: Missing bearer token.
+                $ref: "#/components/schemas/RepairableProblem"
         "403":
           description: Forbidden
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/AuthErrorResponse"
-              examples:
-                insufficientScope:
-                  summary: Caller lacks the required scope
-                  value:
-                    error:
-                      code: forbidden
-                      message: Insufficient scope for WLH access.
+                $ref: "#/components/schemas/RepairableProblem"
         "429":
           description: Rate limited
           content:
@@ -793,7 +747,7 @@ paths:
         subtree or `children` from a returned continuation handle.
       security:
         - entraOAuth2:
-            - api.access
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/reddit.read
       requestBody:
         required: true
         content:
@@ -827,7 +781,7 @@ paths:
         fetching bodies.
       security: &a1
         - entraOAuth2:
-            - api.access
+            - api://97df847a-3e44-4aa7-82ea-557f3dfe0203/reddit.read
       requestBody:
         required: true
         content:
@@ -921,10 +875,10 @@ paths:
     get:
       operationId: bringListLists
       summary: List Bring! shopping lists
-      description: Protected unofficial Bring! integration. Returns normalized list metadata only; credentials, tokens, account data, and cache locations are never exposed.
+      description: Protected, read-only view of allowlisted Bring! lists. Credentials, tokens, account data, and cache locations are never exposed.
       tags: [Bring]
       security:
-        - entraOAuth2: [api.access]
+        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.read]
       responses:
         "200":
           description: Normalized shopping lists.
@@ -934,13 +888,13 @@ paths:
         "401":
           description: Missing or invalid API OAuth bearer token.
           content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
         "403":
           description: Authenticated caller is not authorized for Bring operations.
           content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
         "502":
           description: Bring authentication, dependency, or undocumented response-shape failure.
           content:
@@ -952,10 +906,10 @@ paths:
     get:
       operationId: bringGetItems
       summary: Get Bring! shopping-list items
-      description: Protected unofficial operation returning normalized active and completed items.
+      description: Protected read operation returning normalized items and a SHA-256 list version for optimistic concurrency.
       tags: [Bring]
       security:
-        - entraOAuth2: [api.access]
+        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.read]
       responses:
         "200":
           description: Normalized list items.
@@ -965,13 +919,13 @@ paths:
         "401":
           description: Missing or invalid API OAuth bearer token.
           content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
         "403":
           description: Authenticated caller is not authorized for Bring operations.
           content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
         "404":
           description: Bring list not found.
           content:
@@ -984,16 +938,16 @@ paths:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
     post:
       operationId: bringAddItems
-      summary: Add a batch of Bring! items
-      description: Adds 1-50 items through an unofficial upstream API. The operation is not idempotent.
+      summary: Idempotently add a batch of Bring! items
+      description: Adds 1-50 items to an explicitly allowlisted own list. Generate a new UUID for `operationId`; retry an identical request with the same UUID.
       tags: [Bring]
       security:
-        - entraOAuth2: [api.access]
+        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.write]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/BringBatchRequest" }
+            schema: { $ref: "#/components/schemas/BringAddRequest" }
       responses:
         "200":
           description: Batch accepted by Bring!.
@@ -1008,39 +962,45 @@ paths:
         "401":
           description: Missing or invalid API OAuth bearer token.
           content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
         "403":
           description: Authenticated caller is not authorized for Bring operations.
           content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
+        "409":
+          description: Idempotency conflict, stale list version, or ambiguous prior outcome.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
         "502":
           description: Bring authentication, dependency, or undocumented response-shape failure.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
-  /api/bring/lists/{listUuid}/items/complete:
+  /api/bring/lists/{listUuid}/mutations/prepare:
     parameters:
       - $ref: "#/components/parameters/BringListUuid"
     post:
-      operationId: bringCompleteItems
-      summary: Complete a batch of Bring! items
-      description: Marks 1-50 items complete through an unofficial, undocumented upstream API.
+      operationId: bringPrepareItemMutation
+      summary: Prepare a destructive Bring! item mutation
+      description: Validates a complete or remove request without changing Bring! and returns a five-minute confirmation token.
       tags: [Bring]
       security:
-        - entraOAuth2: [api.access]
+        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.complete]
+        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.remove]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/BringBatchRequest" }
+            schema: { $ref: "#/components/schemas/BringPrepareMutationRequest" }
       responses:
         "200":
-          description: Batch completion accepted by Bring!.
+          description: Mutation prepared; no upstream write has occurred.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/BringMutationResponse" }
+              schema: { $ref: "#/components/schemas/BringPreparedMutationResponse" }
         "400":
           description: Invalid batch or UUID.
           content:
@@ -1049,33 +1009,34 @@ paths:
         "401":
           description: Missing or invalid API OAuth bearer token.
           content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
         "403":
           description: Authenticated caller is not authorized for Bring operations.
           content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
-        "502":
-          description: Bring authentication, dependency, or undocumented response-shape failure.
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
+        "409":
+          description: Idempotency conflict or stale list version.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
-  /api/bring/lists/{listUuid}/items/remove:
+  /api/bring/lists/{listUuid}/mutations/apply:
     parameters:
       - $ref: "#/components/parameters/BringListUuid"
     post:
-      operationId: bringRemoveItems
-      summary: Remove a batch of Bring! items
-      description: Removes 1-50 items from a specific accessible own or shared list through the unofficial upstream API.
+      operationId: bringApplyItemMutation
+      summary: Apply a confirmed destructive Bring! item mutation
+      description: Applies a prepared complete or remove operation using its identity- and payload-bound confirmation token.
       tags: [Bring]
       security:
-        - entraOAuth2: [api.access]
+        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.complete]
+        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.remove]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/BringBatchRequest" }
+            schema: { $ref: "#/components/schemas/BringApplyMutationRequest" }
       responses:
         "200":
           description: Batch removal accepted by Bring!.
@@ -1090,13 +1051,18 @@ paths:
         "401":
           description: Missing or invalid API OAuth bearer token.
           content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
         "403":
           description: Authenticated caller is not authorized for Bring operations.
           content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AuthErrorResponse" }
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
+        "409":
+          description: Expired confirmation, idempotency conflict, or ambiguous prior outcome.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
         "502":
           description: Bring authentication, dependency, or undocumented response-shape failure.
           content:
@@ -1112,7 +1078,13 @@ components:
           authorizationUrl: https://login.microsoftonline.com/7ac3dfd6-e810-4693-805a-9535eb3ab166/oauth2/v2.0/authorize
           tokenUrl: https://login.microsoftonline.com/7ac3dfd6-e810-4693-805a-9535eb3ab166/oauth2/v2.0/token
           scopes:
-            api://97df847a-3e44-4aa7-82ea-557f3dfe0203/api.access: Access protected JueZ API endpoints.
+            api://97df847a-3e44-4aa7-82ea-557f3dfe0203/catalogue.read: Read the authenticated local API catalogue.
+            api://97df847a-3e44-4aa7-82ea-557f3dfe0203/reddit.read: Read normalized Reddit content.
+            api://97df847a-3e44-4aa7-82ea-557f3dfe0203/wlh.read: Read normalized willhaben content.
+            api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.read: Read explicitly allowlisted Bring! lists.
+            api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.write: Add items to explicitly writable Bring! lists.
+            api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.complete: Prepare and apply item completion.
+            api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.remove: Prepare and apply item removal.
   parameters:
     BringListUuid:
       name: listUuid
@@ -1129,16 +1101,35 @@ components:
         name: { type: string, minLength: 1, maxLength: 200 }
         specification: { type: string, maxLength: 500 }
         uuid: { type: string, format: uuid }
-    BringBatchRequest:
+    BringMutationItems:
+      type: array
+      minItems: 1
+      maxItems: 50
+      items: { $ref: "#/components/schemas/BringItemInput" }
+    BringAddRequest:
       type: object
       additionalProperties: false
-      required: [items]
+      required: [operationId, items]
       properties:
-        items:
-          type: array
-          minItems: 1
-          maxItems: 50
-          items: { $ref: "#/components/schemas/BringItemInput" }
+        operationId: { type: string, format: uuid }
+        expectedListVersion: { type: string, pattern: "^[0-9a-f]{64}$" }
+        items: { $ref: "#/components/schemas/BringMutationItems" }
+    BringPrepareMutationRequest:
+      type: object
+      additionalProperties: false
+      required: [operationId, operation, items]
+      properties:
+        operationId: { type: string, format: uuid }
+        expectedListVersion: { type: string, pattern: "^[0-9a-f]{64}$" }
+        operation: { type: string, enum: [complete, remove] }
+        items: { $ref: "#/components/schemas/BringMutationItems" }
+    BringApplyMutationRequest:
+      type: object
+      additionalProperties: false
+      required: [operationId, confirmationToken]
+      properties:
+        operationId: { type: string, format: uuid }
+        confirmationToken: { type: string, minLength: 1, maxLength: 4096 }
     BringListSummary:
       type: object
       additionalProperties: false
@@ -1168,27 +1159,40 @@ components:
     BringList:
       type: object
       additionalProperties: false
-      required: [uuid, items]
+      required: [uuid, version, items]
       properties:
         uuid: { type: string, format: uuid }
         name: { type: string }
+        version: { type: string, pattern: "^[0-9a-f]{64}$" }
         items:
           type: array
           items: { $ref: "#/components/schemas/BringItem" }
+    BringPreparedMutationResponse:
+      type: object
+      additionalProperties: false
+      required: [source, state, operationId, operation, listPseudonym, itemCount, expiresAt, confirmationToken, replayed]
+      properties:
+        source: { type: string, const: bring }
+        state: { type: string, const: prepared }
+        operationId: { type: string, format: uuid }
+        operation: { type: string, enum: [complete, remove] }
+        listPseudonym: { type: string }
+        itemCount: { type: integer, minimum: 1, maximum: 50 }
+        expiresAt: { type: string, format: date-time }
+        confirmationToken: { type: string }
+        replayed: { type: boolean }
     BringMutationResponse:
       type: object
       additionalProperties: false
-      required: [source, listUuid, operation, itemCount, items]
+      required: [source, listUuid, operation, operationId, itemCount, state, replayed]
       properties:
         source: { type: string, const: bring }
         listUuid: { type: string, format: uuid }
         operation: { type: string, enum: [add, complete, remove] }
+        operationId: { type: string, format: uuid }
         itemCount: { type: integer, minimum: 1, maximum: 50 }
-        items:
-          type: array
-          minItems: 1
-          maxItems: 50
-          items: { $ref: "#/components/schemas/BringItemInput" }
+        state: { type: string, const: succeeded }
+        replayed: { type: boolean }
     WlhCategory:
       type: object
       additionalProperties: false
@@ -1529,6 +1533,14 @@ components:
           minimum: 0
         idempotency_required:
           type: boolean
+      allOf:
+        - if:
+            required: [can_retry]
+            properties:
+              can_retry: { const: false }
+          then:
+            properties:
+              same_request: { const: false }
     InvalidField:
       type: object
       additionalProperties: false
@@ -1692,35 +1704,6 @@ components:
             - llm_assisted
             - hybrid
             - fallback
-    AuthErrorResponse:
-      type: object
-      additionalProperties: false
-      properties:
-        error:
-          type: object
-          additionalProperties: false
-          properties:
-            code:
-              type: string
-            message:
-              type: string
-          required:
-            - code
-            - message
-      required:
-        - error
-    SimpleErrorResponse:
-      type: object
-      additionalProperties: true
-      properties:
-        error:
-          type: string
-        message:
-          type: string
-        input:
-          type: string
-      required:
-        - error
     RedditCoverage:
       type: object
       additionalProperties: false

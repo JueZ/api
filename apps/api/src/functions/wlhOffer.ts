@@ -1,31 +1,50 @@
 import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
 import { getTraceIdFromRequestOrContext } from '../shared/errors/diagnosticCapsule.js';
-import { authorizeRequest } from '../shared/security/auth.js';
+import { authorizeRequestForOperation } from '../shared/security/auth.js';
+import { OPERATION_IDS } from '../application/operations/registry.js';
 import { createCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
-import { buildWlhProblem, WLH_OPERATION_IDS, type WlhOperationId, wlhProblemForError, wlhProblemResponse } from '../shared/wlh/problem.js';
+import {
+  buildWlhProblem,
+  WLH_OPERATION_IDS,
+  type WlhOperationId,
+  resolveWlhProblemForError,
+  wlhProblemResponse,
+} from '../shared/wlh/problem.js';
 import { WlhService } from '../shared/wlh/service.js';
 
 let service: WlhService | null = null;
-export function setWlhOfferServiceForTesting(s: WlhService | null) { service = s; }
-function currentService(): WlhService { return service ??= new WlhService(); }
+export function setWlhOfferServiceForTesting(s: WlhService | null) {
+  service = s;
+}
+function currentService(): WlhService {
+  return (service ??= new WlhService());
+}
 
 const corsOptions = { methods: ['GET', 'OPTIONS'] } satisfies CorsOptions;
 
 export async function handler(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (request.method === 'OPTIONS') return { status: 204, headers: corsHeaders(request) };
-  const auth = await authorizeRequest(request, context);
+  const operationId = operationForRequest(request, context);
+  const authOperationId =
+    operationId === WLH_OPERATION_IDS.getWlhOfferImages ? OPERATION_IDS.wlhOfferImages : OPERATION_IDS.wlhOffer;
+  const auth = await authorizeRequestForOperation(request, context, authOperationId);
   if (!auth.ok) return { ...auth.response, headers: { ...corsHeaders(request), ...auth.response.headers } };
   const traceId = getTraceIdFromRequestOrContext(request, context);
-  const operationId = operationForRequest(request, context);
   const adId = request.params['adId'];
   if (!validAdId(adId)) {
-    return wlhProblemResponse(buildWlhProblem({ operationId, failureKind: 'input_validation', field: 'adId', traceId }), corsHeaders(request));
+    return wlhProblemResponse(
+      buildWlhProblem({ operationId, failureKind: 'input_validation', field: 'adId', traceId }),
+      corsHeaders(request),
+    );
   }
   try {
-    const body = operationId === WLH_OPERATION_IDS.getWlhOfferImages ? await currentService().offerImages(adId) : await currentService().offer(adId);
+    const body =
+      operationId === WLH_OPERATION_IDS.getWlhOfferImages
+        ? await currentService().offerImages(adId)
+        : await currentService().offer(adId);
     return { status: 200, headers: corsHeaders(request), jsonBody: body };
   } catch (e) {
-    const problem = wlhProblemForError({ operationId, error: e, traceId });
+    const problem = await resolveWlhProblemForError({ operationId, error: e, traceId, body: { adId } });
     if (problem.status >= 500) {
       context.warn('WLH offer request failed with a repairable error contract.', {
         operation_id: problem.operation_id,
@@ -40,7 +59,12 @@ export async function handler(request: HttpRequest, context: InvocationContext):
 }
 
 app.http('wlhOffer', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'api/wlh/offers/{adId}', handler });
-app.http('wlhOfferImages', { methods: ['GET', 'OPTIONS'], authLevel: 'anonymous', route: 'api/wlh/offers/{adId}/images', handler });
+app.http('wlhOfferImages', {
+  methods: ['GET', 'OPTIONS'],
+  authLevel: 'anonymous',
+  route: 'api/wlh/offers/{adId}/images',
+  handler,
+});
 
 function operationForRequest(request: HttpRequest, context: InvocationContext): WlhOperationId {
   if (context.functionName === 'wlhOfferImages') return WLH_OPERATION_IDS.getWlhOfferImages;

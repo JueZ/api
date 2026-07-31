@@ -1,13 +1,17 @@
 import type { HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+import { authorizeOperation } from '../../application/authorization/policy.js';
+import {
+  PERMISSIONS,
+  type AuthenticatedPrincipal,
+  type OperationAuthorizationPolicy,
+} from '../../application/authorization/types.js';
+import { getOperationDefinition } from '../../application/operations/registry.js';
+import { getDeployedEnvironmentName } from '../config/runtime.js';
+import { buildDeterministicRepairableProblem } from '../errors/repairableErrorService.js';
 
-export interface AuthenticatedUser {
-  subject: string;
-  objectId?: string;
-  tenantId?: string;
-  clientId?: string;
-  tokenType: 'user' | 'service';
-}
+export type { AuthenticatedPrincipal };
+export type AuthenticatedUser = AuthenticatedPrincipal;
 
 export interface AuthConfig {
   enabled: boolean;
@@ -27,7 +31,7 @@ export interface AuthConfig {
 
 interface AuthorizationSuccess {
   ok: true;
-  user: AuthenticatedUser;
+  user: AuthenticatedPrincipal;
 }
 
 interface AuthorizationFailure {
@@ -39,7 +43,11 @@ export type AuthorizationResult = AuthorizationSuccess | AuthorizationFailure;
 export type JwtVerifier = (token: string, config: AuthConfig) => Promise<JWTPayload>;
 
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
-const discoveryCache = new Map<string, Promise<string>>();
+const discoveryCache = new Map<string, { promise: Promise<string>; expiresAt: number }>();
+const defaultAuthorizationPolicy = {
+  permission: 'catalogue.read',
+  allowedTokenTypes: ['user', 'service'],
+} as const satisfies OperationAuthorizationPolicy;
 
 export function readAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
   const issuers = parseCsv(env['OIDC_ISSUER']).map((issuer) => normalizeUrl(issuer));
@@ -50,7 +58,7 @@ export function readAuthConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig
     issuers,
     audience: normalizeOptionalString(env['OIDC_AUDIENCE']),
     jwksUri: normalizeOptionalUrl(env['OIDC_JWKS_URI']),
-    requiredScopes: parseCsv(env['OIDC_REQUIRED_SCOPES'] ?? 'api.access'),
+    requiredScopes: parseCsv(env['OIDC_REQUIRED_SCOPES'] ?? 'catalogue.read'),
     allowedObjectIds: parseCsv(env['OIDC_ALLOWED_OBJECT_IDS']),
     allowedSubjects: parseCsv(env['OIDC_ALLOWED_SUBJECTS']),
     allowedAppObjectIds: parseCsv(env['OIDC_ALLOWED_APP_OBJECT_IDS']),
@@ -66,8 +74,29 @@ export async function authorizeRequest(
   context: InvocationContext,
   config: AuthConfig = readAuthConfig(),
   verifier: JwtVerifier = verifyJwtWithJose,
+  policy: OperationAuthorizationPolicy = defaultAuthorizationPolicy,
 ): Promise<AuthorizationResult> {
-  return authorizeBearerToken(request.headers.get('authorization'), context, config, verifier);
+  return authorizeBearerToken(request.headers.get('authorization'), context, config, verifier, policy);
+}
+
+export async function authorizeRequestForOperation(
+  request: HttpRequest,
+  context: InvocationContext,
+  operationId: string,
+  config: AuthConfig = readAuthConfig(),
+  verifier: JwtVerifier = verifyJwtWithJose,
+): Promise<AuthorizationResult> {
+  const operation = getOperationDefinition(operationId);
+  if (!operation.requiredPermission) {
+    throw new Error(`Operation ${operationId} does not require authorization.`);
+  }
+  const result = await authorizeRequest(request, context, config, verifier, {
+    permission: operation.requiredPermission,
+    allowedTokenTypes: operation.allowedTokenTypes,
+    environment: getDeployedEnvironmentName(),
+    allowedEnvironments: operation.allowedEnvironments,
+  });
+  return result.ok ? result : repairableAuthorizationFailure(result, operationId, context);
 }
 
 export async function authorizeBearerToken(
@@ -75,15 +104,18 @@ export async function authorizeBearerToken(
   context: InvocationContext,
   config: AuthConfig = readAuthConfig(),
   verifier: JwtVerifier = verifyJwtWithJose,
+  policy: OperationAuthorizationPolicy = defaultAuthorizationPolicy,
 ): Promise<AuthorizationResult> {
   if (!config.enabled) {
-    return {
-      ok: true,
-      user: {
+    return authorizePrincipal(
+      {
         subject: 'local-dev-placeholder',
         tokenType: 'user',
+        scopes: [...PERMISSIONS],
+        roles: [],
       },
-    };
+      policy,
+    );
   }
 
   const configError = validateConfig(config);
@@ -116,10 +148,7 @@ export async function authorizeBearerToken(
     return forbidden('Tenant is not allowed.');
   }
 
-  const tokenAccess = getTokenAccess(payload, config.requiredScopes);
-  if (!tokenAccess.hasRequiredAccess) {
-    return forbidden('Required scope or role is missing.');
-  }
+  const tokenAccess = getTokenAccess(payload);
 
   const objectId = typeof payload['oid'] === 'string' ? payload['oid'] : undefined;
   const subject = typeof payload.sub === 'string' ? payload.sub : undefined;
@@ -133,16 +162,18 @@ export async function authorizeBearerToken(
       return forbidden('Service client is not allowed.');
     }
 
-    return {
-      ok: true,
-      user: {
+    return authorizePrincipal(
+      {
         subject,
         objectId,
         tenantId,
         clientId,
         tokenType: 'service',
+        scopes: tokenAccess.scopes,
+        roles: tokenAccess.roles,
       },
-    };
+      policy,
+    );
   }
 
   if (!isAllowedUser(objectId, subject, config)) {
@@ -153,15 +184,18 @@ export async function authorizeBearerToken(
     return forbidden('Delegated OAuth client is not allowed.');
   }
 
-  return {
-    ok: true,
-    user: {
+  return authorizePrincipal(
+    {
       subject,
       objectId,
       tenantId,
+      clientId,
       tokenType: 'user',
+      scopes: tokenAccess.scopes,
+      roles: tokenAccess.roles,
     },
-  };
+    policy,
+  );
 }
 
 export async function verifyJwtWithJose(token: string, config: AuthConfig): Promise<JWTPayload> {
@@ -220,19 +254,17 @@ function validateConfig(config: AuthConfig): string | undefined {
 }
 
 interface TokenAccess {
-  hasRequiredAccess: boolean;
   scopes: string[];
   roles: string[];
 }
 
-function getTokenAccess(payload: JWTPayload, requiredScopes: string[]): TokenAccess {
+function getTokenAccess(payload: JWTPayload): TokenAccess {
   const scopeClaim = typeof payload['scp'] === 'string' ? payload['scp'] : '';
   const scopes = scopeClaim.split(' ').filter(Boolean);
   const rolesClaim = payload['roles'];
   const roles = Array.isArray(rolesClaim) ? rolesClaim.filter((role): role is string => typeof role === 'string') : [];
 
   return {
-    hasRequiredAccess: requiredScopes.some((requiredScope) => scopes.includes(requiredScope) || roles.includes(requiredScope)),
     scopes,
     roles,
   };
@@ -308,26 +340,84 @@ function isAllowedDelegatedClient(clientId: string | undefined, config: AuthConf
   return clientId !== undefined && config.allowedDelegatedClientIds.includes(clientId);
 }
 
-async function discoverJwksUri(issuer: string): Promise<string> {
+export interface OidcDiscoveryOptions {
+  timeoutMs?: number;
+  maxAttempts?: number;
+  cacheTtlMs?: number;
+  retryDelayMs?: number;
+  now?: () => number;
+  sleep?: (milliseconds: number) => Promise<void>;
+}
+
+export async function discoverJwksUri(
+  issuer: string,
+  fetchImpl: typeof fetch = fetch,
+  options: OidcDiscoveryOptions = {},
+): Promise<string> {
   const normalizedIssuer = issuer.replace(/\/$/, '');
-  let discovery = discoveryCache.get(normalizedIssuer);
-  if (!discovery) {
-    discovery = fetch(`${normalizedIssuer}/.well-known/openid-configuration`)
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error('OIDC discovery failed.');
-        }
-        return response.json() as Promise<{ jwks_uri?: unknown }>;
-      })
-      .then((metadata) => {
-        if (typeof metadata.jwks_uri !== 'string' || metadata.jwks_uri.length === 0) {
-          throw new Error('OIDC discovery did not return jwks_uri.');
-        }
-        return metadata.jwks_uri;
-      });
-    discoveryCache.set(normalizedIssuer, discovery);
+  const now = options.now ?? Date.now;
+  const cached = discoveryCache.get(normalizedIssuer);
+  if (cached && cached.expiresAt > now()) return cached.promise;
+  if (cached) discoveryCache.delete(normalizedIssuer);
+
+  const promise = discoverJwksUriWithRetry(normalizedIssuer, fetchImpl, options);
+  const entry = {
+    promise,
+    expiresAt: now() + (options.cacheTtlMs ?? 10 * 60_000),
+  };
+  discoveryCache.set(normalizedIssuer, entry);
+  try {
+    return await promise;
+  } catch (error) {
+    if (discoveryCache.get(normalizedIssuer)?.promise === promise) {
+      discoveryCache.delete(normalizedIssuer);
+    }
+    throw error;
   }
-  return discovery;
+}
+
+export function clearOidcCachesForTesting(): void {
+  discoveryCache.clear();
+  jwksCache.clear();
+}
+
+async function discoverJwksUriWithRetry(
+  normalizedIssuer: string,
+  fetchImpl: typeof fetch,
+  options: OidcDiscoveryOptions,
+): Promise<string> {
+  const maxAttempts = options.maxAttempts ?? 2;
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const retryDelayMs = options.retryDelayMs ?? 150;
+  const sleep =
+    options.sleep ?? ((milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetchImpl(`${normalizedIssuer}/.well-known/openid-configuration`, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) throw new Error(`OIDC discovery returned HTTP ${response.status}.`);
+      const metadata = (await response.json()) as { jwks_uri?: unknown };
+      if (typeof metadata.jwks_uri !== 'string' || metadata.jwks_uri.length === 0) {
+        throw new Error('OIDC discovery did not return jwks_uri.');
+      }
+      const jwksUrl = new URL(metadata.jwks_uri);
+      if (
+        jwksUrl.protocol !== 'https:' &&
+        !(jwksUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(jwksUrl.hostname))
+      ) {
+        throw new Error('OIDC discovery returned an unsupported jwks_uri.');
+      }
+      return jwksUrl.toString();
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) await sleep(retryDelayMs * attempt);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('OIDC discovery failed.');
 }
 
 function getJwks(jwksUri: string): ReturnType<typeof createRemoteJWKSet> {
@@ -371,6 +461,77 @@ function forbidden(message: string): AuthorizationFailure {
       },
     },
   };
+}
+
+function repairableAuthorizationFailure(
+  failure: AuthorizationFailure,
+  operationId: string,
+  context: InvocationContext,
+): AuthorizationFailure {
+  const status = failure.response.status === 403 ? 403 : 401;
+  const problem = buildDeterministicRepairableProblem({
+    operationId,
+    status,
+    endpoint: getOperationDefinition(operationId).rest?.path ?? '/api',
+    classification: 'authorization_context_mismatch',
+    title: status === 401 ? 'Authentication is required' : 'Authorization context does not permit this operation',
+    detail: safeAuthorizationFailureMessage(failure, status),
+    callerInstruction:
+      status === 401
+        ? 'Obtain a valid bearer token for this API and retry the same operation with the credential attached.'
+        : 'Do not mutate the operation arguments. Use an identity and token with the required operation permission, or stop and report that access is denied.',
+    safeDebugSummary: `Deterministic authorization failure for ${operationId}; http_status=${status}; no credential material included.`,
+    repairable: true,
+    retryPolicy: { can_retry: true, same_request: false, idempotency_required: false },
+    traceId: context.invocationId,
+    repairPlan: [
+      {
+        action: 'retry_with_modified_request',
+        reason:
+          status === 401
+            ? 'A valid bearer credential is required before this operation can run.'
+            : 'The authenticated principal does not satisfy the operation authorization policy.',
+      },
+    ],
+  });
+  return {
+    ok: false,
+    response: {
+      ...failure.response,
+      headers: { ...failure.response.headers, 'Content-Type': 'application/problem+json' },
+      jsonBody: problem,
+    },
+  };
+}
+
+function safeAuthorizationFailureMessage(failure: AuthorizationFailure, status: 401 | 403): string {
+  const body = failure.response.jsonBody;
+  if (isRecord(body)) {
+    const error = body['error'];
+    if (isRecord(error) && typeof error['message'] === 'string' && error['message'].length > 0) {
+      return error['message'];
+    }
+  }
+  return status === 401 ? 'A valid bearer token was not provided.' : 'The authenticated principal is not permitted.';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function authorizePrincipal(
+  principal: AuthenticatedPrincipal,
+  policy: OperationAuthorizationPolicy,
+): AuthorizationResult {
+  const decision = authorizeOperation(principal, policy);
+  if (decision.ok) return { ok: true, user: principal };
+  if (decision.reason === 'token_type_not_allowed') {
+    return forbidden('Token type is not allowed for this operation.');
+  }
+  if (decision.reason === 'environment_not_allowed') {
+    return forbidden('Operation is not allowed in this environment.');
+  }
+  return forbidden(`Required permission is missing: ${policy.permission}.`);
 }
 
 function logAuthFailure(context: InvocationContext, reason: string, debug: boolean, error?: unknown): void {

@@ -33,4 +33,28 @@ if [ "${WEB_AUTH_ENABLED}" != "true" ]; then
   exit 1
 fi
 
+if [ "${OIDC_REQUIRED_SCOPES}" = "api.access" ] || [[ ",${OIDC_REQUIRED_SCOPES}," == *",api.access,"* ]]; then
+  echo "OIDC_REQUIRED_SCOPES must use granular permissions; api.access is no longer supported." >&2
+  exit 1
+fi
+
+for permission in \
+  catalogue.read \
+  reddit.read \
+  wlh.read \
+  bring.read \
+  bring.write \
+  bring.complete \
+  bring.remove; do
+  if [[ ",${OIDC_REQUIRED_SCOPES}," != *",${permission},"* ]]; then
+    echo "OIDC_REQUIRED_SCOPES is missing canonical permission: $permission" >&2
+    exit 1
+  fi
+done
+
+if [[ "${WEB_AUTH_API_SCOPE}" != */catalogue.read ]]; then
+  echo "WEB_AUTH_API_SCOPE must be the fully qualified catalogue.read scope." >&2
+  exit 1
+fi
+
 echo "Required authentication configuration variable names are present. Values were not printed."

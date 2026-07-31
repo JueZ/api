@@ -11,10 +11,10 @@ set -euo pipefail
 #   REPOSITORY              GitHub repo owner/name. Default: JueZ/api.
 #   GITHUB_ENVIRONMENT      GitHub Environment subject to trust. Default: test.
 #   SERVICE_APP_DISPLAY_NAME Default: JueZ API Catalogue Service Test.
-#   SERVICE_APP_ROLE_VALUE  Default: api.test.
-#   SERVICE_APP_ROLE_DISPLAY_NAME Default: API test service access.
+#   SERVICE_APP_ROLE_VALUES Comma-separated granular roles. Default: catalogue.read,reddit.read.
+#   SERVICE_APP_ROLE_DISPLAY_NAME Prefix for created role display names.
 #   SET_GITHUB_VARIABLES    true to set GitHub environment variables. Default: false.
-#   OIDC_REQUIRED_SCOPES_VALUE Value to set when SET_GITHUB_VARIABLES=true. Default: api.access,api.test.
+#   OIDC_REQUIRED_SCOPES_VALUE Value to set when SET_GITHUB_VARIABLES=true.
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -31,15 +31,29 @@ repository="${REPOSITORY:-JueZ/api}"
 github_environment="${GITHUB_ENVIRONMENT:-test}"
 api_app_id="${API_APP_ID:?Set API_APP_ID to the API app registration client/application ID.}"
 service_display_name="${SERVICE_APP_DISPLAY_NAME:-JueZ API Catalogue Service Test}"
-role_value="${SERVICE_APP_ROLE_VALUE:-api.test}"
-role_display_name="${SERVICE_APP_ROLE_DISPLAY_NAME:-API test service access}"
+role_values_csv="${SERVICE_APP_ROLE_VALUES:-${SERVICE_APP_ROLE_VALUE:-catalogue.read,reddit.read}}"
+role_display_name="${SERVICE_APP_ROLE_DISPLAY_NAME:-API service access}"
 set_github_variables="${SET_GITHUB_VARIABLES:-false}"
-oidc_required_scopes_value="${OIDC_REQUIRED_SCOPES_VALUE:-api.access,api.test}"
+oidc_required_scopes_value="${OIDC_REQUIRED_SCOPES_VALUE:-catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove}"
 
-if [[ ! "$role_value" =~ ^[A-Za-z0-9._:-]+$ ]]; then
-  echo "SERVICE_APP_ROLE_VALUE must contain only letters, numbers, dot, underscore, colon, or hyphen." >&2
+mapfile -t role_values < <(
+  tr ',' '\n' <<<"$role_values_csv" |
+    awk 'NF { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "" && !seen[$0]++) print $0 }'
+)
+if [ "${#role_values[@]}" -eq 0 ]; then
+  echo "SERVICE_APP_ROLE_VALUES must contain at least one role." >&2
   exit 1
 fi
+for role_value in "${role_values[@]}"; do
+  if [[ ! "$role_value" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+    echo "Each SERVICE_APP_ROLE_VALUES entry must contain only letters, numbers, dot, underscore, colon, or hyphen." >&2
+    exit 1
+  fi
+  if [ "$role_value" = "bring.complete" ] || [ "$role_value" = "bring.remove" ]; then
+    echo "Service identities must not receive destructive Bring roles." >&2
+    exit 1
+  fi
+done
 
 account_tenant_id="$(az account show --query tenantId -o tsv)"
 echo "Using tenant: $account_tenant_id"
@@ -58,25 +72,29 @@ echo "API app object ID: $api_app_object_id"
 echo "API service principal object ID: $api_sp_object_id"
 echo "API identifier URI: $api_identifier_uri"
 
-current_roles="$(az ad app show --id "$api_app_id" --query appRoles -o json)"
-role_id="$(jq -r --arg value "$role_value" '.[] | select(.value == $value and (.isEnabled // true)) | .id' <<< "$current_roles" | head -n 1)"
-if [ -z "$role_id" ]; then
-  role_id="$(python3 - <<'PY'
+role_ids=()
+for role_value in "${role_values[@]}"; do
+  current_roles="$(az ad app show --id "$api_app_id" --query appRoles -o json)"
+  role_id="$(jq -r --arg value "$role_value" '.[] | select(.value == $value and (.isEnabled // true)) | .id' <<<"$current_roles" | head -n 1)"
+  if [ -z "$role_id" ]; then
+    role_id="$(python3 - <<'PY'
 import uuid
 print(uuid.uuid4())
 PY
 )"
-  updated_roles="$(jq \
-    --arg id "$role_id" \
-    --arg value "$role_value" \
-    --arg displayName "$role_display_name" \
-    '. + [{allowedMemberTypes:["Application"], description:("Allows trusted app-only clients to call protected API routes for " + $value + "."), displayName:$displayName, id:$id, isEnabled:true, value:$value}]' \
-    <<< "$current_roles")"
-  az ad app update --id "$api_app_id" --set appRoles="$updated_roles" -o none
-  echo "Created API app role: $role_value ($role_id)"
-else
-  echo "API app role already exists: $role_value ($role_id)"
-fi
+    updated_roles="$(jq \
+      --arg id "$role_id" \
+      --arg value "$role_value" \
+      --arg displayName "$role_display_name ($role_value)" \
+      '. + [{allowedMemberTypes:["Application"], description:("Allows trusted app-only clients to call protected API routes for " + $value + "."), displayName:$displayName, id:$id, isEnabled:true, value:$value}]' \
+      <<<"$current_roles")"
+    az ad app update --id "$api_app_id" --set appRoles="$updated_roles" -o none
+    echo "Created API app role: $role_value ($role_id)"
+  else
+    echo "API app role already exists: $role_value ($role_id)"
+  fi
+  role_ids+=("$role_id")
+done
 
 service_app_json="$(az ad app list --display-name "$service_display_name" --query '[0].{appId:appId,id:id}' -o json)"
 service_app_id="$(jq -r '.appId // empty' <<< "$service_app_json")"
@@ -99,27 +117,31 @@ echo "Service client/application ID: $service_app_id"
 echo "Service app object ID: $service_app_object_id"
 echo "Service principal object ID: $service_sp_object_id"
 
-existing_assignment="$(az rest \
-  --method GET \
-  --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$service_sp_object_id/appRoleAssignments" \
-  --query "value[?resourceId=='$api_sp_object_id' && appRoleId=='$role_id'] | [0].id" \
-  -o tsv 2>/dev/null || true)"
-if [ -z "$existing_assignment" ]; then
-  assignment_body="$(jq -n \
-    --arg principalId "$service_sp_object_id" \
-    --arg resourceId "$api_sp_object_id" \
-    --arg appRoleId "$role_id" \
-    '{principalId:$principalId, resourceId:$resourceId, appRoleId:$appRoleId}')"
-  az rest \
-    --method POST \
+for index in "${!role_ids[@]}"; do
+  role_id="${role_ids[$index]}"
+  role_value="${role_values[$index]}"
+  existing_assignment="$(az rest \
+    --method GET \
     --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$service_sp_object_id/appRoleAssignments" \
-    --headers 'Content-Type=application/json' \
-    --body "$assignment_body" \
-    -o none
-  echo "Assigned app role $role_value to service principal."
-else
-  echo "App role assignment already exists."
-fi
+    --query "value[?resourceId=='$api_sp_object_id' && appRoleId=='$role_id'] | [0].id" \
+    -o tsv 2>/dev/null || true)"
+  if [ -z "$existing_assignment" ]; then
+    assignment_body="$(jq -n \
+      --arg principalId "$service_sp_object_id" \
+      --arg resourceId "$api_sp_object_id" \
+      --arg appRoleId "$role_id" \
+      '{principalId:$principalId, resourceId:$resourceId, appRoleId:$appRoleId}')"
+    az rest \
+      --method POST \
+      --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$service_sp_object_id/appRoleAssignments" \
+      --headers 'Content-Type=application/json' \
+      --body "$assignment_body" \
+      -o none
+    echo "Assigned app role $role_value to service principal."
+  else
+    echo "App role assignment already exists for $role_value."
+  fi
+done
 
 credential_name="github-${github_environment}-service-tests"
 credential_subject="repo:${repository}:environment:${github_environment}"

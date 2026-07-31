@@ -1,10 +1,7 @@
 name: Promote Production
+run-name: Promote Production ${{ inputs.commit_sha || github.sha }}
 
 on:
-  workflow_run:
-    workflows: [Deploy Test]
-    branches: [main]
-    types: [completed]
   workflow_dispatch:
     inputs:
       commit_sha:
@@ -29,17 +26,12 @@ permissions:
   issues: write
 
 concurrency:
-  group: promote-production
+  group: production-deployment
   cancel-in-progress: false
 
 jobs:
   promote-production:
     name: promote production
-    if: >-
-      ${{
-        github.event_name == 'workflow_dispatch' ||
-        (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event == 'workflow_run')
-      }}
     uses: ./.github/workflows/deploy-environment.yml
     secrets:
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
@@ -47,11 +39,14 @@ jobs:
       WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
       BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
       BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
+      BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
+      BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
+      BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
     with:
       environmentName: prod
       azureResourceGroup: rg-api-prod
       githubEnvironment: production
-      deployFrontend: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_frontend }}
-      deployFunctions: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_functions }}
-      sourceRef: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.commit_sha || github.sha }}
+      deployFrontend: ${{ inputs.deploy_frontend }}
+      deployFunctions: ${{ inputs.deploy_functions }}
+      sourceRef: ${{ inputs.commit_sha || github.sha }}
       updateProductionVariables: true

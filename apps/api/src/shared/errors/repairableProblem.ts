@@ -141,7 +141,7 @@ const REPAIRABLE_PROBLEM_KEYS = new Set([
 ]);
 
 const UNSAFE_RESPONSE_PATTERNS = [
-  /Authorization/i,
+  /\bAuthorization\s*:/i,
   /Bearer/i,
   /access_token/i,
   /refresh_token/i,
@@ -241,7 +241,10 @@ export function createDiagnosticId(): string {
   return `diag_${randomBytes(12).toString('hex')}`;
 }
 
-export function validateRepairableProblem(value: unknown, expected: RepairableProblemExpected): RepairableProblem | null {
+export function validateRepairableProblem(
+  value: unknown,
+  expected: RepairableProblemExpected,
+): RepairableProblem | null {
   if (!isRecord(value)) return null;
   if (Object.keys(value).some((key) => !REPAIRABLE_PROBLEM_KEYS.has(key))) return null;
   if (value.rec_version !== '1.0') return null;
@@ -273,14 +276,22 @@ export function validateRepairableProblem(value: unknown, expected: RepairablePr
   if (value.instance !== diagnosticInstance(expected.diagnostic_id)) return null;
 
   if (!isRecord(value.retry_policy)) return null;
-  if (typeof value.retry_policy.can_retry !== 'boolean' || typeof value.retry_policy.same_request !== 'boolean') return null;
+  if (typeof value.retry_policy.can_retry !== 'boolean' || typeof value.retry_policy.same_request !== 'boolean')
+    return null;
+  if (!value.retry_policy.can_retry && value.retry_policy.same_request) return null;
   if (
     value.retry_policy.retry_after_ms !== undefined &&
-    (!Number.isInteger(value.retry_policy.retry_after_ms) || value.retry_policy.retry_after_ms < 0 || value.retry_policy.retry_after_ms > 3_600_000)
+    (!Number.isInteger(value.retry_policy.retry_after_ms) ||
+      value.retry_policy.retry_after_ms < 0 ||
+      value.retry_policy.retry_after_ms > 3_600_000)
   ) {
     return null;
   }
-  if (value.retry_policy.idempotency_required !== undefined && typeof value.retry_policy.idempotency_required !== 'boolean') return null;
+  if (
+    value.retry_policy.idempotency_required !== undefined &&
+    typeof value.retry_policy.idempotency_required !== 'boolean'
+  )
+    return null;
 
   if (value.invalid_fields !== undefined) {
     if (!Array.isArray(value.invalid_fields) || value.invalid_fields.length > 10) return null;
@@ -296,18 +307,24 @@ export function validateRepairableProblem(value: unknown, expected: RepairablePr
   if (value.repair_patch !== undefined) {
     if (!Array.isArray(value.repair_patch) || value.repair_patch.length > 6) return null;
     for (const op of value.repair_patch) {
-      if (!isRecord(op) || !PATCH_OPS.has(String(op.op)) || !isAllowedJsonPointerPath(op.path, expected.allowedRequestFields)) return null;
-      if ((op.op === 'move' || op.op === 'copy') && !isAllowedJsonPointerPath(op.from, expected.allowedRequestFields)) return null;
+      if (
+        !isRecord(op) ||
+        !PATCH_OPS.has(String(op.op)) ||
+        !isAllowedJsonPointerPath(op.path, expected.allowedRequestFields)
+      )
+        return null;
+      if ((op.op === 'move' || op.op === 'copy') && !isAllowedJsonPointerPath(op.from, expected.allowedRequestFields))
+        return null;
     }
   }
-
 
   if (value.repair_plan !== undefined) {
     if (!Array.isArray(value.repair_plan) || value.repair_plan.length > 8) return null;
     for (const step of value.repair_plan) {
       if (!isRecord(step) || !REPAIR_PLAN_ACTIONS.has(step.action as RepairPlanStep['action'])) return null;
       if (step.path !== undefined && !isAllowedPath(step.path, expected.allowedRequestFields)) return null;
-      if (step.operation_id !== undefined && !expected.allowedOperationIds.includes(String(step.operation_id))) return null;
+      if (step.operation_id !== undefined && !expected.allowedOperationIds.includes(String(step.operation_id)))
+        return null;
       if (!boundedOptionalString(step.value_hint, 240)) return null;
       if (!boundedOptionalString(step.reason, 300, true)) return null;
     }
@@ -317,7 +334,10 @@ export function validateRepairableProblem(value: unknown, expected: RepairablePr
   return value as RepairableProblem;
 }
 
-export function sanitizeRepairableProblem(problem: RepairableProblem, policy: RepairableProblemPolicy): RepairableProblem | null {
+export function sanitizeRepairableProblem(
+  problem: RepairableProblem,
+  policy: RepairableProblemPolicy,
+): RepairableProblem | null {
   const expected = {
     operation_id: problem.operation_id,
     diagnostic_id: problem.diagnostic_id,
@@ -326,7 +346,8 @@ export function sanitizeRepairableProblem(problem: RepairableProblem, policy: Re
     allowedOperationIds: policy.allowedOperationIds,
   };
   if (!validateRepairableProblem(problem, expected)) return null;
-  if (problem.repair_plan?.some((step) => step.operation_id && !policy.allowedOperationIds.includes(step.operation_id))) return null;
+  if (problem.repair_plan?.some((step) => step.operation_id && !policy.allowedOperationIds.includes(step.operation_id)))
+    return null;
   return problem;
 }
 
@@ -345,7 +366,7 @@ export function buildFallbackRepairableProblem(args: {
   const status = args.status;
   let classification: RepairableErrorClassification = 'diagnostic_uncertain';
   let repairable = false;
-  let retryPolicy: RetryPolicy = { can_retry: false, same_request: true };
+  let retryPolicy: RetryPolicy = { can_retry: false, same_request: false };
   let title = 'Request could not be completed';
   let detail = args.safe_error?.message ?? 'The request could not be completed.';
   let callerInstruction = 'Do not expose internals. Report the diagnostic_id if this persists.';
@@ -358,17 +379,32 @@ export function buildFallbackRepairableProblem(args: {
     repairable = true;
     retryPolicy = { can_retry: true, same_request: false, idempotency_required: false };
     title = 'Request contract violation';
-    callerInstruction = 'Send valid JSON with a post field containing a Reddit article ID, t3 fullname, redd.it URL, or canonical reddit.com /comments/<id> URL.';
-    invalid_fields = [{ path: '/post', problem: 'The Reddit thread request must include a valid post value.', expected: 'string' }];
+    callerInstruction =
+      'Send valid JSON with a post field containing a Reddit article ID, t3 fullname, redd.it URL, or canonical reddit.com /comments/<id> URL.';
+    invalid_fields = [
+      { path: '/post', problem: 'The Reddit thread request must include a valid post value.', expected: 'string' },
+    ];
     correct_request_example = { post: 'abc123', sort: 'confidence', maxComments: 10000, maxMoreChildrenRequests: 1000 };
     repair_plan = [
-      { action: 'provide_missing_value', path: '/post', value_hint: 'Reddit article ID, t3 fullname, redd.it URL, or canonical /comments/<id> URL', reason: 'The endpoint needs a post identifier to fetch a thread.' },
+      {
+        action: 'provide_missing_value',
+        path: '/post',
+        value_hint: 'Reddit article ID, t3 fullname, redd.it URL, or canonical /comments/<id> URL',
+        reason: 'The endpoint needs a post identifier to fetch a thread.',
+      },
     ];
     if (isShareUrl) {
-      detail = 'Reddit /s/ share URLs must resolve to a canonical comments URL before this endpoint can fetch the thread.';
-      callerInstruction = 'Do not retry the same /s/ share URL. Use a canonical reddit.com /comments/<id> URL, redd.it URL, t3 fullname, or raw post ID instead.';
+      detail =
+        'Reddit /s/ share URLs must resolve to a canonical comments URL before this endpoint can fetch the thread.';
+      callerInstruction =
+        'Do not retry the same /s/ share URL. Use a canonical reddit.com /comments/<id> URL, redd.it URL, t3 fullname, or raw post ID instead.';
       repair_plan = [
-        { action: 'replace_invalid_value', path: '/post', value_hint: 'canonical /comments/<id> URL, redd.it URL, t3 fullname, or raw post ID', reason: 'The /s/ share URL could not be resolved deterministically.' },
+        {
+          action: 'replace_invalid_value',
+          path: '/post',
+          value_hint: 'canonical /comments/<id> URL, redd.it URL, t3 fullname, or raw post ID',
+          reason: 'The /s/ share URL could not be resolved deterministically.',
+        },
       ];
     }
   } else if (status === 403) {
@@ -380,12 +416,14 @@ export function buildFallbackRepairableProblem(args: {
     repairable = true;
     retryPolicy = { can_retry: true, same_request: false, idempotency_required: false };
     title = 'Reddit content was not found';
-    callerInstruction = 'Check that post references an existing public Reddit thread and retry with the corrected identifier or canonical URL.';
+    callerInstruction =
+      'Check that post references an existing public Reddit thread and retry with the corrected identifier or canonical URL.';
   } else if (status === 429) {
     classification = 'capacity_or_timeout';
     retryPolicy = { can_retry: true, same_request: true, retry_after_ms: 30_000, idempotency_required: false };
     title = 'Reddit rate limit reached';
-    callerInstruction = 'Retry later with the same request. Do not change request parameters solely to bypass rate limiting.';
+    callerInstruction =
+      'Retry later with the same request. Do not change request parameters solely to bypass rate limiting.';
     repair_plan = [{ action: 'retry_later', reason: 'The upstream service asked callers to slow down.' }];
   } else if (status >= 500) {
     if (args.error_kind === 'internal' || args.error_kind === 'config') {
@@ -393,14 +431,27 @@ export function buildFallbackRepairableProblem(args: {
       retryPolicy = { can_retry: true, same_request: true, idempotency_required: false };
       title = 'Service bug likely';
       detail = 'The request could not be completed because the service hit an unexpected internal failure.';
-      callerInstruction = 'Retry later with the same request if appropriate. Do not invent request parameters; report the diagnostic_id to the service owner if this persists.';
-      repair_plan = [{ action: 'report_diagnostic_id', reason: 'The failure appears to be inside the service rather than in the caller request or Reddit dependency.' }];
+      callerInstruction =
+        'Retry later with the same request if appropriate. Do not invent request parameters; report the diagnostic_id to the service owner if this persists.';
+      repair_plan = [
+        {
+          action: 'report_diagnostic_id',
+          reason:
+            'The failure appears to be inside the service rather than in the caller request or Reddit dependency.',
+        },
+      ];
     } else {
       classification = 'dependency_failure';
       retryPolicy = { can_retry: true, same_request: true, idempotency_required: false };
       title = 'Reddit dependency failure';
-      callerInstruction = 'Retry later with the same request. Do not invent alternative request parameters for this upstream failure.';
-      repair_plan = [{ action: 'retry_later', reason: 'The failure happened while contacting or processing the upstream Reddit dependency.' }];
+      callerInstruction =
+        'Retry later with the same request. Do not invent alternative request parameters for this upstream failure.';
+      repair_plan = [
+        {
+          action: 'retry_later',
+          reason: 'The failure happened while contacting or processing the upstream Reddit dependency.',
+        },
+      ];
     }
   }
 
@@ -424,7 +475,7 @@ export function buildFallbackRepairableProblem(args: {
     caller_instruction: callerInstruction,
     llm_instruction: callerInstruction,
     safe_debug_summary: `Fallback repairable error for ${args.operation_id} at stage ${args.failure_stage ?? 'unknown'} with status ${status}${code ? ` and code ${code}` : ''}.`,
-    analysis_mode: 'fallback',
+    analysis_mode: classification === 'diagnostic_uncertain' ? 'fallback' : 'deterministic',
   };
 }
 
@@ -463,7 +514,9 @@ function normalizeDiagnosticPath(path: unknown, allowedFields: string[]): string
 
 function isSafeTopLevelFieldPath(field: string): boolean {
   if (!/^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(field)) return false;
-  return !/(^|[_-])(access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|cookie|set-cookie|client[_-]?secret|secret|password|api[_-]?key|apikey|token)([_-]|$)/i.test(field);
+  return !/(^|[_-])(access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|cookie|set-cookie|client[_-]?secret|secret|password|api[_-]?key|apikey|token)([_-]|$)/i.test(
+    field,
+  );
 }
 
 function containsUnsafeString(value: unknown): boolean {

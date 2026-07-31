@@ -40,6 +40,11 @@ on:
         required: false
         default: false
         type: boolean
+      allowRollback:
+        description: Permit a non-monotonic production source only from the dedicated rollback workflow.
+        required: false
+        default: false
+        type: boolean
     secrets:
       REDDIT_CLIENT_SECRET:
         description: Reddit OAuth client secret for app-only API access.
@@ -56,6 +61,15 @@ on:
       BRING_PASSWORD:
         description: Bring! technical account password.
         required: true
+      BRING_CLIENT_API_KEY:
+        description: Unofficial Bring client API key.
+        required: true
+      BRING_CONFIRMATION_HMAC_KEY:
+        description: Bring confirmation/pseudonym HMAC key.
+        required: true
+      BRING_MUTATION_ENCRYPTION_KEY:
+        description: Bring prepared-mutation encryption key.
+        required: true
     outputs:
       effectiveBaseUrl:
         description: Resolved Function App base URL.
@@ -64,8 +78,11 @@ on:
         description: Resolved Azure Function App name.
         value: ${{ jobs.deploy.outputs.functionAppName }}
       storageAccountName:
-        description: Resolved Azure Storage account name.
+        description: Resolved static-web Azure Storage account name.
         value: ${{ jobs.deploy.outputs.storageAccountName }}
+      releaseStorageAccountName:
+        description: Resolved immutable-release Azure Storage account name.
+        value: ${{ jobs.deploy.outputs.releaseStorageAccountName }}
 
 permissions:
   contents: read
@@ -85,10 +102,12 @@ jobs:
       effectiveBaseUrl: ${{ steps.resolve.outputs.effective_base_url }}
       functionAppName: ${{ steps.resolve.outputs.function_app_name }}
       storageAccountName: ${{ steps.resolve.outputs.storage_account_name }}
+      releaseStorageAccountName: ${{ steps.resolve.outputs.release_storage_account_name }}
     env:
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID: ${{ vars.AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID }}
       AZURE_RESOURCE_GROUP: ${{ inputs.azureResourceGroup }}
       ENVIRONMENT_NAME: ${{ inputs.environmentName }}
       DEPLOY_FRONTEND: ${{ inputs.deployFrontend }}
@@ -108,6 +127,9 @@ jobs:
       OIDC_ALLOWED_CLIENT_IDS: ${{ vars.OIDC_ALLOWED_CLIENT_IDS }}
       OIDC_ALLOWED_DELEGATED_CLIENT_IDS: ${{ vars.OIDC_ALLOWED_DELEGATED_CLIENT_IDS }}
       OIDC_ALLOWED_TENANTS: ${{ vars.OIDC_ALLOWED_TENANTS }}
+      MCP_RESOURCE_ORIGIN: ${{ vars.MCP_RESOURCE_ORIGIN }}
+      MCP_ALLOWED_ORIGINS: ${{ vars.MCP_ALLOWED_ORIGINS }}
+      OPERATOR_ALERT_EMAIL: ${{ vars.OPERATOR_ALERT_EMAIL }}
       WEB_AUTH_ENABLED: ${{ vars.WEB_AUTH_ENABLED }}
       WEB_AUTH_CLIENT_ID: ${{ vars.WEB_AUTH_CLIENT_ID }}
       WEB_AUTH_AUTHORITY: ${{ vars.WEB_AUTH_AUTHORITY }}
@@ -125,12 +147,19 @@ jobs:
       WLH_CATEGORY_BLOB_NAME: ${{ vars.WLH_CATEGORY_BLOB_NAME }}
       WLH_CATEGORY_BLOB_CONTAINER: ${{ vars.WLH_CATEGORY_BLOB_CONTAINER }}
       BRING_BASE_URL: ${{ vars.BRING_BASE_URL }}
-      BRING_CLIENT_API_KEY: ${{ vars.BRING_CLIENT_API_KEY }}
       BRING_COUNTRY: ${{ vars.BRING_COUNTRY }}
+      BRING_ENABLED: ${{ vars.BRING_ENABLED }}
+      BRING_ADD_ENABLED: ${{ vars.BRING_ADD_ENABLED }}
+      BRING_DESTRUCTIVE_ENABLED: ${{ vars.BRING_DESTRUCTIVE_ENABLED }}
+      BRING_EXPECTED_ACCOUNT_FINGERPRINT: ${{ vars.BRING_EXPECTED_ACCOUNT_FINGERPRINT }}
       BRING_DEFAULT_LIST_UUID: ${{ vars.BRING_DEFAULT_LIST_UUID }}
+      BRING_READABLE_LIST_UUIDS: ${{ vars.BRING_READABLE_LIST_UUIDS }}
+      BRING_WRITABLE_LIST_UUIDS: ${{ vars.BRING_WRITABLE_LIST_UUIDS }}
       BRING_SESSION_CACHE_ENABLED: ${{ vars.BRING_SESSION_CACHE_ENABLED }}
       BRING_SESSION_CACHE_CONTAINER: ${{ vars.BRING_SESSION_CACHE_CONTAINER }}
       BRING_SESSION_CACHE_BLOB: ${{ vars.BRING_SESSION_CACHE_BLOB }}
+      BRING_MUTATION_CONTAINER: ${{ vars.BRING_MUTATION_CONTAINER }}
+      BRING_AUDIT_CONTAINER: ${{ vars.BRING_AUDIT_CONTAINER }}
       DEPLOYED_AT_UTC: ${{ github.event.head_commit.timestamp || '' }}
       DEPLOYMENT_RUN_ID: ${{ github.run_id }}
       APPLICATIONINSIGHTS_NAME: ${{ vars.APPLICATIONINSIGHTS_NAME }}
@@ -147,6 +176,7 @@ jobs:
           ref: ${{ inputs.sourceRef || github.sha }}
           fetch-depth: 0
       - name: Validate deployment source
+        id: source
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -168,17 +198,34 @@ jobs:
             echo "sourceRef must point to a commit already present in the main branch history." >&2
             exit 1
           fi
-          successful_ci_runs=$(gh api \
+          ci_run_json=$(gh api \
             "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&head_sha=${deployment_ref}&status=completed&per_page=20" \
-            --jq '[.workflow_runs[] | select(.conclusion == "success")] | length')
-          if [ "$successful_ci_runs" -lt 1 ]; then
+            --jq '.workflow_runs | map(select(.conclusion == "success" and .event == "push")) | sort_by(.created_at) | last // {}')
+          ci_run_id="$(jq -r '.id // ""' <<<"$ci_run_json")"
+          if ! [[ "$ci_run_id" =~ ^[0-9]+$ ]]; then
             echo "sourceRef must match a commit that completed CI successfully." >&2
             exit 1
           fi
+          echo "ci_run_id=$ci_run_id" >> "$GITHUB_OUTPUT"
           if [ "$ENVIRONMENT_NAME" = "prod" ]; then
+            if [ "${{ inputs.allowRollback }}" != "true" ]; then
+              : "${PRODUCTION_BASE_URL:?PRODUCTION_BASE_URL is required for monotonic production validation}"
+              current_health="$(curl --fail --show-error --silent --max-time 20 "${PRODUCTION_BASE_URL%/}/health")"
+              current_source_ref="$(jq -r '.deployedSourceRef // .deployedCommitSha // ""' <<<"$current_health")"
+              if ! [[ "$current_source_ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
+                echo "Current production health did not report an immutable source SHA." >&2
+                exit 1
+              fi
+              if [ "${current_source_ref,,}" != "${deployment_ref,,}" ] &&
+                 ! git merge-base --is-ancestor "$current_source_ref" "$deployment_ref"; then
+                echo "Refusing non-monotonic production deployment from $current_source_ref to $deployment_ref. Use rollback-production.yml for an intentional rollback." >&2
+                exit 1
+              fi
+            fi
+
             mapfile -t successful_test_run_ids < <(gh api \
-              "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-test.yml/runs?branch=main&head_sha=${deployment_ref}&status=completed&per_page=20" \
-              --jq '.workflow_runs[] | select(.conclusion == "success" and (.event == "workflow_run" or .event == "workflow_dispatch")) | .id')
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-test.yml/runs?branch=main&status=completed&per_page=50" \
+              --jq '.workflow_runs[] | select(.conclusion == "success" and .event == "workflow_dispatch") | .id')
             valid_test_run_id=""
             provenance_dir="$(mktemp -d)"
             for test_run_id in "${successful_test_run_ids[@]}"; do
@@ -195,9 +242,18 @@ jobs:
                     and .resolvedHead == $source_ref
                     and .deployFrontend == "true"
                     and .deployFunctions == "true"
-                    and (.eventName == "workflow_run" or .eventName == "workflow_dispatch")' \
+                    and .eventName == "workflow_dispatch"
+                    and (.artifacts.functionappSha256 | test("^[0-9a-f]{64}$"))
+                    and (.artifacts.frontendSha256 | test("^[0-9a-f]{64}$"))
+                    and .authenticatedSmokeStatus == "passed"
+                    and .telemetryStatus == "passed"' \
                   "$provenance_file" >/dev/null; then
                   valid_test_run_id="$test_run_id"
+                  {
+                    echo "test_function_digest=$(jq -r '.artifacts.functionappSha256' "$provenance_file")"
+                    echo "test_frontend_digest=$(jq -r '.artifacts.frontendSha256' "$provenance_file")"
+                    echo "test_sbom_digest=$(jq -r '.artifacts.sbomSha256' "$provenance_file")"
+                  } >> "$GITHUB_OUTPUT"
                   break
                 fi
               fi
@@ -208,6 +264,10 @@ jobs:
             fi
             echo "Validated Deploy Test provenance from run $valid_test_run_id for production sourceRef $deployment_ref."
           fi
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        with:
+          node-version: '22'
       - name: Validate deployment configuration
         shell: bash
         run: |
@@ -215,6 +275,7 @@ jobs:
           : "${AZURE_CLIENT_ID:?AZURE_CLIENT_ID repository variable is required}"
           : "${AZURE_TENANT_ID:?AZURE_TENANT_ID repository variable is required}"
           : "${AZURE_SUBSCRIPTION_ID:?AZURE_SUBSCRIPTION_ID repository variable is required}"
+          : "${AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID:?AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID environment variable is required}"
           : "${AZURE_RESOURCE_GROUP:?azureResourceGroup input is required}"
           case "$ENVIRONMENT_NAME" in
             test|prod) ;;
@@ -234,6 +295,32 @@ jobs:
           : "${OIDC_REQUIRED_SCOPES:?OIDC_REQUIRED_SCOPES repository variable is required for $ENVIRONMENT_NAME}"
           : "${OIDC_ALLOWED_OBJECT_IDS:?OIDC_ALLOWED_OBJECT_IDS repository variable is required for $ENVIRONMENT_NAME}"
           : "${OIDC_ALLOWED_TENANTS:?OIDC_ALLOWED_TENANTS repository variable is required for $ENVIRONMENT_NAME}"
+          : "${MCP_RESOURCE_ORIGIN:?MCP_RESOURCE_ORIGIN environment variable is required for $ENVIRONMENT_NAME}"
+          : "${MCP_ALLOWED_ORIGINS:?MCP_ALLOWED_ORIGINS environment variable is required for $ENVIRONMENT_NAME}"
+          : "${OPERATOR_ALERT_EMAIL:?OPERATOR_ALERT_EMAIL environment variable is required for $ENVIRONMENT_NAME}"
+          if ! node --input-type=module --eval '
+            const resourceOrigin = process.env.MCP_RESOURCE_ORIGIN;
+            const allowedOrigins = process.env.MCP_ALLOWED_ORIGINS
+              .split(",")
+              .map((entry) => entry.trim())
+              .filter(Boolean);
+            const isExactHttpsOrigin = (value) => {
+              try {
+                const parsed = new URL(value);
+                return parsed.protocol === "https:" && parsed.origin === value;
+              } catch {
+                return false;
+              }
+            };
+            if (!isExactHttpsOrigin(resourceOrigin) ||
+                allowedOrigins.length === 0 ||
+                allowedOrigins.some((origin) => origin === "*" || !isExactHttpsOrigin(origin))) {
+              process.exit(1);
+            }
+          '; then
+            echo "MCP origins must be non-empty exact HTTPS origins without paths, credentials, query strings, fragments, or wildcards." >&2
+            exit 1
+          fi
           : "${WLH_BASE_URL:?WLH_BASE_URL environment secret is required for $ENVIRONMENT_NAME}"
           : "${WLH_CATEGORY_BLOB_CONTAINER:?WLH_CATEGORY_BLOB_CONTAINER variable is required for $ENVIRONMENT_NAME}"
           : "${WLH_CATEGORY_BLOB_NAME:?WLH_CATEGORY_BLOB_NAME variable is required for $ENVIRONMENT_NAME}"
@@ -250,6 +337,32 @@ jobs:
           : "${WEB_AUTH_API_SCOPE:?WEB_AUTH_API_SCOPE repository variable is required for $ENVIRONMENT_NAME}"
           : "${REDDIT_CLIENT_ID:?REDDIT_CLIENT_ID environment variable is required for $ENVIRONMENT_NAME}"
           : "${REDDIT_USER_AGENT:?REDDIT_USER_AGENT environment variable is required for $ENVIRONMENT_NAME}"
+          : "${BRING_ENABLED:?BRING_ENABLED environment variable must be explicitly true or false}"
+          : "${BRING_ADD_ENABLED:?BRING_ADD_ENABLED environment variable must be explicitly true or false}"
+          : "${BRING_DESTRUCTIVE_ENABLED:?BRING_DESTRUCTIVE_ENABLED environment variable must be explicitly true or false}"
+          for flag in "$BRING_ENABLED" "$BRING_ADD_ENABLED" "$BRING_DESTRUCTIVE_ENABLED"; do
+            if [ "$flag" != "true" ] && [ "$flag" != "false" ]; then
+              echo "Bring enablement flags must be true or false." >&2
+              exit 1
+            fi
+          done
+          if [ "$BRING_ENABLED" != "true" ] &&
+             { [ "$BRING_ADD_ENABLED" = "true" ] || [ "$BRING_DESTRUCTIVE_ENABLED" = "true" ]; }; then
+            echo "Bring write flags require BRING_ENABLED=true." >&2
+            exit 1
+          fi
+          if [ "$ENVIRONMENT_NAME" = "test" ] &&
+             { [ "$BRING_ADD_ENABLED" != "false" ] || [ "$BRING_DESTRUCTIVE_ENABLED" != "false" ]; }; then
+            echo "Bring writes are prohibited in test because test reuses the production technical account." >&2
+            exit 1
+          fi
+          if [ "$BRING_ENABLED" = "true" ]; then
+            : "${BRING_EXPECTED_ACCOUNT_FINGERPRINT:?BRING_EXPECTED_ACCOUNT_FINGERPRINT is required when Bring is enabled}"
+            : "${BRING_READABLE_LIST_UUIDS:?BRING_READABLE_LIST_UUIDS is required when Bring is enabled}"
+          fi
+          if [ "$BRING_ADD_ENABLED" = "true" ] || [ "$BRING_DESTRUCTIVE_ENABLED" = "true" ]; then
+            : "${BRING_WRITABLE_LIST_UUIDS:?BRING_WRITABLE_LIST_UUIDS is required when Bring writes are enabled}"
+          fi
           if [ "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" = "true" ]; then
             : "${REPAIRABLE_ERRORS_LLM_MODEL:?REPAIRABLE_ERRORS_LLM_MODEL repository variable is required when Repairable Error LLM diagnostics are enabled}"
           fi
@@ -259,25 +372,43 @@ jobs:
           client-id: ${{ env.AZURE_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
-      - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
-        with:
-          node-version: '22'
       - name: Install dependencies
         shell: bash
         run: |
           set -euo pipefail
           if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
-      - name: Build deployable artifacts
+      - name: Download immutable CI release bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        with:
+          name: release-${{ inputs.sourceRef || github.sha }}
+          path: ${{ runner.temp }}/release
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.source.outputs.ci_run_id }}
+      - name: Verify immutable release bundle
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f package.json ]; then
-            npm run build --if-present
-            npm run build:api --if-present
-            npm run build:functions --if-present
-          else
-            echo "No root package.json found; skipping application artifact build."
+          release_dir="$RUNNER_TEMP/release"
+          node scripts/verify-release-artifacts.mjs "$release_dir" "${SOURCE_REF:-${GITHUB_SHA}}" > "$RUNNER_TEMP/release-manifest-verified.json"
+          function_digest="$(jq -r '.artifacts.functionapp.sha256' "$release_dir/release-manifest.json")"
+          frontend_digest="$(jq -r '.artifacts.frontend.sha256' "$release_dir/release-manifest.json")"
+          sbom_digest="$(jq -r '.artifacts.sbom.sha256' "$release_dir/release-manifest.json")"
+          {
+            echo "FUNCTION_ARTIFACT_SHA256=$function_digest"
+            echo "FRONTEND_ARTIFACT_SHA256=$frontend_digest"
+            echo "SBOM_SHA256=$sbom_digest"
+          } >> "$GITHUB_ENV"
+          if [ "$ENVIRONMENT_NAME" = "prod" ]; then
+            test_function_digest="${{ steps.source.outputs.test_function_digest }}"
+            test_frontend_digest="${{ steps.source.outputs.test_frontend_digest }}"
+            test_sbom_digest="${{ steps.source.outputs.test_sbom_digest }}"
+            if [ "$function_digest" != "$test_function_digest" ] ||
+               [ "$frontend_digest" != "$test_frontend_digest" ] ||
+               [ "$sbom_digest" != "$test_sbom_digest" ]; then
+              echo "Production release artifact digests do not match the successful test deployment." >&2
+              exit 1
+            fi
           fi
       - name: Deploy Bicep infrastructure
         id: infra
@@ -287,11 +418,17 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
           BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
+          BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
+          BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
+          BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
         run: |
           set -euo pipefail
           : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
           : "${BRING_EMAIL:?BRING_EMAIL environment secret is required for $ENVIRONMENT_NAME}"
           : "${BRING_PASSWORD:?BRING_PASSWORD environment secret is required for $ENVIRONMENT_NAME}"
+          : "${BRING_CLIENT_API_KEY:?BRING_CLIENT_API_KEY environment secret is required for $ENVIRONMENT_NAME}"
+          : "${BRING_CONFIRMATION_HMAC_KEY:?BRING_CONFIRMATION_HMAC_KEY environment secret is required for $ENVIRONMENT_NAME}"
+          : "${BRING_MUTATION_ENCRYPTION_KEY:?BRING_MUTATION_ENCRYPTION_KEY environment secret is required for $ENVIRONMENT_NAME}"
           openai_secret_name='OPENAI_API_KEY'
           openai_credential=""
           if [ "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" = "true" ]; then
@@ -312,47 +449,69 @@ jobs:
             if [ -n "$api_cors_redirect_uri" ]; then
               api_cors_allowed_origins="$(API_CORS_REDIRECT_URI="$api_cors_redirect_uri" node --input-type=module --eval "process.stdout.write(new URL(process.env.API_CORS_REDIRECT_URI).origin)")"
             fi
+            monthly_budget_eur=10
+            if [ "$ENVIRONMENT_NAME" = "prod" ]; then
+              monthly_budget_eur=15
+            fi
 
             deployment_outputs=$(az deployment group create \
               --name "main-${ENVIRONMENT_NAME}" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --template-file infra/main.bicep \
               --parameters environmentName="$ENVIRONMENT_NAME" \
-                authEnabled="${AUTH_ENABLED:-false}" \
+                authEnabled="$AUTH_ENABLED" \
                 oidcIssuer="${OIDC_ISSUER:-}" \
                 oidcAudience="${OIDC_AUDIENCE:-}" \
-                oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-api.access}" \
+                oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove}" \
                 oidcAllowedObjectIds="${OIDC_ALLOWED_OBJECT_IDS:-}" \
                 oidcAllowedSubjects="${OIDC_ALLOWED_SUBJECTS:-}" \
                 oidcAllowedAppObjectIds="${OIDC_ALLOWED_APP_OBJECT_IDS:-}" \
                 oidcAllowedClientIds="${OIDC_ALLOWED_CLIENT_IDS:-}" \
                 oidcAllowedDelegatedClientIds="${OIDC_ALLOWED_DELEGATED_CLIENT_IDS:-}" \
                 oidcAllowedTenants="${OIDC_ALLOWED_TENANTS:-}" \
+                apiCorsAllowedOrigins="$api_cors_allowed_origins" \
+                mcpResourceOrigin="$MCP_RESOURCE_ORIGIN" \
+                mcpAllowedOrigins="$MCP_ALLOWED_ORIGINS" \
+                deploymentPrincipalObjectId="$AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID" \
+                operatorAlertEmail="$OPERATOR_ALERT_EMAIL" \
+                monthlyBudgetEur="$monthly_budget_eur" \
                 redditClientId="${REDDIT_CLIENT_ID:-}" \
                 redditOAuthSecret="${REDDIT_CLIENT_SECRET:-}" \
                 redditUserAgent="${REDDIT_USER_AGENT:-}" \
                 bringBaseUrl="${BRING_BASE_URL:-https://api.getbring.com/rest/}" \
-                bringClientApiKey="${BRING_CLIENT_API_KEY:-}" \
+                bringClientApiKey="$BRING_CLIENT_API_KEY" \
                 bringCountry="${BRING_COUNTRY:-AT}" \
                 bringEmail="$BRING_EMAIL" \
                 bringPassword="$BRING_PASSWORD" \
+                bringEnabled="$BRING_ENABLED" \
+                bringAddEnabled="$BRING_ADD_ENABLED" \
+                bringDestructiveEnabled="$BRING_DESTRUCTIVE_ENABLED" \
+                bringExpectedAccountFingerprint="${BRING_EXPECTED_ACCOUNT_FINGERPRINT:-}" \
                 bringDefaultListUuid="${BRING_DEFAULT_LIST_UUID:-}" \
+                bringReadableListUuids="${BRING_READABLE_LIST_UUIDS:-}" \
+                bringWritableListUuids="${BRING_WRITABLE_LIST_UUIDS:-}" \
                 bringSessionCacheEnabled="${BRING_SESSION_CACHE_ENABLED:-true}" \
                 bringSessionCacheContainer="${BRING_SESSION_CACHE_CONTAINER:-bring-private}" \
                 bringSessionCacheBlob="${BRING_SESSION_CACHE_BLOB:-session-v1.json}" \
-            wlhBaseUrl="${WLH_BASE_URL:-}" \
-            wlhCategoryBlobContainer="${WLH_CATEGORY_BLOB_CONTAINER:-wlh-reference}" \
-            wlhCategoryBlobName="${WLH_CATEGORY_BLOB_NAME:-categories-marketplace.v1.json.gz}" \
+                bringMutationContainer="${BRING_MUTATION_CONTAINER:-bring-mutations}" \
+                bringAuditContainer="${BRING_AUDIT_CONTAINER:-bring-audit}" \
+                bringConfirmationHmacKey="$BRING_CONFIRMATION_HMAC_KEY" \
+                bringMutationEncryptionKey="$BRING_MUTATION_ENCRYPTION_KEY" \
+                wlhBaseUrl="${WLH_BASE_URL:-}" \
+                wlhCategoryBlobContainer="${WLH_CATEGORY_BLOB_CONTAINER:-wlh-reference}" \
+                wlhCategoryBlobName="${WLH_CATEGORY_BLOB_NAME:-categories-marketplace.v1.json.gz}" \
                 openAiCredential="$openai_credential" \
                 repairableErrorsLlmEnabled="${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" \
                 repairableErrorsLlmModel="${REPAIRABLE_ERRORS_LLM_MODEL:-}" \
-                apiCorsAllowedOrigins="$api_cors_allowed_origins" \
               --query properties.outputs \
               -o json)
 
             {
               echo "function_app_name=$(jq -r '.functionAppResourceName.value // empty' <<< "$deployment_outputs")"
-              echo "storage_account_name=$(jq -r '.storageAccountResourceName.value // empty' <<< "$deployment_outputs")"
+              echo "host_storage_account_name=$(jq -r '.hostStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
+              echo "release_storage_account_name=$(jq -r '.releaseStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
+              echo "static_storage_account_name=$(jq -r '.staticWebStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
+              echo "private_storage_account_name=$(jq -r '.privateStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
               echo "application_insights_name=$(jq -r '.applicationInsightsResourceName.value // empty' <<< "$deployment_outputs")"
             } >> "$GITHUB_OUTPUT"
           else
@@ -364,12 +523,15 @@ jobs:
         run: |
           set -euo pipefail
           effective_functionapp_name="${{ steps.infra.outputs.function_app_name }}"
-          effective_storage_account="${{ steps.infra.outputs.storage_account_name }}"
+          effective_release_storage="${{ steps.infra.outputs.release_storage_account_name }}"
+          effective_static_storage="${{ steps.infra.outputs.static_storage_account_name }}"
+          effective_private_storage="${{ steps.infra.outputs.private_storage_account_name }}"
+          effective_host_storage="${{ steps.infra.outputs.host_storage_account_name }}"
           effective_app_insights="${{ steps.infra.outputs.application_insights_name }}"
 
           if [ "$ENVIRONMENT_NAME" = "prod" ]; then
             effective_functionapp_name="${effective_functionapp_name:-${AZURE_FUNCTIONAPP_NAME:-}}"
-            effective_storage_account="${effective_storage_account:-${AZURE_STATIC_WEB_STORAGE_ACCOUNT:-}}"
+            effective_static_storage="${effective_static_storage:-${AZURE_STATIC_WEB_STORAGE_ACCOUNT:-}}"
             effective_base_url="${PRODUCTION_BASE_URL:-}"
             effective_app_insights="${effective_app_insights:-${APPLICATIONINSIGHTS_NAME:-}}"
           else
@@ -377,11 +539,14 @@ jobs:
           fi
 
           : "${effective_functionapp_name:?Function App name could not be resolved}"
-          : "${effective_storage_account:?Storage account name could not be resolved}"
+          : "${effective_release_storage:?Release storage account name could not be resolved}"
+          : "${effective_static_storage:?Static-web storage account name could not be resolved}"
+          : "${effective_private_storage:?Private integration storage account name could not be resolved}"
+          : "${effective_host_storage:?Function host storage account name could not be resolved}"
 
           effective_frontend_url=""
-          if [ -n "$effective_storage_account" ]; then
-            effective_frontend_url="$(az storage account show --resource-group "$AZURE_RESOURCE_GROUP" --name "$effective_storage_account" --query primaryEndpoints.web -o tsv 2>/dev/null || true)"
+          if [ -n "$effective_static_storage" ]; then
+            effective_frontend_url="$(az storage account show --resource-group "$AZURE_RESOURCE_GROUP" --name "$effective_static_storage" --query primaryEndpoints.web -o tsv 2>/dev/null || true)"
             effective_frontend_url="${effective_frontend_url%/}"
           fi
 
@@ -397,7 +562,10 @@ jobs:
 
           {
             echo "EFFECTIVE_FUNCTIONAPP_NAME=$effective_functionapp_name"
-            echo "EFFECTIVE_STORAGE_ACCOUNT=$effective_storage_account"
+            echo "EFFECTIVE_RELEASE_STORAGE_ACCOUNT=$effective_release_storage"
+            echo "EFFECTIVE_STATIC_STORAGE_ACCOUNT=$effective_static_storage"
+            echo "EFFECTIVE_PRIVATE_STORAGE_ACCOUNT=$effective_private_storage"
+            echo "EFFECTIVE_HOST_STORAGE_ACCOUNT=$effective_host_storage"
             echo "EFFECTIVE_BASE_URL=$effective_base_url"
             echo "FRONTEND_BASE_URL=$effective_frontend_url"
             echo "EFFECTIVE_APPLICATIONINSIGHTS_NAME=$effective_app_insights"
@@ -405,7 +573,8 @@ jobs:
 
           {
             echo "function_app_name=$effective_functionapp_name"
-            echo "storage_account_name=$effective_storage_account"
+            echo "storage_account_name=$effective_static_storage"
+            echo "release_storage_account_name=$effective_release_storage"
             echo "effective_base_url=$effective_base_url"
             echo "frontend_base_url=$effective_frontend_url"
             echo "application_insights_name=$effective_app_insights"
@@ -415,52 +584,85 @@ jobs:
             echo "### Effective $ENVIRONMENT_NAME deployment settings"
             echo "- Base URL: $effective_base_url"
             echo "- Function App name: $effective_functionapp_name"
-            echo "- Static web storage account: $effective_storage_account"
+            echo "- Function host storage account: $effective_host_storage"
+            echo "- Release storage account: $effective_release_storage"
+            echo "- Static web storage account: $effective_static_storage"
+            echo "- Private integration storage account: $effective_private_storage"
             echo "- Resource group: $AZURE_RESOURCE_GROUP"
             echo "- Source ref: ${SOURCE_REF:-${GITHUB_SHA}}"
             echo "- Application Insights: ${effective_app_insights:-<not resolved>}"
             echo "- Frontend URL: ${effective_frontend_url:-<not resolved>}"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify private WLH reference data is present
+        if: ${{ inputs.deployFunctions }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${EFFECTIVE_PRIVATE_STORAGE_ACCOUNT:?Private integration storage account is required}"
+          blob_exists="$(az storage blob exists \
+            --auth-mode login \
+            --account-name "$EFFECTIVE_PRIVATE_STORAGE_ACCOUNT" \
+            --container-name "$WLH_CATEGORY_BLOB_CONTAINER" \
+            --name "$WLH_CATEGORY_BLOB_NAME" \
+            --query exists \
+            -o tsv)"
+          if [ "$blob_exists" != "true" ]; then
+            echo "Required WLH reference blob is absent from the private integration account." >&2
+            echo "Run the explicit Private Storage Migration workflow and verify its digest before deployment." >&2
+            exit 1
+          fi
       - name: Package and deploy Azure Functions
         if: ${{ inputs.deployFunctions }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f apps/api/host.json ]; then
+          if [ -f "$RUNNER_TEMP/release/functionapp.zip" ]; then
             : "${EFFECTIVE_FUNCTIONAPP_NAME:?EFFECTIVE_FUNCTIONAPP_NAME is required when Azure Functions are present}"
-            : "${EFFECTIVE_STORAGE_ACCOUNT:?EFFECTIVE_STORAGE_ACCOUNT is required for run-from-package deployment}"
+            : "${EFFECTIVE_RELEASE_STORAGE_ACCOUNT:?EFFECTIVE_RELEASE_STORAGE_ACCOUNT is required for run-from-package deployment}"
             : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
 
-            package_dir="$RUNNER_TEMP/function-package"
-            rm -rf "$package_dir" "$RUNNER_TEMP/functionapp.zip"
-            mkdir -p "$package_dir"
-
-            cp apps/api/host.json apps/api/package.json apps/api/package-lock.json "$package_dir/"
-            cp -R apps/api/dist "$package_dir/dist"
-
-            npm ci --omit=dev --ignore-scripts --prefix "$package_dir"
-
-            (cd "$package_dir" && zip -r "$RUNNER_TEMP/functionapp.zip" .)
-
             release_container="function-releases"
-            release_blob="functionapp-${GITHUB_SHA}-${GITHUB_RUN_ID}.zip"
+            release_blob="functionapp-${FUNCTION_ARTIFACT_SHA256}.zip"
 
             az storage container create \
               --auth-mode login \
-              --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
+              --account-name "$EFFECTIVE_RELEASE_STORAGE_ACCOUNT" \
               --name "$release_container" \
               --public-access off \
               -o none
-            az storage blob upload \
+            blob_exists="$(az storage blob exists \
               --auth-mode login \
-              --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
+              --account-name "$EFFECTIVE_RELEASE_STORAGE_ACCOUNT" \
               --container-name "$release_container" \
               --name "$release_blob" \
-              --file "$RUNNER_TEMP/functionapp.zip" \
+              --query exists \
+              -o tsv)"
+            if [ "$blob_exists" != "true" ]; then
+              az storage blob upload \
+                --auth-mode login \
+                --account-name "$EFFECTIVE_RELEASE_STORAGE_ACCOUNT" \
+                --container-name "$release_container" \
+                --name "$release_blob" \
+                --file "$RUNNER_TEMP/release/functionapp.zip" \
+                --overwrite false \
+                -o none
+            fi
+            verified_package="$RUNNER_TEMP/verified-functionapp.zip"
+            az storage blob download \
+              --auth-mode login \
+              --account-name "$EFFECTIVE_RELEASE_STORAGE_ACCOUNT" \
+              --container-name "$release_container" \
+              --name "$release_blob" \
+              --file "$verified_package" \
               --overwrite true \
               -o none
+            verified_package_digest="$(sha256sum "$verified_package" | awk '{print $1}')"
+            if [ "$verified_package_digest" != "$FUNCTION_ARTIFACT_SHA256" ]; then
+              echo "Immutable release blob content does not match its approved digest." >&2
+              exit 1
+            fi
 
-            package_url="https://$EFFECTIVE_STORAGE_ACCOUNT.blob.core.windows.net/$release_container/$release_blob"
+            package_url="https://$EFFECTIVE_RELEASE_STORAGE_ACCOUNT.blob.core.windows.net/$release_container/$release_blob"
             deployed_at_utc="${DEPLOYED_AT_UTC:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
 
             az functionapp config appsettings set \
@@ -475,6 +677,9 @@ jobs:
                 DEPLOYED_ENVIRONMENT_NAME="$ENVIRONMENT_NAME" \
                 DEPLOYED_AT_UTC="$deployed_at_utc" \
                 BUILD_TIMESTAMP_UTC="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+                RELEASE_FUNCTION_SHA256="$FUNCTION_ARTIFACT_SHA256" \
+                RELEASE_FRONTEND_SHA256="$FRONTEND_ARTIFACT_SHA256" \
+                RELEASE_SBOM_SHA256="$SBOM_SHA256" \
               -o none
             function_app_id="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$EFFECTIVE_FUNCTIONAPP_NAME"
             az rest \
@@ -506,13 +711,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if find . -path './node_modules' -prune -o -name angular.json -print -quit | grep -q .; then
-            : "${EFFECTIVE_STORAGE_ACCOUNT:?EFFECTIVE_STORAGE_ACCOUNT is required when Angular is present}"
-            output_dir=$(find . -path './node_modules' -prune -o -path '*/dist/*' -type f -name index.html -print -quit | xargs -r dirname)
-            if [ -z "${output_dir:-}" ]; then
-              echo "No Angular dist index.html found after build."
-              exit 1
-            fi
+          if [ -f "$RUNNER_TEMP/release/frontend.tar.gz" ]; then
+            : "${EFFECTIVE_STATIC_STORAGE_ACCOUNT:?EFFECTIVE_STATIC_STORAGE_ACCOUNT is required when Angular is present}"
+            output_dir="$(mktemp -d "$RUNNER_TEMP/frontend-release.XXXXXX")"
+            tar -xzf "$RUNNER_TEMP/release/frontend.tar.gz" -C "$output_dir"
+            : "${output_dir:?Frontend release extraction failed}"
+            [ -f "$output_dir/index.html" ] || { echo "Frontend release lacks index.html." >&2; exit 1; }
             mkdir -p "$output_dir/assets"
             if [ "$ENVIRONMENT_NAME" = "prod" ]; then
               effective_web_api_base_url="${WEB_API_BASE_URL:-$EFFECTIVE_BASE_URL}"
@@ -529,13 +733,15 @@ jobs:
             jq -n --arg deployedCommitSha "${SOURCE_REF:-${GITHUB_SHA}}" --arg environmentName "$ENVIRONMENT_NAME" --arg deploymentRunId "$GITHUB_RUN_ID" --arg deployedAtUtc "$EFFECTIVE_DEPLOYED_AT_UTC" '{service:"api-catalogue-web", deployedCommitSha:($deployedCommitSha|ascii_downcase), environmentName:$environmentName, deploymentRunId:$deploymentRunId, deployedAtUtc:$deployedAtUtc}' > "$output_dir/assets/build-info.json"
             az storage blob service-properties update \
               --auth-mode login \
-              --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
+              --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
               --static-website true \
               --index-document index.html \
               -o none
+            # $web is Azure's literal static-site container.
+            # shellcheck disable=SC2016
             az storage blob upload-batch \
               --auth-mode login \
-              --account-name "$EFFECTIVE_STORAGE_ACCOUNT" \
+              --account-name "$EFFECTIVE_STATIC_STORAGE_ACCOUNT" \
               --destination '$web' \
               --source "$output_dir" \
               --overwrite
@@ -580,7 +786,7 @@ jobs:
                 -H "Access-Control-Request-Method: GET" \
                 -H "Access-Control-Request-Headers: authorization")
               allow_origin_header="$(tr -d '\r' < "$headers_file" | awk 'BEGIN { IGNORECASE=1 } /^access-control-allow-origin:/ { sub(/^[^:]*:[[:space:]]*/, ""); value=$0 } END { print value }')"
-              if { [ "$preflight_status" = "204" ] || [ "$preflight_status" = "200" ]; } && { [ "$allow_origin_header" = "*" ] || [ "$allow_origin_header" = "$api_cors_origin" ]; }; then
+              if { [ "$preflight_status" = "204" ] || [ "$preflight_status" = "200" ]; } && [ "$allow_origin_header" = "$api_cors_origin" ]; then
                 preflight_ok=true
                 break
               fi
@@ -606,11 +812,10 @@ jobs:
         run: |
           set -euo pipefail
           export ENVIRONMENT_NAME
-          export REQUIRE_AUTH_SMOKE=$([ "$ENVIRONMENT_NAME" = "prod" ] && echo true || echo false)
+          export REQUIRE_AUTH_SMOKE=true
           npm run --silent ops:mint-smoke-token
       - name: Run authenticated smoke tests
         shell: bash
-        continue-on-error: ${{ inputs.environmentName != 'prod' }}
         run: |
           set -euo pipefail
           smoke_dir="$RUNNER_TEMP/smoke"
@@ -619,7 +824,7 @@ jobs:
           export EXPECTED_DEPLOYED_COMMIT_SHA="${SOURCE_REF:-${GITHUB_SHA}}"
           export ENVIRONMENT_NAME
           export SMOKE_RUN_ID
-          export REQUIRE_AUTH_SMOKE=$([ "$ENVIRONMENT_NAME" = "prod" ] && echo true || echo false)
+          export REQUIRE_AUTH_SMOKE=true
           export REDDIT_SHARE_URL_SMOKE_ENABLED="${{ inputs.redditShareUrlSmokeEnabled && 'true' || 'false' }}"
           export REDDIT_SHARE_URL_SMOKE_URL="https://www.reddit.com/r/macbookpro/s/nnlryuZCNX"
           export REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID="1tryldy"
@@ -627,7 +832,6 @@ jobs:
           echo "AUTH_SMOKE_RESULTS_PATH=$smoke_dir/auth-smoke.json" >> "$GITHUB_ENV"
       - name: Run telemetry gate
         shell: bash
-        continue-on-error: ${{ inputs.environmentName != 'prod' }}
         run: |
           set -euo pipefail
           smoke_dir="$RUNNER_TEMP/smoke"
@@ -636,8 +840,8 @@ jobs:
           export AZURE_RESOURCE_GROUP
           export ENVIRONMENT_NAME
           export SMOKE_RUN_ID
-          export REQUIRE_TELEMETRY_CHECK=$([ "$ENVIRONMENT_NAME" = "prod" ] && echo true || echo false)
-          export TELEMETRY_REQUIRE_SMOKE_CORRELATION=$([ "$ENVIRONMENT_NAME" = "prod" ] && echo true || echo false)
+          export REQUIRE_TELEMETRY_CHECK=true
+          export TELEMETRY_REQUIRE_SMOKE_CORRELATION=true
           export TELEMETRY_TIMESPAN_MINUTES=45
           export TELEMETRY_RESULTS_PATH="$smoke_dir/telemetry.json"
           npm run --silent ops:check-telemetry
@@ -655,6 +859,9 @@ jobs:
           export DEPLOYED_SOURCE_REF="${SOURCE_REF:-${GITHUB_SHA}}"
           export ENVIRONMENT_NAME
           export EFFECTIVE_FUNCTIONAPP_NAME="${EFFECTIVE_FUNCTIONAPP_NAME:-}"
+          export RELEASE_FUNCTION_SHA256="$FUNCTION_ARTIFACT_SHA256"
+          export RELEASE_FRONTEND_SHA256="$FRONTEND_ARTIFACT_SHA256"
+          export RELEASE_SBOM_SHA256="$SBOM_SHA256"
           export SMOKE_RUN_ID="${SMOKE_RUN_ID:-smoke-${ENVIRONMENT_NAME}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
           export RELEASE_LEDGER_PATH="$smoke_dir/release-ledger-${ENVIRONMENT_NAME}.json"
           npm run --silent ops:write-release-ledger -- "$RELEASE_LEDGER_PATH"
@@ -685,6 +892,11 @@ jobs:
             --arg repository "$GITHUB_REPOSITORY" \
             --arg runId "$GITHUB_RUN_ID" \
             --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg functionappSha256 "$FUNCTION_ARTIFACT_SHA256" \
+            --arg frontendSha256 "$FRONTEND_ARTIFACT_SHA256" \
+            --arg sbomSha256 "$SBOM_SHA256" \
+            --arg authenticatedSmokeStatus "$(jq -r '.status // "missing"' "$AUTH_SMOKE_RESULTS_PATH")" \
+            --arg telemetryStatus "$(jq -r '.status // "missing"' "$TELEMETRY_RESULTS_PATH")" \
             '{
               environmentName: $environmentName,
               sourceRef: $sourceRef,
@@ -695,7 +907,14 @@ jobs:
               workflow: $workflow,
               repository: $repository,
               runId: $runId,
-              runAttempt: $runAttempt
+              runAttempt: $runAttempt,
+              artifacts: {
+                functionappSha256: $functionappSha256,
+                frontendSha256: $frontendSha256,
+                sbomSha256: $sbomSha256
+              },
+              authenticatedSmokeStatus: $authenticatedSmokeStatus,
+              telemetryStatus: $telemetryStatus
             }' > .github/deploy-test-provenance.json
       - name: Upload test deployment provenance
         if: ${{ inputs.environmentName == 'test' && success() }}
@@ -715,12 +934,12 @@ jobs:
             echo "### Production deployment values"
             echo "- PRODUCTION_BASE_URL: $EFFECTIVE_BASE_URL"
             echo "- AZURE_FUNCTIONAPP_NAME: $EFFECTIVE_FUNCTIONAPP_NAME"
-            echo "- AZURE_STATIC_WEB_STORAGE_ACCOUNT: $EFFECTIVE_STORAGE_ACCOUNT"
+            echo "- AZURE_STATIC_WEB_STORAGE_ACCOUNT: $EFFECTIVE_STATIC_STORAGE_ACCOUNT"
             echo ""
             echo "Repository variables are treated as operator-provided defaults and are not mutated by the workflow token."
           } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "::notice title=Production values resolved::Smoke tests passed for $EFFECTIVE_BASE_URL using Function App $EFFECTIVE_FUNCTIONAPP_NAME and storage account $EFFECTIVE_STORAGE_ACCOUNT."
+          echo "::notice title=Production values resolved::Smoke tests passed for $EFFECTIVE_BASE_URL using Function App $EFFECTIVE_FUNCTIONAPP_NAME and static storage account $EFFECTIVE_STATIC_STORAGE_ACCOUNT."
       - name: Create production issue on failed deploy or smoke
         if: ${{ failure() && inputs.environmentName == 'prod' }}
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # tag=v8

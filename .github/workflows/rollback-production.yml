@@ -15,7 +15,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: promote-production
+  group: production-deployment
   cancel-in-progress: false
 
 jobs:
@@ -28,6 +28,9 @@ jobs:
       WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
       BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
       BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
+      BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
+      BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
+      BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
     with:
       environmentName: prod
       azureResourceGroup: rg-api-prod
@@ -36,3 +39,4 @@ jobs:
       deployFunctions: true
       sourceRef: ${{ inputs.commit_sha }}
       updateProductionVariables: true
+      allowRollback: true
