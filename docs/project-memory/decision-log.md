@@ -2,10 +2,10 @@
 
 ## 2026-07-31 — Bound paid autonomous review before any model call
 
-- Decision: Wait for all free exact-head CI, Policy Check, and CodeQL requirements before independent AI review. Use only `gpt-5.6-luna` with low reasoning, at most 100,000 diff bytes, 2,000 output tokens, one call, and a conservative $0.12 per-head pre-call ceiling.
+- Decision: Wait for all free exact-head CI, Policy Check, and CodeQL requirements before independent AI review. Retain `gpt-5.6-sol` with high reasoning, but allow at most 40,000 diff bytes, 1,500 output tokens, one call, and a conservative $0.31 per-head pre-call ceiling.
 - Decision: Record the request ceiling and sanitized response token usage in the review artifact. Fail closed without controller or SDK retries. Require an explicit live-API environment gate so local and ordinary test execution cannot spend against a present key.
 - Context: 23 autonomous-review runs invoked `gpt-5.6-sol` on 2026-07-31 and produced at least 25 API requests; repeated high-reasoning review, not `npm test`, caused the unexpected account spend.
-- Consequences: Batch locally validated changes before pushing. An over-budget or oversized high-risk change cannot merge until its review payload is reduced while retaining the single bundled MCP server. Runtime REC permits only Luna and falls back deterministically above a 24,000-byte sanitized capsule or on any model/configuration failure. The Platform project hard spend limit remains the monthly account-level backstop.
+- Consequences: Batch locally validated changes before pushing. An over-budget or oversized high-risk change cannot merge until its review payload is reduced while retaining the single bundled MCP server. Runtime REC permits only Luna and falls back deterministically above a 24,000-byte sanitized capsule or on any model/configuration failure. The Platform project hard spend limit remains the monthly account-level backstop. The first bootstrap review rejected Luna/low as an assurance regression, so the repair preserves Sol/high and obtains savings from sequencing and hard request bounds instead.
 - Status: Implemented on PR #286 branch; shared future-deployment variable `REPAIRABLE_ERRORS_LLM_MODEL=gpt-5.6-luna` applied without reading or changing the API key; remote gates pending.
 
 ## 2026-07-31 — Preserve workflow-bound OIDC and repair only existing test federation

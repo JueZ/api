@@ -10,9 +10,8 @@ set -euo pipefail
 # Optional environment variables:
 #   REPOSITORY              GitHub repo owner/name. Default: JueZ/api.
 #   GITHUB_ENVIRONMENT      GitHub Environment subject to trust. Default: test.
-#   GITHUB_JOB_WORKFLOW_REF Exact reusable workflow identity trusted by the
-#                           repository OIDC subject. Defaults to the main-branch
-#                           deploy-environment.yml workflow.
+#   GITHUB_JOB_WORKFLOW_REF Optional assertion of the one approved reusable
+#                           workflow identity. Any other workflow or ref is rejected.
 #   SERVICE_APP_DISPLAY_NAME Default: JueZ API Catalogue Service Test.
 #   SERVICE_APP_ROLE_VALUES Comma-separated granular roles. Default: catalogue.read,reddit.read.
 #   SERVICE_APP_ROLE_DISPLAY_NAME Prefix for created role display names.
@@ -32,7 +31,8 @@ require_command python3
 
 repository="${REPOSITORY:-JueZ/api}"
 github_environment="${GITHUB_ENVIRONMENT:-test}"
-github_job_workflow_ref="${GITHUB_JOB_WORKFLOW_REF:-${repository}/.github/workflows/deploy-environment.yml@refs/heads/main}"
+approved_github_job_workflow_ref="${repository}/.github/workflows/deploy-environment.yml@refs/heads/main"
+github_job_workflow_ref="${GITHUB_JOB_WORKFLOW_REF:-$approved_github_job_workflow_ref}"
 api_app_id="${API_APP_ID:?Set API_APP_ID to the API app registration client/application ID.}"
 service_display_name="${SERVICE_APP_DISPLAY_NAME:-JueZ API Catalogue Service Test}"
 role_values_csv="${SERVICE_APP_ROLE_VALUES:-${SERVICE_APP_ROLE_VALUE:-catalogue.read,reddit.read}}"
@@ -48,9 +48,8 @@ if [[ ! "$github_environment" =~ ^[A-Za-z0-9_.-]+$ ]]; then
   echo "GITHUB_ENVIRONMENT contains unsupported characters." >&2
   exit 1
 fi
-if [[ ! "$github_job_workflow_ref" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml@refs/heads/[A-Za-z0-9._/-]+$ ]] ||
-   [[ "$github_job_workflow_ref" != "$repository/.github/workflows/"* ]]; then
-  echo "GITHUB_JOB_WORKFLOW_REF must bind a workflow in REPOSITORY to an exact branch ref." >&2
+if [ "$github_job_workflow_ref" != "$approved_github_job_workflow_ref" ]; then
+  echo "GITHUB_JOB_WORKFLOW_REF must equal the approved main workflow: $approved_github_job_workflow_ref" >&2
   exit 1
 fi
 

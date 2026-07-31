@@ -79,11 +79,11 @@ test('canonical autonomous policy is internally valid', () => {
   assert.deepEqual(validateAutonomousPolicy(policy), []);
   assert.equal(policy.merge.allowAdminBypass, false);
   assert.equal(policy.autonomousReview.humanApprovalRequired, false);
-  assert.equal(policy.autonomousReview.model, 'gpt-5.6-luna');
-  assert.equal(policy.autonomousReview.reasoningEffort, 'low');
-  assert.equal(policy.autonomousReview.maxDiffBytes, 100_000);
-  assert.equal(policy.autonomousReview.maxOutputTokens, 2_000);
-  assert.equal(policy.autonomousReview.maxEstimatedCostUsd, 0.12);
+  assert.equal(policy.autonomousReview.model, 'gpt-5.6-sol');
+  assert.equal(policy.autonomousReview.reasoningEffort, 'high');
+  assert.equal(policy.autonomousReview.maxDiffBytes, 40_000);
+  assert.equal(policy.autonomousReview.maxOutputTokens, 1_500);
+  assert.equal(policy.autonomousReview.maxEstimatedCostUsd, 0.31);
   assert.match(codexAutomergeWorkflow, /Wait for free deterministic exact-head checks/);
   assert.match(codexAutomergeWorkflow, /AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'/);
   assert.doesNotMatch(codexAutomergeWorkflow, /labeled, unlabeled/);
@@ -446,10 +446,10 @@ test('high-risk autonomous review uses one cost-bounded call and records sanitiz
   assert.equal(review.decision, 'approve');
   assert.equal(review.responseId, 'resp_complete');
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].model, 'gpt-5.6-luna');
-  assert.deepEqual(requests[0].reasoning, { effort: 'low' });
+  assert.equal(requests[0].model, 'gpt-5.6-sol');
+  assert.deepEqual(requests[0].reasoning, { effort: 'high' });
   assert.equal(requests[0].text.verbosity, 'low');
-  assert.equal(requests[0].max_output_tokens, 2000);
+  assert.equal(requests[0].max_output_tokens, 1500);
   assert.equal(review.reviewBudget.apiCallLimit, 1);
   assert.ok(review.reviewBudget.estimatedMaximumCostUsd <= policy.autonomousReview.maxEstimatedCostUsd);
   assert.deepEqual(review.modelUsage, {
@@ -458,7 +458,7 @@ test('high-risk autonomous review uses one cost-bounded call and records sanitiz
     outputTokens: 250,
     reasoningTokens: 100,
     totalTokens: 1000,
-    estimatedUpperBoundCostUsd: 0.00225,
+    estimatedUpperBoundCostUsd: 0.01125,
   });
 });
 
@@ -694,9 +694,9 @@ test('review budget uses conservative byte-token accounting and a one-call cap',
     policy,
   );
   assert.equal(budget.apiCallLimit, 1);
-  assert.equal(budget.maximumOutputTokens, 2000);
+  assert.equal(budget.maximumOutputTokens, 1500);
   assert.ok(budget.estimatedMaximumInputTokens > budget.serializedInputBytes);
-  assert.ok(budget.estimatedMaximumCostUsd < 0.12);
+  assert.ok(budget.estimatedMaximumCostUsd < 0.31);
 });
 
 test('pull request state rejects forks, stale heads, and behind branches', () => {

@@ -22,10 +22,10 @@ export async function analyzeRepairableErrorWithLlm(args: {
   if (!sampledIn()) return null;
   const model = approvedModel();
   if (!model) return null;
-  const capsuleJson = JSON.stringify(args.capsule);
-  if (Buffer.byteLength(capsuleJson) > MAX_INPUT_BYTES) return null;
 
   try {
+    const capsuleJson = JSON.stringify(args.capsule);
+    if (typeof capsuleJson !== 'string' || Buffer.byteLength(capsuleJson) > MAX_INPUT_BYTES) return null;
     const openAiApiKey = process.env['OPENAI_API_KEY'];
     const client = new OpenAI({
       ['api' + 'Key']: openAiApiKey,

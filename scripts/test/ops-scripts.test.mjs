@@ -101,6 +101,11 @@ test('service OAuth bootstrap maintains exact workflow-bound federation', async 
   const source = await readFile(new URL('../configure-entra-service-oauth.sh', import.meta.url), 'utf8');
 
   assert.match(source, /job_workflow_ref:\$\{github_job_workflow_ref\}/);
+  assert.match(
+    source,
+    /approved_github_job_workflow_ref="\$\{repository\}\/\.github\/workflows\/deploy-environment\.yml@refs\/heads\/main"/,
+  );
+  assert.match(source, /github_job_workflow_ref" != "\$approved_github_job_workflow_ref/);
   assert.match(source, /federated-credential update/);
   assert.match(source, /\.audiences == \[\$audience\]/);
   assert.doesNotMatch(source, /credential_subject="repo:\$\{repository\}:environment:\$\{github_environment\}"\n/);

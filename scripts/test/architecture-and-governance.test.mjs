@@ -58,6 +58,7 @@ test('runtime REC model analysis remains deterministic-first and cost bounded', 
   assert.match(analyzer, /verbosity: 'low'/);
   assert.match(analyzer, /maxRetries: 0/);
   assert.match(analyzer, /configured === DEFAULT_MODEL \? configured : null/);
+  assert.match(analyzer, /try \{\s+const capsuleJson = JSON\.stringify\(args\.capsule\)/);
   assert.doesNotMatch(analyzer, /gpt-5\.6-sol/);
 });
 

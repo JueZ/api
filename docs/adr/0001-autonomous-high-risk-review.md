@@ -7,7 +7,7 @@
 
 Routine and high-risk delivery remains fully autonomous. High-risk paths require deterministic guardrail classification plus an independent structured AI review on the exact PR head. No human approval is required by policy. Critical or high findings block merge.
 
-The trusted controller runs from `main`, never executes PR code under `pull_request_target`, verifies required checks by exact name, SHA, and GitHub App, and merges only the reviewed SHA. Paid review starts only after all free deterministic checks pass. It uses the approved low-cost model, low reasoning, one bounded call, and a conservative per-head cost ceiling; failures do not retry automatically.
+The trusted controller runs from `main`, never executes PR code under `pull_request_target`, verifies required checks by exact name, SHA, and GitHub App, and merges only the reviewed SHA. Paid review starts only after all free deterministic checks pass. It retains the approved high-assurance model and high reasoning, but permits only one bounded call under a conservative per-head cost ceiling; failures do not retry automatically.
 
 ## Consequences
 

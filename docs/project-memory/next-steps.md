@@ -16,4 +16,4 @@
 5. Retry cancellation of orphaned zero-job run `30663819848` through GitHub or support; do not delete the evidence without explicit approval.
 6. Prove intentionally failing and pending-check PRs cannot merge, and prove a high-risk PR cannot merge when its exact-head independent review fails or is absent.
 7. Keep production disabled until a later explicit request. Any future promotion must consume the exact accepted test evidence or run a fresh test if main changed, then pass production authenticated smoke, telemetry, ledger/runtime truth, and rollback-bundle verification.
-8. Configure an OpenAI project hard spend limit with earlier alerts in the Platform; the repository's $0.12 control is per reviewed exact head and is not a monthly billing cap.
+8. Configure an OpenAI project hard spend limit with earlier alerts in the Platform; the repository's $0.31 control is per reviewed exact head and is not a monthly billing cap.

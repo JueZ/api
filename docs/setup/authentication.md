@@ -42,7 +42,7 @@ MCP uses the same API audience and per-tool permission. See `mcp-devmode.md`.
 
 ## Service identities
 
-Use `scripts/configure-entra-service-oauth.sh` with GitHub Environment federation. The helper binds the service credential to the exact repository, environment, reusable workflow, and workflow branch through `job_workflow_ref`; override `GITHUB_JOB_WORKFLOW_REF` only when the token-minting job genuinely moves to another trusted workflow/ref. Default smoke roles are `catalogue.read,reddit.read`. Create a separate test canary identity with `bring.read` only. Each identity needs exact `OIDC_ALLOWED_APP_OBJECT_IDS`/`OIDC_ALLOWED_CLIENT_IDS`.
+Use `scripts/configure-entra-service-oauth.sh` with GitHub Environment federation. The helper binds the service credential to the exact repository, environment, and `${repository}/.github/workflows/deploy-environment.yml@refs/heads/main` `job_workflow_ref`; it rejects every other workflow or ref. Default smoke roles are `catalogue.read,reddit.read`. Create a separate test canary identity with `bring.read` only. Each identity needs exact `OIDC_ALLOWED_APP_OBJECT_IDS`/`OIDC_ALLOWED_CLIENT_IDS`.
 
 ## Repository/runtime variables
 
