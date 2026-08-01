@@ -231,11 +231,16 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.match(deployEnvironmentWorkflow, /effective_web_api_base_url="\$EFFECTIVE_BASE_URL"/);
   assert.match(deployEnvironmentWorkflow, /name: Checkout current deployment controller/);
   assert.doesNotMatch(deployEnvironmentWorkflow, /uses: actions\/checkout/);
+  assert.doesNotMatch(deployEnvironmentWorkflow, /git clone .*--branch main/);
+  assert.match(deployEnvironmentWorkflow, /\^\[0-9a-f\]\{40\}\$/);
   assert.match(
     deployEnvironmentWorkflow,
-    /git clone --no-tags --branch main --single-branch https:\/\/github\.com\/JueZ\/api\.git \./,
+    /git fetch --no-tags --prune origin "\+refs\/heads\/main:refs\/remotes\/origin\/main"/,
   );
-  assert.match(deployEnvironmentWorkflow, /git checkout --detach HEAD/);
+  assert.match(deployEnvironmentWorkflow, /fetched_main="\$\(git rev-parse refs\/remotes\/origin\/main\)"/);
+  assert.match(deployEnvironmentWorkflow, /\[ "\$fetched_main" != "\$controller_ref" \]/);
+  assert.match(deployEnvironmentWorkflow, /git checkout --detach "\$controller_ref"/);
+  assert.match(deployEnvironmentWorkflow, /\[ "\$\(git rev-parse HEAD\)" = "\$controller_ref" \]/);
   assert.match(
     deployEnvironmentWorkflow,
     /INFRA_FUNCTION_APP_NAME: \$\{\{ steps\.infra\.outputs\.function_app_name \}\}[\s\S]*?effective_functionapp_name="\$INFRA_FUNCTION_APP_NAME"/,

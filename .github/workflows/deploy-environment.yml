@@ -234,10 +234,31 @@ jobs:
     steps:
       - name: Checkout current deployment controller
         shell: bash
+        env:
+          CHECKOUT_CONTROLLER_REF: ${{ inputs.controllerRef }}
         run: |
           set -euo pipefail
-          git clone --no-tags --branch main --single-branch https://github.com/JueZ/api.git .
-          git checkout --detach HEAD
+          # CHECKOUT_CONTROLLER_REF is assigned through the workflow step environment.
+          # shellcheck disable=SC2153
+          controller_ref="$CHECKOUT_CONTROLLER_REF"
+          if [[ ! "$controller_ref" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "controllerRef must be a full lowercase commit SHA before repository fetch." >&2
+            exit 1
+          fi
+
+          git init .
+          git remote add origin https://github.com/JueZ/api.git
+          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
+          fetched_main="$(git rev-parse refs/remotes/origin/main)"
+          if [ "$fetched_main" != "$controller_ref" ]; then
+            echo "Fetched protected main does not equal the immutable deployment controller." >&2
+            exit 1
+          fi
+          git checkout --detach "$controller_ref"
+          [ "$(git rev-parse HEAD)" = "$controller_ref" ] || {
+            echo "Checked-out deployment controller does not equal controllerRef." >&2
+            exit 1
+          }
       - name: Validate deployment source
         id: source
         shell: bash

@@ -3,7 +3,7 @@
 ## 2026-08-01 Reusable deployment checkout security repair in progress
 
 - GitHub Actions CodeQL identified the existing explicit `actions/checkout` reference in the privileged reusable deployment workflow as an untrusted artifact source under `workflow_call`; later runtime SHA validation does not sanitize that static dataflow.
-- The bounded repair clones only the public protected `JueZ/api` `main` branch from a literal HTTPS repository URL, then retains the exact caller SHA, workflow SHA, checked-out HEAD, current-main, first-attempt, and Actions API identity gates before any Azure login or mutation.
+- The bounded repair validates the immutable controller SHA before repository access, fetches only the public protected `JueZ/api` `main` ref from a literal HTTPS repository URL, requires its fetched tip to equal that exact controller SHA, and checks out that SHA detached. It retains the caller SHA, workflow SHA, checked-out HEAD, current-main, first-attempt, and Actions API identity gates before any Azure login or mutation.
 - Step outputs used by deployment shell code are passed through step environment variables instead of direct expression interpolation. No authentication, deployment, smoke, telemetry, policy, or branch-protection gate is weakened.
 - This repair is delivered separately from production private-storage preparation with application deployment skipped. Production application state remains unchanged.
 
