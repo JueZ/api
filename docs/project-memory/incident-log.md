@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-01 — Medium review found incomplete executable coverage
+
+- Evidence: PR #289 review `30692285462` ran only after exact-head CI `30692211088`, Policy `30692211086`, and CodeQL `30692211107` passed at `faa21750223eb20f72232f4dbb2e5d83f48ea4f1`. It rejected because `buildReviewDiffCapsule` selected only `risk.highRiskPaths`, omitting executable changes such as `scripts/lib/autonomous-policy.mjs`; the capsule covered 39,357 of 162,829 source-diff bytes. Sanitized usage recorded 12,083 input tokens and 1,048 output tokens, with an estimated upper-bound cost of `$0.091855`.
+- Root cause: Complete changed-file metadata did not compensate for absent code. The byte-as-token budget estimate also forced aggressive zero-context selection even though observed tokenization was substantially smaller than serialized byte length.
+- Repair: Preserve the consumed head. On a new commit, include every changed non-documentation diff section with normal context, cross-check completeness against GitHub's authoritative file list, reject capsules above 200 KB, obtain an exact input-token count after durable claim acquisition, and permit at most one generation only under the unchanged `$0.31` ceiling. Local tests mock both OpenAI requests.
+- Status: First scoped repair in progress. No rejected head merged or deployed; production remained disabled.
+
 ## 2026-08-01 — High-effort bounded review returned no structured output
 
 - Evidence: PR #289 review run `30691998861` created exact-head claim `91348292399`, made one Responses API call, and returned `empty_output`. Sanitized usage recorded 12,066 input tokens and 1,500 output/reasoning tokens, with an estimated upper-bound cost of `$0.10533`.

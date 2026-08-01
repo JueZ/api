@@ -187,8 +187,8 @@ jobs:
         run: |
           set -euo pipefail
           claim_state_valid=true
-          if { [ "$MODEL_INVOKED" = "true" ] && [ "$CLAIM_STATUS" != "new" ]; } ||
-             { [ "$MODEL_INVOKED" != "true" ] && [ "$CLAIM_STATUS" != "not_required" ]; }; then
+          if { [ "$HIGH_RISK" = "true" ] && [ "$CLAIM_STATUS" != "new" ]; } ||
+             { [ "$HIGH_RISK" != "true" ] && [ "$CLAIM_STATUS" != "not_required" ]; }; then
             echo "Exact-head review claim state does not match the review path." >&2
             claim_state_valid=false
           fi

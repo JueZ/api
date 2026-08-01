@@ -1,8 +1,15 @@
 # Decision log
 
+## 2026-08-01 — Review every executable change and use exact input-token budgeting
+
+- Decision: For a high-risk PR, build the independent-review capsule from the complete contextual diff of every changed non-`docs/` path in GitHub's authoritative file list, not only paths matched by the high-risk classifier. Include every changed document when the PR has no non-documentation changes. Reject missing, duplicate, ambiguous, source-oversized, or capsule-oversized input; never silently truncate context or paths.
+- Decision: Cap the complete capsule at 200,000 bytes. After one durable exact-head claim, make one OpenAI input-token count request using the same model, reasoning, schema, and input as generation. Permit at most one generation only when the exact-input plus maximum-output calculation is no more than `$0.31`; disable SDK retries and revalidate free gates and claim ownership before both external-request boundaries.
+- Rationale: PR #289 review `30692285462` correctly found that the 40 KB high-risk-only capsule omitted executable policy helpers and reviewed only 39,357 of 162,829 source-diff bytes. Exact token counting allows complete relevant context without reverting to unsafe byte-as-token overestimation or raising the dollar ceiling.
+- Status: Implemented locally as the first repair for this finding. Full local/free gates, one new-head bounded review, merge, and test-only acceptance remain pending. Production is unauthorized.
+
 ## 2026-08-01 — Use medium reasoning inside the fixed autonomous-review output cap
 
-- Decision: Keep `gpt-5.6-sol`, the exact executable/governance capsule, one permanent claim, one SDK call, 1,500 output tokens, and the conservative `$0.31` ceiling, but use medium reasoning for the repository review.
+- Decision: Keep `gpt-5.6-sol`, one permanent claim, 1,500 output tokens, and the conservative `$0.31` ceiling, but use medium reasoning for the repository review.
 - Rationale: Review run `30691998861` consumed all 1,500 output tokens as high-effort reasoning and emitted no structured text. Raising the token or dollar ceiling would conflict with the operator's cost constraint; medium effort leaves capacity for the required fail-closed JSON decision.
 - Status: Implemented on the new exact head after preserving the consumed failed head. Free gates and one final bounded review remain required. Production remains unauthorized.
 
@@ -11,7 +18,7 @@
 - Decision: Remove the standalone review-claim command and create the permanent marker inside `runReview` after free gates and cost checks pass. Require one serialized controller run per PR and exactly one workflow invocation of the review command.
 - Decision: Bind the marker to repository, PR, exact head, controller workflow filename, and workflow run ID. Re-read it after creation and again immediately before the OpenAI call, requiring the created check-run ID, `github-actions` App, canonical external identity/details URL, and completed-neutral state.
 - Decision: Require the live API path to execute inside the exact `Codex Auto-Merge` GitHub Actions run. Exact-name allowlist all workflow secrets and reject dynamic/bracket expressions, inherited secret sets, alternate token-minting actions/shell paths, non-built-in GitHub-auth values, and non-controller raw check-run access.
-- Decision: Build the paid input from exact zero-context changes for executable/governance high-risk paths while retaining all changed-file metadata. Omit mixed documentation text but include exact documentation when documentation is the only high-risk class. Fail if any selected path is missing or the full source diff, capsule, or conservative serialized-request ceiling is exceeded.
+- Superseded detail: The initial repair selected exact zero-context changes only for classifier-matched executable/governance paths. Review `30692285462` proved that selection incomplete; the newer decision above requires every non-documentation changed path with context and exact token budgeting.
 - Rationale: PR #289 review run `30689779148` correctly identified that separate claim/review operations and a name-focused credential heuristic did not prove durable ownership at the paid boundary.
 - Status: Implemented in one batched repair on draft PR #289. Full local/free remote gates, one final independent review, merge, and test-only acceptance remain pending. Production is not authorized.
 

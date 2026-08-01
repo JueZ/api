@@ -61,9 +61,9 @@ export function validateAutonomousPolicy(policy) {
   if (
     !Number.isInteger(policy.autonomousReview?.maxDiffBytes) ||
     policy.autonomousReview.maxDiffBytes < 1 ||
-    policy.autonomousReview.maxDiffBytes > 40_000
+    policy.autonomousReview.maxDiffBytes > 200_000
   ) {
-    errors.push('autonomousReview.maxDiffBytes must be an integer from 1 to 40000');
+    errors.push('autonomousReview.maxDiffBytes must be an integer from 1 to 200000');
   }
   if (
     !Number.isInteger(policy.autonomousReview?.maxOutputTokens) ||

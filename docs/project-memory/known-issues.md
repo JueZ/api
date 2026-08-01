@@ -10,7 +10,7 @@
 
 - PR #286 exhausted its two autonomous-review repairs and is closed as superseded by PR #287.
 - PR #287 exact-head CI, Policy Check, and CodeQL passed. The provenance and paid-boundary findings were repaired, but final review run `30687126474` rejected the optional service-identity verifier's incomplete whole-identity validation.
-- The operator removed repository-side service-identity setup/audit from scope. PR #289 repaired the predecessor review findings and GitHub claim integration, but bounded run `30691998861` returned no text after high reasoning consumed the complete 1,500-token output allowance. The fresh head uses medium reasoning under the unchanged cost and single-call controls. Until that head is approved, merged, and test-deployed, the last accepted test release remains online without the successor controls.
+- The operator removed repository-side service-identity setup/audit from scope. PR #289 repaired the predecessor review findings and GitHub claim integration. Bounded run `30691998861` returned no text after high reasoning consumed the complete output allowance; medium run `30692285462` then correctly found that the paid capsule omitted executable policy helpers outside classifier-matched paths. The fresh repair includes every non-documentation change with context and uses exact token counting under the unchanged generation-cost ceiling. Until a new head is approved, merged, and test-deployed, the last accepted test release remains online without the successor controls.
 
 ## One orphaned GitHub Actions run cannot currently be deleted
 
