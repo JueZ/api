@@ -112,7 +112,7 @@ autonomousReview:
   model: gpt-5.6-sol
   reasoningEffort: medium
   maxDiffBytes: 200000
-  maxOutputTokens: 3000
+  maxOutputTokens: 3500
   maxEstimatedCostUsd: 0.31
   store: false
   humanApprovalRequired: false

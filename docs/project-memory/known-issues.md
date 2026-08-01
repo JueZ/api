@@ -10,11 +10,12 @@
 
 - PR #286 exhausted its two autonomous-review repairs and is closed as superseded by PR #287.
 - PR #287 exact-head CI, Policy Check, and CodeQL passed. The provenance and paid-boundary findings were repaired, but final review run `30687126474` rejected the optional service-identity verifier's incomplete whole-identity validation.
-- The operator removed repository-side service-identity setup/audit from scope. PR #289 repaired the predecessor review findings and GitHub claim integration. Reviews then exposed omitted executable helpers, insufficient output allowance for the complete diff, and finally omitted classified security/ADR documentation in mixed capsules. The current repair includes every non-documentation path and every high-risk document under the unchanged 200 KB, 3,000-token, and `$0.31` gates. Until it is approved, merged, and test-deployed, the last accepted test release remains online without the successor controls.
+- The operator removed repository-side service-identity setup/audit from scope. PR #289 repaired the predecessor review findings and GitHub claim integration. Reviews then exposed omitted executable helpers, insufficient output allowance for the complete diff, omitted classified security/ADR documentation in mixed capsules, and a second output exhaustion once that context was included. The final repair includes every non-documentation path and every high-risk document under the unchanged 200 KB and `$0.31` gates, reserves final-JSON capacity, and raises only the static output allowance to 3,500. Until it is approved, merged, and test-deployed, the last accepted test release remains online without the successor controls.
 
 ## One orphaned GitHub Actions run cannot currently be deleted
 
 - Deploy Test run `30663819848` was dispatched while repository Actions was disabled. GitHub retained it as `queued` with zero jobs or check runs and no concurrency-group membership.
+- Autonomous-review run `30693764586` is a second zero-job orphan created when its workflow was disabled before scheduling. Replacement run `30693881648` acquired the only durable paid-call claim; the orphan cannot make an OpenAI request for that consumed head.
 - Normal and force-cancel APIs returned HTTP 500, and the deletion API returned HTTP 403. Briefly enabling the workflow did not materialize or cancel it. It did not block the successful replacement run and cannot execute while repository Actions or Deploy Test remains disabled.
 - The operator explicitly authorized historical-run cleanup, but GitHub has not exposed a successful removal path. Keep the identifier documented, do not repeatedly toggle deployment workflows for it, and retain accepted deployment/security-review evidence.
 

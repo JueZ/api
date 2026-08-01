@@ -15,7 +15,7 @@ For each candidate it:
 5. serializes controller runs per pull request, revalidates every free exact-head check, verifies every workflow has an explicit permission map and computes each job's effective permissions, rejects non-allowlisted or dynamic secret access and alternate GitHub credential injection, and creates one completed permanent paid-call marker from inside the same review command that owns the request;
 6. binds that marker to repository, PR, exact head, trusted controller workflow, and workflow run; re-reads it after creation, before exact token counting, and again at the generation boundary; and permits OpenAI requests only while exactly that canonical marker and every free check still pass;
 7. never patches, releases, or reuses a paid-call marker or approval; any existing marker permanently blocks another request for that PR/head;
-8. makes one exact input-token count request and, only when the complete request remains within the cost ceiling, at most one independent structured model-generation request with `store=false`;
+8. makes one exact input-token count request and, only when the complete request remains within the cost ceiling, at most one independent structured model-generation request with `store=false`, a 3,500-token static output cap, and explicit final-JSON capacity reservation;
 9. publishes `Autonomous review complete` for that exact SHA;
 10. rechecks open/current/non-behind PR state;
 11. squash-merges only the reviewed head SHA.

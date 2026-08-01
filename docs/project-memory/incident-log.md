@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-01 — Complete high-risk-document review exhausted 3,000 output tokens
+
+- Evidence: Exact-head CI `30693681909`, Policy `30693681916`, and CodeQL `30693681915` passed for `cbe2dc71f7815b282cb1e485ff7ec5ad27074ce9`. Review `30693881648` included every one of the eight classifier-matched high-risk paths, counted exactly 34,178 input tokens, and made one generation. The response ended `incomplete` after all 3,000 output tokens, including 2,974 hidden reasoning tokens, with an estimated upper-bound cost of `$0.26089`; no retry occurred.
+- Root cause: Adding the required security and ADR context increased the medium-reasoning workload enough that the static 3,000-token allowance left no capacity for the structured decision.
+- Repair: Preserve the consumed head. On the final scoped availability repair, explicitly reserve at least 512 output tokens for final JSON and raise only the static cap to 3,500. Keep the complete capsule, medium reasoning, exact token count, one generation, zero SDK retries, and `$0.31` ceiling unchanged. At the observed input, the new conservative maximum is `$0.27589`.
+- Status: Repair in progress. A failure of the same area on the next exact head exhausts the repair limit. No merge or deployment occurred; production remained disabled.
+
 ## 2026-08-01 — Review found high-risk documentation omitted from mixed capsules
 
 - Evidence: Exact-head CI `30693294597`, Policy `30693294596`, and CodeQL `30693294603` passed for `670fa5c62d25e79db7cbf10f9684c3b8e9dd82ec`. Review `30693386513` returned a valid rejection because mixed capsules omitted classified high-risk files including `docs/security/autonomous-guardrails.md` and `docs/adr/0001-autonomous-high-risk-review.md`. It used 32,389 input and 1,848 output tokens, with 1,655 reasoning tokens and an estimated upper-bound cost of `$0.217385`.
