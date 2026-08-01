@@ -1,5 +1,12 @@
 # Deployment log
 
+## 2026-08-01 — Review controls merged; first test rollout stopped before package mutation
+
+- PR #289 passed exact-head CI `30694157626`, Policy `30694157876`, CodeQL `30694157622`, and bounded independent review/merge `30694244308`, then squash-merged as `7907708d3db92a698bbfb549cb8ccfa91a1e86c8`. The approved review used 34,447 input and 1,844 output tokens with a `$0.227555` estimated upper-bound cost.
+- Exact first-attempt main CI `30694325712` passed and produced the immutable release bundle for `7907708d3db92a698bbfb549cb8ccfa91a1e86c8`.
+- Test-only run `30694406216` validated the source/controller generation, Azure OIDC identity, and immutable bundle, then failed during Bicep before either application package was deployed. The existing test budget starts at `2026-07-01`; the dynamic Bicep default attempted to change it to `2026-08-01`, which Azure rejects.
+- Result: test remains on accepted run `30666921988` and commit `6cadc861954af706cd752c022b194c742c0aa6fd`. Production was not dispatched or changed. The repair preserves the existing immutable budget date and retains the €10 alert.
+
 ## 2026-07-31 — AI-native release accepted in test; production unchanged
 
 - PR #284 merged safe API-verified authorization diagnostics as `6cadc861954af706cd752c022b194c742c0aa6fd`; exact first-attempt main CI run `30654113519` passed.

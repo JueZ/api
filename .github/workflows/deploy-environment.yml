@@ -715,6 +715,10 @@ jobs:
             if [ "$ENVIRONMENT_NAME" = "prod" ]; then
               monthly_budget_eur=15
             fi
+            budget_resource_id="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Consumption/budgets/budget-api-catalogue-${ENVIRONMENT_NAME}"
+            budget_start_date="$(node scripts/resolve-budget-start-date.mjs \
+              --resource-id "$budget_resource_id" \
+              --current-month "$(date -u +%Y-%m-01T00:00:00Z)")"
 
             node scripts/assert-current-main.mjs
             deployment_outputs=$(az deployment group create \
@@ -740,6 +744,7 @@ jobs:
                 deploymentPrincipalObjectId="$AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID" \
                 operatorAlertEmail="$OPERATOR_ALERT_EMAIL" \
                 monthlyBudgetEur="$monthly_budget_eur" \
+                budgetStartDate="$budget_start_date" \
                 redditClientId="${REDDIT_CLIENT_ID:-}" \
                 redditOAuthSecret="${REDDIT_CLIENT_SECRET:-}" \
                 redditUserAgent="${REDDIT_USER_AGENT:-}" \

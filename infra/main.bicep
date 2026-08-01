@@ -73,7 +73,7 @@ param operatorAlertEmail string
 @description('Monthly resource-group budget. Test uses EUR 10 and production EUR 15, for EUR 25 combined.')
 param monthlyBudgetEur int = environmentName == 'prod' ? 15 : 10
 
-@description('Budget start on the first day of the current month.')
+@description('Immutable budget start. New budgets default to the current month; deployment callers preserve an existing value.')
 param budgetStartDate string = utcNow('yyyy-MM-01T00:00:00Z')
 
 @description('Reddit OAuth client ID.')

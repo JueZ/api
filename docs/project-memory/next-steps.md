@@ -9,8 +9,8 @@
 
 ## Operational rollout
 
-1. Deliver PR #289 with the completed permission/claim repairs and a contextual capsule containing every non-documentation path and every classified high-risk document. After a durable claim, permit one exact input-token count request and at most one medium-effort generation under the final 3,500-token static cap, explicit final-JSON capacity reservation, and unchanged `$0.31` calculated cap. Run independent review only after the repaired head passes all free gates and never retry a consumed exact head; stop if the same availability area fails again.
-2. Deploy the merged successor only to test, then require exact `/health`, unauthenticated and authenticated REST smokes, bundled MCP/REC behavior, telemetry correlation, release ledger, provenance, and runtime-truth evidence. Keep `DEPLOY_PRODUCTION_ENABLED=false` and production workflows disabled.
+1. Deliver the budget-date successor that preserves the existing Azure budget start date across monthly rollovers without deleting or recreating the €10 test budget, accepting a new-budget default only after an actual ARM HTTP 404. Stop if the final repair fails the same lookup area.
+2. Run exact main CI and deploy the successor only to test, then require exact `/health`, unauthenticated and authenticated REST smokes, bundled MCP/REC behavior, telemetry correlation, release ledger, provenance, and runtime-truth evidence. Keep `DEPLOY_PRODUCTION_ENABLED=false` and production workflows disabled.
 3. Have a privileged Entra operator verify the granular delegated scopes/application roles and exact current test SPA redirect. Keep complete/remove unavailable to service tokens.
 4. Add a token-safe authenticated MCP smoke to the deployment workflow if live MCP provider execution must become a formal release gate; retain the existing REST authenticated smokes.
 5. Inventory remaining Bring session/private data before enabling Bring. Enable the GET-only canary only after its dedicated `bring.read` identity and target list are verified; never add a mutation canary.
