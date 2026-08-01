@@ -5,6 +5,7 @@ import {
   PERMISSIONS,
   type AuthenticatedPrincipal,
   type OperationAuthorizationPolicy,
+  type Permission,
 } from '../../application/authorization/types.js';
 import { getOperationDefinition } from '../../application/operations/registry.js';
 import { getDeployedEnvironmentName } from '../config/runtime.js';
@@ -44,6 +45,10 @@ export type JwtVerifier = (token: string, config: AuthConfig) => Promise<JWTPayl
 
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 const discoveryCache = new Map<string, { promise: Promise<string>; expiresAt: number }>();
+const serviceRolePermissionAliases = new Map<string, Permission>([
+  ['catalogue.service.read', 'catalogue.read'],
+  ['reddit.service.read', 'reddit.read'],
+]);
 const defaultAuthorizationPolicy = {
   permission: 'catalogue.read',
   allowedTokenTypes: ['user', 'service'],
@@ -175,7 +180,7 @@ export async function authorizeBearerToken(
         clientId,
         tokenType: 'service',
         scopes: tokenAccess.scopes,
-        roles: tokenAccess.roles,
+        roles: normalizeServiceRoles(tokenAccess.roles),
       },
       policy,
     );
@@ -273,6 +278,10 @@ function getTokenAccess(payload: JWTPayload): TokenAccess {
     scopes,
     roles,
   };
+}
+
+function normalizeServiceRoles(roles: string[]): string[] {
+  return [...new Set(roles.map((role) => serviceRolePermissionAliases.get(role) ?? role))];
 }
 
 function isServiceToken(

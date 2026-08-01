@@ -1,5 +1,13 @@
 # Incident log
 
+## 2026-08-01 — Bundled MCP OAuth authorization rejected missing delegated scopes
+
+- Impact: ChatGPT could reach the production Microsoft Entra authorization flow for the one bundled MCP server, but authorization returned `AADSTS650053` because requested granular delegated scopes such as `bring.write` and `catalogue.read` were not exposed by the API registration.
+- Root cause: The API registration retained only the legacy `api.access` delegated scope while `catalogue.read` and `reddit.read` already existed as service-only application-role values. Microsoft Graph rejected adding same-valued delegated scopes with `DuplicateValue`. The bundled MCP client manifest also contained the legacy `api.access` scope ID twice. Earlier repair scripts incorrectly attempted scope creation and preauthorization in one PATCH and did not account for the cross-permission value collision.
+- Containment: Failed Graph PATCH requests were atomic; no partial scope or preauthorization state was accepted. Runtime JWT validation, allowlists, the one bundled `/mcp` route, and existing production service-role assignments remained unchanged.
+- Repair: Stage a backward-compatible service-role alias normalization in the API before changing Entra. After deployment, rename the two existing service-role values in place, expose/pre-authorize the seven canonical scopes, replace the MCP client's duplicate legacy entries with the exact granular scope IDs, and verify authenticated test and production runtime evidence.
+- Status: Repair is in progress on `codex/entra-delegated-scope-repair`; production application behavior remains on the previously accepted release until the staged migration passes its gates.
+
 ## 2026-08-01 — Production startup and authenticated-smoke blockers resolved
 
 - Evidence: Promotion `30711503917` deployed infrastructure/packages but public smoke found `/health` unavailable because the production `OIDC_REQUIRED_SCOPES` setting still used legacy `api.access,api.service`; fail-closed runtime safety therefore registered no Function routes. After the canonical granular catalogue restored live health, recovery `30712220640` remained rejected because it had captured the unavailable pre-dispatch health state. Acceptance attempt `30712337225` then passed public deployment gates but Microsoft Entra returned `401 invalid_client` while exchanging the GitHub OIDC assertion for the existing production smoke application.

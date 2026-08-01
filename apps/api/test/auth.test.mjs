@@ -286,6 +286,52 @@ test('app-only service token with allowed app object ID returns service authoriz
   });
 });
 
+test('app-only service role aliases normalize to canonical operation permissions', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'service-subject',
+      oid: 'allowed-app-oid',
+      tid: 'tenant-id',
+      idtyp: 'app',
+      azp: 'service-client-id',
+      azpacr: '2',
+      roles: ['catalogue.service.read', 'reddit.service.read', 'catalogue.read'],
+    },
+    {},
+    {
+      permission: 'reddit.read',
+      allowedTokenTypes: ['service'],
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.user.roles, ['catalogue.read', 'reddit.read']);
+});
+
+test('service role aliases do not grant delegated user permissions', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'user-subject',
+      oid: 'allowed-oid',
+      tid: 'tenant-id',
+      azp: 'delegated-client-id',
+      scp: 'profile',
+      roles: ['catalogue.service.read'],
+    },
+    {},
+    {
+      permission: 'catalogue.read',
+      allowedTokenTypes: ['user'],
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.message, 'Required permission is missing: catalogue.read.');
+});
+
 test('app-only service token can be allowed by client ID', async () => {
   const result = await authorize(
     'Bearer valid-token',
