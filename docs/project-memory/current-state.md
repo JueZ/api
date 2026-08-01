@@ -1,5 +1,12 @@
 # Current state
 
+## 2026-08-01 Production release latch explicitly enabled under disabled promotion controls
+
+- The operator explicitly authorized setting the repository variable `DEPLOY_PRODUCTION_ENABLED=true`. This authorizes the fail-closed production latch only; it is not a production deployment request or evidence that the current `main` is release-ready.
+- `Promote Production`, `Rollback Production`, and `Codex Main Delivery` remain disabled between bounded delivery windows. No test or production workflow is dispatched as part of changing the variable.
+- Production promotion remains blocked pending a fresh Deploy Test acceptance for the exact current `main`, completion and verification of required production environment variables, privileged verification of the existing production OIDC and smoke-client identity configuration, and a digest-verified migration of the WLH reference blob into the production private-storage boundary created by the current infrastructure.
+- The accepted online test release remains `5d9e3cc87ed0f8e18e70544b6b1587ae2ddcf56c` from Deploy Test run `30695340416`. Production remains unchanged at its previously accepted release until a separately controlled promotion passes every required gate.
+
 ## 2026-08-01 Security-review controls and budget rollover repair accepted in test
 
 - PR #290 final head `00285974178e402c8104ea7097dabc04d506a1b2` passed exact-head CI `30695135412`, Policy `30695135427`, CodeQL `30695135428`, and independent review/merge `30695207692` with no blocking findings. The final review used 4,074 input and 1,085 output tokens with a `$0.05292` estimated upper-bound cost. The PR merged as main commit `5d9e3cc87ed0f8e18e70544b6b1587ae2ddcf56c`; exact first-attempt main CI `30695268947` passed.

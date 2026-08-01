@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-08-01 — Enable the production latch without dispatching a release
+
+- Decision: Set `DEPLOY_PRODUCTION_ENABLED=true` after the operator's explicit request, while keeping `Promote Production`, `Rollback Production`, and `Codex Main Delivery` disabled between bounded delivery windows.
+- Decision: Treat the variable as one necessary fail-closed release condition, not as standalone authorization to dispatch or accept production. A future production window must still use exact-current-main CI and test provenance, verify the required production configuration and identities, migrate and digest-check the private WLH reference data, and pass production smoke, telemetry, ledger/runtime-truth, and rollback-bundle gates.
+- Rationale: The operator authorized the repository latch but did not request a production deployment. Separating the persistent latch from a bounded workflow-enable/dispatch window preserves that scope and prevents an accidental release.
+- Status: Authorized for guarded enablement; production remains unchanged and promotion remains operationally blocked until the prerequisites above are satisfied.
+
 ## 2026-08-01 — Review every executable change and use exact input-token budgeting
 
 - Decision: For a high-risk PR, build the independent-review capsule from the complete contextual diff of every changed non-`docs/` path in GitHub's authoritative file list, not only paths matched by the high-risk classifier, plus every classifier-matched high-risk document. Include every changed document when the PR has no non-documentation changes. Reject missing, duplicate, ambiguous, source-oversized, or capsule-oversized input; never silently truncate executable or high-risk policy context.

@@ -3,13 +3,13 @@
 ## Current delivery boundary
 
 - Test release `5d9e3cc87ed0f8e18e70544b6b1587ae2ddcf56c` is accepted by first-attempt Deploy Test run `30695340416`, including authenticated smoke, telemetry, ledger, provenance, and independent live bundled-MCP/REC verification.
-- Production deployment is not authorized for this rollout and remains disabled. Do not infer production acceptance from the successful test run.
+- The operator explicitly authorized `DEPLOY_PRODUCTION_ENABLED=true`, but did not request a production deployment. `Promote Production`, `Rollback Production`, and `Codex Main Delivery` remain disabled between bounded delivery windows; do not infer production acceptance or dispatch authority from the enabled latch.
 - The operator deferred credential rotation and an independent trust-root bootstrap. Keep the stronger workflow-bound GitHub OIDC subject; do not restore the legacy broad subject. Superseded PR #285 is closed and is not the current delivery path.
 - Do not change or reveal the shared repository `OPENAI_API_KEY`; deployment verified its managed reference without exposing its value.
 
 ## Operational rollout
 
-1. Keep production disabled until a later explicit request. Any future promotion must consume the exact accepted test evidence or run a fresh test if main changed, then pass production authenticated smoke, telemetry, ledger/runtime truth, and rollback-bundle verification.
+1. Keep production workflows disabled until a separately controlled release window. Before enabling or dispatching them, run and accept Deploy Test for the exact current `main`; complete and verify required production environment variables; verify the existing production OIDC and smoke-client identities with sufficient privileges; migrate and digest-check the WLH reference blob in the new production private storage; then require production authenticated smoke, telemetry, ledger/runtime truth, and rollback-bundle verification.
 2. Have a privileged Entra operator verify the granular delegated scopes/application roles and exact current test SPA redirect. Keep complete/remove unavailable to service tokens.
 3. Add a token-safe authenticated MCP smoke to the deployment workflow if live MCP provider execution must become a formal release gate; retain the existing REST authenticated smokes. The deployed server, all 14 tools, and deterministic protected-tool REC are already independently verified without a provider call.
 4. Inventory remaining Bring session/private data before enabling Bring. Enable the GET-only canary only after its dedicated `bring.read` identity and target list are verified; never add a mutation canary.
