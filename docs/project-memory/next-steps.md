@@ -2,7 +2,7 @@
 
 ## Current delivery boundary
 
-- Deploy Test `30709082286` accepted exact main `d578cc5e335a938f9563d3be704e34c340b4d348`, including complete configuration, authenticated smoke, telemetry, ledger, and provenance. The storage-guard repair advances `main`, so it requires new exact-current-main CI and Deploy Test evidence before production preparation or promotion.
+- Deploy Test `30709729912` accepted exact main `c1eeaac4b8df86e3fe93738ee5cf5c2030a98664`, including complete configuration, authenticated smoke, telemetry, ledger, and provenance. The what-if output repair advances `main`, so it requires new exact-current-main CI and Deploy Test evidence before production preparation or promotion.
 - The operator explicitly authorized `DEPLOY_PRODUCTION_ENABLED=true` and subsequently authorized only bounded production private-storage preparation/migration without application deployment. `Promote Production`, `Rollback Production`, and `Codex Main Delivery` remain disabled between bounded delivery windows; do not infer application deployment authority from the enabled latch or storage preparation.
 - Production attempt `30700059811` previously failed Azure OIDC before mutation. The operator reports updating the one existing production federated credential in place to the exact workflow-bound subject; the bounded preparation job's Azure login is the live proof. Do not create an alternate or broader trust route. Issues #292 and #294 retain the failed-run evidence until replacement operational evidence exists.
 - The operator deferred credential rotation and an independent trust-root bootstrap. Keep the stronger workflow-bound GitHub OIDC subject; do not restore the legacy broad subject. Superseded PR #285 is closed and is not the current delivery path.
@@ -10,7 +10,7 @@
 
 ## Operational rollout
 
-1. Merge the bounded current-main guard wiring repair through protected CI/policy/review, then run and accept Deploy Test for that exact current `main`.
+1. Merge the bounded non-pretty Azure what-if output repair through protected CI/policy/review, then run and accept Deploy Test for that exact current `main`.
 2. Pin the accepted exact-main evidence in `PREP_CI_RUN_ID`, `PREP_CI_CORRELATION`, `PREP_TEST_RUN_ID`, and `PREP_TEST_CORRELATION`. Enable only `Prepare Production Private Storage` for one first-attempt run. Require its exact OIDC login, storage-only what-if, shared-Bicep deployment, fixed-digest no-overwrite migration, policy/RBAC checks, evidence artifact, and unchanged production runtime identity; disable it again immediately after dispatch.
 3. Keep production application workflows disabled after storage preparation. A later separately authorized promotion must still pass production authenticated smoke, telemetry, ledger/runtime truth, and rollback-bundle verification.
 4. Have a privileged Entra operator verify the granular delegated scopes/application roles and exact current test SPA redirect. Keep complete/remove unavailable to service tokens.
