@@ -101,11 +101,20 @@ test('service OAuth bootstrap maintains exact workflow-bound federation', async 
   const source = await readFile(new URL('../configure-entra-service-oauth.sh', import.meta.url), 'utf8');
 
   assert.match(source, /job_workflow_ref:\$\{github_job_workflow_ref\}/);
+  assert.match(source, /approved_repository='JueZ\/api'/);
+  assert.match(source, /approved_github_environment='test'/);
   assert.match(
     source,
-    /approved_github_job_workflow_ref="\$\{repository\}\/\.github\/workflows\/deploy-environment\.yml@refs\/heads\/main"/,
+    /approved_github_job_workflow_ref='JueZ\/api\/\.github\/workflows\/deploy-environment\.yml@refs\/heads\/main'/,
   );
+  assert.match(source, /approved_service_display_name='JueZ API Catalogue Service Test'/);
+  assert.match(source, /repository" != "\$approved_repository/);
+  assert.match(source, /github_environment" != "\$approved_github_environment/);
   assert.match(source, /github_job_workflow_ref" != "\$approved_github_job_workflow_ref/);
+  assert.match(source, /service_app_count" != "1/);
+  assert.doesNotMatch(source, /SERVICE_APP_DISPLAY_NAME/);
+  assert.doesNotMatch(source, /az ad app create/);
+  assert.doesNotMatch(source, /federated-credential create/);
   assert.match(source, /federated-credential update/);
   assert.match(source, /\.audiences == \[\$audience\]/);
   assert.doesNotMatch(source, /credential_subject="repo:\$\{repository\}:environment:\$\{github_environment\}"\n/);

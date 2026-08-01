@@ -1,12 +1,20 @@
 # Decision log
 
+## 2026-08-01 — Make the paid-review limit durable per exact head
+
+- Decision: Serialize every PR/manual/label controller event per pull request. After all free exact-head gates pass and immediately before a paid request, atomically create one durable check-run claim whose external identity binds repository, PR number, and full head SHA.
+- Decision: Reuse only a valid approved exact-head artifact from the trusted source run recorded by that claim. An in-progress, failed, ambiguous, or artifact-less claim publishes a current failure check and cannot call again. Restored label triggers publish current eligibility failure/success checks without changing the durable claim.
+- Decision: Lock the service-federation helper to `JueZ/api`, environment `test`, the main `deploy-environment.yml` workflow, and exactly one existing `JueZ API Catalogue Service Test` app/FIC. Do not create a missing app or trust route.
+- Rationale: PR #286's terminal independent review showed that SDK/controller retry limits did not prevent repeated workflow events from charging the same head, and that deriving trusted values from caller inputs allowed federation rebinding.
+- Status: Implemented on fresh successor branch `codex/finish-test-zone`; local and remote delivery gates plus test-only runtime acceptance remain pending. Production remains disabled.
+
 ## 2026-07-31 — Bound paid autonomous review before any model call
 
-- Decision: Wait for all free exact-head CI, Policy Check, and CodeQL requirements before independent AI review. Retain `gpt-5.6-sol` with high reasoning, but allow at most 40,000 diff bytes, 1,500 output tokens, one call, and a conservative $0.31 per-head pre-call ceiling.
+- Decision: Wait for all free exact-head CI, Policy Check, and CodeQL requirements before independent AI review. Retain `gpt-5.6-sol` with high reasoning, but allow at most 40,000 diff bytes, 1,500 output tokens, one controller/SDK call, and a conservative $0.31 pre-call ceiling.
 - Decision: Record the request ceiling and sanitized response token usage in the review artifact. Fail closed without controller or SDK retries. Require an explicit live-API environment gate so local and ordinary test execution cannot spend against a present key.
 - Context: 23 autonomous-review runs invoked `gpt-5.6-sol` on 2026-07-31 and produced at least 25 API requests; repeated high-reasoning review, not `npm test`, caused the unexpected account spend.
 - Consequences: Batch locally validated changes before pushing. An over-budget or oversized high-risk change cannot merge until its review payload is reduced while retaining the single bundled MCP server. Runtime REC permits only Luna and falls back deterministically above a 24,000-byte sanitized capsule or on any model/configuration failure. The Platform project hard spend limit remains the monthly account-level backstop. The first bootstrap review rejected Luna/low as an assurance regression, so the repair preserves Sol/high and obtains savings from sequencing and hard request bounds instead.
-- Status: Implemented on PR #286 branch; shared future-deployment variable `REPAIRABLE_ERRORS_LLM_MODEL=gpt-5.6-luna` applied without reading or changing the API key; remote gates pending.
+- Status: Implemented on PR #286 but superseded by the durable 2026-08-01 decision after that PR exhausted two review repairs. Shared future-deployment variable `REPAIRABLE_ERRORS_LLM_MODEL=gpt-5.6-luna` was applied without reading or changing the API key.
 
 ## 2026-07-31 — Preserve workflow-bound OIDC and repair only existing test federation
 

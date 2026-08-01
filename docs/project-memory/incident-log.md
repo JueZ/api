@@ -1,12 +1,20 @@
 # Incident log
 
+## 2026-08-01 — PR #286 review exposed cross-run cost and federation gaps
+
+- Symptom: PR #286's final permitted review rejected an otherwise locally and remotely green head because one-call enforcement was scoped only to a controller invocation, caller-selected repository/environment values could rebind the existing FIC, and label transitions no longer triggered immediate evaluation.
+- Evidence: Exact-head review run `30670820873` returned three sanitized findings: no durable repository/PR/head claim, a workflow ref derived from caller-controlled repository/environment values, and removed `labeled`/`unlabeled` triggers. The PR was returned to draft and repository Actions were disabled; no third paid attempt ran.
+- Root cause: SDK retries and a single `responses.create` call do not deduplicate separate workflow runs. The helper validated self-consistency rather than an immutable complete test tuple. Removing label triggers treated duplicate-cost symptoms rather than making review idempotent.
+- Repair: The fresh successor serializes controller runs, claims one durable exact head after free gates, reuses only a trusted approval artifact, publishes current failure/success checks for label transitions, restores label triggers, and locks the helper to the unique existing approved test app/FIC without creating trust.
+- Status: Local validation in progress; successor PR, merge, and test-only deployment acceptance remain pending. Production is unchanged.
+
 ## 2026-07-31 — Repeated high-cost autonomous review exhausted OpenAI credits
 
 - Symptom: The operator observed approximately $9 of OpenAI API spend during delivery testing and the final PR review failed with `credit_balance_exhausted` despite ordinary repository tests passing.
 - Evidence: 23 same-day `Codex Auto-Merge` artifacts report `modelInvoked=true` with `gpt-5.6-sol`; two final artifacts explicitly report two request attempts, establishing at least 25 paid Responses API requests. The trusted controller allowed two attempts with 6,000 then 12,000 output tokens, high reasoning, and up to 1.5 MB of diff. Local/API tests use mocks and made no live OpenAI request.
 - Root cause: Each pushed high-risk exact head started paid review immediately, including heads that had not yet passed deterministic checks, and model-output/API failures automatically doubled the request. The model and token/diff bounds were unsuitable for frequent delivery checks.
-- Repair: Gate paid review behind free exact-head checks; retain the required Sol/high-assurance analysis while allowing one call with SDK retries disabled, 40 KB diff, 1,500 output tokens, and a conservative $0.31 pre-call ceiling; record sanitized usage; require explicit live enablement. The first bootstrap review rejected the proposed Luna/low reviewer as an assurance regression and also identified an arbitrary workflow-ref override and unguarded REC capsule serialization; both defects were repaired before the only permitted retry. Runtime REC remains Luna/low, caps sanitized input at 24 KB and output at 700 tokens, disables SDK retries, and preserves deterministic-first fallback including serialization failures.
-- Status: Local repair validated; PR gates pending. Repository Actions remain disabled until the complete change is pushed once.
+- Repair: Gate paid review behind free exact-head checks; retain the required Sol/high-assurance analysis while allowing one call with SDK retries disabled, 40 KB diff, 1,500 output tokens, and a conservative $0.31 pre-call ceiling; record sanitized usage; require explicit live enablement. Runtime REC remains Luna/low, caps sanitized input at 24 KB and output at 700 tokens, disables SDK retries, and preserves deterministic-first fallback including serialization failures.
+- Status: PR #286 exhausted its two repairs; the remaining cross-run idempotency and federation findings are tracked in the 2026-08-01 successor incident above.
 
 ## 2026-07-31 — Disabled Actions and legacy FIC subjects blocked test recovery
 

@@ -11,13 +11,15 @@ For each candidate it:
 1. records the exact PR head SHA;
 2. checks branch/label eligibility and blocks forks/hold labels;
 3. classifies high-risk paths deterministically;
-4. runs an independent structured AI review for high-risk changes with `store=false`;
-5. publishes `Autonomous review complete` for that exact SHA;
-6. waits for every canonical check from the expected `github-actions` app;
-7. rechecks open/current/non-behind PR state;
-8. squash-merges only the reviewed head SHA.
+4. waits for every free canonical check from the expected `github-actions` app;
+5. serializes controller runs per pull request and atomically creates one durable repository/PR/head-SHA check-run claim immediately before any paid request;
+6. reuses a valid approved exact-head artifact, or fails closed when a prior claim was consumed without approval;
+7. runs at most one independent structured AI request for a newly claimed high-risk head with `store=false`;
+8. publishes `Autonomous review complete` for that exact SHA;
+9. rechecks open/current/non-behind PR state;
+10. squash-merges only the reviewed head SHA.
 
-Critical/high review findings, stale heads, missing/wrong-app checks, forks, merge conflicts, and policy errors fail closed. Routine and high-risk changes do not require human approval under the selected policy.
+Critical/high review findings, a duplicate/consumed paid-review claim, stale heads, missing/wrong-app checks, forks, merge conflicts, and policy errors fail closed. Label changes are controller events, so adding/removing eligibility or hold labels is evaluated immediately without permitting a second exact-head paid request. Routine and high-risk changes do not require human approval under the selected policy.
 
 ## Required checks
 

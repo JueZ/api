@@ -11,6 +11,7 @@ import {
 } from './lib/autonomous-policy.mjs';
 
 const REVIEW_INPUT_TOKEN_OVERHEAD = 4096;
+const REVIEW_CLAIM_VERSION = 'v1';
 
 const reviewSchema = {
   type: 'object',
@@ -350,6 +351,112 @@ export async function runRequiredCheckPreflight(options, policy, github) {
   return evaluation;
 }
 
+export async function claimAutonomousReview(options, policy, github) {
+  const pullRequest = await github.getPullRequest(options.prNumber);
+  assertExpectedHead(pullRequest, options.headSha);
+  const pullRequestState = evaluatePullRequestState(pullRequest, options.headSha, policy);
+  if (!pullRequestState.ok) {
+    throw new Error(`Autonomous review claim rejected the pull request:\n- ${pullRequestState.errors.join('\n- ')}`);
+  }
+
+  const externalId = reviewClaimExternalId(options.repository, options.prNumber, options.headSha);
+  const matchingClaims = (await github.getCheckRuns(options.headSha)).filter(
+    (checkRun) =>
+      checkRun.name === policy.autonomousReview.checkName &&
+      checkRun.head_sha === options.headSha &&
+      checkRun.external_id === externalId,
+  );
+
+  if (matchingClaims.length > 1) {
+    return publishConsumedReviewClaim(
+      options,
+      policy,
+      {
+        status: 'consumed',
+        reason: 'multiple_exact_head_claims',
+      },
+      github,
+    );
+  }
+
+  const existing = matchingClaims[0];
+  if (existing) {
+    if (existing.status === 'completed' && existing.conclusion === 'success') {
+      const reuseRunId = parseTrustedRunId(existing.details_url, options.repository);
+      if (!reuseRunId) {
+        return publishConsumedReviewClaim(
+          options,
+          policy,
+          {
+            status: 'consumed',
+            reason: 'approved_claim_missing_trusted_run',
+            checkRunId: existing.id,
+          },
+          github,
+        );
+      }
+      const claim = { status: 'reuse', checkRunId: existing.id, reuseRunId };
+      await writeGithubOutput({
+        claim_status: claim.status,
+        claim_check_run_id: String(claim.checkRunId),
+        reuse_run_id: String(claim.reuseRunId),
+      });
+      return claim;
+    }
+    return publishConsumedReviewClaim(
+      options,
+      policy,
+      {
+        status: 'consumed',
+        reason: `existing_claim_${safeDiagnosticToken(existing.status) ?? 'unknown'}_${safeDiagnosticToken(existing.conclusion) ?? 'none'}`,
+        checkRunId: existing.id,
+      },
+      github,
+    );
+  }
+
+  const detailsUrl = `https://github.com/${options.repository}/actions/runs/${options.runId}`;
+  const created = await github.createReviewClaim({
+    name: policy.autonomousReview.checkName,
+    headSha: options.headSha,
+    externalId,
+    detailsUrl,
+  });
+  const claim = { status: 'new', checkRunId: created.id, runId: options.runId };
+  await writeGithubOutput({
+    claim_status: claim.status,
+    claim_check_run_id: String(claim.checkRunId),
+    reuse_run_id: '',
+  });
+  return claim;
+}
+
+export async function reuseAutonomousReview(options, policy, github) {
+  assertExpectedHead(await github.getPullRequest(options.prNumber), options.headSha);
+  const review = JSON.parse(await readFile(options.reviewFile, 'utf8'));
+  const validation = validateAutonomousReview(review, options.headSha, policy);
+  if (!validation.ok) {
+    throw new Error(`Stored exact-head review is not reusable:\n- ${validation.errors.join('\n- ')}`);
+  }
+  const decisionCheck = await github.createReviewDecisionCheck({
+    name: policy.autonomousReview.checkName,
+    headSha: options.headSha,
+    externalId: `${reviewClaimExternalId(options.repository, options.prNumber, options.headSha)}:reuse:${options.runId}`,
+    detailsUrl: `https://github.com/${options.repository}/actions/runs/${options.runId}`,
+    conclusion: 'success',
+    title: 'Autonomous review approval reused',
+    summary: `Trusted approved evidence for exact head ${options.headSha} was reused without another paid request.`,
+  });
+  await writeGithubOutput({
+    decision: review.decision,
+    reviewed_head_sha: review.reviewedHeadSha,
+    high_risk: String(review.risk?.highRisk === true),
+    model_invoked: String(review.modelInvoked === true),
+    reuse_check_run_id: String(decisionCheck.id),
+  });
+  return review;
+}
+
 async function runGate(options, policy, github) {
   let lastEvaluation;
   const deadline = Date.now() + options.waitSeconds * 1000;
@@ -440,6 +547,43 @@ function createGithubClient(repository, token) {
       }
       throw new Error('Commit contains more than 10000 check runs.');
     },
+    async createReviewClaim({ name, headSha, externalId, detailsUrl }) {
+      return (
+        await request('/check-runs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            head_sha: headSha,
+            status: 'in_progress',
+            external_id: externalId,
+            details_url: detailsUrl,
+            output: {
+              title: 'Autonomous review claimed',
+              summary:
+                'Free exact-head gates passed and this durable claim permits at most one paid review request for this repository, pull request, and head SHA.',
+            },
+          }),
+        })
+      ).json();
+    },
+    async createReviewDecisionCheck({ name, headSha, externalId, detailsUrl, conclusion, title, summary }) {
+      return (
+        await request('/check-runs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            head_sha: headSha,
+            status: 'completed',
+            conclusion,
+            external_id: externalId,
+            details_url: detailsUrl,
+            output: { title, summary },
+          }),
+        })
+      ).json();
+    },
     async mergePullRequest(prNumber, headSha, mergeMethod) {
       return (
         await request(`/pulls/${prNumber}/merge`, {
@@ -479,12 +623,16 @@ function parseOptions(argv) {
   const repository = values.get('--repository') ?? process.env.GITHUB_REPOSITORY;
   const prNumber = Number(values.get('--pr') ?? process.env.PR_NUMBER);
   const headSha = values.get('--head-sha') ?? process.env.HEAD_SHA;
-  if (!['preflight', 'review', 'gate'].includes(command)) {
-    throw new Error('command must be preflight, review, or gate');
+  if (!['preflight', 'claim', 'reuse', 'review', 'gate'].includes(command)) {
+    throw new Error('command must be preflight, claim, reuse, review, or gate');
   }
   if (!repository) throw new Error('--repository is required');
   if (!Number.isInteger(prNumber) || prNumber < 1) throw new Error('--pr must be a positive integer');
   if (!/^[0-9a-f]{40}$/i.test(headSha ?? '')) throw new Error('--head-sha must be a full commit SHA');
+  const runId = Number(values.get('--run-id') ?? process.env.GITHUB_RUN_ID);
+  if (['claim', 'reuse'].includes(command) && (!Number.isSafeInteger(runId) || runId < 1)) {
+    throw new Error('--run-id must be a positive workflow run ID for claim or reuse');
+  }
   return {
     command,
     repository,
@@ -493,6 +641,7 @@ function parseOptions(argv) {
     reviewFile: values.get('--review-file') ?? 'autonomous-review.json',
     waitSeconds: Number(values.get('--wait-seconds') ?? 3600),
     pollSeconds: Number(values.get('--poll-seconds') ?? 15),
+    runId,
     merge: values.get('--merge') === 'true',
   };
 }
@@ -505,6 +654,57 @@ function assertExpectedHead(pullRequest, expectedHeadSha) {
 
 function safetyIdentifier(repository, prNumber) {
   return createHash('sha256').update(`${repository}:pull:${prNumber}`).digest('hex');
+}
+
+export function reviewClaimExternalId(repository, prNumber, headSha) {
+  return `juez-autonomous-review:${REVIEW_CLAIM_VERSION}:${repository}:pull:${prNumber}:head:${headSha}`;
+}
+
+function parseTrustedRunId(detailsUrl, repository) {
+  if (typeof detailsUrl !== 'string') return null;
+  const escapedRepository = repository.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = detailsUrl.match(new RegExp(`^https://github\\.com/${escapedRepository}/actions/runs/([1-9][0-9]*)$`));
+  if (!match) return null;
+  const runId = Number(match[1]);
+  return Number.isSafeInteger(runId) ? runId : null;
+}
+
+async function publishConsumedReviewClaim(options, policy, claim, github) {
+  const decisionCheck = await github.createReviewDecisionCheck({
+    name: policy.autonomousReview.checkName,
+    headSha: options.headSha,
+    externalId: `${reviewClaimExternalId(options.repository, options.prNumber, options.headSha)}:consumed:${options.runId}`,
+    detailsUrl: `https://github.com/${options.repository}/actions/runs/${options.runId}`,
+    conclusion: 'failure',
+    title: 'Autonomous review claim already consumed',
+    summary: `Exact head ${options.headSha} cannot make another paid request (${claim.reason}).`,
+  });
+  claim.decisionCheckRunId = decisionCheck.id;
+  const review = {
+    decision: 'reject',
+    reviewedHeadSha: options.headSha,
+    summary: 'This exact pull-request head already consumed its durable autonomous-review claim.',
+    findings: [
+      {
+        severity: 'high',
+        title: 'Exact-head paid-review claim already consumed',
+        evidence: `The durable repository/PR/head claim is unavailable (${claim.reason}).`,
+        remediation:
+          'Do not rerun the paid review for this head. Repair the change on a new commit and pass all gates again.',
+      },
+    ],
+    risk: { highRisk: true, highRiskPaths: [], classes: {} },
+    modelInvoked: false,
+    model: policy.autonomousReview.model,
+    reviewClaim: claim,
+  };
+  await publishReview(review, options);
+  await writeGithubOutput({
+    claim_status: claim.status,
+    claim_check_run_id: claim.checkRunId ? String(claim.checkRunId) : '',
+    reuse_run_id: '',
+  });
+  return claim;
 }
 
 export function calculateReviewBudget(request, policy) {
@@ -643,8 +843,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const result =
     options.command === 'preflight'
       ? await runRequiredCheckPreflight(options, policy, github)
-      : options.command === 'review'
-        ? await runReview(options, policy, github)
-        : await runGate(options, policy, github);
+      : options.command === 'claim'
+        ? await claimAutonomousReview(options, policy, github)
+        : options.command === 'reuse'
+          ? await reuseAutonomousReview(options, policy, github)
+          : options.command === 'review'
+            ? await runReview(options, policy, github)
+            : await runGate(options, policy, github);
   console.log(JSON.stringify(result, null, 2));
 }

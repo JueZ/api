@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -13,9 +13,12 @@ import {
 } from '../lib/autonomous-policy.mjs';
 import {
   calculateReviewBudget,
+  claimAutonomousReview,
   evaluatePullRequestState,
   evaluateRequiredChecks,
   mergeGateDecision,
+  reuseAutonomousReview,
+  reviewClaimExternalId,
   runRequiredCheckPreflight,
   runReview,
   validateAutonomousReview,
@@ -86,7 +89,17 @@ test('canonical autonomous policy is internally valid', () => {
   assert.equal(policy.autonomousReview.maxEstimatedCostUsd, 0.31);
   assert.match(codexAutomergeWorkflow, /Wait for free deterministic exact-head checks/);
   assert.match(codexAutomergeWorkflow, /AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'/);
-  assert.doesNotMatch(codexAutomergeWorkflow, /labeled, unlabeled/);
+  assert.match(codexAutomergeWorkflow, /ready_for_review, labeled, unlabeled/);
+  assert.match(codexAutomergeWorkflow, /cancel-in-progress: false/);
+  assert.match(codexAutomergeWorkflow, /Atomically claim or reuse the exact-head paid review/);
+  assert.ok(
+    codexAutomergeWorkflow.indexOf('Wait for free deterministic exact-head checks') <
+      codexAutomergeWorkflow.indexOf('Atomically claim or reuse the exact-head paid review'),
+  );
+  assert.ok(
+    codexAutomergeWorkflow.indexOf('Atomically claim or reuse the exact-head paid review') <
+      codexAutomergeWorkflow.indexOf('Run deterministic classification and independent review'),
+  );
   assert.match(autonomousControllerSource, /maxRetries: 0/);
 });
 
@@ -685,6 +698,123 @@ test('paid review preflight excludes its own check and requires every free exact
   await assert.rejects(
     runRequiredCheckPreflight({ prNumber: 1, headSha, waitSeconds: 0, pollSeconds: 0 }, policy, github),
     /lint: failure/,
+  );
+});
+
+test('durable exact-head claim is created once, reuses approval, and consumes failure without another call', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-claim-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const reviewFile = join(directory, 'review.json');
+  const createdClaims = [];
+  const decisionChecks = [];
+  const github = {
+    async getPullRequest() {
+      return pullRequest();
+    },
+    async getCheckRuns() {
+      return [];
+    },
+    async createReviewClaim(claim) {
+      createdClaims.push(claim);
+      return { id: 77 };
+    },
+    async createReviewDecisionCheck(check) {
+      decisionChecks.push(check);
+      return { id: 88 };
+    },
+  };
+  const options = {
+    repository: 'JueZ/api',
+    prNumber: 42,
+    headSha,
+    runId: 12345,
+    reviewFile,
+  };
+
+  const created = await claimAutonomousReview(options, policy, github);
+  assert.deepEqual(created, { status: 'new', checkRunId: 77, runId: 12345 });
+  assert.equal(createdClaims.length, 1);
+  assert.equal(createdClaims[0].externalId, reviewClaimExternalId('JueZ/api', 42, headSha));
+  assert.equal(createdClaims[0].detailsUrl, 'https://github.com/JueZ/api/actions/runs/12345');
+
+  github.getCheckRuns = async () => [
+    {
+      id: 77,
+      name: policy.autonomousReview.checkName,
+      head_sha: headSha,
+      external_id: reviewClaimExternalId('JueZ/api', 42, headSha),
+      status: 'completed',
+      conclusion: 'success',
+      details_url: 'https://github.com/JueZ/api/actions/runs/12345',
+    },
+  ];
+  assert.deepEqual(await claimAutonomousReview(options, policy, github), {
+    status: 'reuse',
+    checkRunId: 77,
+    reuseRunId: 12345,
+  });
+  assert.equal(createdClaims.length, 1);
+
+  github.getCheckRuns = async () => [
+    {
+      id: 77,
+      name: policy.autonomousReview.checkName,
+      head_sha: headSha,
+      external_id: reviewClaimExternalId('JueZ/api', 42, headSha),
+      status: 'completed',
+      conclusion: 'failure',
+      details_url: 'https://github.com/JueZ/api/actions/runs/12345',
+    },
+  ];
+  const consumed = await claimAutonomousReview(options, policy, github);
+  assert.equal(consumed.status, 'consumed');
+  assert.equal(consumed.checkRunId, 77);
+  assert.equal(consumed.decisionCheckRunId, 88);
+  assert.equal(createdClaims.length, 1);
+  assert.equal(decisionChecks.at(-1).conclusion, 'failure');
+  const rejection = JSON.parse(await readFile(reviewFile, 'utf8'));
+  assert.equal(rejection.decision, 'reject');
+  assert.equal(rejection.modelInvoked, false);
+  assert.equal(rejection.reviewClaim.reason, 'existing_claim_completed_failure');
+});
+
+test('only a valid approved exact-head artifact can be reused', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-reuse-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const reviewFile = join(directory, 'review.json');
+  const github = {
+    async getPullRequest() {
+      return pullRequest();
+    },
+    async createReviewDecisionCheck(check) {
+      assert.equal(check.conclusion, 'success');
+      return { id: 99 };
+    },
+  };
+  const approved = {
+    decision: 'approve',
+    reviewedHeadSha: headSha,
+    summary: 'Approved exact head.',
+    findings: [],
+    risk: { highRisk: true, highRiskPaths: [], classes: {} },
+    modelInvoked: true,
+  };
+  await writeFile(reviewFile, JSON.stringify(approved));
+  assert.equal(
+    (
+      await reuseAutonomousReview(
+        { repository: 'JueZ/api', prNumber: 1, headSha, runId: 12345, reviewFile },
+        policy,
+        github,
+      )
+    ).decision,
+    'approve',
+  );
+
+  await writeFile(reviewFile, JSON.stringify({ ...approved, reviewedHeadSha: 'b'.repeat(40) }));
+  await assert.rejects(
+    reuseAutonomousReview({ repository: 'JueZ/api', prNumber: 1, headSha, runId: 12345, reviewFile }, policy, github),
+    /Stored exact-head review is not reusable/,
   );
 });
 

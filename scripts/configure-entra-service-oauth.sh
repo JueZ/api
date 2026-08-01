@@ -7,12 +7,10 @@ set -euo pipefail
 #
 # Required environment variables:
 #   API_APP_ID              API app registration client/application ID.
-# Optional environment variables:
-#   REPOSITORY              GitHub repo owner/name. Default: JueZ/api.
-#   GITHUB_ENVIRONMENT      GitHub Environment subject to trust. Default: test.
-#   GITHUB_JOB_WORKFLOW_REF Optional assertion of the one approved reusable
-#                           workflow identity. Any other workflow or ref is rejected.
-#   SERVICE_APP_DISPLAY_NAME Default: JueZ API Catalogue Service Test.
+# Optional assertions (every value is locked to the checked-in test tuple):
+#   REPOSITORY              Must be JueZ/api.
+#   GITHUB_ENVIRONMENT      Must be test.
+#   GITHUB_JOB_WORKFLOW_REF Must be JueZ/api/.github/workflows/deploy-environment.yml@refs/heads/main.
 #   SERVICE_APP_ROLE_VALUES Comma-separated granular roles. Default: catalogue.read,reddit.read.
 #   SERVICE_APP_ROLE_DISPLAY_NAME Prefix for created role display names.
 #   SET_GITHUB_VARIABLES    true to set GitHub environment variables. Default: false.
@@ -29,30 +27,31 @@ require_command az
 require_command jq
 require_command python3
 
-repository="${REPOSITORY:-JueZ/api}"
-github_environment="${GITHUB_ENVIRONMENT:-test}"
-approved_github_job_workflow_ref="${repository}/.github/workflows/deploy-environment.yml@refs/heads/main"
+approved_repository='JueZ/api'
+approved_github_environment='test'
+approved_github_job_workflow_ref='JueZ/api/.github/workflows/deploy-environment.yml@refs/heads/main'
+approved_service_display_name='JueZ API Catalogue Service Test'
+repository="${REPOSITORY:-$approved_repository}"
+github_environment="${GITHUB_ENVIRONMENT:-$approved_github_environment}"
 github_job_workflow_ref="${GITHUB_JOB_WORKFLOW_REF:-$approved_github_job_workflow_ref}"
 api_app_id="${API_APP_ID:?Set API_APP_ID to the API app registration client/application ID.}"
-service_display_name="${SERVICE_APP_DISPLAY_NAME:-JueZ API Catalogue Service Test}"
 role_values_csv="${SERVICE_APP_ROLE_VALUES:-${SERVICE_APP_ROLE_VALUE:-catalogue.read,reddit.read}}"
 role_display_name="${SERVICE_APP_ROLE_DISPLAY_NAME:-API service access}"
 set_github_variables="${SET_GITHUB_VARIABLES:-false}"
 oidc_required_scopes_value="${OIDC_REQUIRED_SCOPES_VALUE:-catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove}"
 
-if [[ ! "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
-  echo "REPOSITORY must be an owner/name pair." >&2
+if [ "$repository" != "$approved_repository" ]; then
+  echo "REPOSITORY must equal the approved test repository: $approved_repository" >&2
   exit 1
 fi
-if [[ ! "$github_environment" =~ ^[A-Za-z0-9_.-]+$ ]]; then
-  echo "GITHUB_ENVIRONMENT contains unsupported characters." >&2
+if [ "$github_environment" != "$approved_github_environment" ]; then
+  echo "GITHUB_ENVIRONMENT must equal the approved environment: $approved_github_environment" >&2
   exit 1
 fi
 if [ "$github_job_workflow_ref" != "$approved_github_job_workflow_ref" ]; then
   echo "GITHUB_JOB_WORKFLOW_REF must equal the approved main workflow: $approved_github_job_workflow_ref" >&2
   exit 1
 fi
-
 mapfile -t role_values < <(
   tr ',' '\n' <<<"$role_values_csv" |
     awk 'NF { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "" && !seen[$0]++) print $0 }'
@@ -113,17 +112,16 @@ PY
   role_ids+=("$role_id")
 done
 
-service_app_json="$(az ad app list --display-name "$service_display_name" --query '[0].{appId:appId,id:id}' -o json)"
-service_app_id="$(jq -r '.appId // empty' <<< "$service_app_json")"
-service_app_object_id="$(jq -r '.id // empty' <<< "$service_app_json")"
-if [ -z "$service_app_id" ]; then
-  service_app_json="$(az ad app create --display-name "$service_display_name" --sign-in-audience AzureADMyOrg --query '{appId:appId,id:id}' -o json)"
-  service_app_id="$(jq -r '.appId' <<< "$service_app_json")"
-  service_app_object_id="$(jq -r '.id' <<< "$service_app_json")"
-  echo "Created service app registration: $service_display_name"
-else
-  echo "Using existing service app registration: $service_display_name"
+service_apps_json="$(az ad app list --display-name "$approved_service_display_name" --query '[].{appId:appId,id:id,displayName:displayName}' -o json)"
+service_app_count="$(jq --arg display_name "$approved_service_display_name" '[.[] | select(.displayName == $display_name)] | length' <<<"$service_apps_json")"
+if [ "$service_app_count" != "1" ]; then
+  echo "Expected exactly one existing approved test service app named: $approved_service_display_name" >&2
+  exit 1
 fi
+service_app_json="$(jq --arg display_name "$approved_service_display_name" '[.[] | select(.displayName == $display_name)] | first' <<<"$service_apps_json")"
+service_app_id="$(jq -r '.appId' <<<"$service_app_json")"
+service_app_object_id="$(jq -r '.id' <<<"$service_app_json")"
+echo "Using the unique existing approved service app registration: $approved_service_display_name"
 
 service_sp_object_id="$(az ad sp show --id "$service_app_id" --query id -o tsv 2>/dev/null || true)"
 if [ -z "$service_sp_object_id" ]; then
@@ -172,15 +170,8 @@ cleanup_credential_file() {
 trap cleanup_credential_file EXIT
 
 if [ "$(jq -r '.name // empty' <<<"$existing_credential")" = "" ]; then
-  jq -n \
-    --arg name "$credential_name" \
-    --arg issuer "$credential_issuer" \
-    --arg subject "$credential_subject" \
-    --arg audience "$credential_audience" \
-    '{name:$name, issuer:$issuer, subject:$subject, description:"GitHub Actions OIDC for service/e2e tests", audiences:[$audience]}' \
-    > "$credential_file"
-  az ad app federated-credential create --id "$service_app_object_id" --parameters "@$credential_file" -o none
-  echo "Created federated credential subject: $credential_subject"
+  echo "The approved existing federated credential is missing: $credential_name" >&2
+  exit 1
 elif jq -e \
   --arg issuer "$credential_issuer" \
   --arg subject "$credential_subject" \
@@ -206,9 +197,6 @@ fi
 if [ "$set_github_variables" = "true" ]; then
   require_command gh
   service_var_prefix='TEST'
-  if [ "$github_environment" = "production" ] || [ "$github_environment" = "prod" ]; then
-    service_var_prefix='PROD'
-  fi
   gh variable set "${service_var_prefix}_SERVICE_AUTH_CLIENT_ID" --env "$github_environment" --repo "$repository" --body "$service_app_id"
   gh variable set "${service_var_prefix}_SERVICE_AUTH_TENANT_ID" --env "$github_environment" --repo "$repository" --body "$account_tenant_id"
   gh variable set "${service_var_prefix}_SERVICE_AUTH_SCOPE" --env "$github_environment" --repo "$repository" --body "$api_identifier_uri/.default"
@@ -218,9 +206,6 @@ if [ "$set_github_variables" = "true" ]; then
   echo "Set GitHub environment variables for $repository/$github_environment."
 else
   service_var_prefix='TEST'
-  if [ "$github_environment" = "production" ] || [ "$github_environment" = "prod" ]; then
-    service_var_prefix='PROD'
-  fi
   cat <<VALUES
 
 GitHub environment variables to set for $repository environment '$github_environment':

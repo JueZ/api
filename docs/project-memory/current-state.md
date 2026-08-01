@@ -1,5 +1,13 @@
 # Current state
 
+## 2026-08-01 Durable review-cost and test-federation successor pending delivery
+
+- PR #286 exhausted its two review repairs after proving that per-invocation retry control was not durable per exact head and that repository/environment federation inputs remained caller-controlled.
+- Fresh successor branch `codex/finish-test-zone` waits for free gates, serializes controller events, atomically claims the repository/PR/head tuple through one durable check run, reuses only a trusted approved artifact, and otherwise prevents another paid request. Sol/high assurance remains bounded to 40 KB input diff, 1,500 output tokens, no SDK retries, and a conservative $0.31 ceiling.
+- Label changes again trigger immediate policy evaluation. Ineligible states publish a current failure check; removing a hold can reuse trusted approved evidence without another model request and publishes a fresh success check only after validating that artifact.
+- The test federation helper is locked to the complete `JueZ/api`/`test`/main deploy workflow/unique existing test service-app tuple. It refuses to create a missing app or trust route. REC serialization failures fall back deterministically. Existing deployed app settings remain unchanged until the requested guarded test deployment.
+- Repository Actions remain disabled during local validation. The last accepted online test release remains run `30666921988` at commit `6cadc861954af706cd752c022b194c742c0aa6fd`; production remains disabled and unchanged.
+
 ## 2026-07-31 AI-native hardening accepted in test; production unchanged
 
 - PR #264 merged the 2026-07 architecture and AI-native audit remediation as `4d82ed8491a32440ec5495049ba39e8f73c6bbac`. Exact-head PR CI, Policy Check, and CodeQL passed; main CI, Policy Check, and CodeQL also passed. The PR used `[skip autodeploy]`, the main-delivery workflow honored it, and no production deployment was dispatched.
@@ -31,7 +39,7 @@
 - The telemetry gate observed five correlated smoke evidence records and zero exceptions, HTTP 5xx responses, or failed requests. The published ledger and provenance bind the exact source, run, correlation, CI run, artifact digests, authenticated-smoke success, and telemetry success.
 - GitHub's exact repository/environment/workflow OIDC subject remained enabled. The two existing test federated credentials were rebound in place to that exact workflow identity; no key or secret was rotated, no new identity or permission was created by the federation repair, and the production federation record was unchanged. The operator explicitly deferred the broader rotation/independent-trust-root proposal in open unmerged PR #285.
 - Repository Actions and Deploy Test were returned to disabled after acceptance. `DEPLOY_PRODUCTION_ENABLED=false`; Main Delivery, production promotion, and rollback remain disabled. Production was not dispatched or changed.
-- A same-day cost audit found 23 high-risk autonomous-review runs and at least 25 paid `gpt-5.6-sol` requests. Ordinary local/API tests were mocked and did not call OpenAI. The pending repair waits for all free exact-head gates, retains Sol/high assurance, enforces one call with SDK retries disabled, 40 KB input-diff and 1,500 output-token bounds plus a conservative $0.31 ceiling, records sanitized usage, and has no automatic paid retry. The first bootstrap review rejected Luna/low and found two repairable defects, now fixed: federation overrides are locked to the exact approved main workflow and REC serialization failures fall back deterministically. Runtime REC remains deterministic-first; its shared future-deployment repository model variable is `gpt-5.6-luna`, and the analyzer permits only Luna/low with 24 KB input, 700 output tokens, no SDK retries, and deterministic fallback. Existing deployed app settings remain unchanged until a later guarded deployment.
+- A same-day cost audit found 23 high-risk autonomous-review runs and at least 25 paid `gpt-5.6-sol` requests. Ordinary local/API tests were mocked and did not call OpenAI. The first repair waited for free exact-head gates, retained Sol/high assurance, enforced one SDK call with retries disabled, bounded the diff/output and estimated cost, recorded sanitized usage, and preserved deterministic-first Luna runtime REC. Its remaining cross-run idempotency and complete federation-tuple findings are superseded by the 2026-08-01 successor state above.
 
 ## Authoritative references
 
