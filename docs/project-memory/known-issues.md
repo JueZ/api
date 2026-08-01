@@ -1,15 +1,23 @@
 # Known issues and unresolved risks
 
-## Test deployment is not yet accepted after protected auth failed open
+## Test is accepted; production remains intentionally unpromoted
 
-- PR #264 and main CI/policy passed, and test run `30629930683` deployed exact commit `4d82ed8491a32440ec5495049ba39e8f73c6bbac`, but the runtime gate failed: unauthenticated `GET /api/hello` returned `200` as `local-dev-placeholder` instead of `401`.
-- The Azure deployment received `authEnabled=true`, while the effective Function worker behaved as if `AUTH_ENABLED` was false or missing. The focused repair makes app settings an explicit resource and validates every Bicep-managed value, including the exact deployed Application Insights connection metadata and versioned Key Vault reference identities, after normal deployment and read-only before rollback. The streamed Azure response is never persisted, and secret values are never read or emitted.
-- The focused repair loads `dist/index.js`, executes `assertRuntimeSafety()` before registration, and independently rejects disabled authentication outside local development. Local regression coverage passes; live test deployment still must prove the behavior.
-- The first fresh live attempt, run `30650254586`, stopped before package deployment on an ARM circular dependency caused by listing and directly writing Function `appsettings` in one template. The follow-up secure nested-module boundary builds locally but still requires PR gates and a newly dispatched test run.
-- PR #281 merged that nested-module repair, and test run `30651053281` proved the ARM cycle resolved. The next fail-closed gate found that all seven `string(bool)` app settings were title-cased by ARM instead of matching the runtime's lowercase contract. The focused normalization repair still requires PR gates and a fresh test-only run.
-- PR #282 merged the lowercase repair, and test run `30651802409` passed the complete settings gate and both package deployments. Function startup then failed closed because Entra GUIDs were incorrectly constrained to RFC-versioned UUIDs. The focused GUID/UUID separation still requires PR gates and a fresh test-only run.
-- Test environment origin placeholders were corrected to the exact Function origin without reading or changing secrets. Infrastructure and workflow validation now reject `https://null` and the test frontend derives its API base from the deployed Function output.
-- Authenticated smoke, telemetry correlation, and accepted test provenance remain pending until the Entra GUID validation repair merges and deploys. Production must not be promoted from this release.
+- Deploy Test run `30666921988` accepted exact main commit `6cadc861954af706cd752c022b194c742c0aa6fd` after every infrastructure, package, runtime, authenticated-smoke, telemetry, ledger, and provenance gate passed.
+- The previous fail-open auth, ARM settings cycle, boolean casing, Entra GUID, missing service-role, and legacy federated-subject failures are resolved for test.
+- Production was not dispatched and remains disabled. A later production request must revalidate current-main ancestry, exact accepted test evidence, production identity/configuration, full authenticated smokes, telemetry, ledger, and rollback bundle before promotion.
+
+## Final review-permission successor is not yet delivered
+
+- PR #286 exhausted its two autonomous-review repairs and is closed as superseded by PR #287.
+- PR #287 exact-head CI, Policy Check, and CodeQL passed. The provenance and paid-boundary findings were repaired, but final review run `30687126474` rejected the optional service-identity verifier's incomplete whole-identity validation.
+- The operator removed repository-side service-identity setup/audit from scope. PR #289 repaired the predecessor review findings and GitHub claim integration. Reviews then exposed omitted executable helpers, insufficient output allowance for the complete diff, omitted classified security/ADR documentation in mixed capsules, and a second output exhaustion once that context was included. The final repair includes every non-documentation path and every high-risk document under the unchanged 200 KB and `$0.31` gates, reserves final-JSON capacity, and raises only the static output allowance to 3,500. Until it is approved, merged, and test-deployed, the last accepted test release remains online without the successor controls.
+
+## One orphaned GitHub Actions run cannot currently be deleted
+
+- Deploy Test run `30663819848` was dispatched while repository Actions was disabled. GitHub retained it as `queued` with zero jobs or check runs and no concurrency-group membership.
+- Autonomous-review run `30693764586` is a second zero-job orphan created when its workflow was disabled before scheduling. Replacement run `30693881648` acquired the only durable paid-call claim; the orphan cannot make an OpenAI request for that consumed head.
+- Normal and force-cancel APIs returned HTTP 500, and the deletion API returned HTTP 403. Briefly enabling the workflow did not materialize or cancel it. It did not block the successful replacement run and cannot execute while repository Actions or Deploy Test remains disabled.
+- The operator explicitly authorized historical-run cleanup, but GitHub has not exposed a successful removal path. Keep the identifier documented, do not repeatedly toggle deployment workflows for it, and retain accepted deployment/security-review evidence.
 
 ## Granular Entra configuration and new test SPA redirect need privileged verification
 
@@ -27,13 +35,13 @@
 - Test may still see allowlisted real list metadata/items. The read-only canary must stay disabled until its dedicated `bring.read` identity and target list are verified.
 - Undocumented provider write compatibility is covered by sanitized fixtures and guarded production rollout, not by a live mutation canary.
 
-## Remaining live acceptance criteria require external proof
+## Remaining live acceptance criteria
 
 - An intentionally failing or pending-check PR must be shown unable to merge.
 - High-risk exact-head independent review and no-bypass branch rules must be verified on GitHub.
-- Exactly one first-attempt CI/test chain must be observed. The exact CI run ID/correlation must remain pinned through test provenance and any later promotion. Function, SBOM, and frontend-source digests must match promotion evidence; each environment-rendered frontend digest must match its manifest, deployment settings, ledger, and preserved production bundle.
-- The fresh workflow repair must prove in test that the Function runtime points at the exact SHA-256-verified immutable blob version, and that the active static container contains exactly the approved frontend names and downloaded bytes after activation-last replacement and stale-blob removal. A mutable package URL, overwrite-only upload, or deleting the active site's stale files before replacement verification is not accepted as exact-release evidence.
-- Test runtime SHA is proven, but fail-closed auth, authenticated REST/MCP behavior, MCP origin, Bring read-only behavior, telemetry correlation, accepted provenance, storage/RBAC boundaries, and production promotion gates still require test/live evidence.
+- First-attempt CI/test pinning, immutable Function activation, activation-last frontend convergence, fail-closed auth, authenticated REST, MCP origin/REC behavior, telemetry correlation, and accepted test provenance are proven by run `30666921988` and its artifacts.
+- A live authenticated MCP provider call was not separately executed outside the authenticated workflow smoke. Local API/MCP tests and live unauthenticated MCP REC behavior pass; add a token-safe authenticated MCP smoke to a future workflow change if this must become an explicit deployment gate.
+- Bring remains disabled in test, so live Bring read-only behavior and private/session migration remain intentionally unaccepted.
 
 ## Angular production bundle warning
 

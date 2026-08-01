@@ -18,7 +18,7 @@ permissions:
 
 concurrency:
   group: codex-automerge-${{ github.event.pull_request.number || inputs.pr_number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   resolve:
@@ -33,7 +33,6 @@ jobs:
       eligible: ${{ steps.resolve.outputs.eligible }}
       pr_number: ${{ steps.resolve.outputs.pr_number }}
       head_sha: ${{ steps.resolve.outputs.head_sha }}
-      review_check_run_id: ${{ steps.resolve.outputs.review_check_run_id }}
     steps:
       - name: Resolve immutable pull-request identity
         id: resolve
@@ -77,24 +76,30 @@ jobs:
             echo "head_sha=$head_sha"
           } >> "$GITHUB_OUTPUT"
 
-          check_run_id="$(gh api \
-            --method POST \
-            "repos/$REPOSITORY/check-runs" \
-            -f name='Autonomous review complete' \
-            -f head_sha="$head_sha" \
-            -f status='in_progress' \
-            -f 'output[title]=Autonomous review started' \
-            -f 'output[summary]=The trusted default-branch controller is evaluating this exact pull-request head.' \
-            --jq '.id')"
-          echo "review_check_run_id=$check_run_id" >> "$GITHUB_OUTPUT"
+          if [ "$eligible" != "true" ]; then
+            gh api \
+              --method POST \
+              "repos/$REPOSITORY/check-runs" \
+              -f name='Autonomous review complete' \
+              -f head_sha="$head_sha" \
+              -f status='completed' \
+              -f conclusion='failure' \
+              -f external_id="juez-autonomous-review-eligibility:v1:$REPOSITORY:pull:$pr_number:head:$head_sha:run:${{ github.run_id }}" \
+              -f details_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              -f 'output[title]=Autonomous review ineligible' \
+              -f 'output[summary]=The pull request is draft, forked, outside the allowed branch/label policy, or carries a blocking label.' \
+              >/dev/null
+          fi
 
   autonomous-review:
     name: perform autonomous review
     needs: resolve
     if: needs.resolve.outputs.eligible == 'true'
-    timeout-minutes: 30
+    timeout-minutes: 75
     runs-on: ubuntu-latest
     permissions:
+      actions: read
+      checks: write
       contents: read
       pull-requests: read
     outputs:
@@ -102,11 +107,12 @@ jobs:
       reviewed_head_sha: ${{ steps.review.outputs.reviewed_head_sha }}
       high_risk: ${{ steps.review.outputs.high_risk }}
       model_invoked: ${{ steps.review.outputs.model_invoked }}
+      claim_status: ${{ steps.review.outputs.claim_status }}
     steps:
       - name: Checkout trusted controller
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: main
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
@@ -117,11 +123,24 @@ jobs:
       - name: Install trusted controller dependencies
         shell: bash
         run: npm ci --ignore-scripts
-      - name: Run deterministic classification and independent review
+      - name: Wait for free deterministic exact-head checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/autonomous-merge-controller.mjs preflight \
+            --repository "${{ github.repository }}" \
+            --pr "${{ needs.resolve.outputs.pr_number }}" \
+            --head-sha "${{ needs.resolve.outputs.head_sha }}" \
+            --wait-seconds 3600 \
+            --poll-seconds 15
+      - name: Claim exact head and run deterministic classification and independent review
         id: review
         env:
           GH_TOKEN: ${{ github.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -129,8 +148,10 @@ jobs:
             --repository "${{ github.repository }}" \
             --pr "${{ needs.resolve.outputs.pr_number }}" \
             --head-sha "${{ needs.resolve.outputs.head_sha }}" \
+            --run-id "${{ github.run_id }}" \
             --review-file "$RUNNER_TEMP/autonomous-review.json"
       - name: Upload sanitized review evidence
+        id: review_artifact
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
         with:
@@ -142,7 +163,7 @@ jobs:
   publish-review-check:
     name: publish autonomous review check
     needs: [resolve, autonomous-review]
-    if: always() && needs.resolve.result == 'success'
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.eligible == 'true'
     timeout-minutes: 5
     runs-on: ubuntu-latest
     permissions:
@@ -153,20 +174,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          CHECK_RUN_ID: ${{ needs.resolve.outputs.review_check_run_id }}
+          CLAIM_STATUS: ${{ needs.autonomous-review.outputs.claim_status }}
           REVIEW_RESULT: ${{ needs.autonomous-review.result }}
           REVIEW_DECISION: ${{ needs.autonomous-review.outputs.decision }}
           REVIEWED_HEAD_SHA: ${{ needs.autonomous-review.outputs.reviewed_head_sha }}
           EXPECTED_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
           HIGH_RISK: ${{ needs.autonomous-review.outputs.high_risk }}
           MODEL_INVOKED: ${{ needs.autonomous-review.outputs.model_invoked }}
+          PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
+          RUN_ID: ${{ github.run_id }}
         shell: bash
         run: |
           set -euo pipefail
+          claim_state_valid=true
+          if { [ "$HIGH_RISK" = "true" ] && [ "$CLAIM_STATUS" != "new" ]; } ||
+             { [ "$HIGH_RISK" != "true" ] && [ "$CLAIM_STATUS" != "not_required" ]; }; then
+            echo "Exact-head review claim state does not match the review path." >&2
+            claim_state_valid=false
+          fi
           conclusion=failure
           title='Autonomous review failed'
           summary='The review workflow did not approve this exact pull-request head.'
-          if [ "$REVIEW_RESULT" = "success" ] &&
+          if [ "$claim_state_valid" = "true" ] &&
+             [ "$REVIEW_RESULT" = "success" ] &&
              [ "$REVIEW_DECISION" = "approve" ] &&
              [ "$REVIEWED_HEAD_SHA" = "$EXPECTED_HEAD_SHA" ]; then
             conclusion=success
@@ -175,12 +205,17 @@ jobs:
           fi
 
           gh api \
-            --method PATCH \
-            "repos/$REPOSITORY/check-runs/$CHECK_RUN_ID" \
+            --method POST \
+            "repos/$REPOSITORY/check-runs" \
+            -f name='Autonomous review complete' \
+            -f head_sha="$EXPECTED_HEAD_SHA" \
             -f status=completed \
             -f conclusion="$conclusion" \
+            -f external_id="juez-autonomous-review-decision:v1:$REPOSITORY:pull:$PR_NUMBER:head:$EXPECTED_HEAD_SHA:run:$RUN_ID" \
+            -f details_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             -f "output[title]=$title" \
-            -f "output[summary]=$summary" >/dev/null
+            -f "output[summary]=$summary" \
+            >/dev/null
 
           if [ "$conclusion" != "success" ]; then
             exit 1
@@ -206,7 +241,7 @@ jobs:
       - name: Checkout trusted controller
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: main
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import {
   architectureFindings,
@@ -8,6 +11,7 @@ import {
   sourceArchitectureFindings,
 } from '../check-architecture.mjs';
 import { inspectDependencyFiles } from '../check-lockfile-policy.mjs';
+import { exclusiveWorkflowCheckWriteFindings } from '../autonomous-merge-controller.mjs';
 import { validateAgentSkills } from '../validate-agent-skills.mjs';
 
 test('repository architecture dependency directions are valid', () => {
@@ -39,6 +43,72 @@ test('authorization architecture rejects provider and transport dependencies', (
 
 test('MCP stays bundled behind one server and one Function route', () => {
   assert.deepEqual(bundledMcpFindings(), []);
+});
+
+test('only the trusted autonomous controller can write GitHub check runs', async () => {
+  assert.deepEqual(await exclusiveWorkflowCheckWriteFindings(), []);
+});
+
+test('workflow permission policy rejects inherited defaults and alternate GitHub credentials', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'workflow-permissions-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(
+    join(directory, 'codex-automerge.yml'),
+    `permissions:\n  contents: read\njobs:\n  resolve:\n    permissions:\n      checks: write\n  autonomous-review:\n    permissions:\n      checks: write\n  publish-review-check:\n    permissions:\n      checks: write\n`,
+  );
+  await writeFile(
+    join(directory, 'unsafe.yml'),
+    `jobs:\n  inherited:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/create-github-app-token@v2\n      - run: gh api repos/example/example/check-runs\n        env:\n          GH_TOKEN: \${{ secrets.REPOSITORY_PAT }}\n          AUTHORIZATION: \${{ secrets['GH_APP_PRIVATE_KEY'] }}\n  disguised:\n    runs-on: ubuntu-latest\n    steps:\n      - run: curl https://api.github.com/repos/example/example/check-runs\n        env:\n          AUTHORIZATION: Bearer \${{ secrets.OPENAI_API_KEY }}\n  reusable:\n    uses: ./.github/workflows/reusable.yml\n    secrets: inherit\n`,
+  );
+
+  const findings = await exclusiveWorkflowCheckWriteFindings(directory);
+  assert.ok(findings.some((finding) => finding.includes('top-level permissions must be an explicit mapping')));
+  assert.ok(findings.some((finding) => finding.includes('token minting actions are not allowed')));
+  assert.ok(findings.some((finding) => finding.includes('GitHub authentication must use the built-in job token')));
+  assert.ok(findings.some((finding) => finding.includes('workflow secret REPOSITORY_PAT is not allowlisted')));
+  assert.ok(findings.some((finding) => finding.includes('dynamic or bracket workflow secret access')));
+  assert.ok(findings.some((finding) => finding.includes('must not inherit all secrets')));
+  assert.ok(findings.some((finding) => finding.includes('raw GitHub check-run access is controller-only')));
+  assert.ok(
+    findings.some(
+      (finding) =>
+        finding.includes('unsafe.yml:jobs.disguised.steps.0.env.AUTHORIZATION') &&
+        finding.includes('GitHub authentication must use the built-in job token'),
+    ),
+  );
+});
+
+test('workflow permission policy computes effective job-level checks write', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'workflow-effective-permissions-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(
+    join(directory, 'codex-automerge.yml'),
+    `permissions:\n  checks: write\njobs:\n  resolve:\n    runs-on: ubuntu-latest\n  autonomous-review:\n    runs-on: ubuntu-latest\n  publish-review-check:\n    runs-on: ubuntu-latest\n  unexpected:\n    runs-on: ubuntu-latest\n`,
+  );
+
+  const findings = await exclusiveWorkflowCheckWriteFindings(directory);
+  assert.ok(findings.some((finding) => finding.includes('codex-automerge.yml:unexpected')));
+});
+
+test('runtime REC model analysis remains deterministic-first and cost bounded', () => {
+  const analyzer = readFileSync(
+    new URL('../../apps/api/src/shared/errors/llmDiagnosticAnalyzer.ts', import.meta.url),
+    'utf8',
+  );
+  const service = readFileSync(
+    new URL('../../apps/api/src/shared/errors/repairableErrorService.ts', import.meta.url),
+    'utf8',
+  );
+  assert.match(service, /deterministic\.classification !== 'diagnostic_uncertain'/);
+  assert.match(analyzer, /const DEFAULT_MODEL = 'gpt-5\.6-luna'/);
+  assert.match(analyzer, /const MAX_INPUT_BYTES = 24_000/);
+  assert.match(analyzer, /const MAX_OUTPUT_TOKENS = 700/);
+  assert.match(analyzer, /reasoning: \{ effort: 'low' \}/);
+  assert.match(analyzer, /verbosity: 'low'/);
+  assert.match(analyzer, /maxRetries: 0/);
+  assert.match(analyzer, /configured === DEFAULT_MODEL \? configured : null/);
+  assert.match(analyzer, /try \{\s+const capsuleJson = JSON\.stringify\(args\.capsule\)/);
+  assert.doesNotMatch(analyzer, /gpt-5\.6-sol/);
 });
 
 test('Azure Functions loads the fail-closed composition root before registering functions', () => {

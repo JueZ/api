@@ -11,13 +11,20 @@ For each candidate it:
 1. records the exact PR head SHA;
 2. checks branch/label eligibility and blocks forks/hold labels;
 3. classifies high-risk paths deterministically;
-4. runs an independent structured AI review for high-risk changes with `store=false`;
-5. publishes `Autonomous review complete` for that exact SHA;
-6. waits for every canonical check from the expected `github-actions` app;
-7. rechecks open/current/non-behind PR state;
-8. squash-merges only the reviewed head SHA.
+4. waits for every free canonical check from the expected `github-actions` app;
+5. serializes controller runs per pull request, revalidates every free exact-head check, verifies every workflow has an explicit permission map and computes each job's effective permissions, rejects non-allowlisted or dynamic secret access and alternate GitHub credential injection, and creates one completed permanent paid-call marker from inside the same review command that owns the request;
+6. binds that marker to repository, PR, exact head, trusted controller workflow, and workflow run; re-reads it after creation, before exact token counting, and again at the generation boundary; and permits OpenAI requests only while exactly that canonical marker and every free check still pass;
+7. never patches, releases, or reuses a paid-call marker or approval; any existing marker permanently blocks another request for that PR/head;
+8. makes one exact input-token count request and, only when the complete request remains within the cost ceiling, at most one independent structured model-generation request with `store=false`, a 3,500-token static output cap, and explicit final-JSON capacity reservation;
+9. publishes `Autonomous review complete` for that exact SHA;
+10. rechecks open/current/non-behind PR state;
+11. squash-merges only the reviewed head SHA.
 
-Critical/high review findings, stale heads, missing/wrong-app checks, forks, merge conflicts, and policy errors fail closed. Routine and high-risk changes do not require human approval under the selected policy.
+Critical/high review findings, a duplicate/consumed paid-review claim, stale heads, missing/wrong-app checks, forks, merge conflicts, and policy errors fail closed. Label changes are controller events, so adding/removing eligibility or hold labels is evaluated immediately without permitting a second exact-head paid request. Routine and high-risk changes do not require human approval under the selected policy.
+
+Repository workflow defaults are kept read-only with Actions unable to approve pull requests. The controller does not rely on that mutable setting for check-writer isolation: every workflow must declare an explicit top-level permission map, job overrides are evaluated with GitHub inheritance semantics, and only the approved controller jobs may receive `checks: write`. All workflow secret expressions use an exact allowlist; bracket/dynamic access and `secrets: inherit` are denied. GitHub App/PAT minting, shell token minting, non-built-in GitHub-auth tokens, and raw check-run access outside the controller are rejected. The required check and paid-call marker GitHub App identities are verified on the exact head.
+
+The live API path is accepted only from the exact `Codex Auto-Merge` GitHub Actions run. The standalone claim command has been removed, and the marker ID, canonical external identity, details URL, App identity, status, and conclusion must all match before either OpenAI request. The bounded model capsule contains the complete contextual diff for every changed non-documentation path, including executable policy helpers that are not themselves classified as high risk, and every classifier-matched high-risk documentation path, plus metadata for every changed file. Ordinary mixed `docs/` diffs may be omitted, while documentation-only high-risk PRs retain every changed documentation diff. Capsule completeness is checked against GitHub's authoritative changed-file list and deterministic risk classification. A hard 200,000-byte capsule limit rejects oversized reviews without silent truncation; the OpenAI input-token endpoint then counts the exact structured request, and the model-generation maximum—not an approximate byte or line count—must remain under the configured cost ceiling. If a free gate or marker changes after creation, before counting, or before generation, the controller fails closed and the marker remains consumed. Retrying requires a genuinely repaired new commit and a fresh full set of free gates.
 
 ## Required checks
 

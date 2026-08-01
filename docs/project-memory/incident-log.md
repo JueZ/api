@@ -1,5 +1,94 @@
 # Incident log
 
+## 2026-08-01 — Complete high-risk-document review exhausted 3,000 output tokens
+
+- Evidence: Exact-head CI `30693681909`, Policy `30693681916`, and CodeQL `30693681915` passed for `cbe2dc71f7815b282cb1e485ff7ec5ad27074ce9`. Review `30693881648` included every one of the eight classifier-matched high-risk paths, counted exactly 34,178 input tokens, and made one generation. The response ended `incomplete` after all 3,000 output tokens, including 2,974 hidden reasoning tokens, with an estimated upper-bound cost of `$0.26089`; no retry occurred.
+- Root cause: Adding the required security and ADR context increased the medium-reasoning workload enough that the static 3,000-token allowance left no capacity for the structured decision.
+- Repair: Preserve the consumed head. On the final scoped availability repair, explicitly reserve at least 512 output tokens for final JSON and raise only the static cap to 3,500. Keep the complete capsule, medium reasoning, exact token count, one generation, zero SDK retries, and `$0.31` ceiling unchanged. At the observed input, the new conservative maximum is `$0.27589`.
+- Status: Repair in progress. A failure of the same area on the next exact head exhausts the repair limit. No merge or deployment occurred; production remained disabled.
+
+## 2026-08-01 — Review found high-risk documentation omitted from mixed capsules
+
+- Evidence: Exact-head CI `30693294597`, Policy `30693294596`, and CodeQL `30693294603` passed for `670fa5c62d25e79db7cbf10f9684c3b8e9dd82ec`. Review `30693386513` returned a valid rejection because mixed capsules omitted classified high-risk files including `docs/security/autonomous-guardrails.md` and `docs/adr/0001-autonomous-high-risk-review.md`. It used 32,389 input and 1,848 output tokens, with 1,655 reasoning tokens and an estimated upper-bound cost of `$0.217385`.
+- Root cause: The complete-diff repair selected every non-documentation path but treated the entire `docs/` subtree as optional whenever executable files were present. File metadata did not provide the policy content required for independent review.
+- Repair: Preserve the consumed head. Include every non-documentation path plus every classifier-matched high-risk document, retain all documentation for documentation-only high-risk PRs, and omit only ordinary mixed documentation. Keep the 200 KB, 3,000-token, and exact `$0.31` gates unchanged.
+- Status: First scoped repair for this finding is in progress. No merge or deployment occurred; production remained disabled.
+
+## 2026-08-01 — Complete-diff medium review exhausted the initial output cap
+
+- Evidence: Exact-head CI `30692962446`, Policy `30692962452`, and CodeQL `30692962458` passed for `c1a4efacaa5dfce6b3dabc68487e4cda3d993329`. Review `30693113238` created one durable claim, counted exactly 32,304 input tokens, made one generation, and returned `empty_output` after all 1,500 output tokens were hidden reasoning. The estimated upper-bound cost was `$0.20652`; no retry occurred.
+- Root cause: Complete contextual coverage increased the review from roughly 12,000 to 32,000 input tokens. Medium reasoning required more than the initial 1,500-token allowance before it could emit the structured decision.
+- Repair: Preserve the consumed head and unchanged complete input. Raise the static output cap to 3,000 while retaining medium reasoning, zero SDK retries, one generation, and the exact `$0.31` gate. At the observed input size, the conservative maximum becomes `$0.251521`.
+- Status: This is the final scoped availability repair. If the new head again produces no decision, stop rather than widening the cap or retrying. No merge or deployment occurred; production remained disabled.
+
+## 2026-08-01 — Medium review found incomplete executable coverage
+
+- Evidence: PR #289 review `30692285462` ran only after exact-head CI `30692211088`, Policy `30692211086`, and CodeQL `30692211107` passed at `faa21750223eb20f72232f4dbb2e5d83f48ea4f1`. It rejected because `buildReviewDiffCapsule` selected only `risk.highRiskPaths`, omitting executable changes such as `scripts/lib/autonomous-policy.mjs`; the capsule covered 39,357 of 162,829 source-diff bytes. Sanitized usage recorded 12,083 input tokens and 1,048 output tokens, with an estimated upper-bound cost of `$0.091855`.
+- Root cause: Complete changed-file metadata did not compensate for absent code. The byte-as-token budget estimate also forced aggressive zero-context selection even though observed tokenization was substantially smaller than serialized byte length.
+- Repair: Preserve the consumed head. On a new commit, include every changed non-documentation diff section with normal context, cross-check completeness against GitHub's authoritative file list, reject capsules above 200 KB, obtain an exact input-token count after durable claim acquisition, and permit at most one generation only under the unchanged `$0.31` ceiling. Local tests mock both OpenAI requests.
+- Status: First scoped repair in progress. No rejected head merged or deployed; production remained disabled.
+
+## 2026-08-01 — High-effort bounded review returned no structured output
+
+- Evidence: PR #289 review run `30691998861` created exact-head claim `91348292399`, made one Responses API call, and returned `empty_output`. Sanitized usage recorded 12,066 input tokens and 1,500 output/reasoning tokens, with an estimated upper-bound cost of `$0.10533`.
+- Root cause: The required high reasoning effort consumed the complete fixed 1,500-token output allowance before emitting structured text.
+- Repair: Preserve the consumed head, keep the same model and exact capsule, and use medium reasoning under the unchanged one-call, no-retry, 1,500-token, and `$0.31` controls. No production or deployment workflow ran.
+- Status: Repair pending exact-head free gates and one final bounded review; the failed head will not be retried.
+
+## 2026-08-01 — PR #289 review rejected a separable claim path and incomplete credential audit
+
+- Evidence: Exact-head CI run `30689701559`, Policy Check run `30689701551`, and CodeQL run `30689701547` passed for `c069be9b9f3203d0625248eb6b9fd1d6fab83040`. Final bounded review run `30689779148` rejected because paid review remained callable separately from durable claim acquisition and the credential audit could be bypassed with alternate secret expression forms or an insufficiently bound marker identity.
+- Root cause: Claim acquisition and review were separate CLI/workflow steps, the claim external identity did not bind the exact controller workflow run, and the repository audit focused on known GitHub-token names instead of denying every non-allowlisted/dynamic workflow secret access path.
+- Repair: Remove the standalone claim command. The review command now creates, re-reads, and owns the only canonical marker; binds it to repository, PR, exact head, controller workflow, and run; revalidates its ID, App identity, external identity, details URL, status, and conclusion immediately before the API boundary; and requires the live path to run inside the exact trusted GitHub Actions workflow. The workflow audit now exact-name allowlists secrets and rejects bracket/dynamic access, `secrets: inherit`, alternate action/shell token minting, non-built-in GitHub-auth values, and raw check-run access outside the controller.
+- Safety/cost: The PR was returned to draft after rejection. One earlier controller was canceled shortly after review startup and is conservatively treated as a possible paid attempt; run `30689779148` is the one completed decision. The repair is batched and locally fake-backed before one final review. No rejected head merged or deployed, and production stayed disabled.
+
+## 2026-08-01 — PR #288 final review rejected incomplete effective-permission handling
+
+- Evidence: Exact-head CI run `30688624142`, Policy Check `30688624984`, and CodeQL `30688625872` passed for `9129ea7416df291ced7598b3c2b792d9b349aa13`. Final bounded review run `30688708482` rejected because the controller audit treated omitted workflow permissions as harmless and did not compute effective job inheritance, while GitHub repository defaults can be changed independently.
+- Root cause: The static/runtime audit searched only literal `checks: write` or `write-all` blocks. It did not require every workflow to have an explicit top-level permission map and did not reject alternate GitHub token sources.
+- Repair: A fresh successor requires explicit top-level maps, evaluates job overrides with inheritance, permits checks write only in `resolve`, `autonomous-review`, and `publish-review-check`, rejects alternate GitHub App/PAT minting and non-built-in GitHub-auth tokens, and regression-tests omitted/default and inherited-write cases. The live repository default was independently verified as read-only with Actions PR approval disabled; the controller no longer relies on that default.
+- Safety/cost: PR #288 was returned to draft after its second permitted review and will be closed as superseded. No rejected head was merged or deployed, no third paid call ran, and production remained disabled.
+
+## 2026-08-01 — PR #288 review rejected mutable paid-call claims and approval reuse
+
+- Evidence: After exact-head CI run `30687904523`, Policy Check `30687905396`, and CodeQL `30687906106` passed, the only paid review run `30687989661` rejected head `274e56fa3945bbed80e314ba668628dce6eee2de`. The sanitized findings showed that mutable check-run fields could hide a prior claim and that reusable approval was not independently bound to an immutable controller revision.
+- Repair: Remove approval reuse and all historical-run/artifact provenance logic. Create a separate completed neutral PR/head marker immediately before the call, never patch or release it, treat any existing marker as permanently consumed regardless of mutable fields, pin checkout to `github.workflow_sha`, and require `checks: write` to be exclusive to the controller through policy, tests, and a runtime audit.
+- Cost handling: Free gates ran first. PR #288 has used one paid review head; the repair is batched locally before one final exact-head review. Ordinary validation remains fake-backed and makes no live OpenAI call.
+- Safety: The optional service-identity helper remains deleted. Runtime OAuth/JWT enforcement is unchanged. No production or Azure mutation ran.
+
+## 2026-08-01 — PR #287 review rejected optional service-identity verification
+
+- Evidence: Exact-head CI, Policy Check, and CodeQL passed, then autonomous review run `30686104064` rejected head `8b43ae26d6416979f036b98aaa85467915560f71` with three high findings and one medium finding. The sanitized artifact identified forgeable reuse provenance, identity/role/FIC mutations before a fully pinned boundary, and missing free-check revalidation at the paid-call boundary.
+- Cost handling: The diagnosis used the one bootstrap workflow only; no rerun was requested. Ordinary tests remained fake-backed. The next head is the first and only scoped repair attempt for PR #287.
+- Repair: Reusable evidence was bound to the pinned GitHub Actions App, controller workflow identity, successful first run attempt, exact repository/head, and unique artifact digest; free-gate validation was repeated at claim and API boundaries. Final review run `30687126474` then rejected the optional read-only verifier because it did not reject every additional credential, FIC, or API-resource role assignment.
+- Resolution: The operator confirmed that repository-side service-identity setup/audit was not wanted. The verifier, its dedicated test, and setup references are removed from the reduced successor instead of expanding identity inspection or creating a new trust-management route.
+- Safety: No production workflow ran. No Azure identity, FIC, credential, role, assignment, app setting, or GitHub environment variable was changed.
+- CI follow-up: Repair head `4e443239b5dbbdb3012d49b16b00fd106f3f3534` passed remote Actionlint/ShellCheck, policy, and CodeQL, but secret scan rejected a duplicated public API client GUID under the generic-key heuristic. Controller run `30686876997` was canceled before evidence publication to limit spend. The repair commit is amended to derive the identifier from the canonical contract, removing the duplicate from branch history instead of allowlisting or weakening Gitleaks.
+
+## 2026-08-01 — PR #286 review exposed cross-run cost and federation gaps
+
+- Symptom: PR #286's final permitted review rejected an otherwise locally and remotely green head because one-call enforcement was scoped only to a controller invocation, caller-selected repository/environment values could rebind the existing FIC, and label transitions no longer triggered immediate evaluation.
+- Evidence: Exact-head review run `30670820873` returned three sanitized findings: no durable repository/PR/head claim, a workflow ref derived from caller-controlled repository/environment values, and removed `labeled`/`unlabeled` triggers. The PR was returned to draft and repository Actions were disabled; no third paid attempt ran.
+- Root cause: SDK retries and a single `responses.create` call do not deduplicate separate workflow runs. The helper validated self-consistency rather than an immutable complete test tuple. Removing label triggers treated duplicate-cost symptoms rather than making review idempotent.
+- Repair: The initial successor serialized controller runs and attempted durable claims plus trusted artifact reuse. Later reviews proved mutable claim/reuse evidence insufficient, so PR #288 removes reuse and uses an unpatched permanent paid-call marker instead. The optional service helper is deleted from current scope.
+- Status: Local validation in progress; successor PR, merge, and test-only deployment acceptance remain pending. Production is unchanged.
+
+## 2026-07-31 — Repeated high-cost autonomous review exhausted OpenAI credits
+
+- Symptom: The operator observed approximately $9 of OpenAI API spend during delivery testing and the final PR review failed with `credit_balance_exhausted` despite ordinary repository tests passing.
+- Evidence: 23 same-day `Codex Auto-Merge` artifacts report `modelInvoked=true` with `gpt-5.6-sol`; two final artifacts explicitly report two request attempts, establishing at least 25 paid Responses API requests. The trusted controller allowed two attempts with 6,000 then 12,000 output tokens, high reasoning, and up to 1.5 MB of diff. Local/API tests use mocks and made no live OpenAI request.
+- Root cause: Each pushed high-risk exact head started paid review immediately, including heads that had not yet passed deterministic checks, and model-output/API failures automatically doubled the request. The model and token/diff bounds were unsuitable for frequent delivery checks.
+- Repair: Gate paid review behind free exact-head checks; retain the required Sol/high-assurance analysis while allowing one call with SDK retries disabled, 40 KB diff, 1,500 output tokens, and a conservative $0.31 pre-call ceiling; record sanitized usage; require explicit live enablement. Runtime REC remains Luna/low, caps sanitized input at 24 KB and output at 700 tokens, disables SDK retries, and preserves deterministic-first fallback including serialization failures.
+- Status: PR #286 exhausted its two repairs; the remaining cross-run idempotency and federation findings are tracked in the 2026-08-01 successor incident above.
+
+## 2026-07-31 — Disabled Actions and legacy FIC subjects blocked test recovery
+
+- Symptom: run `30663819848` remained queued with zero jobs after a test dispatch while repository Actions was disabled. After Actions was restored, the replacement run instantiated but Azure login failed with `AADSTS700213` because GitHub emitted the strengthened workflow-bound subject and the Azure test credentials still trusted the former environment-only subject.
+- Root cause: enabling an individual workflow did not override the repository-wide Actions gate, and changing the repository OIDC claim template intentionally changed the assertion subject without rebinding the two existing test federated credentials.
+- Repair: re-enabled the repository gate only for the bounded test run, rebound the existing test deployment and smoke FICs in place to the exact repository/environment/workflow subject, and dispatched a new first-attempt run. No broad/default subject, long-lived secret, new trust root, production identity, or production workflow was enabled.
+- Verification: run `30666921988` passed every deployment, runtime, authenticated-smoke, telemetry, ledger, and provenance gate. Actions and Deploy Test were disabled again afterward. The original zero-job run still returns HTTP 500 to both cancel APIs and remains contained while Actions is disabled.
+- Status: test runtime incident resolved; orphaned GitHub run remains an operational cleanup item.
+
 ## 2026-07-31 — Entra GUID was rejected as a non-versioned UUID at Function startup
 
 - Symptom: test-only run `30651802409` passed infrastructure, complete settings reconciliation, immutable Function activation, and frontend activation, but every Function route returned `404`. Application Insights recorded the fail-closed entry-point error `OIDC_ALLOWED_OBJECT_IDS must contain at least one valid user object ID in test`.

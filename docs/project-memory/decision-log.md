@@ -1,5 +1,58 @@
 # Decision log
 
+## 2026-08-01 — Review every executable change and use exact input-token budgeting
+
+- Decision: For a high-risk PR, build the independent-review capsule from the complete contextual diff of every changed non-`docs/` path in GitHub's authoritative file list, not only paths matched by the high-risk classifier, plus every classifier-matched high-risk document. Include every changed document when the PR has no non-documentation changes. Reject missing, duplicate, ambiguous, source-oversized, or capsule-oversized input; never silently truncate executable or high-risk policy context.
+- Decision: Cap the complete capsule at 200,000 bytes. After one durable exact-head claim, make one OpenAI input-token count request using the same model, reasoning, schema, and input as generation. Permit at most one generation with up to 3,500 output tokens and explicit final-JSON capacity reservation only when the exact-input plus maximum-output calculation is no more than `$0.31`; disable SDK retries and revalidate free gates and claim ownership before both external-request boundaries.
+- Rationale: PR #289 review `30692285462` correctly found that the 40 KB high-risk-only capsule omitted executable policy helpers and reviewed only 39,357 of 162,829 source-diff bytes. Exact token counting allows complete relevant context without reverting to unsafe byte-as-token overestimation or raising the dollar ceiling.
+- Status: Review `30693386513` correctly found omitted mixed high-risk documentation. The complete repaired capsule then reached `30693881648`, but that review used all 3,000 output tokens internally and emitted no JSON. The final availability repair raises only the static output limit to 3,500 and reserves final-answer capacity; the exact `$0.31` cap, one-generation limit, medium reasoning, and fail-closed behavior remain unchanged. Fresh free gates, one new-head review, merge, and test-only acceptance remain pending. Production is unauthorized.
+
+## 2026-08-01 — Use medium reasoning inside the fixed autonomous-review output cap
+
+- Decision: Keep `gpt-5.6-sol`, one permanent claim, 1,500 output tokens, and the conservative `$0.31` ceiling, but use medium reasoning for the repository review.
+- Rationale: Review run `30691998861` consumed all 1,500 output tokens as high-effort reasoning and emitted no structured text. Raising the token or dollar ceiling would conflict with the operator's cost constraint; medium effort leaves capacity for the required fail-closed JSON decision.
+- Status: Implemented on the new exact head after preserving the consumed failed head. Free gates and one final bounded review remain required. Production remains unauthorized.
+
+## 2026-08-01 — Make paid-call ownership inseparable from the trusted review run
+
+- Decision: Remove the standalone review-claim command and create the permanent marker inside `runReview` after free gates and cost checks pass. Require one serialized controller run per PR and exactly one workflow invocation of the review command.
+- Decision: Bind the marker to repository, PR, exact head, controller workflow filename, and workflow run ID. Re-read it after creation and again immediately before the OpenAI call, requiring the created check-run ID, `github-actions` App, canonical external identity/details URL, and completed-neutral state.
+- Decision: Require the live API path to execute inside the exact `Codex Auto-Merge` GitHub Actions run. Exact-name allowlist all workflow secrets and reject dynamic/bracket expressions, inherited secret sets, alternate token-minting actions/shell paths, non-built-in GitHub-auth values, and non-controller raw check-run access.
+- Superseded detail: The initial repair selected exact zero-context changes only for classifier-matched executable/governance paths. Review `30692285462` proved that selection incomplete; the newer decision above requires every non-documentation changed path with context and exact token budgeting.
+- Rationale: PR #289 review run `30689779148` correctly identified that separate claim/review operations and a name-focused credential heuristic did not prove durable ownership at the paid boundary.
+- Status: Implemented in one batched repair on draft PR #289. Full local/free remote gates, one final independent review, merge, and test-only acceptance remain pending. Production is not authorized.
+
+## 2026-08-01 — Enforce effective workflow permissions without a new trust route
+
+- Decision: Require an explicit top-level permission map in every workflow, compute each job's effective permission map after overrides, and allow `checks: write` only in the three named trusted-controller jobs. Reject alternate GitHub App/PAT minting actions, suspicious GitHub credential secrets, and non-built-in values in workflow GitHub-auth token channels.
+- Decision: Keep repository default workflow permissions read-only and Actions PR approval disabled as defense in depth, but do not add an administration token, service identity, or external trust route merely so the workflow can inspect that mutable setting. Static policy and the trusted pre-call audit make omitted defaults irrelevant to check-writer isolation.
+- Rationale: Final PR #288 review correctly found that searching only literal write blocks was not a fail-closed effective-permission audit. GitHub's administration endpoint is an operator control plane and would require a stronger token than the least-privilege workflow token.
+- Status: Implemented on the fresh test-only successor; local/remote gates, independent review, merge, and exact test acceptance remain pending. Production is not authorized.
+
+## 2026-08-01 — Make the paid-review limit durable per exact head
+
+- Decision: Serialize every PR/manual/label controller event per pull request. After all free exact-head gates pass and immediately before a paid request, create one completed neutral marker whose name binds the PR and whose external identity binds repository, PR number, and full head SHA.
+- Decision: Never patch, release, or reuse that marker or an approval. Any existing marker permanently consumes the PR/head call. Pin controller checkout to `github.workflow_sha` and require `checks: write` to be exclusive to the controller workflow through policy, tests, and runtime validation.
+- Decision: Revalidate every free exact-head check both before the durable claim and immediately before the OpenAI request.
+- Decision: Remove service-identity setup and verification from repository scope. Application delivery consumes the already configured external test identity but does not create, repair, rotate, or audit its credentials, federation, roles, or trust routes.
+- Rationale: PR #286's terminal independent review showed that SDK/controller retry limits did not prevent repeated workflow events from charging the same head, and that deriving trusted values from caller inputs allowed federation rebinding.
+- Status: PR #287 free gates passed, but final review run `30687126474` rejected the optional verifier's incomplete whole-identity validation. The operator removed that feature and requested a reduced successor. Production remains disabled.
+
+## 2026-07-31 — Bound paid autonomous review before any model call
+
+- Decision: Wait for all free exact-head CI, Policy Check, and CodeQL requirements before independent AI review. Retain `gpt-5.6-sol` with high reasoning, but allow at most 40,000 diff bytes, 1,500 output tokens, one controller/SDK call, and a conservative $0.31 pre-call ceiling.
+- Decision: Record the request ceiling and sanitized response token usage in the review artifact. Fail closed without controller or SDK retries. Require an explicit live-API environment gate so local and ordinary test execution cannot spend against a present key.
+- Context: 23 autonomous-review runs invoked `gpt-5.6-sol` on 2026-07-31 and produced at least 25 API requests; repeated high-reasoning review, not `npm test`, caused the unexpected account spend.
+- Consequences: Batch locally validated changes before pushing. An over-budget or oversized high-risk change cannot merge until its review payload is reduced while retaining the single bundled MCP server. Runtime REC permits only Luna and falls back deterministically above a 24,000-byte sanitized capsule or on any model/configuration failure. The Platform project hard spend limit remains the monthly account-level backstop. The first bootstrap review rejected Luna/low as an assurance regression, so the repair preserves Sol/high and obtains savings from sequencing and hard request bounds instead.
+- Status: Implemented on PR #286 but superseded by the durable 2026-08-01 decision after that PR exhausted two review repairs. Shared future-deployment variable `REPAIRABLE_ERRORS_LLM_MODEL=gpt-5.6-luna` was applied without reading or changing the API key.
+
+## 2026-07-31 — Preserve workflow-bound OIDC and repair only existing test federation
+
+- Decision: Keep GitHub's repository/environment/`job_workflow_ref` OIDC subject and rebind only the two existing test federated credentials to that exact subject. Do not restore the broader legacy subject.
+- Decision: The operator deferred credential rotation and an independent trust-root bootstrap. Open unmerged PR #285 remains a separate proposal and does not block the accepted test-only recovery requested by the operator.
+- Consequences: The completed federation repair created no new identity, key, secret, permission, app role, or RBAC grant. Production federation and deployment remain unchanged and disabled. Future identity maintenance is a privileged operator procedure outside repository delivery; no service-identity helper remains in this repository.
+- Status: Test recovery validated by first-attempt run `30666921988`; repository-side service-identity maintenance is intentionally removed from current scope.
+
 ## 2026-07-31 — Validate Entra identifiers as GUIDs, not versioned UUIDs
 
 - Decision: Validate `OIDC_ALLOWED_OBJECT_IDS` and `OIDC_ALLOWED_TENANTS` with the Microsoft GUID shape only. Retain the stricter RFC-versioned UUID pattern for Bring list identifiers.

@@ -42,7 +42,7 @@ MCP uses the same API audience and per-tool permission. See `mcp-devmode.md`.
 
 ## Service identities
 
-Use `scripts/configure-entra-service-oauth.sh` with GitHub Environment federation. Default smoke roles are `catalogue.read,reddit.read`. Create a separate test canary identity with `bring.read` only. Each identity needs exact `OIDC_ALLOWED_APP_OBJECT_IDS`/`OIDC_ALLOWED_CLIENT_IDS`.
+The repository does not include a service-identity setup, repair, rotation, or audit helper. Authenticated test smoke consumes the already configured external identity through the deployment workflow. Changes to that identity, its credentials, federation, or app-role grants require a separate privileged operator procedure and are not part of application delivery. A future dedicated `bring.read` canary requires its own reviewed identity and allowlist.
 
 ## Repository/runtime variables
 
