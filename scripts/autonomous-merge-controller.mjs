@@ -288,7 +288,9 @@ export async function runReview(options, policy, github, openAIClient) {
   if (reviewClaim.status !== 'new') {
     throw new Error(`Autonomous review claim is unavailable (${reviewClaim.reason ?? reviewClaim.status}).`);
   }
-  await assertFreeExactHeadChecks(options, policy, github, 'paid-call boundary');
+  await assertFreeExactHeadChecks(options, policy, github, 'paid-call boundary', {
+    allowBlockedBeforeOwnReview: true,
+  });
   await assertReviewClaimOwnership(options, github, reviewClaim, 'paid-call boundary');
 
   let parsed;
@@ -471,7 +473,9 @@ export async function claimAutonomousReview(options, policy, github, { enforceGi
     throw new Error(`Autonomous review claim rejected the pull request:\n- ${pullRequestState.errors.join('\n- ')}`);
   }
 
-  const checkRuns = await assertFreeExactHeadChecks(options, policy, github, 'durable-claim boundary');
+  const checkRuns = await assertFreeExactHeadChecks(options, policy, github, 'durable-claim boundary', {
+    allowBlockedBeforeOwnReview: true,
+  });
   const claimName = reviewClaimName(options.prNumber);
   const matchingClaims = checkRuns.filter(
     (checkRun) => checkRun.name === claimName && checkRun.head_sha === options.headSha,
@@ -899,10 +903,18 @@ export async function assertReviewClaimOwnership(options, github, claim, boundar
   return marker;
 }
 
-async function assertFreeExactHeadChecks(options, policy, github, boundary) {
+async function assertFreeExactHeadChecks(
+  options,
+  policy,
+  github,
+  boundary,
+  { allowBlockedBeforeOwnReview = false } = {},
+) {
   const pullRequest = await github.getPullRequest(options.prNumber);
   assertExpectedHead(pullRequest, options.headSha);
-  const pullRequestState = evaluatePullRequestState(pullRequest, options.headSha, policy);
+  const pullRequestState = evaluatePullRequestState(pullRequest, options.headSha, policy, {
+    allowBlockedBeforeOwnReview,
+  });
   if (!pullRequestState.ok) {
     throw new Error(`Free exact-head checks failed at ${boundary}: ${pullRequestState.errors.join('; ')}.`);
   }

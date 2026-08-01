@@ -464,7 +464,11 @@ test('high-risk autonomous review uses one cost-bounded call and records sanitiz
   const requestOptions = [];
   const github = withFreeChecks({
     async getPullRequest() {
-      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
+      return {
+        ...pullRequest({ mergeable_state: 'blocked' }),
+        title: 'High-risk change',
+        body: 'Review this change.',
+      };
     },
     async getPullRequestFiles() {
       return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
