@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-01 — PR #288 review rejected mutable paid-call claims and approval reuse
+
+- Evidence: After exact-head CI run `30687904523`, Policy Check `30687905396`, and CodeQL `30687906106` passed, the only paid review run `30687989661` rejected head `274e56fa3945bbed80e314ba668628dce6eee2de`. The sanitized findings showed that mutable check-run fields could hide a prior claim and that reusable approval was not independently bound to an immutable controller revision.
+- Repair: Remove approval reuse and all historical-run/artifact provenance logic. Create a separate completed neutral PR/head marker immediately before the call, never patch or release it, treat any existing marker as permanently consumed regardless of mutable fields, pin checkout to `github.workflow_sha`, and require `checks: write` to be exclusive to the controller through policy, tests, and a runtime audit.
+- Cost handling: Free gates ran first. PR #288 has used one paid review head; the repair is batched locally before one final exact-head review. Ordinary validation remains fake-backed and makes no live OpenAI call.
+- Safety: The optional service-identity helper remains deleted. Runtime OAuth/JWT enforcement is unchanged. No production or Azure mutation ran.
+
 ## 2026-08-01 — PR #287 review rejected optional service-identity verification
 
 - Evidence: Exact-head CI, Policy Check, and CodeQL passed, then autonomous review run `30686104064` rejected head `8b43ae26d6416979f036b98aaa85467915560f71` with three high findings and one medium finding. The sanitized artifact identified forgeable reuse provenance, identity/role/FIC mutations before a fully pinned boundary, and missing free-check revalidation at the paid-call boundary.
@@ -14,7 +21,7 @@
 - Symptom: PR #286's final permitted review rejected an otherwise locally and remotely green head because one-call enforcement was scoped only to a controller invocation, caller-selected repository/environment values could rebind the existing FIC, and label transitions no longer triggered immediate evaluation.
 - Evidence: Exact-head review run `30670820873` returned three sanitized findings: no durable repository/PR/head claim, a workflow ref derived from caller-controlled repository/environment values, and removed `labeled`/`unlabeled` triggers. The PR was returned to draft and repository Actions were disabled; no third paid attempt ran.
 - Root cause: SDK retries and a single `responses.create` call do not deduplicate separate workflow runs. The helper validated self-consistency rather than an immutable complete test tuple. Removing label triggers treated duplicate-cost symptoms rather than making review idempotent.
-- Repair: The fresh successor serializes controller runs, claims one durable exact head after free gates, reuses only a trusted approval artifact, publishes current failure/success checks for label transitions, restores label triggers, and locks the helper to the unique existing approved test app/FIC without creating trust.
+- Repair: The initial successor serialized controller runs and attempted durable claims plus trusted artifact reuse. Later reviews proved mutable claim/reuse evidence insufficient, so PR #288 removes reuse and uses an unpatched permanent paid-call marker instead. The optional service helper is deleted from current scope.
 - Status: Local validation in progress; successor PR, merge, and test-only deployment acceptance remain pending. Production is unchanged.
 
 ## 2026-07-31 — Repeated high-cost autonomous review exhausted OpenAI credits

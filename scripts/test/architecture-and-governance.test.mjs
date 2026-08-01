@@ -8,6 +8,7 @@ import {
   sourceArchitectureFindings,
 } from '../check-architecture.mjs';
 import { inspectDependencyFiles } from '../check-lockfile-policy.mjs';
+import { exclusiveWorkflowCheckWriteFindings } from '../autonomous-merge-controller.mjs';
 import { validateAgentSkills } from '../validate-agent-skills.mjs';
 
 test('repository architecture dependency directions are valid', () => {
@@ -39,6 +40,10 @@ test('authorization architecture rejects provider and transport dependencies', (
 
 test('MCP stays bundled behind one server and one Function route', () => {
   assert.deepEqual(bundledMcpFindings(), []);
+});
+
+test('only the trusted autonomous controller can write GitHub check runs', async () => {
+  assert.deepEqual(await exclusiveWorkflowCheckWriteFindings(), []);
 });
 
 test('runtime REC model analysis remains deterministic-first and cost bounded', () => {

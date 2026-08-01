@@ -9,7 +9,7 @@
 
 ## Operational rollout
 
-1. Publish one fully validated reduced successor to PR #287 with authoritative review provenance, repeated free-gate boundaries, restored label evaluation, REC bounds, and no repository-side service-identity helper. Permit only its final independent review after all free gates pass.
+1. Complete one batched PR #288 repair with a permanent unpatched paid-call marker, no approval reuse, immutable controller checkout, controller-exclusive `checks: write`, repeated free-gate boundaries, restored label evaluation, REC bounds, and no repository-side service-identity helper. Permit only its final independent review after all free gates pass.
 2. Deploy the merged successor only to test, then require exact `/health`, unauthenticated and authenticated REST smokes, bundled MCP/REC behavior, telemetry correlation, release ledger, provenance, and runtime-truth evidence. Keep `DEPLOY_PRODUCTION_ENABLED=false` and production workflows disabled.
 3. Have a privileged Entra operator verify the granular delegated scopes/application roles and exact current test SPA redirect. Keep complete/remove unavailable to service tokens.
 4. Add a token-safe authenticated MCP smoke to the deployment workflow if live MCP provider execution must become a formal release gate; retain the existing REST authenticated smokes.

@@ -7,6 +7,7 @@ import {
   pathsMatchingPatterns,
   validateAutonomousPolicy,
 } from './lib/autonomous-policy.mjs';
+import { exclusiveWorkflowCheckWriteFindings } from './autonomous-merge-controller.mjs';
 
 export function highRiskPaths(paths, policy = loadAutonomousPolicy()) {
   return pathsMatchingPatterns(paths, policy.highRiskPaths);
@@ -131,7 +132,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     )
     .join('\n');
   const diff = `${trackedDiff}\n${untrackedDiff}`;
-  const findings = forbiddenDiffFindings(diff);
+  const findings = [...forbiddenDiffFindings(diff), ...(await exclusiveWorkflowCheckWriteFindings())];
   if (findings.length > 0) {
     console.error(`Forbidden guardrail changes detected: ${findings.join(', ')}`);
     process.exit(1);

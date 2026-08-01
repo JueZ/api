@@ -2,8 +2,8 @@
 
 ## 2026-08-01 — Make the paid-review limit durable per exact head
 
-- Decision: Serialize every PR/manual/label controller event per pull request. After all free exact-head gates pass and immediately before a paid request, atomically create one durable check-run claim whose external identity binds repository, PR number, and full head SHA.
-- Decision: Reuse only when the claim creator is the pinned GitHub Actions App, the independently queried source is a successful first attempt of the pinned main controller workflow ID/path/ref/event for the exact repository/head, and the unique artifact ID/SHA-256 digest matches evidence sealed into the check. Any mismatch publishes failure and cannot call again.
+- Decision: Serialize every PR/manual/label controller event per pull request. After all free exact-head gates pass and immediately before a paid request, create one completed neutral marker whose name binds the PR and whose external identity binds repository, PR number, and full head SHA.
+- Decision: Never patch, release, or reuse that marker or an approval. Any existing marker permanently consumes the PR/head call. Pin controller checkout to `github.workflow_sha` and require `checks: write` to be exclusive to the controller workflow through policy, tests, and runtime validation.
 - Decision: Revalidate every free exact-head check both before the durable claim and immediately before the OpenAI request.
 - Decision: Remove service-identity setup and verification from repository scope. Application delivery consumes the already configured external test identity but does not create, repair, rotate, or audit its credentials, federation, roles, or trust routes.
 - Rationale: PR #286's terminal independent review showed that SDK/controller retry limits did not prevent repeated workflow events from charging the same head, and that deriving trusted values from caller inputs allowed federation rebinding.

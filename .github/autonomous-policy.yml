@@ -108,12 +108,6 @@ riskClasses:
 
 autonomousReview:
   checkName: Autonomous review complete
-  trustedWorkflowId: 276132077
-  trustedWorkflowPath: .github/workflows/codex-automerge.yml
-  trustedWorkflowRef: JueZ/api/.github/workflows/codex-automerge.yml@refs/heads/main
-  trustedEvent: pull_request_target
-  trustedCheckAppId: 15368
-  trustedCheckAppSlug: github-actions
   requiredForHighRisk: true
   model: gpt-5.6-sol
   reasoningEffort: high
