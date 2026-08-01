@@ -239,8 +239,13 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   );
   assert.match(deployEnvironmentWorkflow, /fetched_main="\$\(git rev-parse refs\/remotes\/origin\/main\)"/);
   assert.match(deployEnvironmentWorkflow, /\[ "\$fetched_main" != "\$controller_ref" \]/);
+  assert.match(deployEnvironmentWorkflow, /\[ "\$\(pwd -P\)" != "\$\(realpath "\$GITHUB_WORKSPACE"\)" \]/);
+  assert.match(deployEnvironmentWorkflow, /find \. -mindepth 1 -maxdepth 1 -print -quit/);
   assert.match(deployEnvironmentWorkflow, /git checkout --detach "\$controller_ref"/);
+  assert.match(deployEnvironmentWorkflow, /git reset --hard "\$controller_ref"/);
   assert.match(deployEnvironmentWorkflow, /\[ "\$\(git rev-parse HEAD\)" = "\$controller_ref" \]/);
+  assert.match(deployEnvironmentWorkflow, /git status --porcelain=v1 --untracked-files=all --ignored=matching/);
+  assert.match(deployEnvironmentWorkflow, /git clean -ndx/);
   assert.match(
     deployEnvironmentWorkflow,
     /INFRA_FUNCTION_APP_NAME: \$\{\{ steps\.infra\.outputs\.function_app_name \}\}[\s\S]*?effective_functionapp_name="\$INFRA_FUNCTION_APP_NAME"/,
