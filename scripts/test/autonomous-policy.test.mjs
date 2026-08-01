@@ -258,6 +258,9 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.match(deployEnvironmentWorkflow, /\[ "\$controller_ref" != "\$checked_out_controller" \]/);
   assert.match(deployEnvironmentWorkflow, /git status --porcelain=v1 --untracked-files=all --ignored=matching/);
   assert.match(deployEnvironmentWorkflow, /git clean -ndx/);
+  assert.match(deployEnvironmentWorkflow, /--dir "\$RUNNER_TEMP\/rollback-ledger"/);
+  assert.equal(deployEnvironmentWorkflow.match(/--dir "\$RUNNER_TEMP\/deploy-test-provenance"/g)?.length, 2);
+  assert.doesNotMatch(deployEnvironmentWorkflow, /_dir="\$\(mktemp -d\)"[\s\S]*?gh run download/);
   assert.match(
     deployEnvironmentWorkflow,
     /INFRA_FUNCTION_APP_NAME: \$\{\{ steps\.infra\.outputs\.function_app_name \}\}[\s\S]*?effective_functionapp_name="\$INFRA_FUNCTION_APP_NAME"/,

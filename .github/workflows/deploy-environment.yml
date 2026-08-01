@@ -446,12 +446,16 @@ jobs:
                 echo "Rollback release run identity does not match the requested historical source and correlation." >&2
                 exit 1
               fi
-              rollback_ledger_dir="$(mktemp -d)"
+              mkdir -p "$RUNNER_TEMP/rollback-ledger"
+              if find "$RUNNER_TEMP/rollback-ledger" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+                echo "Rollback ledger extraction directory must be empty before download." >&2
+                exit 1
+              fi
               gh run download "$ROLLBACK_RELEASE_RUN_ID" \
                 --repo "$GITHUB_REPOSITORY" \
                 --name "release-ledger-prod-${deployment_ref}-${ROLLBACK_RELEASE_CORRELATION}" \
-                --dir "$rollback_ledger_dir"
-              rollback_ledger="$rollback_ledger_dir/release-ledger-prod.json"
+                --dir "$RUNNER_TEMP/rollback-ledger"
+              rollback_ledger="$RUNNER_TEMP/rollback-ledger/release-ledger-prod.json"
               EXPECTED_DELIVERY_CORRELATION="$ROLLBACK_RELEASE_CORRELATION" \
                 node scripts/validate-release-ledger.mjs "$rollback_ledger"
               if ! jq -e \
@@ -507,12 +511,16 @@ jobs:
                 echo "Deploy Test run identity does not match the exact source and correlation being promoted." >&2
                 exit 1
               fi
-              provenance_dir="$(mktemp -d)"
+              mkdir -p "$RUNNER_TEMP/deploy-test-provenance"
+              if find "$RUNNER_TEMP/deploy-test-provenance" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+                echo "Deploy Test provenance extraction directory must be empty before download." >&2
+                exit 1
+              fi
               gh run download "$TEST_DELIVERY_RUN_ID" \
                 --repo "$GITHUB_REPOSITORY" \
                 --name "deploy-test-provenance-${deployment_ref}-${TEST_DELIVERY_CORRELATION}" \
-                --dir "$provenance_dir"
-              provenance_file="$provenance_dir/deploy-test-provenance.json"
+                --dir "$RUNNER_TEMP/deploy-test-provenance"
+              provenance_file="$RUNNER_TEMP/deploy-test-provenance/deploy-test-provenance.json"
               if ! jq -e \
                 --arg source_ref "$deployment_ref" \
                 --arg test_run_id "$TEST_DELIVERY_RUN_ID" \
@@ -1851,12 +1859,16 @@ jobs:
             exit 1
           fi
 
-          provenance_dir="$(mktemp -d)"
+          mkdir -p "$RUNNER_TEMP/deploy-test-provenance"
+          if find "$RUNNER_TEMP/deploy-test-provenance" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+            echo "Deploy Test provenance extraction directory must be empty before download." >&2
+            exit 1
+          fi
           gh run download "$TEST_DELIVERY_RUN_ID" \
             --repo "$GITHUB_REPOSITORY" \
             --name "deploy-test-provenance-${deployment_ref}-${TEST_DELIVERY_CORRELATION}" \
-            --dir "$provenance_dir"
-          provenance_file="$provenance_dir/deploy-test-provenance.json"
+            --dir "$RUNNER_TEMP/deploy-test-provenance"
+          provenance_file="$RUNNER_TEMP/deploy-test-provenance/deploy-test-provenance.json"
           if ! jq -e \
             --arg source_ref "$deployment_ref" \
             --arg test_run_id "$TEST_DELIVERY_RUN_ID" \
