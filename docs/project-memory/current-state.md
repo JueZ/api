@@ -1,11 +1,21 @@
 # Current state
 
-## 2026-08-01 Reusable deployment checkout security repair in progress
+## 2026-08-01 Reusable deployment checkout security repair accepted
 
 - GitHub Actions CodeQL identified the existing explicit `actions/checkout` reference in the privileged reusable deployment workflow as an untrusted artifact source under `workflow_call`; later runtime SHA validation does not sanitize that static dataflow.
 - The bounded repair validates the immutable controller SHA before repository access, requires the exact GitHub workspace to be empty, fetches only the public protected `JueZ/api` `main` ref from a literal HTTPS repository URL, requires its fetched tip to equal that exact controller SHA, and checks out and hard-resets to that SHA detached. It rejects any untracked or ignored workspace content and retains the caller SHA, workflow SHA, checked-out HEAD, current-main, first-attempt, and Actions API identity gates before any Azure login or mutation.
 - Step outputs used by deployment shell code are passed through step environment variables instead of direct expression interpolation. No authentication, deployment, smoke, telemetry, policy, or branch-protection gate is weakened.
-- This repair is delivered separately from production private-storage preparation with application deployment skipped. Production application state remains unchanged.
+- PR #298 exact head `59b17b6bcb9cc4bceb099554029635078334f7f0` passed CI `30707131034`, Policy `30707131051`, both CodeQL analyses `30707131086`, and independent review/merge `30707224277`. The review approved with no findings and used an estimated upper-bound `$0.060725`; the PR squash-merged as `0fcaf64c6270fc1b7d00b1af2ee76f97f7564601`.
+- Exact-main CI `30707340491` passed for that merge. Application deployment was skipped and the deployment controllers remain disabled between bounded windows, so test and production runtime state were unchanged by the security repair.
+
+## 2026-08-01 Bounded production private-storage preparation authorized
+
+- The operator explicitly authorized provisioning the production private-storage boundary and migrating the one approved WLH reference blob without deploying or changing the production Function or frontend.
+- The last accepted Deploy Test run `30704470979` proved exact main `5f033da73e4fd24de2f5f41c1abba97159f4b56b`; the security merge advanced `main`, so a fresh accepted Deploy Test for the eventual storage-preparation merge is required before production storage mutation.
+- The production source blob exists at the legacy storage boundary and independently hashes to `4b2651b8d842854716b4fb2e20ecd9482f59f2ea6ee2352401bec5d42e8c6ed0`. Production remains healthy on accepted commit `9d99dfc041893070eeb817e24ad0baeadaee11e1` and run `30168788236`.
+- The bounded preparation path reuses the existing workflow-bound `deploy-environment.yml` OIDC identity; it adds no federated credential, secret, identity, broader subject, or alternate trust route. Both reusable jobs require the supplied controller ref, immutable caller SHA, fetched protected-main SHA, checkout, reset, and resulting HEAD to be the same full SHA before any repository script or Azure login. Preparation additionally requires exact-current-main CI and accepted test provenance, a fixed source/target/blob/digest tuple, explicit confirmation, storage-only what-if, no-overwrite copy, post-copy digest verification, and proof that production runtime identity stayed unchanged.
+- Every downloaded release-ledger or test-provenance artifact is extracted only into an explicit runner-temporary directory and then checked against its exact workflow run, source, correlation, artifact fields, authenticated-smoke result, and telemetry result; no downloaded artifact can overwrite or supply executable workspace content.
+- `Promote Production`, `Rollback Production`, and `Codex Main Delivery` remain outside this authorization. The preparation workflow must be disabled again immediately after its bounded dispatch, and a later application promotion still requires separate control and every normal production acceptance gate.
 
 ## 2026-08-01 Production release latch explicitly enabled under disabled promotion controls
 

@@ -1,0 +1,54 @@
+name: Prepare Production Private Storage
+run-name: Prepare Production Private Storage ${{ github.sha }} ${{ format('prepare-{0}-{1}', github.run_id, github.run_attempt) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Enter PREPARE_PRODUCTION_PRIVATE_STORAGE to authorize only this bounded storage preparation.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+  issues: write
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  prepare-production-private-storage:
+    name: prepare production private storage
+    uses: ./.github/workflows/deploy-environment.yml
+    secrets:
+      REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
+      BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
+      BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
+      BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
+      BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
+      BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
+    with:
+      environmentName: prod
+      azureResourceGroup: rg-api-prod
+      githubEnvironment: production
+      deployFrontend: false
+      deployFunctions: false
+      sourceRef: ${{ github.sha }}
+      controllerRef: ${{ github.sha }}
+      controllerWorkflowSha: ${{ github.workflow_sha }}
+      updateProductionVariables: false
+      preparePrivateStorageOnly: true
+      deliveryCorrelation: ${{ format('prepare-{0}-{1}', github.run_id, github.run_attempt) }}
+      testDeliveryCorrelation: ${{ vars.PREP_TEST_CORRELATION }}
+      testDeliveryRunId: ${{ vars.PREP_TEST_RUN_ID }}
+      ciRunId: ${{ vars.PREP_CI_RUN_ID }}
+      ciDeliveryCorrelation: ${{ vars.PREP_CI_CORRELATION }}
+      migrationSourceStorageAccount: stapicatalogueprodbfjsts
+      migrationTargetStorageAccount: stapicatalogueprodpbfjst
+      migrationExpectedSha256: 4b2651b8d842854716b4fb2e20ecd9482f59f2ea6ee2352401bec5d42e8c6ed0
+      migrationConfirmation: ${{ inputs.confirmation }}
