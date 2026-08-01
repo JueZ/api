@@ -1,5 +1,13 @@
 # Decision log
 
+## 2026-08-01 — Separate Entra service-role claim values from canonical delegated scopes
+
+- Decision: Keep the public delegated OAuth scope values `catalogue.read` and `reddit.read` for the browser and bundled MCP client. Rename only the corresponding service-only Entra application-role claim values to `catalogue.service.read` and `reddit.service.read`, preserving their existing role IDs and assignments.
+- Decision: Normalize those two aliases to the canonical operation permissions only after JWT validation, app-only token classification, tenant validation, and explicit service-client allowlisting. Continue accepting the legacy canonical role values during the migration. Do not normalize service aliases for delegated user tokens.
+- Rationale: The production Entra API registration already uses `catalogue.read` and `reddit.read` as application-role values. Microsoft Graph rejects delegated scopes with the same values as duplicate application permissions, so the previous assumption that a custom resource app could expose matching scope and app-role values was false in this tenant.
+- Migration: Deliver and verify the backward-compatible runtime normalization before changing Entra. Then rename the existing role values in place, expose the seven canonical delegated scopes, pre-authorize the existing bundled MCP OAuth client, deduplicate its legacy `api.access` manifest entries, and re-run authenticated deployment/runtime verification.
+- Security: No issuer, audience, JWT signature validation, allowlist, token-type restriction, destructive-operation policy, secret, credential, federation, or RBAC rule is weakened. The temporary Codex Graph grant is `Application.ReadWrite.OwnedBy` and applies only to app registrations that the operator explicitly made it own.
+
 ## 2026-08-01 — Repair the existing production smoke trust in place and accept production
 
 - Decision: Under the operator's explicit authorization, update only the one existing production smoke federated identity credential to GitHub's exact repository/environment/`deploy-environment.yml` subject. Do not create or delete a federated credential, identity, secret, RBAC assignment, broader subject, alternate trust route, or credential rotation/revocation path.
