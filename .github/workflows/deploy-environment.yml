@@ -278,6 +278,24 @@ jobs:
             echo "Deployment controller workspace contains content outside the exact commit." >&2
             exit 1
           fi
+      - name: Download exact accepted production release ledger
+        if: ${{ inputs.environmentName == 'prod' && inputs.allowRollback }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        with:
+          name: release-ledger-prod-${{ inputs.sourceRef }}-${{ inputs.rollbackReleaseCorrelation }}
+          path: ${{ runner.temp }}/rollback-ledger
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.rollbackReleaseRunId }}
+      - name: Download exact accepted test provenance for production
+        if: ${{ inputs.environmentName == 'prod' && !inputs.allowRollback }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        with:
+          name: deploy-test-provenance-${{ inputs.sourceRef }}-${{ inputs.testDeliveryCorrelation }}
+          path: ${{ runner.temp }}/deploy-test-provenance
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.testDeliveryRunId }}
       - name: Validate deployment source
         id: source
         shell: bash
@@ -446,16 +464,12 @@ jobs:
                 echo "Rollback release run identity does not match the requested historical source and correlation." >&2
                 exit 1
               fi
-              mkdir -p "${{ runner.temp }}/rollback-ledger"
-              if find "${{ runner.temp }}/rollback-ledger" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-                echo "Rollback ledger extraction directory must be empty before download." >&2
+              rollback_ledger="${{ runner.temp }}/rollback-ledger/release-ledger-prod.json"
+              if [ ! -f "$rollback_ledger" ] || [ -L "$rollback_ledger" ] ||
+                 [ "$(find "${{ runner.temp }}/rollback-ledger" -mindepth 1 -maxdepth 1 -printf '%P\n')" != "release-ledger-prod.json" ]; then
+                echo "Downloaded rollback evidence must contain only the exact regular release-ledger file." >&2
                 exit 1
               fi
-              gh run download "$ROLLBACK_RELEASE_RUN_ID" \
-                --repo "$GITHUB_REPOSITORY" \
-                --name "release-ledger-prod-${deployment_ref}-${ROLLBACK_RELEASE_CORRELATION}" \
-                --dir "${{ runner.temp }}/rollback-ledger"
-              rollback_ledger="${{ runner.temp }}/rollback-ledger/release-ledger-prod.json"
               EXPECTED_DELIVERY_CORRELATION="$ROLLBACK_RELEASE_CORRELATION" \
                 node scripts/validate-release-ledger.mjs "$rollback_ledger"
               if ! jq -e \
@@ -511,16 +525,12 @@ jobs:
                 echo "Deploy Test run identity does not match the exact source and correlation being promoted." >&2
                 exit 1
               fi
-              mkdir -p "${{ runner.temp }}/deploy-test-provenance"
-              if find "${{ runner.temp }}/deploy-test-provenance" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-                echo "Deploy Test provenance extraction directory must be empty before download." >&2
+              provenance_file="${{ runner.temp }}/deploy-test-provenance/deploy-test-provenance.json"
+              if [ ! -f "$provenance_file" ] || [ -L "$provenance_file" ] ||
+                 [ "$(find "${{ runner.temp }}/deploy-test-provenance" -mindepth 1 -maxdepth 1 -printf '%P\n')" != "deploy-test-provenance.json" ]; then
+                echo "Downloaded test evidence must contain only the exact regular provenance file." >&2
                 exit 1
               fi
-              gh run download "$TEST_DELIVERY_RUN_ID" \
-                --repo "$GITHUB_REPOSITORY" \
-                --name "deploy-test-provenance-${deployment_ref}-${TEST_DELIVERY_CORRELATION}" \
-                --dir "${{ runner.temp }}/deploy-test-provenance"
-              provenance_file="${{ runner.temp }}/deploy-test-provenance/deploy-test-provenance.json"
               if ! jq -e \
                 --arg source_ref "$deployment_ref" \
                 --arg test_run_id "$TEST_DELIVERY_RUN_ID" \
@@ -1735,6 +1745,14 @@ jobs:
             echo "Preparation controller workspace contains content outside the exact commit." >&2
             exit 1
           fi
+      - name: Download exact accepted test provenance for storage preparation
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        with:
+          name: deploy-test-provenance-${{ inputs.sourceRef }}-${{ inputs.testDeliveryCorrelation }}
+          path: ${{ runner.temp }}/deploy-test-provenance
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.testDeliveryRunId }}
       - name: Validate bounded preparation source and evidence
         shell: bash
         run: |
@@ -1859,16 +1877,12 @@ jobs:
             exit 1
           fi
 
-          mkdir -p "${{ runner.temp }}/deploy-test-provenance"
-          if find "${{ runner.temp }}/deploy-test-provenance" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-            echo "Deploy Test provenance extraction directory must be empty before download." >&2
+          provenance_file="${{ runner.temp }}/deploy-test-provenance/deploy-test-provenance.json"
+          if [ ! -f "$provenance_file" ] || [ -L "$provenance_file" ] ||
+             [ "$(find "${{ runner.temp }}/deploy-test-provenance" -mindepth 1 -maxdepth 1 -printf '%P\n')" != "deploy-test-provenance.json" ]; then
+            echo "Downloaded test evidence must contain only the exact regular provenance file." >&2
             exit 1
           fi
-          gh run download "$TEST_DELIVERY_RUN_ID" \
-            --repo "$GITHUB_REPOSITORY" \
-            --name "deploy-test-provenance-${deployment_ref}-${TEST_DELIVERY_CORRELATION}" \
-            --dir "${{ runner.temp }}/deploy-test-provenance"
-          provenance_file="${{ runner.temp }}/deploy-test-provenance/deploy-test-provenance.json"
           if ! jq -e \
             --arg source_ref "$deployment_ref" \
             --arg test_run_id "$TEST_DELIVERY_RUN_ID" \

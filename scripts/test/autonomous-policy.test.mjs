@@ -258,9 +258,13 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.match(deployEnvironmentWorkflow, /\[ "\$controller_ref" != "\$checked_out_controller" \]/);
   assert.match(deployEnvironmentWorkflow, /git status --porcelain=v1 --untracked-files=all --ignored=matching/);
   assert.match(deployEnvironmentWorkflow, /git clean -ndx/);
-  assert.match(deployEnvironmentWorkflow, /--dir "\$\{\{ runner\.temp \}\}\/rollback-ledger"/);
-  assert.equal(deployEnvironmentWorkflow.match(/--dir "\$\{\{ runner\.temp \}\}\/deploy-test-provenance"/g)?.length, 2);
-  assert.doesNotMatch(deployEnvironmentWorkflow, /_dir="\$\(mktemp -d\)"[\s\S]*?gh run download/);
+  assert.match(deployEnvironmentWorkflow, /path: \$\{\{ runner\.temp \}\}\/rollback-ledger/);
+  assert.equal(deployEnvironmentWorkflow.match(/path: \$\{\{ runner\.temp \}\}\/deploy-test-provenance/g)?.length, 2);
+  assert.equal(
+    deployEnvironmentWorkflow.match(/actions\/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093/g)?.length,
+    5,
+  );
+  assert.doesNotMatch(deployEnvironmentWorkflow, /gh run download/);
   assert.match(
     deployEnvironmentWorkflow,
     /INFRA_FUNCTION_APP_NAME: \$\{\{ steps\.infra\.outputs\.function_app_name \}\}[\s\S]*?effective_functionapp_name="\$INFRA_FUNCTION_APP_NAME"/,
