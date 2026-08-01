@@ -1,11 +1,17 @@
 # Decision log
 
+## 2026-08-01 — Contain failed production attempts at the existing trust boundary
+
+- Decision: Keep `Promote Production`, `Rollback Production`, `Codex Main Delivery`, and `Codex Auto-Merge` disabled after the contemporaneous operator-named production attempts. Do not create a new, broader, or alternate Azure trust route to bypass the production OIDC failure.
+- Evidence: Deploy Test `30699788985` accepted exact main `d359035b1fda01a00b90a4e892399526b6c2a03c`. Promote Production `30699926656` stopped at configuration while the production latch was false. After the latch became true and complete production configuration validation passed, Promote Production `30700059811` failed Azure login with `AADSTS700213`: no existing federated identity credential matched the exact workflow-bound production subject.
+- Consequence: No Azure infrastructure or application mutation occurred, and production remains on its prior accepted release. Issues #292 and #294 retain the failure evidence. Any future production attempt requires separately authorized repair or privileged verification of the existing production federation, fresh test provenance for the then-current `main`, private WLH data migration, and every normal production acceptance gate.
+
 ## 2026-08-01 — Enable the production latch without dispatching a release
 
 - Decision: Set `DEPLOY_PRODUCTION_ENABLED=true` after the operator's explicit request, while keeping `Promote Production`, `Rollback Production`, and `Codex Main Delivery` disabled between bounded delivery windows.
 - Decision: Treat the variable as one necessary fail-closed release condition, not as standalone authorization to dispatch or accept production. A future production window must still use exact-current-main CI and test provenance, verify the required production configuration and identities, migrate and digest-check the private WLH reference data, and pass production smoke, telemetry, ledger/runtime-truth, and rollback-bundle gates.
 - Rationale: The operator authorized the repository latch but did not request a production deployment. Separating the persistent latch from a bounded workflow-enable/dispatch window preserves that scope and prevents an accidental release.
-- Status: Authorized for guarded enablement; production remains unchanged and promotion remains operationally blocked until the prerequisites above are satisfied.
+- Status: Enabled and verified. Production remains unchanged; the failed-closed attempts and current blockers are recorded in the newer containment decision above.
 
 ## 2026-08-01 — Review every executable change and use exact input-token budgeting
 
