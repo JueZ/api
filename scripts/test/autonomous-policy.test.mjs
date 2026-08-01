@@ -12,6 +12,7 @@ import {
   validateAutonomousPolicy,
 } from '../lib/autonomous-policy.mjs';
 import {
+  buildReviewDiffCapsule,
   calculateReviewBudget,
   claimAutonomousReview,
   evaluatePullRequestState,
@@ -19,12 +20,22 @@ import {
   mergeGateDecision,
   reviewClaimExternalId,
   reviewClaimName,
+  reviewRequestIdempotencyKey,
   runRequiredCheckPreflight,
   runReview,
   validateAutonomousReview,
 } from '../autonomous-merge-controller.mjs';
 
 const headSha = 'a'.repeat(40);
+const highRiskDiff = `diff --git a/.github/workflows/example.yml b/.github/workflows/example.yml
+index 1111111..2222222 100644
+--- a/.github/workflows/example.yml
++++ b/.github/workflows/example.yml
+@@ -1,2 +1,2 @@
+-permissions: write-all
++permissions:
+   contents: read
+`;
 const policy = loadAutonomousPolicy();
 const mainDeliveryWorkflow = readFileSync(
   new URL('../../.github/workflows/codex-main-delivery.yml', import.meta.url),
@@ -83,10 +94,24 @@ function successfulFreeChecks() {
 }
 
 function withFreeChecks(github) {
+  let claimMarker;
   return {
     ...github,
     async getCheckRuns() {
-      return successfulFreeChecks();
+      return [...successfulFreeChecks(), ...(claimMarker ? [claimMarker] : [])];
+    },
+    async createReviewClaim(claim) {
+      claimMarker = {
+        id: 777,
+        name: claim.name,
+        head_sha: claim.headSha,
+        external_id: claim.externalId,
+        details_url: claim.detailsUrl,
+        status: 'completed',
+        conclusion: 'neutral',
+        app: { slug: 'github-actions' },
+      };
+      return claimMarker;
     },
   };
 }
@@ -104,15 +129,27 @@ test('canonical autonomous policy is internally valid', () => {
   assert.match(codexAutomergeWorkflow, /AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'/);
   assert.match(codexAutomergeWorkflow, /ready_for_review, labeled, unlabeled/);
   assert.match(codexAutomergeWorkflow, /cancel-in-progress: false/);
-  assert.match(codexAutomergeWorkflow, /Permanently consume the exact-head paid-review claim/);
-  assert.ok(
-    codexAutomergeWorkflow.indexOf('Wait for free deterministic exact-head checks') <
-      codexAutomergeWorkflow.indexOf('Permanently consume the exact-head paid-review claim'),
+  assert.match(
+    codexAutomergeWorkflow,
+    /group: codex-automerge-\$\{\{ github\.event\.pull_request\.number \|\| inputs\.pr_number \}\}/,
+  );
+  assert.match(codexAutomergeWorkflow, /Claim exact head and run deterministic classification/);
+  assert.doesNotMatch(codexAutomergeWorkflow, /autonomous-merge-controller\.mjs claim/);
+  assert.equal(codexAutomergeWorkflow.match(/autonomous-merge-controller\.mjs review/g)?.length, 1);
+  assert.match(
+    codexAutomergeWorkflow,
+    /claim_state_valid=false[\s\S]*gh api[\s\S]*if \[ "\$conclusion" != "success" \]/,
   );
   assert.ok(
-    codexAutomergeWorkflow.indexOf('Permanently consume the exact-head paid-review claim') <
-      codexAutomergeWorkflow.indexOf('Run deterministic classification and independent review'),
+    autonomousControllerSource.indexOf('const reviewClaim = await claimAutonomousReview') <
+      autonomousControllerSource.indexOf('response = await client.responses.create'),
   );
+  assert.ok(
+    autonomousControllerSource.indexOf(
+      "assertReviewClaimOwnership(options, github, reviewClaim, 'paid-call boundary')",
+    ) < autonomousControllerSource.indexOf('response = await client.responses.create'),
+  );
+  assert.match(autonomousControllerSource, /requireGitHubActions: !openAIClient/);
   assert.match(autonomousControllerSource, /maxRetries: 0/);
   assert.match(codexAutomergeWorkflow, /ref: \$\{\{ github\.workflow_sha \}\}/);
   assert.doesNotMatch(codexAutomergeWorkflow, /source-run-id|Reuse approved exact-head review evidence/);
@@ -424,6 +461,7 @@ test('high-risk autonomous review uses one cost-bounded call and records sanitiz
   const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-bounded-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const requests = [];
+  const requestOptions = [];
   const github = withFreeChecks({
     async getPullRequest() {
       return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
@@ -432,13 +470,14 @@ test('high-risk autonomous review uses one cost-bounded call and records sanitiz
       return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
     },
     async getPullRequestDiff() {
-      return 'diff --git a/example b/example';
+      return highRiskDiff;
     },
   });
   const client = {
     responses: {
-      async create(request) {
+      async create(request, options) {
         requests.push(request);
+        requestOptions.push(options);
         return {
           id: 'resp_complete',
           status: 'completed',
@@ -465,6 +504,7 @@ test('high-risk autonomous review uses one cost-bounded call and records sanitiz
       repository: 'JueZ/api',
       prNumber: 1,
       headSha,
+      runId: 12345,
       reviewFile: join(directory, 'review.json'),
     },
     policy,
@@ -474,11 +514,17 @@ test('high-risk autonomous review uses one cost-bounded call and records sanitiz
 
   assert.equal(review.decision, 'approve');
   assert.equal(review.responseId, 'resp_complete');
+  assert.deepEqual(review.reviewClaim, { status: 'new', checkRunId: 777, runId: 12345 });
   assert.equal(requests.length, 1);
   assert.equal(requests[0].model, 'gpt-5.6-sol');
   assert.deepEqual(requests[0].reasoning, { effort: 'high' });
   assert.equal(requests[0].text.verbosity, 'low');
   assert.equal(requests[0].max_output_tokens, 1500);
+  const expectedIdempotencyKey = reviewRequestIdempotencyKey('JueZ/api', 1, headSha);
+  assert.equal(requestOptions[0].idempotencyKey, expectedIdempotencyKey);
+  assert.equal(requestOptions[0].headers['Idempotency-Key'], expectedIdempotencyKey);
+  assert.equal(expectedIdempotencyKey, reviewRequestIdempotencyKey('JueZ/api', 1, headSha));
+  assert.notEqual(expectedIdempotencyKey, reviewRequestIdempotencyKey('JueZ/api', 2, headSha));
   assert.equal(review.reviewBudget.apiCallLimit, 1);
   assert.ok(review.reviewBudget.estimatedMaximumCostUsd <= policy.autonomousReview.maxEstimatedCostUsd);
   assert.deepEqual(review.modelUsage, {
@@ -509,7 +555,7 @@ test('high-risk autonomous review does not retry or accept an incomplete respons
       return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
     },
     async getPullRequestDiff() {
-      return 'diff --git a/example b/example';
+      return highRiskDiff;
     },
   });
   const client = {
@@ -532,6 +578,7 @@ test('high-risk autonomous review does not retry or accept an incomplete respons
         repository: 'JueZ/api',
         prNumber: 1,
         headSha,
+        runId: 12345,
         reviewFile: join(directory, 'review.json'),
       },
       policy,
@@ -556,7 +603,7 @@ test('high-risk autonomous review fails closed after one structurally invalid de
       return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
     },
     async getPullRequestDiff() {
-      return 'diff --git a/example b/example';
+      return highRiskDiff;
     },
   });
   const client = {
@@ -583,6 +630,7 @@ test('high-risk autonomous review fails closed after one structurally invalid de
         repository: 'JueZ/api',
         prNumber: 1,
         headSha,
+        runId: 12345,
         reviewFile: join(directory, 'review.json'),
       },
       policy,
@@ -607,7 +655,7 @@ test('persistent empty model output fails closed with sanitized review evidence'
       return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
     },
     async getPullRequestDiff() {
-      return 'diff --git a/example b/example';
+      return highRiskDiff;
     },
   });
   const client = {
@@ -629,6 +677,7 @@ test('persistent empty model output fails closed with sanitized review evidence'
         repository: 'JueZ/api',
         prNumber: 1,
         headSha,
+        runId: 12345,
         reviewFile,
       },
       policy,
@@ -660,7 +709,7 @@ test('autonomous review cost ceiling blocks before any API request', async (cont
       return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
     },
     async getPullRequestDiff() {
-      return 'diff --git a/example b/example';
+      return highRiskDiff;
     },
   });
   const client = {
@@ -676,7 +725,12 @@ test('autonomous review cost ceiling blocks before any API request', async (cont
   };
 
   await assert.rejects(
-    runReview({ repository: 'JueZ/api', prNumber: 1, headSha, reviewFile }, strictCostPolicy, github, client),
+    runReview(
+      { repository: 'JueZ/api', prNumber: 1, headSha, runId: 12345, reviewFile },
+      strictCostPolicy,
+      github,
+      client,
+    ),
     /cost_ceiling_exceeded/,
   );
 
@@ -690,6 +744,8 @@ test('paid review revalidates every free check immediately before the API call',
   const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-boundary-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   let attempts = 0;
+  let marker;
+  let checkReads = 0;
   const github = {
     async getPullRequest() {
       return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
@@ -698,12 +754,27 @@ test('paid review revalidates every free check immediately before the API call',
       return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
     },
     async getPullRequestDiff() {
-      return 'diff --git a/example b/example';
+      return highRiskDiff;
     },
     async getCheckRuns() {
-      return successfulFreeChecks().map((check) =>
-        check.name === 'lint' ? { ...check, conclusion: 'failure' } : check,
+      checkReads += 1;
+      const freeChecks = successfulFreeChecks().map((check) =>
+        checkReads >= 3 && check.name === 'lint' ? { ...check, conclusion: 'failure' } : check,
       );
+      return [...freeChecks, ...(marker ? [marker] : [])];
+    },
+    async createReviewClaim(claim) {
+      marker = {
+        id: 77,
+        name: claim.name,
+        head_sha: claim.headSha,
+        external_id: claim.externalId,
+        details_url: claim.detailsUrl,
+        status: 'completed',
+        conclusion: 'neutral',
+        app: { slug: 'github-actions' },
+      };
+      return marker;
     },
   };
   const client = {
@@ -728,6 +799,53 @@ test('paid review revalidates every free check immediately before the API call',
       client,
     ),
     /paid-call boundary: lint: failure/,
+  );
+  assert.equal(attempts, 0);
+});
+
+test('paid review cannot invoke the API unless its exact run owns one canonical claim', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-claim-boundary-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  let attempts = 0;
+  const github = {
+    async getPullRequest() {
+      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
+    },
+    async getPullRequestFiles() {
+      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
+    },
+    async getPullRequestDiff() {
+      return highRiskDiff;
+    },
+    async getCheckRuns() {
+      return successfulFreeChecks();
+    },
+    async createReviewClaim() {
+      return { id: 77 };
+    },
+  };
+  const client = {
+    responses: {
+      async create() {
+        attempts += 1;
+      },
+    },
+  };
+
+  await assert.rejects(
+    runReview(
+      {
+        repository: 'JueZ/api',
+        prNumber: 1,
+        headSha,
+        runId: 12345,
+        reviewFile: join(directory, 'review.json'),
+      },
+      policy,
+      github,
+      client,
+    ),
+    /claim ownership failed at post-create claim verification/,
   );
   assert.equal(attempts, 0);
 });
@@ -769,16 +887,27 @@ test('permanent exact-head marker is created once and any existing marker consum
   const reviewFile = join(directory, 'review.json');
   const createdClaims = [];
   const decisionChecks = [];
+  let marker;
   const github = {
     async getPullRequest() {
       return pullRequest();
     },
     async getCheckRuns() {
-      return successfulFreeChecks();
+      return [...successfulFreeChecks(), ...(marker ? [marker] : [])];
     },
     async createReviewClaim(claim) {
       createdClaims.push(claim);
-      return { id: 77 };
+      marker = {
+        id: 77,
+        name: claim.name,
+        head_sha: claim.headSha,
+        external_id: claim.externalId,
+        details_url: claim.detailsUrl,
+        status: 'completed',
+        conclusion: 'neutral',
+        app: { slug: 'github-actions' },
+      };
+      return marker;
     },
     async createReviewDecisionCheck(check) {
       decisionChecks.push(check);
@@ -797,30 +926,26 @@ test('permanent exact-head marker is created once and any existing marker consum
   assert.deepEqual(created, { status: 'new', checkRunId: 77, runId: 12345 });
   assert.equal(createdClaims.length, 1);
   assert.equal(createdClaims[0].name, reviewClaimName(42));
-  assert.equal(createdClaims[0].externalId, reviewClaimExternalId('JueZ/api', 42, headSha));
+  assert.equal(createdClaims[0].externalId, reviewClaimExternalId('JueZ/api', 42, headSha, 12345));
   assert.equal(createdClaims[0].detailsUrl, 'https://github.com/JueZ/api/actions/runs/12345');
 
-  github.getCheckRuns = async () => [
-    ...successfulFreeChecks(),
-    {
-      id: 77,
-      name: reviewClaimName(42),
-      head_sha: headSha,
-      external_id: 'fields-may-change-without-restoring-the-paid-call',
-      status: 'completed',
-      conclusion: 'neutral',
-    },
-  ];
+  const alreadyConsumed = await claimAutonomousReview(options, policy, github);
+  assert.equal(alreadyConsumed.status, 'consumed');
+  assert.equal(alreadyConsumed.reason, 'exact_head_claim_exists');
+
+  marker = { ...marker, external_id: 'fields-may-change-without-restoring-the-paid-call' };
   const consumed = await claimAutonomousReview(options, policy, github);
   assert.equal(consumed.status, 'consumed');
   assert.equal(consumed.checkRunId, 77);
   assert.equal(consumed.decisionCheckRunId, 88);
+  assert.equal(consumed.reason, 'invalid_or_multiple_exact_head_claims');
   assert.equal(createdClaims.length, 1);
+  assert.equal(decisionChecks.length, 2);
   assert.equal(decisionChecks.at(-1).conclusion, 'failure');
   const rejection = JSON.parse(await readFile(reviewFile, 'utf8'));
   assert.equal(rejection.decision, 'reject');
   assert.equal(rejection.modelInvoked, false);
-  assert.equal(rejection.reviewClaim.reason, 'exact_head_claim_exists');
+  assert.equal(rejection.reviewClaim.reason, 'invalid_or_multiple_exact_head_claims');
 });
 
 test('review budget uses conservative byte-token accounting and a one-call cap', () => {
@@ -832,6 +957,45 @@ test('review budget uses conservative byte-token accounting and a one-call cap',
   assert.equal(budget.maximumOutputTokens, 1500);
   assert.ok(budget.estimatedMaximumInputTokens > budget.serializedInputBytes);
   assert.ok(budget.estimatedMaximumCostUsd < 0.31);
+});
+
+test('review capsule keeps exact executable high-risk changes and omits mixed documentation context', () => {
+  const sourceDiff = `${highRiskDiff}diff --git a/docs/security/example.md b/docs/security/example.md
+index 3333333..4444444 100644
+--- a/docs/security/example.md
++++ b/docs/security/example.md
+@@ -1 +1 @@
+-Old documentation.
++New documentation.
+`;
+  const capsule = buildReviewDiffCapsule(sourceDiff, {
+    highRiskPaths: ['.github/workflows/example.yml', 'docs/security/example.md'],
+  });
+  assert.deepEqual(capsule.reviewedPaths, ['.github/workflows/example.yml']);
+  assert.deepEqual(capsule.omittedDocumentationPaths, ['docs/security/example.md']);
+  assert.match(capsule.diff, /\+permissions:/);
+  assert.doesNotMatch(capsule.diff, /^ {3}contents: read$/m);
+  assert.doesNotMatch(capsule.diff, /New documentation/);
+});
+
+test('review capsule includes documentation when it is the only high-risk change and fails on missing paths', () => {
+  const documentationDiff = `diff --git a/docs/security/example.md b/docs/security/example.md
+--- a/docs/security/example.md
++++ b/docs/security/example.md
+@@ -1 +1 @@
+-Old documentation.
++New documentation.
+`;
+  const capsule = buildReviewDiffCapsule(documentationDiff, {
+    highRiskPaths: ['docs/security/example.md'],
+  });
+  assert.deepEqual(capsule.reviewedPaths, ['docs/security/example.md']);
+  assert.deepEqual(capsule.omittedDocumentationPaths, []);
+  assert.match(capsule.diff, /\+New documentation\./);
+  assert.throws(
+    () => buildReviewDiffCapsule(documentationDiff, { highRiskPaths: ['scripts/missing.mjs'] }),
+    /missing classified paths/,
+  );
 });
 
 test('pull request state rejects forks, stale heads, and behind branches', () => {

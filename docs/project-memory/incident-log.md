@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-01 — PR #289 review rejected a separable claim path and incomplete credential audit
+
+- Evidence: Exact-head CI run `30689701559`, Policy Check run `30689701551`, and CodeQL run `30689701547` passed for `c069be9b9f3203d0625248eb6b9fd1d6fab83040`. Final bounded review run `30689779148` rejected because paid review remained callable separately from durable claim acquisition and the credential audit could be bypassed with alternate secret expression forms or an insufficiently bound marker identity.
+- Root cause: Claim acquisition and review were separate CLI/workflow steps, the claim external identity did not bind the exact controller workflow run, and the repository audit focused on known GitHub-token names instead of denying every non-allowlisted/dynamic workflow secret access path.
+- Repair: Remove the standalone claim command. The review command now creates, re-reads, and owns the only canonical marker; binds it to repository, PR, exact head, controller workflow, and run; revalidates its ID, App identity, external identity, details URL, status, and conclusion immediately before the API boundary; and requires the live path to run inside the exact trusted GitHub Actions workflow. The workflow audit now exact-name allowlists secrets and rejects bracket/dynamic access, `secrets: inherit`, alternate action/shell token minting, non-built-in GitHub-auth values, and raw check-run access outside the controller.
+- Safety/cost: The PR was returned to draft after rejection. One earlier controller was canceled shortly after review startup and is conservatively treated as a possible paid attempt; run `30689779148` is the one completed decision. The repair is batched and locally fake-backed before one final review. No rejected head merged or deployed, and production stayed disabled.
+
 ## 2026-08-01 — PR #288 final review rejected incomplete effective-permission handling
 
 - Evidence: Exact-head CI run `30688624142`, Policy Check `30688624984`, and CodeQL `30688625872` passed for `9129ea7416df291ced7598b3c2b792d9b349aa13`. Final bounded review run `30688708482` rejected because the controller audit treated omitted workflow permissions as harmless and did not compute effective job inheritance, while GitHub repository defaults can be changed independently.

@@ -13,13 +13,26 @@ import {
 } from './lib/autonomous-policy.mjs';
 
 const REVIEW_INPUT_TOKEN_OVERHEAD = 4096;
-const REVIEW_CLAIM_VERSION = 'v3';
+const MAX_SOURCE_DIFF_BYTES = 1_500_000;
+const REVIEW_CLAIM_VERSION = 'v4';
 const CONTROLLER_WORKFLOW = 'codex-automerge.yml';
 const CONTROLLER_CHECK_WRITER_JOBS = new Set(['resolve', 'autonomous-review', 'publish-review-check']);
 const BUILTIN_GITHUB_TOKEN_EXPRESSIONS = new Set(['${{ github.token }}', '${{ secrets.GITHUB_TOKEN }}']);
-const GITHUB_AUTH_KEYS = new Set(['gh_token', 'github_token', 'github-token', 'github_pat', 'token']);
-const GITHUB_TOKEN_MINTING_ACTION = /(?:create-github-app-token|github-app-token)/i;
-const SUSPICIOUS_GITHUB_SECRET = /(?:^|_)(?:gh|github|pat)(?:_|$)|(?:^|_)github_app(?:_|$)/i;
+const GITHUB_AUTH_KEYS = new Set(['authorization', 'gh_token', 'github_token', 'github-token', 'github_pat', 'token']);
+const GITHUB_TOKEN_MINTING_ACTION = /(?:github.*(?:app-)?token|(?:app-)?token.*github|create.*app.*token)/i;
+const GITHUB_TOKEN_MINTING_SHELL =
+  /(?:gh\s+auth\s+login|\/app\/installations\/|app\/installations\/[^\s"']*\/access_tokens|openssl[^\n]*(?:jwt|private[-_ ]key))/i;
+const ALLOWED_WORKFLOW_SECRET_NAMES = new Set([
+  'GITHUB_TOKEN',
+  'OPENAI_API_KEY',
+  'REDDIT_CLIENT_SECRET',
+  'WLH_BASE_URL',
+  'BRING_EMAIL',
+  'BRING_PASSWORD',
+  'BRING_CLIENT_API_KEY',
+  'BRING_CONFIRMATION_HMAC_KEY',
+  'BRING_MUTATION_ENCRYPTION_KEY',
+]);
 
 const reviewSchema = {
   type: 'object',
@@ -161,13 +174,21 @@ export async function runReview(options, policy, github, openAIClient) {
   if (!openAIClient && !process.env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required for high-risk autonomous review.');
   }
+  assertRuntimeWorkflowIdentity(options, { requireGitHubActions: !openAIClient });
 
-  const diff = await github.getPullRequestDiff(options.prNumber);
+  const sourceDiff = await github.getPullRequestDiff(options.prNumber);
   assertExpectedHead(await github.getPullRequest(options.prNumber), options.headSha);
-  const diffBytes = Buffer.byteLength(diff);
-  if (diffBytes > policy.autonomousReview.maxDiffBytes) {
+  const sourceDiffBytes = Buffer.byteLength(sourceDiff);
+  if (sourceDiffBytes > MAX_SOURCE_DIFF_BYTES) {
     throw new Error(
-      `High-risk pull request diff is ${diffBytes} bytes; maximum autonomous review size is ${policy.autonomousReview.maxDiffBytes}.`,
+      `High-risk pull request source diff is ${sourceDiffBytes} bytes; maximum source size is ${MAX_SOURCE_DIFF_BYTES}.`,
+    );
+  }
+  const reviewDiff = buildReviewDiffCapsule(sourceDiff, risk);
+  const reviewDiffBytes = Buffer.byteLength(reviewDiff.diff);
+  if (reviewDiffBytes > policy.autonomousReview.maxDiffBytes) {
+    throw new Error(
+      `High-risk executable review capsule is ${reviewDiffBytes} bytes; maximum autonomous review size is ${policy.autonomousReview.maxDiffBytes}.`,
     );
   }
 
@@ -213,13 +234,19 @@ export async function runReview(options, policy, github, openAIClient) {
             deletions: file.deletions,
           })),
           risk,
+          reviewInput: {
+            sourceDiffBytes,
+            reviewDiffBytes,
+            reviewedPaths: reviewDiff.reviewedPaths,
+            omittedDocumentationPaths: reviewDiff.omittedDocumentationPaths,
+          },
           policy: {
             highRiskPaths: policy.highRiskPaths,
             riskClasses: policy.riskClasses,
             authorization: policy.authorization,
             merge: policy.merge,
           },
-          untrustedDiff: diff,
+          untrustedExecutableDiff: reviewDiff.diff,
         }),
       },
     ],
@@ -250,16 +277,28 @@ export async function runReview(options, policy, github, openAIClient) {
     throw new Error('Autonomous review blocked before API call: cost_ceiling_exceeded.');
   }
 
+  const reviewClaim = await claimAutonomousReview(options, policy, github);
+  if (reviewClaim.status !== 'new') {
+    throw new Error(`Autonomous review claim is unavailable (${reviewClaim.reason ?? reviewClaim.status}).`);
+  }
   await assertFreeExactHeadChecks(options, policy, github, 'paid-call boundary');
+  await assertReviewClaimOwnership(options, github, reviewClaim, 'paid-call boundary');
 
   let parsed;
   let response;
   let modelFailure;
   try {
-    response = await client.responses.create({
-      ...request,
-      max_output_tokens: policy.autonomousReview.maxOutputTokens,
-    });
+    const idempotencyKey = reviewRequestIdempotencyKey(options.repository, options.prNumber, options.headSha);
+    response = await client.responses.create(
+      {
+        ...request,
+        max_output_tokens: policy.autonomousReview.maxOutputTokens,
+      },
+      {
+        idempotencyKey,
+        headers: { 'Idempotency-Key': idempotencyKey },
+      },
+    );
     const outputText = typeof response.output_text === 'string' ? response.output_text.trim() : '';
     if (!outputText) {
       modelFailure = summarizeModelFailure(response, 'empty_output', 1);
@@ -302,6 +341,7 @@ export async function runReview(options, policy, github, openAIClient) {
       modelFailure,
       reviewBudget: { ...reviewBudget, status: 'consumed' },
       modelUsage: summarizeModelUsage(response, policy),
+      reviewClaim,
     };
     await publishReview(review, options);
     throw new Error(`Autonomous review unavailable: ${modelFailure?.kind ?? 'unknown_failure'}.`);
@@ -315,6 +355,7 @@ export async function runReview(options, policy, github, openAIClient) {
     responseId: response.id,
     reviewBudget: { ...reviewBudget, status: 'consumed' },
     modelUsage: summarizeModelUsage(response, policy),
+    reviewClaim,
   };
   const validation = validateAutonomousReview(review, options.headSha, policy);
   if (!validation.ok) {
@@ -326,6 +367,53 @@ export async function runReview(options, policy, github, openAIClient) {
     throw new Error(`Autonomous review rejected the pull request: ${review.summary}`);
   }
   return review;
+}
+
+export function buildReviewDiffCapsule(sourceDiff, risk) {
+  const highRiskPaths = Array.isArray(risk?.highRiskPaths) ? risk.highRiskPaths : [];
+  if (highRiskPaths.length === 0) throw new Error('High-risk review has no classified paths.');
+  const executablePaths = highRiskPaths.filter((path) => !path.startsWith('docs/'));
+  const reviewedPaths = executablePaths.length > 0 ? executablePaths : highRiskPaths;
+  const reviewedPathSet = new Set(reviewedPaths);
+  const sections = String(sourceDiff)
+    .split(/(?=^diff --git )/m)
+    .filter((section) => section.startsWith('diff --git '));
+  const foundPaths = new Set();
+  const selectedSections = [];
+
+  for (const section of sections) {
+    const matchingPath = reviewedPaths.find(
+      (path) =>
+        section.includes(`\n--- a/${path}\n`) ||
+        section.includes(`\n+++ b/${path}\n`) ||
+        section.startsWith(`diff --git a/${path} b/${path}\n`),
+    );
+    if (!matchingPath || !reviewedPathSet.has(matchingPath)) continue;
+    foundPaths.add(matchingPath);
+    selectedSections.push(compactUnifiedDiffSection(section));
+  }
+
+  const missingPaths = reviewedPaths.filter((path) => !foundPaths.has(path));
+  if (missingPaths.length > 0) {
+    throw new Error(`High-risk review diff is missing classified paths: ${missingPaths.join(', ')}.`);
+  }
+
+  return {
+    diff: selectedSections.join(''),
+    reviewedPaths,
+    omittedDocumentationPaths: highRiskPaths.filter((path) => path.startsWith('docs/') && !foundPaths.has(path)),
+  };
+}
+
+function compactUnifiedDiffSection(section) {
+  let insideHunk = false;
+  return section
+    .split(/(?<=\n)/)
+    .filter((line) => {
+      if (line.startsWith('@@ ')) insideHunk = true;
+      return !insideHunk || !line.startsWith(' ');
+    })
+    .join('');
 }
 
 export async function runRequiredCheckPreflight(options, policy, github) {
@@ -363,6 +451,7 @@ export async function runRequiredCheckPreflight(options, policy, github) {
 }
 
 export async function claimAutonomousReview(options, policy, github) {
+  assertRuntimeWorkflowIdentity(options);
   await assertExclusiveWorkflowCheckWriter();
   const pullRequest = await github.getPullRequest(options.prNumber);
   assertExpectedHead(pullRequest, options.headSha);
@@ -378,19 +467,20 @@ export async function claimAutonomousReview(options, policy, github) {
   );
 
   if (matchingClaims.length > 0) {
+    const canonicalClaim = matchingClaims.length === 1 && isCanonicalExistingReviewClaim(options, matchingClaims[0]);
     return publishConsumedReviewClaim(
       options,
       policy,
       {
         status: 'consumed',
-        reason: matchingClaims.length === 1 ? 'exact_head_claim_exists' : 'multiple_exact_head_claims',
+        reason: canonicalClaim ? 'exact_head_claim_exists' : 'invalid_or_multiple_exact_head_claims',
         checkRunId: matchingClaims[0]?.id,
       },
       github,
     );
   }
 
-  const externalId = reviewClaimExternalId(options.repository, options.prNumber, options.headSha);
+  const externalId = reviewClaimExternalId(options.repository, options.prNumber, options.headSha, options.runId);
   const detailsUrl = `https://github.com/${options.repository}/actions/runs/${options.runId}`;
   const created = await github.createReviewClaim({
     name: claimName,
@@ -399,6 +489,7 @@ export async function claimAutonomousReview(options, policy, github) {
     detailsUrl,
   });
   const claim = { status: 'new', checkRunId: created.id, runId: options.runId };
+  await assertReviewClaimOwnership(options, github, claim, 'post-create claim verification');
   await writeGithubOutput({
     claim_status: claim.status,
     claim_check_run_id: String(claim.checkRunId),
@@ -553,6 +644,7 @@ async function publishReview(review, options) {
     reviewed_head_sha: review.reviewedHeadSha,
     high_risk: String(review.risk.highRisk),
     model_invoked: String(review.modelInvoked),
+    claim_status: review.reviewClaim?.status ?? (review.modelInvoked ? 'missing' : 'not_required'),
   });
 }
 
@@ -573,15 +665,15 @@ function parseOptions(argv) {
   const repository = values.get('--repository') ?? process.env.GITHUB_REPOSITORY;
   const prNumber = Number(values.get('--pr') ?? process.env.PR_NUMBER);
   const headSha = values.get('--head-sha') ?? process.env.HEAD_SHA;
-  if (!['preflight', 'claim', 'review', 'gate'].includes(command)) {
-    throw new Error('command must be preflight, claim, review, or gate');
+  if (!['preflight', 'review', 'gate'].includes(command)) {
+    throw new Error('command must be preflight, review, or gate');
   }
   if (!repository) throw new Error('--repository is required');
   if (!Number.isInteger(prNumber) || prNumber < 1) throw new Error('--pr must be a positive integer');
   if (!/^[0-9a-f]{40}$/i.test(headSha ?? '')) throw new Error('--head-sha must be a full commit SHA');
   const runId = Number(values.get('--run-id') ?? process.env.GITHUB_RUN_ID);
-  if (['claim', 'review'].includes(command) && (!Number.isSafeInteger(runId) || runId < 1)) {
-    throw new Error('--run-id must be a positive workflow run ID for claim or review');
+  if (command === 'review' && (!Number.isSafeInteger(runId) || runId < 1)) {
+    throw new Error('--run-id must be a positive workflow run ID for review');
   }
   return {
     command,
@@ -606,12 +698,19 @@ function safetyIdentifier(repository, prNumber) {
   return createHash('sha256').update(`${repository}:pull:${prNumber}`).digest('hex');
 }
 
-export function reviewClaimExternalId(repository, prNumber, headSha) {
-  return `juez-autonomous-review:${REVIEW_CLAIM_VERSION}:${repository}:pull:${prNumber}:head:${headSha}`;
+export function reviewClaimExternalId(repository, prNumber, headSha, runId) {
+  return `juez-autonomous-review:${REVIEW_CLAIM_VERSION}:${repository}:pull:${prNumber}:head:${headSha}:workflow:${CONTROLLER_WORKFLOW}:run:${runId}`;
 }
 
 export function reviewClaimName(prNumber) {
   return `Autonomous review paid-call claim ${REVIEW_CLAIM_VERSION} PR #${prNumber}`;
+}
+
+export function reviewRequestIdempotencyKey(repository, prNumber, headSha) {
+  const digest = createHash('sha256')
+    .update(`${REVIEW_CLAIM_VERSION}:${repository}:pull:${prNumber}:head:${headSha}`)
+    .digest('hex');
+  return `juez-autonomous-review-${REVIEW_CLAIM_VERSION}-${digest}`;
 }
 
 export async function exclusiveWorkflowCheckWriteFindings(
@@ -687,23 +786,106 @@ function collectUnsafeGithubTokenFindings(value, workflowName, findings, path = 
     if (key === 'uses' && typeof child === 'string' && GITHUB_TOKEN_MINTING_ACTION.test(child)) {
       findings.push(`${workflowName}:${childPath.join('.')}: GitHub App/PAT token minting actions are not allowed`);
     }
+    if (key.toLowerCase() === 'secrets' && child === 'inherit') {
+      findings.push(`${workflowName}:${childPath.join('.')}: reusable workflows must not inherit all secrets`);
+    }
     if (GITHUB_AUTH_KEYS.has(key.toLowerCase()) && typeof child === 'string') {
-      if (!BUILTIN_GITHUB_TOKEN_EXPRESSIONS.has(child.trim())) {
+      const normalized = child.trim();
+      const allowed =
+        BUILTIN_GITHUB_TOKEN_EXPRESSIONS.has(normalized) ||
+        [...BUILTIN_GITHUB_TOKEN_EXPRESSIONS].some(
+          (expression) => normalized.toLowerCase() === `bearer ${expression}`.toLowerCase(),
+        );
+      if (!allowed) {
         findings.push(`${workflowName}:${childPath.join('.')}: GitHub authentication must use the built-in job token`);
       }
     }
     if (typeof child === 'string') {
-      for (const match of child.matchAll(/\$\{\{\s*secrets\.([A-Za-z0-9_]+)\s*\}\}/g)) {
-        const secretName = match[1];
-        if (secretName !== 'GITHUB_TOKEN' && SUSPICIOUS_GITHUB_SECRET.test(secretName)) {
-          findings.push(
-            `${workflowName}:${childPath.join('.')}: alternate GitHub credential secret ${secretName} is not allowed`,
-          );
-        }
+      collectSecretExpressionFindings(child, workflowName, childPath, findings);
+      if (GITHUB_TOKEN_MINTING_SHELL.test(child)) {
+        findings.push(`${workflowName}:${childPath.join('.')}: shell-based GitHub token minting is not allowed`);
+      }
+      if (workflowName !== CONTROLLER_WORKFLOW && /(?:^|[\s/"'])check-runs(?:$|[\s/?"'])/i.test(child)) {
+        findings.push(`${workflowName}:${childPath.join('.')}: raw GitHub check-run access is controller-only`);
       }
     }
     collectUnsafeGithubTokenFindings(child, workflowName, findings, childPath);
   }
+}
+
+function collectSecretExpressionFindings(value, workflowName, path, findings) {
+  for (const expressionMatch of value.matchAll(/\$\{\{([\s\S]*?)\}\}/g)) {
+    const expression = expressionMatch[1];
+    if (!/\bsecrets\b/.test(expression)) continue;
+    const names = [...expression.matchAll(/\bsecrets\.([A-Za-z_][A-Za-z0-9_]*)\b/g)].map((match) => match[1]);
+    const withoutStaticReferences = expression.replace(/\bsecrets\.[A-Za-z_][A-Za-z0-9_]*\b/g, '');
+    if (/\bsecrets\b/.test(withoutStaticReferences)) {
+      findings.push(`${workflowName}:${path.join('.')}: dynamic or bracket workflow secret access is not allowed`);
+    }
+    for (const secretName of names) {
+      if (!ALLOWED_WORKFLOW_SECRET_NAMES.has(secretName)) {
+        findings.push(`${workflowName}:${path.join('.')}: workflow secret ${secretName} is not allowlisted`);
+      }
+    }
+  }
+}
+
+function assertRuntimeWorkflowIdentity(options, { requireGitHubActions = false } = {}) {
+  if (!Number.isSafeInteger(options.runId) || options.runId < 1) {
+    throw new Error('Autonomous review requires a positive trusted workflow run ID.');
+  }
+  if (requireGitHubActions && process.env.GITHUB_ACTIONS !== 'true') {
+    throw new Error('Live autonomous review must execute in the trusted GitHub Actions workflow.');
+  }
+  if (process.env.GITHUB_ACTIONS !== 'true') return;
+  if (process.env.GITHUB_REPOSITORY !== options.repository) {
+    throw new Error('Autonomous review repository does not match the current GitHub Actions run.');
+  }
+  if (Number(process.env.GITHUB_RUN_ID) !== options.runId) {
+    throw new Error('Autonomous review run ID does not match GITHUB_RUN_ID.');
+  }
+  if (process.env.GITHUB_WORKFLOW !== 'Codex Auto-Merge') {
+    throw new Error('Autonomous review must execute only from the Codex Auto-Merge workflow.');
+  }
+}
+
+function isCanonicalExistingReviewClaim(options, marker) {
+  if (marker.app?.slug !== 'github-actions') return false;
+  if (marker.status !== 'completed' || marker.conclusion !== 'neutral') return false;
+  const externalIdPrefix = `juez-autonomous-review:${REVIEW_CLAIM_VERSION}:${options.repository}:pull:${options.prNumber}:head:${options.headSha}:workflow:${CONTROLLER_WORKFLOW}:run:`;
+  if (typeof marker.external_id !== 'string' || !marker.external_id.startsWith(externalIdPrefix)) return false;
+  const runIdText = marker.external_id.slice(externalIdPrefix.length);
+  if (!/^[1-9][0-9]*$/.test(runIdText) || !Number.isSafeInteger(Number(runIdText))) return false;
+  return marker.details_url === `https://github.com/${options.repository}/actions/runs/${runIdText}`;
+}
+
+export async function assertReviewClaimOwnership(options, github, claim, boundary) {
+  const expectedName = reviewClaimName(options.prNumber);
+  const expectedExternalId = reviewClaimExternalId(
+    options.repository,
+    options.prNumber,
+    options.headSha,
+    options.runId,
+  );
+  const expectedDetailsUrl = `https://github.com/${options.repository}/actions/runs/${options.runId}`;
+  const matching = (await github.getCheckRuns(options.headSha)).filter(
+    (checkRun) => checkRun.name === expectedName && checkRun.head_sha === options.headSha,
+  );
+  if (matching.length !== 1) {
+    throw new Error(`Autonomous review claim ownership failed at ${boundary}: expected exactly one marker.`);
+  }
+  const marker = matching[0];
+  const errors = [];
+  if (marker.id !== claim.checkRunId) errors.push('check_run_id');
+  if (marker.app?.slug !== 'github-actions') errors.push('app');
+  if (marker.external_id !== expectedExternalId) errors.push('external_id');
+  if (marker.details_url !== expectedDetailsUrl) errors.push('details_url');
+  if (marker.status !== 'completed') errors.push('status');
+  if (marker.conclusion !== 'neutral') errors.push('conclusion');
+  if (errors.length > 0) {
+    throw new Error(`Autonomous review claim ownership failed at ${boundary}: ${errors.join(', ')}.`);
+  }
+  return marker;
 }
 
 async function assertFreeExactHeadChecks(options, policy, github, boundary) {
@@ -732,7 +914,7 @@ async function publishConsumedReviewClaim(options, policy, claim, github) {
   const decisionCheck = await github.createReviewDecisionCheck({
     name: policy.autonomousReview.checkName,
     headSha: options.headSha,
-    externalId: `${reviewClaimExternalId(options.repository, options.prNumber, options.headSha)}:consumed:${options.runId}`,
+    externalId: `${reviewClaimExternalId(options.repository, options.prNumber, options.headSha, options.runId)}:consumed`,
     detailsUrl: `https://github.com/${options.repository}/actions/runs/${options.runId}`,
     conclusion: 'failure',
     title: 'Autonomous review claim already consumed',
@@ -901,10 +1083,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const result =
     options.command === 'preflight'
       ? await runRequiredCheckPreflight(options, policy, github)
-      : options.command === 'claim'
-        ? await claimAutonomousReview(options, policy, github)
-        : options.command === 'review'
-          ? await runReview(options, policy, github)
-          : await runGate(options, policy, github);
+      : options.command === 'review'
+        ? await runReview(options, policy, github)
+        : await runGate(options, policy, github);
   console.log(JSON.stringify(result, null, 2));
 }

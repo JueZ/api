@@ -1,5 +1,14 @@
 # Decision log
 
+## 2026-08-01 — Make paid-call ownership inseparable from the trusted review run
+
+- Decision: Remove the standalone review-claim command and create the permanent marker inside `runReview` after free gates and cost checks pass. Require one serialized controller run per PR and exactly one workflow invocation of the review command.
+- Decision: Bind the marker to repository, PR, exact head, controller workflow filename, and workflow run ID. Re-read it after creation and again immediately before the OpenAI call, requiring the created check-run ID, `github-actions` App, canonical external identity/details URL, and completed-neutral state.
+- Decision: Require the live API path to execute inside the exact `Codex Auto-Merge` GitHub Actions run. Exact-name allowlist all workflow secrets and reject dynamic/bracket expressions, inherited secret sets, alternate token-minting actions/shell paths, non-built-in GitHub-auth values, and non-controller raw check-run access.
+- Decision: Build the paid input from exact zero-context changes for executable/governance high-risk paths while retaining all changed-file metadata. Omit mixed documentation text but include exact documentation when documentation is the only high-risk class. Fail if any selected path is missing or the full source diff, capsule, or conservative serialized-request ceiling is exceeded.
+- Rationale: PR #289 review run `30689779148` correctly identified that separate claim/review operations and a name-focused credential heuristic did not prove durable ownership at the paid boundary.
+- Status: Implemented in one batched repair on draft PR #289. Full local/free remote gates, one final independent review, merge, and test-only acceptance remain pending. Production is not authorized.
+
 ## 2026-08-01 — Enforce effective workflow permissions without a new trust route
 
 - Decision: Require an explicit top-level permission map in every workflow, compute each job's effective permission map after overrides, and allow `checks: write` only in the three named trusted-controller jobs. Reject alternate GitHub App/PAT minting actions, suspicious GitHub credential secrets, and non-built-in values in workflow GitHub-auth token channels.

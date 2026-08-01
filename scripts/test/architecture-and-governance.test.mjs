@@ -58,14 +58,24 @@ test('workflow permission policy rejects inherited defaults and alternate GitHub
   );
   await writeFile(
     join(directory, 'unsafe.yml'),
-    `jobs:\n  inherited:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/create-github-app-token@v2\n      - run: gh api repos/example/example/check-runs\n        env:\n          GH_TOKEN: \${{ secrets.REPOSITORY_PAT }}\n`,
+    `jobs:\n  inherited:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/create-github-app-token@v2\n      - run: gh api repos/example/example/check-runs\n        env:\n          GH_TOKEN: \${{ secrets.REPOSITORY_PAT }}\n          AUTHORIZATION: \${{ secrets['GH_APP_PRIVATE_KEY'] }}\n  disguised:\n    runs-on: ubuntu-latest\n    steps:\n      - run: curl https://api.github.com/repos/example/example/check-runs\n        env:\n          AUTHORIZATION: Bearer \${{ secrets.OPENAI_API_KEY }}\n  reusable:\n    uses: ./.github/workflows/reusable.yml\n    secrets: inherit\n`,
   );
 
   const findings = await exclusiveWorkflowCheckWriteFindings(directory);
   assert.ok(findings.some((finding) => finding.includes('top-level permissions must be an explicit mapping')));
   assert.ok(findings.some((finding) => finding.includes('token minting actions are not allowed')));
   assert.ok(findings.some((finding) => finding.includes('GitHub authentication must use the built-in job token')));
-  assert.ok(findings.some((finding) => finding.includes('alternate GitHub credential secret REPOSITORY_PAT')));
+  assert.ok(findings.some((finding) => finding.includes('workflow secret REPOSITORY_PAT is not allowlisted')));
+  assert.ok(findings.some((finding) => finding.includes('dynamic or bracket workflow secret access')));
+  assert.ok(findings.some((finding) => finding.includes('must not inherit all secrets')));
+  assert.ok(findings.some((finding) => finding.includes('raw GitHub check-run access is controller-only')));
+  assert.ok(
+    findings.some(
+      (finding) =>
+        finding.includes('unsafe.yml:jobs.disguised.steps.0.env.AUTHORIZATION') &&
+        finding.includes('GitHub authentication must use the built-in job token'),
+    ),
+  );
 });
 
 test('workflow permission policy computes effective job-level checks write', async (context) => {
