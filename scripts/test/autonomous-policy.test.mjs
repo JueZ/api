@@ -106,7 +106,7 @@ function withFreeChecks(github) {
         name: claim.name,
         head_sha: claim.headSha,
         external_id: claim.externalId,
-        details_url: claim.detailsUrl,
+        details_url: 'https://github.com/JueZ/api/runs/777',
         status: 'completed',
         conclusion: 'neutral',
         app: { slug: 'github-actions' },
@@ -525,6 +525,12 @@ test('high-risk autonomous review uses one cost-bounded call and records sanitiz
   assert.equal(requests[0].text.verbosity, 'low');
   assert.equal(requests[0].max_output_tokens, 1500);
   assert.doesNotMatch(JSON.stringify(requests[0].input), /Review this change\./);
+  const reviewPayload = JSON.parse(requests[0].input[1].content);
+  assert.deepEqual(reviewPayload.changedFiles, [{ filename: '.github/workflows/example.yml', status: 'modified' }]);
+  assert.equal(reviewPayload.risk.highRisk, true);
+  assert.equal(reviewPayload.policy.highRiskPaths, undefined);
+  assert.ok(reviewPayload.policy.authorization);
+  assert.ok(reviewPayload.policy.merge);
   const expectedIdempotencyKey = reviewRequestIdempotencyKey('JueZ/api', 1, headSha);
   assert.equal(requestOptions[0].idempotencyKey, expectedIdempotencyKey);
   assert.equal(requestOptions[0].headers['Idempotency-Key'], expectedIdempotencyKey);
@@ -774,7 +780,7 @@ test('paid review revalidates every free check immediately before the API call',
         name: claim.name,
         head_sha: claim.headSha,
         external_id: claim.externalId,
-        details_url: claim.detailsUrl,
+        details_url: 'https://github.com/JueZ/api/runs/77',
         status: 'completed',
         conclusion: 'neutral',
         app: { slug: 'github-actions' },
@@ -907,7 +913,7 @@ test('permanent exact-head marker is created once and any existing marker consum
         name: claim.name,
         head_sha: claim.headSha,
         external_id: claim.externalId,
-        details_url: claim.detailsUrl,
+        details_url: 'https://github.com/JueZ/api/runs/77',
         status: 'completed',
         conclusion: 'neutral',
         app: { slug: 'github-actions' },
@@ -939,14 +945,23 @@ test('permanent exact-head marker is created once and any existing marker consum
   assert.equal(alreadyConsumed.status, 'consumed');
   assert.equal(alreadyConsumed.reason, 'exact_head_claim_exists');
 
-  marker = { ...marker, external_id: 'fields-may-change-without-restoring-the-paid-call' };
+  marker = { ...marker, details_url: 'https://example.com/runs/77' };
   const consumed = await claimAutonomousReview(options, policy, github, testRuntime);
   assert.equal(consumed.status, 'consumed');
   assert.equal(consumed.checkRunId, 77);
   assert.equal(consumed.decisionCheckRunId, 88);
   assert.equal(consumed.reason, 'invalid_or_multiple_exact_head_claims');
+
+  marker = {
+    ...marker,
+    details_url: 'https://github.com/JueZ/api/runs/77',
+    external_id: 'fields-may-change-without-restoring-the-paid-call',
+  };
+  const consumedExternalId = await claimAutonomousReview(options, policy, github, testRuntime);
+  assert.equal(consumedExternalId.status, 'consumed');
+  assert.equal(consumedExternalId.reason, 'invalid_or_multiple_exact_head_claims');
   assert.equal(createdClaims.length, 1);
-  assert.equal(decisionChecks.length, 2);
+  assert.equal(decisionChecks.length, 3);
   assert.equal(decisionChecks.at(-1).conclusion, 'failure');
   const rejection = JSON.parse(await readFile(reviewFile, 'utf8'));
   assert.equal(rejection.decision, 'reject');

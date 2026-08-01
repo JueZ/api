@@ -235,8 +235,6 @@ export async function runReview(options, policy, github, openAIClient) {
           changedFiles: files.map((file) => ({
             filename: file.filename,
             status: file.status,
-            additions: file.additions,
-            deletions: file.deletions,
           })),
           risk,
           reviewInput: {
@@ -246,8 +244,6 @@ export async function runReview(options, policy, github, openAIClient) {
             omittedDocumentationPaths: reviewDiff.omittedDocumentationPaths,
           },
           policy: {
-            highRiskPaths: policy.highRiskPaths,
-            riskClasses: policy.riskClasses,
             authorization: policy.authorization,
             merge: policy.merge,
           },
@@ -871,7 +867,14 @@ function isCanonicalExistingReviewClaim(options, marker) {
   if (typeof marker.external_id !== 'string' || !marker.external_id.startsWith(externalIdPrefix)) return false;
   const runIdText = marker.external_id.slice(externalIdPrefix.length);
   if (!/^[1-9][0-9]*$/.test(runIdText) || !Number.isSafeInteger(Number(runIdText))) return false;
-  return marker.details_url === `https://github.com/${options.repository}/actions/runs/${runIdText}`;
+  return isCanonicalReviewClaimDetailsUrl(options.repository, marker, Number(runIdText));
+}
+
+function isCanonicalReviewClaimDetailsUrl(repository, marker, runId) {
+  const requestedActionsUrl = `https://github.com/${repository}/actions/runs/${runId}`;
+  const githubCanonicalCheckRunUrl =
+    Number.isSafeInteger(marker.id) && marker.id > 0 ? `https://github.com/${repository}/runs/${marker.id}` : undefined;
+  return marker.details_url === requestedActionsUrl || marker.details_url === githubCanonicalCheckRunUrl;
 }
 
 export async function assertReviewClaimOwnership(options, github, claim, boundary) {
@@ -882,7 +885,6 @@ export async function assertReviewClaimOwnership(options, github, claim, boundar
     options.headSha,
     options.runId,
   );
-  const expectedDetailsUrl = `https://github.com/${options.repository}/actions/runs/${options.runId}`;
   const matching = (await github.getCheckRuns(options.headSha)).filter(
     (checkRun) => checkRun.name === expectedName && checkRun.head_sha === options.headSha,
   );
@@ -894,7 +896,7 @@ export async function assertReviewClaimOwnership(options, github, claim, boundar
   if (marker.id !== claim.checkRunId) errors.push('check_run_id');
   if (marker.app?.slug !== 'github-actions') errors.push('app');
   if (marker.external_id !== expectedExternalId) errors.push('external_id');
-  if (marker.details_url !== expectedDetailsUrl) errors.push('details_url');
+  if (!isCanonicalReviewClaimDetailsUrl(options.repository, marker, options.runId)) errors.push('details_url');
   if (marker.status !== 'completed') errors.push('status');
   if (marker.conclusion !== 'neutral') errors.push('conclusion');
   if (errors.length > 0) {
