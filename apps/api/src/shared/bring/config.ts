@@ -26,6 +26,10 @@ export function readBringConfig(env: NodeJS.ProcessEnv = process.env): BringConf
 
   const readableListUuids = parseUuidList(env['BRING_READABLE_LIST_UUIDS'], 'BRING_READABLE_LIST_UUIDS');
   const writableListUuids = parseUuidList(env['BRING_WRITABLE_LIST_UUIDS'], 'BRING_WRITABLE_LIST_UUIDS');
+  const writableSharedListUuids = parseUuidList(
+    env['BRING_WRITABLE_SHARED_LIST_UUIDS'],
+    'BRING_WRITABLE_SHARED_LIST_UUIDS',
+  );
   const defaultListUuid = optional(env, 'BRING_DEFAULT_LIST_UUID');
   if (defaultListUuid && !uuidPattern.test(defaultListUuid)) {
     throw new BringConfigError('BRING_DEFAULT_LIST_UUID must be a valid UUID.');
@@ -46,6 +50,9 @@ export function readBringConfig(env: NodeJS.ProcessEnv = process.env): BringConf
   }
   if (writableListUuids.some((uuid) => !readableListUuids.includes(uuid))) {
     throw new BringConfigError('Every writable Bring list must also be readable.');
+  }
+  if (writableSharedListUuids.some((uuid) => !writableListUuids.includes(uuid))) {
+    throw new BringConfigError('Every shared-writable Bring list must also be in BRING_WRITABLE_LIST_UUIDS.');
   }
   if (defaultListUuid && readableListUuids.length > 0 && !readableListUuids.includes(defaultListUuid)) {
     throw new BringConfigError('BRING_DEFAULT_LIST_UUID must be present in BRING_READABLE_LIST_UUIDS.');
@@ -72,6 +79,7 @@ export function readBringConfig(env: NodeJS.ProcessEnv = process.env): BringConf
     ...(defaultListUuid ? { defaultListUuid } : {}),
     readableListUuids,
     writableListUuids,
+    writableSharedListUuids,
     sessionCacheEnabled: readBoolean(env, 'BRING_SESSION_CACHE_ENABLED', true),
     sessionCacheContainer: optional(env, 'BRING_SESSION_CACHE_CONTAINER') ?? 'bring-private',
     sessionCacheBlob: optional(env, 'BRING_SESSION_CACHE_BLOB') ?? 'session-v1.json',

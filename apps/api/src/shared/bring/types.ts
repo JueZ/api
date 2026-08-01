@@ -15,6 +15,7 @@ export interface BringConfig {
   defaultListUuid?: string;
   readableListUuids: string[];
   writableListUuids: string[];
+  writableSharedListUuids: string[];
   sessionCacheEnabled: boolean;
   sessionCacheContainer: string;
   sessionCacheBlob: string;

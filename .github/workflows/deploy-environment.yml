@@ -234,6 +234,7 @@ jobs:
       BRING_DEFAULT_LIST_UUID: ${{ vars.BRING_DEFAULT_LIST_UUID }}
       BRING_READABLE_LIST_UUIDS: ${{ vars.BRING_READABLE_LIST_UUIDS }}
       BRING_WRITABLE_LIST_UUIDS: ${{ vars.BRING_WRITABLE_LIST_UUIDS }}
+      BRING_WRITABLE_SHARED_LIST_UUIDS: ${{ vars.BRING_WRITABLE_SHARED_LIST_UUIDS }}
       BRING_SESSION_CACHE_ENABLED: ${{ vars.BRING_SESSION_CACHE_ENABLED }}
       BRING_SESSION_CACHE_CONTAINER: ${{ vars.BRING_SESSION_CACHE_CONTAINER }}
       BRING_SESSION_CACHE_BLOB: ${{ vars.BRING_SESSION_CACHE_BLOB }}
@@ -846,6 +847,7 @@ jobs:
                 bringDefaultListUuid="${BRING_DEFAULT_LIST_UUID:-}" \
                 bringReadableListUuids="${BRING_READABLE_LIST_UUIDS:-}" \
                 bringWritableListUuids="${BRING_WRITABLE_LIST_UUIDS:-}" \
+                bringWritableSharedListUuids="${BRING_WRITABLE_SHARED_LIST_UUIDS:-}" \
                 bringSessionCacheEnabled="${BRING_SESSION_CACHE_ENABLED:-true}" \
                 bringSessionCacheContainer="${BRING_SESSION_CACHE_CONTAINER:-bring-private}" \
                 bringSessionCacheBlob="${BRING_SESSION_CACHE_BLOB:-session-v1.json}" \

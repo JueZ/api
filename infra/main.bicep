@@ -132,8 +132,11 @@ param bringDefaultListUuid string = ''
 @description('Comma-separated Bring list UUIDs that this environment may read.')
 param bringReadableListUuids string
 
-@description('Comma-separated own-list UUIDs that production may write. Shared/unlisted lists are denied in application policy.')
+@description('Comma-separated list UUIDs that production may write. Unlisted lists are denied in application policy.')
 param bringWritableListUuids string = ''
+
+@description('Comma-separated shared-list UUIDs that may be written only when also explicitly writable. Empty denies all shared-list writes.')
+param bringWritableSharedListUuids string = ''
 
 @description('Enable durable Bring authentication-session caching.')
 param bringSessionCacheEnabled bool = true
@@ -644,6 +647,7 @@ module functionAppSettings './modules/function-app-settings.bicep' = {
       BRING_DEFAULT_LIST_UUID: bringDefaultListUuid
       BRING_READABLE_LIST_UUIDS: validatedBringReadableLists
       BRING_WRITABLE_LIST_UUIDS: validatedBringWritableLists
+      BRING_WRITABLE_SHARED_LIST_UUIDS: bringWritableSharedListUuids
       BRING_SESSION_CACHE_ENABLED: toLower(string(bringSessionCacheEnabled))
       BRING_SESSION_CACHE_CONTAINER: bringSessionCacheContainer
       BRING_SESSION_CACHE_BLOB: bringSessionCacheBlob
