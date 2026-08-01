@@ -109,6 +109,8 @@ jobs:
       model_invoked: ${{ steps.review.outputs.model_invoked || steps.reuse.outputs.model_invoked || steps.claim.outputs.model_invoked }}
       claim_status: ${{ steps.claim.outputs.claim_status }}
       claim_check_run_id: ${{ steps.claim.outputs.claim_check_run_id }}
+      review_artifact_id: ${{ steps.review_artifact.outputs.artifact-id }}
+      review_artifact_digest: ${{ steps.review_artifact.outputs.artifact-digest }}
     steps:
       - name: Checkout trusted controller
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
@@ -168,6 +170,7 @@ jobs:
             --pr "${{ needs.resolve.outputs.pr_number }}" \
             --head-sha "${{ needs.resolve.outputs.head_sha }}" \
             --run-id "${{ github.run_id }}" \
+            --source-run-id "${{ steps.claim.outputs.reuse_run_id }}" \
             --review-file "$RUNNER_TEMP/autonomous-review.json"
       - name: Run deterministic classification and independent review
         id: review
@@ -183,6 +186,8 @@ jobs:
             --repository "${{ github.repository }}" \
             --pr "${{ needs.resolve.outputs.pr_number }}" \
             --head-sha "${{ needs.resolve.outputs.head_sha }}" \
+            --run-id "${{ github.run_id }}" \
+            --claim-check-run-id "${{ steps.claim.outputs.claim_check_run_id }}" \
             --review-file "$RUNNER_TEMP/autonomous-review.json"
       - name: Fail closed after a consumed exact-head review claim
         if: steps.claim.outputs.claim_status == 'consumed'
@@ -191,6 +196,7 @@ jobs:
           echo "This exact head already consumed its one durable paid-review claim." >&2
           exit 1
       - name: Upload sanitized review evidence
+        id: review_artifact
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
         with:
@@ -221,6 +227,17 @@ jobs:
           EXPECTED_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
           HIGH_RISK: ${{ needs.autonomous-review.outputs.high_risk }}
           MODEL_INVOKED: ${{ needs.autonomous-review.outputs.model_invoked }}
+          ARTIFACT_ID: ${{ needs.autonomous-review.outputs.review_artifact_id }}
+          ARTIFACT_DIGEST: ${{ needs.autonomous-review.outputs.review_artifact_digest }}
+          ARTIFACT_NAME: autonomous-review-${{ needs.resolve.outputs.head_sha }}
+          PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          WORKFLOW_ID: '276132077'
+          WORKFLOW_PATH: .github/workflows/codex-automerge.yml
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          WORKFLOW_EVENT: ${{ github.event_name }}
         shell: bash
         run: |
           set -euo pipefail
@@ -237,21 +254,51 @@ jobs:
           conclusion=failure
           title='Autonomous review failed'
           summary='The review workflow did not approve this exact pull-request head.'
+          evidence=''
           if [ "$REVIEW_RESULT" = "success" ] &&
              [ "$REVIEW_DECISION" = "approve" ] &&
              [ "$REVIEWED_HEAD_SHA" = "$EXPECTED_HEAD_SHA" ]; then
+            if ! [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]] ||
+               ! [[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+               [ "$RUN_ATTEMPT" != "1" ] ||
+               [ "$WORKFLOW_REF" != 'JueZ/api/.github/workflows/codex-automerge.yml@refs/heads/main' ] ||
+               ! [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+               [ "$WORKFLOW_EVENT" != "pull_request_target" ]; then
+              echo "Approved review evidence lacks immutable trusted artifact provenance." >&2
+              exit 1
+            fi
+            evidence="$(jq -cn \
+              --arg repository "$REPOSITORY" \
+              --argjson prNumber "$PR_NUMBER" \
+              --arg headSha "$EXPECTED_HEAD_SHA" \
+              --argjson runId "$RUN_ID" \
+              --argjson runAttempt "$RUN_ATTEMPT" \
+              --argjson workflowId "$WORKFLOW_ID" \
+              --arg workflowPath "$WORKFLOW_PATH" \
+              --arg workflowRef "$WORKFLOW_REF" \
+              --arg workflowSha "$WORKFLOW_SHA" \
+              --arg event "$WORKFLOW_EVENT" \
+              --argjson artifactId "$ARTIFACT_ID" \
+              --arg artifactName "$ARTIFACT_NAME" \
+              --arg artifactDigest "$ARTIFACT_DIGEST" \
+              '{version:1,repository:$repository,prNumber:$prNumber,headSha:$headSha,runId:$runId,runAttempt:$runAttempt,workflowId:$workflowId,workflowPath:$workflowPath,workflowRef:$workflowRef,workflowSha:$workflowSha,event:$event,artifact:{id:$artifactId,name:$artifactName,digest:$artifactDigest}}')"
             conclusion=success
             title='Autonomous review approved'
             summary="Exact head $EXPECTED_HEAD_SHA passed autonomous review (high-risk: ${HIGH_RISK:-unknown}, model invoked: ${MODEL_INVOKED:-unknown})."
           fi
 
-          gh api \
-            --method PATCH \
-            "repos/$REPOSITORY/check-runs/$CHECK_RUN_ID" \
-            -f status=completed \
-            -f conclusion="$conclusion" \
-            -f "output[title]=$title" \
-            -f "output[summary]=$summary" >/dev/null
+          patch_args=(
+            --method PATCH
+            "repos/$REPOSITORY/check-runs/$CHECK_RUN_ID"
+            -f status=completed
+            -f conclusion="$conclusion"
+            -f "output[title]=$title"
+            -f "output[summary]=$summary"
+          )
+          if [ -n "$evidence" ]; then
+            patch_args+=(-f "output[text]=$evidence")
+          fi
+          gh api "${patch_args[@]}" >/dev/null
 
           if [ "$conclusion" != "success" ]; then
             exit 1

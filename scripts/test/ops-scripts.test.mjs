@@ -97,10 +97,13 @@ test('policy guardrails distinguish OIDC hardening from client-secret authentica
   assert.ok(!forbiddenDiffFindings('+ added: /^\\+.*print' + 'env/im').includes('secret-logging-risk'));
 });
 
-test('service OAuth bootstrap maintains exact workflow-bound federation', async () => {
+test('service OAuth verifier pins the existing test identity and cannot mutate trust or roles', async () => {
   const source = await readFile(new URL('../configure-entra-service-oauth.sh', import.meta.url), 'utf8');
 
-  assert.match(source, /job_workflow_ref:\$\{github_job_workflow_ref\}/);
+  assert.match(
+    source,
+    /approved_credential_subject='repo:JueZ\/api:environment:test:job_workflow_ref:JueZ\/api\/\.github\/workflows\/deploy-environment\.yml@refs\/heads\/main'/,
+  );
   assert.match(source, /approved_repository='JueZ\/api'/);
   assert.match(source, /approved_github_environment='test'/);
   assert.match(
@@ -108,16 +111,26 @@ test('service OAuth bootstrap maintains exact workflow-bound federation', async 
     /approved_github_job_workflow_ref='JueZ\/api\/\.github\/workflows\/deploy-environment\.yml@refs\/heads\/main'/,
   );
   assert.match(source, /approved_service_display_name='JueZ API Catalogue Service Test'/);
-  assert.match(source, /repository" != "\$approved_repository/);
-  assert.match(source, /github_environment" != "\$approved_github_environment/);
-  assert.match(source, /github_job_workflow_ref" != "\$approved_github_job_workflow_ref/);
-  assert.match(source, /service_app_count" != "1/);
+  assert.match(source, /approved_tenant_id='7ac3dfd6-e810-4693-805a-9535eb3ab166'/);
+  assert.match(source, /contract_path="\$script_dir\/\.\.\/contracts\/openapi\.gpt\.yaml"/);
+  assert.match(source, /contract_api_identifiers/);
+  assert.match(source, /approved_api_client_id="\$\{approved_api_identifier_uri#api:\/\/\}"/);
+  assert.match(source, /approved_service_client_id='2a5dd0fe-eb6f-41ab-ba48-6542645c508f'/);
+  assert.match(source, /approved_service_principal_object_id='6519c92f-2dbc-43d1-9396-1f2d9e766357'/);
+  assert.match(source, /approved_credential_name='github-test-service-tests'/);
+  assert.match(source, /assert_optional_exact API_APP_ID/);
+  assert.match(source, /account_tenant_id" != "\$approved_tenant_id/);
   assert.doesNotMatch(source, /SERVICE_APP_DISPLAY_NAME/);
   assert.doesNotMatch(source, /az ad app create/);
+  assert.doesNotMatch(source, /az ad app update/);
+  assert.doesNotMatch(source, /az ad sp create/);
   assert.doesNotMatch(source, /federated-credential create/);
-  assert.match(source, /federated-credential update/);
+  assert.doesNotMatch(source, /federated-credential update/);
+  assert.doesNotMatch(source, /--method POST/);
+  assert.doesNotMatch(source, /gh variable set/);
   assert.match(source, /\.audiences == \[\$audience\]/);
-  assert.doesNotMatch(source, /credential_subject="repo:\$\{repository\}:environment:\$\{github_environment\}"\n/);
+  assert.match(source, /approved_role_values=\('catalogue\.read' 'reddit\.read'\)/);
+  assert.match(source, /Verified the existing test service OAuth identity without mutation/);
 });
 
 test('smoke token mint config selects production service variables', () => {

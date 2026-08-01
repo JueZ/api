@@ -1,5 +1,13 @@
 # Incident log
 
+## 2026-08-01 — PR #287 bootstrap review rejected incomplete provenance and mutable OAuth maintenance
+
+- Evidence: Exact-head CI, Policy Check, and CodeQL passed, then autonomous review run `30686104064` rejected head `8b43ae26d6416979f036b98aaa85467915560f71` with three high findings and one medium finding. The sanitized artifact identified forgeable reuse provenance, identity/role/FIC mutations before a fully pinned boundary, and missing free-check revalidation at the paid-call boundary.
+- Cost handling: The diagnosis used the one bootstrap workflow only; no rerun was requested. Ordinary tests remained fake-backed. The next head is the first and only scoped repair attempt for PR #287.
+- Repair: Bind reusable evidence to the pinned GitHub Actions App, controller workflow identity, successful first run attempt, exact repository/head, and unique artifact digest; repeat free-gate validation at claim and API boundaries; make the Entra helper read-only and pin its existing public identity tuple and least-privilege assignments.
+- Safety: No production workflow ran. No Azure identity, FIC, credential, role, assignment, app setting, or GitHub environment variable was changed.
+- CI follow-up: Repair head `4e443239b5dbbdb3012d49b16b00fd106f3f3534` passed remote Actionlint/ShellCheck, policy, and CodeQL, but secret scan rejected a duplicated public API client GUID under the generic-key heuristic. Controller run `30686876997` was canceled before evidence publication to limit spend. The repair commit is amended to derive the identifier from the canonical contract, removing the duplicate from branch history instead of allowlisting or weakening Gitleaks.
+
 ## 2026-08-01 — PR #286 review exposed cross-run cost and federation gaps
 
 - Symptom: PR #286's final permitted review rejected an otherwise locally and remotely green head because one-call enforcement was scoped only to a controller invocation, caller-selected repository/environment values could rebind the existing FIC, and label transitions no longer triggered immediate evaluation.

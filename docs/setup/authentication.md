@@ -42,7 +42,7 @@ MCP uses the same API audience and per-tool permission. See `mcp-devmode.md`.
 
 ## Service identities
 
-Use `scripts/configure-entra-service-oauth.sh` only for the checked-in test service identity. The helper is immutable to `JueZ/api`, GitHub environment `test`, `JueZ/api/.github/workflows/deploy-environment.yml@refs/heads/main`, and the unique existing service app `JueZ API Catalogue Service Test`; it rejects caller attempts to rebind any part of that trust tuple and refuses to create a missing app or FIC. Default smoke roles are `catalogue.read,reddit.read`. A future dedicated `bring.read` canary requires a separate reviewed helper/allowlist rather than overriding this identity. Each identity needs exact `OIDC_ALLOWED_APP_OBJECT_IDS`/`OIDC_ALLOWED_CLIENT_IDS`.
+Use `scripts/configure-entra-service-oauth.sh` only to audit the one existing test service identity. It is a read-only verifier pinned to the checked-in tenant, API client/identifier URI, service client and service-principal object, `JueZ/api`, environment `test`, the main `deploy-environment.yml` workflow, the named existing FIC, and the fixed `catalogue.read,reddit.read` grants. It never creates or updates an app, service principal, FIC, role, assignment, credential, or GitHub variable. Any mismatch fails closed and requires a separate reviewed operator repair. A future dedicated `bring.read` canary requires its own reviewed verifier and allowlist.
 
 ## Repository/runtime variables
 

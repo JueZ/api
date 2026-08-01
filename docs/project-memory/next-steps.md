@@ -9,7 +9,7 @@
 
 ## Operational rollout
 
-1. Deliver the fresh successor for the durable exact-head paid-review claim, restored label evaluation, immutable test federation tuple, and REC bounds. Enable repository Actions only after the complete locally validated head is pushed once; run free gates before the single bootstrap review.
+1. Complete PR #287 repair attempt 1 for authoritative review provenance, repeated free-gate boundaries, restored label evaluation, the read-only pinned test identity verifier, and REC bounds. Push one fully validated head, let free gates pass, and permit only its final bootstrap review.
 2. Deploy the merged successor only to test, then require exact `/health`, unauthenticated and authenticated REST smokes, bundled MCP/REC behavior, telemetry correlation, release ledger, provenance, and runtime-truth evidence. Keep `DEPLOY_PRODUCTION_ENABLED=false` and production workflows disabled.
 3. Have a privileged Entra operator verify the granular delegated scopes/application roles and exact current test SPA redirect. Keep complete/remove unavailable to service tokens.
 4. Add a token-safe authenticated MCP smoke to the deployment workflow if live MCP provider execution must become a formal release gate; retain the existing REST authenticated smokes.

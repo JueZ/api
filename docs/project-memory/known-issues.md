@@ -6,11 +6,11 @@
 - The previous fail-open auth, ARM settings cycle, boolean casing, Entra GUID, missing service-role, and legacy federated-subject failures are resolved for test.
 - Production was not dispatched and remains disabled. A later production request must revalidate current-main ancestry, exact accepted test evidence, production identity/configuration, full authenticated smokes, telemetry, ledger, and rollback bundle before promotion.
 
-## Paid-review and workflow-bound federation successor is not yet delivered
+## PR #287 provenance repair is not yet delivered
 
-- PR #286 exhausted its two autonomous-review repairs and remains draft. Its terminal review identified missing durable exact-head paid-call idempotency, caller-controlled repository/environment federation inputs, and missing label-event evaluation.
-- The fresh successor branch implements one durable repository/PR/head claim, approved-artifact reuse, consumed-claim fail-closed behavior, restored label triggers, and the immutable complete test trust tuple.
-- Until the successor merges, repository Actions remain disabled to prevent accidental paid calls. The last accepted test release remains online but does not yet contain these successor controls.
+- PR #286 exhausted its two autonomous-review repairs and is closed as superseded by PR #287.
+- PR #287 exact-head CI, Policy Check, and CodeQL passed, but review run `30686104064` rejected incomplete approval provenance, mutable OAuth maintenance, and missing paid-boundary check revalidation.
+- Repair attempt 1 adds source-run/App/workflow/artifact-digest provenance, repeats free gates at both boundaries, and turns the OAuth helper into a pinned read-only verifier. Until that head is approved, merged, and test-deployed, the last accepted test release remains online without these successor controls.
 
 ## One orphaned GitHub Actions run cannot be cancelled
 

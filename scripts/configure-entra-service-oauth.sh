@@ -1,20 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Creates/configures a Microsoft Entra app-only OAuth client for service/e2e tests.
-# The script intentionally creates no client secret. It uses a GitHub Actions
-# federated credential so workflows can use OIDC instead of long-lived secrets.
-#
-# Required environment variables:
-#   API_APP_ID              API app registration client/application ID.
-# Optional assertions (every value is locked to the checked-in test tuple):
-#   REPOSITORY              Must be JueZ/api.
-#   GITHUB_ENVIRONMENT      Must be test.
-#   GITHUB_JOB_WORKFLOW_REF Must be JueZ/api/.github/workflows/deploy-environment.yml@refs/heads/main.
-#   SERVICE_APP_ROLE_VALUES Comma-separated granular roles. Default: catalogue.read,reddit.read.
-#   SERVICE_APP_ROLE_DISPLAY_NAME Prefix for created role display names.
-#   SET_GITHUB_VARIABLES    true to set GitHub environment variables. Default: false.
-#   OIDC_REQUIRED_SCOPES_VALUE Value to set when SET_GITHUB_VARIABLES=true.
+# Read-only verification for the one existing test service OAuth identity.
+# This helper deliberately performs no Entra, GitHub, credential, role, or
+# federation mutation. Identity repair requires a separately reviewed operator
+# procedure; this script only proves that the deployed test tuple still matches
+# the checked-in public identifiers and least-privilege grants.
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -24,198 +15,166 @@ require_command() {
 }
 
 require_command az
+require_command grep
 require_command jq
-require_command python3
+require_command sort
 
 approved_repository='JueZ/api'
 approved_github_environment='test'
 approved_github_job_workflow_ref='JueZ/api/.github/workflows/deploy-environment.yml@refs/heads/main'
+approved_tenant_id='7ac3dfd6-e810-4693-805a-9535eb3ab166'
+approved_service_client_id='2a5dd0fe-eb6f-41ab-ba48-6542645c508f'
+approved_service_principal_object_id='6519c92f-2dbc-43d1-9396-1f2d9e766357'
 approved_service_display_name='JueZ API Catalogue Service Test'
+approved_credential_name='github-test-service-tests'
+approved_credential_issuer='https://token.actions.githubusercontent.com'
+approved_credential_audience='api://AzureADTokenExchange'
+approved_credential_subject='repo:JueZ/api:environment:test:job_workflow_ref:JueZ/api/.github/workflows/deploy-environment.yml@refs/heads/main'
+approved_role_values=('catalogue.read' 'reddit.read')
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+contract_path="$script_dir/../contracts/openapi.gpt.yaml"
+mapfile -t contract_api_identifiers < <(
+  grep -oE 'api://[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' "$contract_path" |
+    sort -u
+)
+if [ "${#contract_api_identifiers[@]}" -ne 1 ]; then
+  echo 'The canonical GPT Actions contract must contain one unique Entra API identifier.' >&2
+  exit 1
+fi
+approved_api_identifier_uri="${contract_api_identifiers[0]}"
+approved_api_client_id="${approved_api_identifier_uri#api://}"
+
 repository="${REPOSITORY:-$approved_repository}"
 github_environment="${GITHUB_ENVIRONMENT:-$approved_github_environment}"
 github_job_workflow_ref="${GITHUB_JOB_WORKFLOW_REF:-$approved_github_job_workflow_ref}"
-api_app_id="${API_APP_ID:?Set API_APP_ID to the API app registration client/application ID.}"
-role_values_csv="${SERVICE_APP_ROLE_VALUES:-${SERVICE_APP_ROLE_VALUE:-catalogue.read,reddit.read}}"
-role_display_name="${SERVICE_APP_ROLE_DISPLAY_NAME:-API service access}"
-set_github_variables="${SET_GITHUB_VARIABLES:-false}"
-oidc_required_scopes_value="${OIDC_REQUIRED_SCOPES_VALUE:-catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove}"
 
-if [ "$repository" != "$approved_repository" ]; then
-  echo "REPOSITORY must equal the approved test repository: $approved_repository" >&2
-  exit 1
-fi
-if [ "$github_environment" != "$approved_github_environment" ]; then
-  echo "GITHUB_ENVIRONMENT must equal the approved environment: $approved_github_environment" >&2
-  exit 1
-fi
-if [ "$github_job_workflow_ref" != "$approved_github_job_workflow_ref" ]; then
-  echo "GITHUB_JOB_WORKFLOW_REF must equal the approved main workflow: $approved_github_job_workflow_ref" >&2
-  exit 1
-fi
-mapfile -t role_values < <(
-  tr ',' '\n' <<<"$role_values_csv" |
-    awk 'NF { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 != "" && !seen[$0]++) print $0 }'
-)
-if [ "${#role_values[@]}" -eq 0 ]; then
-  echo "SERVICE_APP_ROLE_VALUES must contain at least one role." >&2
-  exit 1
-fi
-for role_value in "${role_values[@]}"; do
-  if [[ ! "$role_value" =~ ^[A-Za-z0-9._:-]+$ ]]; then
-    echo "Each SERVICE_APP_ROLE_VALUES entry must contain only letters, numbers, dot, underscore, colon, or hyphen." >&2
+assert_optional_exact() {
+  local name="$1"
+  local actual="$2"
+  local expected="$3"
+  if [ -n "$actual" ] && [ "$actual" != "$expected" ]; then
+    echo "$name does not match the checked-in test identity." >&2
     exit 1
   fi
-  if [ "$role_value" = "bring.complete" ] || [ "$role_value" = "bring.remove" ]; then
-    echo "Service identities must not receive destructive Bring roles." >&2
-    exit 1
-  fi
-done
+}
+
+assert_optional_exact REPOSITORY "$repository" "$approved_repository"
+assert_optional_exact GITHUB_ENVIRONMENT "$github_environment" "$approved_github_environment"
+assert_optional_exact GITHUB_JOB_WORKFLOW_REF "$github_job_workflow_ref" "$approved_github_job_workflow_ref"
+assert_optional_exact API_APP_ID "${API_APP_ID:-}" "$approved_api_client_id"
+assert_optional_exact SERVICE_APP_CLIENT_ID "${SERVICE_APP_CLIENT_ID:-}" "$approved_service_client_id"
+assert_optional_exact TENANT_ID "${TENANT_ID:-}" "$approved_tenant_id"
+
+if [ "${SET_GITHUB_VARIABLES:-false}" != "false" ]; then
+  echo 'SET_GITHUB_VARIABLES is unsupported: this verifier never mutates GitHub configuration.' >&2
+  exit 1
+fi
+if [ -n "${SERVICE_APP_ROLE_VALUES:-${SERVICE_APP_ROLE_VALUE:-}}" ]; then
+  echo 'Service roles are fixed to catalogue.read and reddit.read and cannot be overridden.' >&2
+  exit 1
+fi
 
 account_tenant_id="$(az account show --query tenantId -o tsv)"
-echo "Using tenant: $account_tenant_id"
-
-api_app_object_id="$(az ad app show --id "$api_app_id" --query id -o tsv)"
-api_identifier_uri="$(az ad app show --id "$api_app_id" --query 'identifierUris[0]' -o tsv)"
-if [ -z "$api_identifier_uri" ] || [ "$api_identifier_uri" = "None" ]; then
-  api_identifier_uri="api://$api_app_id"
-fi
-api_sp_object_id="$(az ad sp show --id "$api_app_id" --query id -o tsv 2>/dev/null || true)"
-if [ -z "$api_sp_object_id" ]; then
-  api_sp_object_id="$(az ad sp create --id "$api_app_id" --query id -o tsv)"
-fi
-
-echo "API app object ID: $api_app_object_id"
-echo "API service principal object ID: $api_sp_object_id"
-echo "API identifier URI: $api_identifier_uri"
-
-role_ids=()
-for role_value in "${role_values[@]}"; do
-  current_roles="$(az ad app show --id "$api_app_id" --query appRoles -o json)"
-  role_id="$(jq -r --arg value "$role_value" '.[] | select(.value == $value and (.isEnabled // true)) | .id' <<<"$current_roles" | head -n 1)"
-  if [ -z "$role_id" ]; then
-    role_id="$(python3 - <<'PY'
-import uuid
-print(uuid.uuid4())
-PY
-)"
-    updated_roles="$(jq \
-      --arg id "$role_id" \
-      --arg value "$role_value" \
-      --arg displayName "$role_display_name ($role_value)" \
-      '. + [{allowedMemberTypes:["Application"], description:("Allows trusted app-only clients to call protected API routes for " + $value + "."), displayName:$displayName, id:$id, isEnabled:true, value:$value}]' \
-      <<<"$current_roles")"
-    az ad app update --id "$api_app_id" --set appRoles="$updated_roles" -o none
-    echo "Created API app role: $role_value ($role_id)"
-  else
-    echo "API app role already exists: $role_value ($role_id)"
-  fi
-  role_ids+=("$role_id")
-done
-
-service_apps_json="$(az ad app list --display-name "$approved_service_display_name" --query '[].{appId:appId,id:id,displayName:displayName}' -o json)"
-service_app_count="$(jq --arg display_name "$approved_service_display_name" '[.[] | select(.displayName == $display_name)] | length' <<<"$service_apps_json")"
-if [ "$service_app_count" != "1" ]; then
-  echo "Expected exactly one existing approved test service app named: $approved_service_display_name" >&2
+if [ "$account_tenant_id" != "$approved_tenant_id" ]; then
+  echo 'The active Azure tenant does not match the checked-in test tenant.' >&2
   exit 1
 fi
-service_app_json="$(jq --arg display_name "$approved_service_display_name" '[.[] | select(.displayName == $display_name)] | first' <<<"$service_apps_json")"
-service_app_id="$(jq -r '.appId' <<<"$service_app_json")"
+
+# The pinned tenant/client pairs are the immutable application authorities.
+# Directory object IDs are resolved only after those checks and are never used
+# to select a different identity or to authorize a mutation.
+api_app_json="$(az ad app show --id "$approved_api_client_id" --query '{appId:appId,id:id,identifierUris:identifierUris,appRoles:appRoles}' -o json)"
+if ! jq -e \
+  --arg client_id "$approved_api_client_id" \
+  --arg identifier_uri "$approved_api_identifier_uri" \
+  '.appId == $client_id and (.id | type == "string" and length > 0) and (.identifierUris | index($identifier_uri) != null)' \
+  <<<"$api_app_json" >/dev/null; then
+  echo 'The API application does not match the checked-in tenant/client/identifier tuple.' >&2
+  exit 1
+fi
+api_app_object_id="$(jq -r '.id' <<<"$api_app_json")"
+
+api_sp_json="$(az ad sp show --id "$approved_api_client_id" --query '{appId:appId,id:id}' -o json)"
+if ! jq -e --arg client_id "$approved_api_client_id" '.appId == $client_id and (.id | type == "string" and length > 0)' <<<"$api_sp_json" >/dev/null; then
+  echo 'The API service principal does not match the checked-in API client.' >&2
+  exit 1
+fi
+api_sp_object_id="$(jq -r '.id' <<<"$api_sp_json")"
+
+service_app_json="$(az ad app show --id "$approved_service_client_id" --query '{appId:appId,id:id,displayName:displayName}' -o json)"
+if ! jq -e \
+  --arg client_id "$approved_service_client_id" \
+  --arg display_name "$approved_service_display_name" \
+  '.appId == $client_id and .displayName == $display_name and (.id | type == "string" and length > 0)' \
+  <<<"$service_app_json" >/dev/null; then
+  echo 'The service application does not match the checked-in test client and display name.' >&2
+  exit 1
+fi
 service_app_object_id="$(jq -r '.id' <<<"$service_app_json")"
-echo "Using the unique existing approved service app registration: $approved_service_display_name"
 
-service_sp_object_id="$(az ad sp show --id "$service_app_id" --query id -o tsv 2>/dev/null || true)"
-if [ -z "$service_sp_object_id" ]; then
-  service_sp_object_id="$(az ad sp create --id "$service_app_id" --query id -o tsv)"
+service_sp_json="$(az ad sp show --id "$approved_service_client_id" --query '{appId:appId,id:id}' -o json)"
+if ! jq -e \
+  --arg client_id "$approved_service_client_id" \
+  --arg object_id "$approved_service_principal_object_id" \
+  '.appId == $client_id and .id == $object_id' \
+  <<<"$service_sp_json" >/dev/null; then
+  echo 'The service principal does not match the checked-in client/object pair.' >&2
+  exit 1
 fi
 
-echo "Service client/application ID: $service_app_id"
-echo "Service app object ID: $service_app_object_id"
-echo "Service principal object ID: $service_sp_object_id"
+credentials_json="$(az ad app federated-credential list --id "$service_app_object_id" -o json)"
+credential_matches="$(jq \
+  --arg name "$approved_credential_name" \
+  '[.[] | select(.name == $name)] | length' \
+  <<<"$credentials_json")"
+if [ "$credential_matches" != '1' ] || ! jq -e \
+  --arg name "$approved_credential_name" \
+  --arg issuer "$approved_credential_issuer" \
+  --arg subject "$approved_credential_subject" \
+  --arg audience "$approved_credential_audience" \
+  '[.[] | select(.name == $name)] | first | .issuer == $issuer and .subject == $subject and .audiences == [$audience]' \
+  <<<"$credentials_json" >/dev/null; then
+  echo 'The existing test federated credential is missing, ambiguous, or not bound to the approved main workflow.' >&2
+  exit 1
+fi
 
-for index in "${!role_ids[@]}"; do
-  role_id="${role_ids[$index]}"
-  role_value="${role_values[$index]}"
-  existing_assignment="$(az rest \
-    --method GET \
-    --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$service_sp_object_id/appRoleAssignments" \
-    --query "value[?resourceId=='$api_sp_object_id' && appRoleId=='$role_id'] | [0].id" \
-    -o tsv 2>/dev/null || true)"
-  if [ -z "$existing_assignment" ]; then
-    assignment_body="$(jq -n \
-      --arg principalId "$service_sp_object_id" \
-      --arg resourceId "$api_sp_object_id" \
-      --arg appRoleId "$role_id" \
-      '{principalId:$principalId, resourceId:$resourceId, appRoleId:$appRoleId}')"
-    az rest \
-      --method POST \
-      --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$service_sp_object_id/appRoleAssignments" \
-      --headers 'Content-Type=application/json' \
-      --body "$assignment_body" \
-      -o none
-    echo "Assigned app role $role_value to service principal."
-  else
-    echo "App role assignment already exists for $role_value."
+api_roles="$(jq -c '.appRoles' <<<"$api_app_json")"
+assignments="$(az rest \
+  --method GET \
+  --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$approved_service_principal_object_id/appRoleAssignments" \
+  --query value \
+  -o json)"
+for role_value in "${approved_role_values[@]}"; do
+  role_ids="$(jq -c \
+    --arg value "$role_value" \
+    '[.[] | select(.value == $value and (.isEnabled // true) and (.allowedMemberTypes | index("Application") != null)) | .id]' \
+    <<<"$api_roles")"
+  if [ "$(jq 'length' <<<"$role_ids")" != '1' ]; then
+    echo "Expected exactly one enabled application role for $role_value." >&2
+    exit 1
+  fi
+  role_id="$(jq -r '.[0]' <<<"$role_ids")"
+  assignment_count="$(jq \
+    --arg principal_id "$approved_service_principal_object_id" \
+    --arg resource_id "$api_sp_object_id" \
+    --arg role_id "$role_id" \
+    '[.[] | select(.principalId == $principal_id and .resourceId == $resource_id and .appRoleId == $role_id)] | length' \
+    <<<"$assignments")"
+  if [ "$assignment_count" != '1' ]; then
+    echo "Expected exactly one existing $role_value assignment for the approved service principal." >&2
+    exit 1
   fi
 done
 
-credential_name="github-${github_environment}-service-tests"
-credential_subject="repo:${repository}:environment:${github_environment}:job_workflow_ref:${github_job_workflow_ref}"
-credential_issuer="https://token.actions.githubusercontent.com"
-credential_audience="api://AzureADTokenExchange"
-existing_credential="$(az ad app federated-credential list --id "$service_app_object_id" --query "[?name=='$credential_name'] | [0]" -o json)"
-credential_file="$(mktemp)"
-cleanup_credential_file() {
-  rm -f "$credential_file"
-}
-trap cleanup_credential_file EXIT
-
-if [ "$(jq -r '.name // empty' <<<"$existing_credential")" = "" ]; then
-  echo "The approved existing federated credential is missing: $credential_name" >&2
-  exit 1
-elif jq -e \
-  --arg issuer "$credential_issuer" \
-  --arg subject "$credential_subject" \
-  --arg audience "$credential_audience" \
-  '.issuer == $issuer and .subject == $subject and .audiences == [$audience]' \
-  <<<"$existing_credential" >/dev/null; then
-  echo "Federated credential already matches the exact workflow subject: $credential_name"
-else
-  jq -n \
-    --arg issuer "$credential_issuer" \
-    --arg subject "$credential_subject" \
-    --arg audience "$credential_audience" \
-    '{issuer:$issuer, subject:$subject, description:"GitHub Actions OIDC for service/e2e tests", audiences:[$audience]}' \
-    > "$credential_file"
-  az ad app federated-credential update \
-    --id "$service_app_object_id" \
-    --federated-credential-id "$credential_name" \
-    --parameters "@$credential_file" \
-    -o none
-  echo "Updated federated credential to exact workflow subject: $credential_subject"
-fi
-
-if [ "$set_github_variables" = "true" ]; then
-  require_command gh
-  service_var_prefix='TEST'
-  gh variable set "${service_var_prefix}_SERVICE_AUTH_CLIENT_ID" --env "$github_environment" --repo "$repository" --body "$service_app_id"
-  gh variable set "${service_var_prefix}_SERVICE_AUTH_TENANT_ID" --env "$github_environment" --repo "$repository" --body "$account_tenant_id"
-  gh variable set "${service_var_prefix}_SERVICE_AUTH_SCOPE" --env "$github_environment" --repo "$repository" --body "$api_identifier_uri/.default"
-  gh variable set OIDC_ALLOWED_APP_OBJECT_IDS --env "$github_environment" --repo "$repository" --body "$service_sp_object_id"
-  gh variable set OIDC_ALLOWED_CLIENT_IDS --env "$github_environment" --repo "$repository" --body "$service_app_id"
-  gh variable set OIDC_REQUIRED_SCOPES --env "$github_environment" --repo "$repository" --body "$oidc_required_scopes_value"
-  echo "Set GitHub environment variables for $repository/$github_environment."
-else
-  service_var_prefix='TEST'
-  cat <<VALUES
-
-GitHub environment variables to set for $repository environment '$github_environment':
-  ${service_var_prefix}_SERVICE_AUTH_CLIENT_ID=$service_app_id
-  ${service_var_prefix}_SERVICE_AUTH_TENANT_ID=$account_tenant_id
-  ${service_var_prefix}_SERVICE_AUTH_SCOPE=$api_identifier_uri/.default
-  OIDC_ALLOWED_APP_OBJECT_IDS=$service_sp_object_id
-  OIDC_ALLOWED_CLIENT_IDS=$service_app_id
-  OIDC_REQUIRED_SCOPES=$oidc_required_scopes_value
-
-Re-run with SET_GITHUB_VARIABLES=true to set them automatically when gh is authenticated.
-VALUES
-fi
+printf '%s\n' \
+  'Verified the existing test service OAuth identity without mutation.' \
+  "Tenant: $approved_tenant_id" \
+  "API client: $approved_api_client_id" \
+  "API app object: $api_app_object_id" \
+  "API service principal: $api_sp_object_id" \
+  "Service client: $approved_service_client_id" \
+  "Service app object: $service_app_object_id" \
+  "Service principal: $approved_service_principal_object_id" \
+  "Federated credential: $approved_credential_name" \
+  'Roles: catalogue.read,reddit.read'

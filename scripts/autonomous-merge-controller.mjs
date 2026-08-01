@@ -11,7 +11,8 @@ import {
 } from './lib/autonomous-policy.mjs';
 
 const REVIEW_INPUT_TOKEN_OVERHEAD = 4096;
-const REVIEW_CLAIM_VERSION = 'v1';
+const REVIEW_CLAIM_VERSION = 'v2';
+const REVIEW_EVIDENCE_VERSION = 1;
 
 const reviewSchema = {
   type: 'object',
@@ -241,6 +242,21 @@ export async function runReview(options, policy, github, openAIClient) {
     throw new Error('Autonomous review blocked before API call: cost_ceiling_exceeded.');
   }
 
+  try {
+    await assertFreeExactHeadChecks(options, policy, github, 'paid-call boundary');
+  } catch (error) {
+    if (options.claimCheckRunId && options.runId) {
+      await github.releaseReviewClaim({
+        checkRunId: options.claimCheckRunId,
+        externalId: `${reviewClaimExternalId(options.repository, options.prNumber, options.headSha)}:released:${options.runId}`,
+        detailsUrl: `https://github.com/${options.repository}/actions/runs/${options.runId}`,
+        summary:
+          'The exact-head claim was released without an OpenAI request because a free deterministic gate changed before the paid-call boundary.',
+      });
+    }
+    throw error;
+  }
+
   let parsed;
   let response;
   let modelFailure;
@@ -359,8 +375,9 @@ export async function claimAutonomousReview(options, policy, github) {
     throw new Error(`Autonomous review claim rejected the pull request:\n- ${pullRequestState.errors.join('\n- ')}`);
   }
 
+  const checkRuns = await assertFreeExactHeadChecks(options, policy, github, 'durable-claim boundary');
   const externalId = reviewClaimExternalId(options.repository, options.prNumber, options.headSha);
-  const matchingClaims = (await github.getCheckRuns(options.headSha)).filter(
+  const matchingClaims = checkRuns.filter(
     (checkRun) =>
       checkRun.name === policy.autonomousReview.checkName &&
       checkRun.head_sha === options.headSha &&
@@ -382,20 +399,26 @@ export async function claimAutonomousReview(options, policy, github) {
   const existing = matchingClaims[0];
   if (existing) {
     if (existing.status === 'completed' && existing.conclusion === 'success') {
-      const reuseRunId = parseTrustedRunId(existing.details_url, options.repository);
-      if (!reuseRunId) {
+      const provenance = await validateReviewClaimProvenance(existing, options, policy, github);
+      if (!provenance.ok) {
         return publishConsumedReviewClaim(
           options,
           policy,
           {
             status: 'consumed',
-            reason: 'approved_claim_missing_trusted_run',
+            reason: provenance.reason,
             checkRunId: existing.id,
           },
           github,
         );
       }
-      const claim = { status: 'reuse', checkRunId: existing.id, reuseRunId };
+      const claim = {
+        status: 'reuse',
+        checkRunId: existing.id,
+        reuseRunId: provenance.runId,
+        artifactId: provenance.artifact.id,
+        artifactDigest: provenance.artifact.digest,
+      };
       await writeGithubOutput({
         claim_status: claim.status,
         claim_check_run_id: String(claim.checkRunId),
@@ -433,6 +456,26 @@ export async function claimAutonomousReview(options, policy, github) {
 
 export async function reuseAutonomousReview(options, policy, github) {
   assertExpectedHead(await github.getPullRequest(options.prNumber), options.headSha);
+  await assertFreeExactHeadChecks(options, policy, github, 'review-reuse boundary');
+  const matchingClaims = (await github.getCheckRuns(options.headSha)).filter(
+    (checkRun) =>
+      checkRun.name === policy.autonomousReview.checkName &&
+      checkRun.head_sha === options.headSha &&
+      checkRun.external_id === reviewClaimExternalId(options.repository, options.prNumber, options.headSha),
+  );
+  if (
+    matchingClaims.length !== 1 ||
+    matchingClaims[0].status !== 'completed' ||
+    matchingClaims[0].conclusion !== 'success'
+  ) {
+    throw new Error('Stored exact-head review is not reusable: one completed successful durable claim is required.');
+  }
+  const provenance = await validateReviewClaimProvenance(matchingClaims[0], options, policy, github);
+  if (!provenance.ok || provenance.runId !== options.sourceRunId) {
+    throw new Error(
+      `Stored exact-head review provenance is not reusable: ${provenance.reason ?? 'source_run_mismatch'}.`,
+    );
+  }
   const review = JSON.parse(await readFile(options.reviewFile, 'utf8'));
   const validation = validateAutonomousReview(review, options.headSha, policy);
   if (!validation.ok) {
@@ -547,6 +590,19 @@ function createGithubClient(repository, token) {
       }
       throw new Error('Commit contains more than 10000 check runs.');
     },
+    async getWorkflowRun(runId) {
+      return (await request(`/actions/runs/${runId}`)).json();
+    },
+    async getWorkflowRunArtifacts(runId) {
+      const all = [];
+      for (let page = 1; page <= 10; page += 1) {
+        const response = await (await request(`/actions/runs/${runId}/artifacts?per_page=100&page=${page}`)).json();
+        const rows = response.artifacts ?? [];
+        all.push(...rows);
+        if (all.length >= (response.total_count ?? all.length) || rows.length < 100) return all;
+      }
+      throw new Error('Workflow run contains more than 1000 artifacts.');
+    },
     async createReviewClaim({ name, headSha, externalId, detailsUrl }) {
       return (
         await request('/check-runs', {
@@ -563,6 +619,21 @@ function createGithubClient(repository, token) {
               summary:
                 'Free exact-head gates passed and this durable claim permits at most one paid review request for this repository, pull request, and head SHA.',
             },
+          }),
+        })
+      ).json();
+    },
+    async releaseReviewClaim({ checkRunId, externalId, detailsUrl, summary }) {
+      return (
+        await request(`/check-runs/${checkRunId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: 'completed',
+            conclusion: 'neutral',
+            external_id: externalId,
+            details_url: detailsUrl,
+            output: { title: 'Autonomous review claim released before paid call', summary },
           }),
         })
       ).json();
@@ -630,8 +701,16 @@ function parseOptions(argv) {
   if (!Number.isInteger(prNumber) || prNumber < 1) throw new Error('--pr must be a positive integer');
   if (!/^[0-9a-f]{40}$/i.test(headSha ?? '')) throw new Error('--head-sha must be a full commit SHA');
   const runId = Number(values.get('--run-id') ?? process.env.GITHUB_RUN_ID);
-  if (['claim', 'reuse'].includes(command) && (!Number.isSafeInteger(runId) || runId < 1)) {
-    throw new Error('--run-id must be a positive workflow run ID for claim or reuse');
+  if (['claim', 'reuse', 'review'].includes(command) && (!Number.isSafeInteger(runId) || runId < 1)) {
+    throw new Error('--run-id must be a positive workflow run ID for claim, reuse, or review');
+  }
+  const sourceRunId = Number(values.get('--source-run-id'));
+  if (command === 'reuse' && (!Number.isSafeInteger(sourceRunId) || sourceRunId < 1)) {
+    throw new Error('--source-run-id must be a positive trusted workflow run ID for reuse');
+  }
+  const claimCheckRunId = Number(values.get('--claim-check-run-id'));
+  if (command === 'review' && (!Number.isSafeInteger(claimCheckRunId) || claimCheckRunId < 1)) {
+    throw new Error('--claim-check-run-id must be a positive durable claim check-run ID for review');
   }
   return {
     command,
@@ -642,6 +721,8 @@ function parseOptions(argv) {
     waitSeconds: Number(values.get('--wait-seconds') ?? 3600),
     pollSeconds: Number(values.get('--poll-seconds') ?? 15),
     runId,
+    sourceRunId,
+    claimCheckRunId,
     merge: values.get('--merge') === 'true',
   };
 }
@@ -667,6 +748,100 @@ function parseTrustedRunId(detailsUrl, repository) {
   if (!match) return null;
   const runId = Number(match[1]);
   return Number.isSafeInteger(runId) ? runId : null;
+}
+
+async function assertFreeExactHeadChecks(options, policy, github, boundary) {
+  const pullRequest = await github.getPullRequest(options.prNumber);
+  assertExpectedHead(pullRequest, options.headSha);
+  const pullRequestState = evaluatePullRequestState(pullRequest, options.headSha, policy);
+  if (!pullRequestState.ok) {
+    throw new Error(`Free exact-head checks failed at ${boundary}: ${pullRequestState.errors.join('; ')}.`);
+  }
+  const checkRuns = await github.getCheckRuns(options.headSha);
+  const requiredChecks = policy.requiredChecks.filter(
+    (required) => required.name !== policy.autonomousReview.checkName,
+  );
+  const evaluation = evaluateRequiredChecks(checkRuns, options.headSha, requiredChecks);
+  if (!evaluation.ok) {
+    const errors = [
+      ...evaluation.failures.map((failure) => `${failure.check}: ${failure.reason}`),
+      ...evaluation.pending.map((pending) => `${pending.check}: ${pending.reason}`),
+    ];
+    throw new Error(`Free exact-head checks failed at ${boundary}: ${errors.join('; ')}.`);
+  }
+  return checkRuns;
+}
+
+async function validateReviewClaimProvenance(checkRun, options, policy, github) {
+  const reject = (reason) => ({ ok: false, reason });
+  if (
+    checkRun.app?.id !== policy.autonomousReview.trustedCheckAppId ||
+    checkRun.app?.slug !== policy.autonomousReview.trustedCheckAppSlug
+  ) {
+    return reject('approved_claim_wrong_github_app');
+  }
+  const runId = parseTrustedRunId(checkRun.details_url, options.repository);
+  if (!runId) return reject('approved_claim_missing_trusted_run');
+
+  let evidence;
+  try {
+    evidence = JSON.parse(checkRun.output?.text ?? '');
+  } catch {
+    return reject('approved_claim_invalid_evidence_json');
+  }
+  const expectedArtifactName = `autonomous-review-${options.headSha}`;
+  if (
+    evidence?.version !== REVIEW_EVIDENCE_VERSION ||
+    evidence.repository !== options.repository ||
+    evidence.prNumber !== options.prNumber ||
+    evidence.headSha !== options.headSha ||
+    evidence.runId !== runId ||
+    evidence.runAttempt !== 1 ||
+    evidence.workflowId !== policy.autonomousReview.trustedWorkflowId ||
+    evidence.workflowPath !== policy.autonomousReview.trustedWorkflowPath ||
+    evidence.workflowRef !== policy.autonomousReview.trustedWorkflowRef ||
+    evidence.event !== policy.autonomousReview.trustedEvent ||
+    !/^[0-9a-f]{40}$/i.test(evidence.workflowSha ?? '') ||
+    evidence.artifact?.name !== expectedArtifactName ||
+    !Number.isSafeInteger(evidence.artifact?.id) ||
+    evidence.artifact.id < 1 ||
+    !/^sha256:[0-9a-f]{64}$/i.test(evidence.artifact?.digest ?? '')
+  ) {
+    return reject('approved_claim_evidence_mismatch');
+  }
+
+  const workflowRun = await github.getWorkflowRun(runId);
+  if (
+    workflowRun.id !== runId ||
+    workflowRun.workflow_id !== policy.autonomousReview.trustedWorkflowId ||
+    workflowRun.path !== policy.autonomousReview.trustedWorkflowPath ||
+    workflowRun.event !== policy.autonomousReview.trustedEvent ||
+    workflowRun.run_attempt !== 1 ||
+    workflowRun.status !== 'completed' ||
+    workflowRun.conclusion !== 'success' ||
+    workflowRun.head_sha !== options.headSha ||
+    workflowRun.repository?.full_name !== options.repository ||
+    workflowRun.head_repository?.full_name !== options.repository
+  ) {
+    return reject('approved_claim_untrusted_workflow_run');
+  }
+
+  const artifacts = (await github.getWorkflowRunArtifacts(runId)).filter(
+    (artifact) => artifact.name === expectedArtifactName,
+  );
+  if (artifacts.length !== 1 || artifacts[0].id !== evidence.artifact.id) {
+    return reject('approved_claim_artifact_not_unique');
+  }
+  const artifact = artifacts[0];
+  if (
+    artifact.expired === true ||
+    artifact.digest !== evidence.artifact.digest ||
+    artifact.workflow_run?.id !== runId ||
+    artifact.workflow_run?.head_sha !== options.headSha
+  ) {
+    return reject('approved_claim_artifact_provenance_mismatch');
+  }
+  return { ok: true, runId, artifact, evidence };
 }
 
 async function publishConsumedReviewClaim(options, policy, claim, github) {

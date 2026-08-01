@@ -52,6 +52,32 @@ export function validateAutonomousPolicy(policy) {
   if (policy.autonomousReview?.checkName !== 'Autonomous review complete') {
     errors.push('autonomousReview.checkName must be "Autonomous review complete"');
   }
+  if (
+    !Number.isSafeInteger(policy.autonomousReview?.trustedWorkflowId) ||
+    policy.autonomousReview.trustedWorkflowId < 1
+  ) {
+    errors.push('autonomousReview.trustedWorkflowId must be a positive workflow ID');
+  }
+  if (policy.autonomousReview?.trustedWorkflowPath !== '.github/workflows/codex-automerge.yml') {
+    errors.push('autonomousReview.trustedWorkflowPath must identify codex-automerge.yml');
+  }
+  if (
+    policy.autonomousReview?.trustedWorkflowRef !== 'JueZ/api/.github/workflows/codex-automerge.yml@refs/heads/main'
+  ) {
+    errors.push('autonomousReview.trustedWorkflowRef must identify the JueZ/api main controller');
+  }
+  if (policy.autonomousReview?.trustedEvent !== 'pull_request_target') {
+    errors.push('autonomousReview.trustedEvent must be pull_request_target');
+  }
+  if (
+    !Number.isSafeInteger(policy.autonomousReview?.trustedCheckAppId) ||
+    policy.autonomousReview.trustedCheckAppId < 1
+  ) {
+    errors.push('autonomousReview.trustedCheckAppId must be a positive GitHub App ID');
+  }
+  if (policy.autonomousReview?.trustedCheckAppSlug !== 'github-actions') {
+    errors.push('autonomousReview.trustedCheckAppSlug must be github-actions');
+  }
   if (!Object.hasOwn(AUTONOMOUS_REVIEW_MODEL_PRICING, policy.autonomousReview?.model)) {
     errors.push('autonomousReview.model must use an approved cost-bounded model');
   }

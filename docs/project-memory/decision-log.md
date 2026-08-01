@@ -3,10 +3,11 @@
 ## 2026-08-01 — Make the paid-review limit durable per exact head
 
 - Decision: Serialize every PR/manual/label controller event per pull request. After all free exact-head gates pass and immediately before a paid request, atomically create one durable check-run claim whose external identity binds repository, PR number, and full head SHA.
-- Decision: Reuse only a valid approved exact-head artifact from the trusted source run recorded by that claim. An in-progress, failed, ambiguous, or artifact-less claim publishes a current failure check and cannot call again. Restored label triggers publish current eligibility failure/success checks without changing the durable claim.
-- Decision: Lock the service-federation helper to `JueZ/api`, environment `test`, the main `deploy-environment.yml` workflow, and exactly one existing `JueZ API Catalogue Service Test` app/FIC. Do not create a missing app or trust route.
+- Decision: Reuse only when the claim creator is the pinned GitHub Actions App, the independently queried source is a successful first attempt of the pinned main controller workflow ID/path/ref/event for the exact repository/head, and the unique artifact ID/SHA-256 digest matches evidence sealed into the check. Any mismatch publishes failure and cannot call again.
+- Decision: Revalidate every free exact-head check both before the durable claim and immediately before the OpenAI request.
+- Decision: Replace service-federation mutation with a read-only verifier pinned to the existing tenant, API/service clients, service-principal object, main deployment-workflow subject, named FIC, and fixed non-destructive roles. The helper cannot create or update a missing identity, role, assignment, FIC, credential, GitHub variable, or trust route.
 - Rationale: PR #286's terminal independent review showed that SDK/controller retry limits did not prevent repeated workflow events from charging the same head, and that deriving trusted values from caller inputs allowed federation rebinding.
-- Status: Implemented on fresh successor branch `codex/finish-test-zone`; local and remote delivery gates plus test-only runtime acceptance remain pending. Production remains disabled.
+- Status: PR #287 free gates passed. Bootstrap review run `30686104064` produced the provenance/mutation/boundary findings above; repair attempt 1 is implemented locally and requires a new exact-head review. Production remains disabled.
 
 ## 2026-07-31 — Bound paid autonomous review before any model call
 

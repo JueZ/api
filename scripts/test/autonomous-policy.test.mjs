@@ -78,6 +78,63 @@ function successfulChecks() {
   }));
 }
 
+function successfulFreeChecks() {
+  return successfulChecks().filter((check) => check.name !== policy.autonomousReview.checkName);
+}
+
+function withFreeChecks(github) {
+  return {
+    ...github,
+    async getCheckRuns() {
+      return successfulFreeChecks();
+    },
+  };
+}
+
+function trustedReviewEvidence({ prNumber = 42, runId = 12345 } = {}) {
+  return {
+    version: 1,
+    repository: 'JueZ/api',
+    prNumber,
+    headSha,
+    runId,
+    runAttempt: 1,
+    workflowId: policy.autonomousReview.trustedWorkflowId,
+    workflowPath: policy.autonomousReview.trustedWorkflowPath,
+    workflowRef: policy.autonomousReview.trustedWorkflowRef,
+    workflowSha: 'c'.repeat(40),
+    event: policy.autonomousReview.trustedEvent,
+    artifact: {
+      id: 555,
+      name: `autonomous-review-${headSha}`,
+      digest: `sha256:${'d'.repeat(64)}`,
+    },
+  };
+}
+
+function trustedWorkflowRun(runId = 12345) {
+  return {
+    id: runId,
+    workflow_id: policy.autonomousReview.trustedWorkflowId,
+    path: policy.autonomousReview.trustedWorkflowPath,
+    event: policy.autonomousReview.trustedEvent,
+    run_attempt: 1,
+    status: 'completed',
+    conclusion: 'success',
+    head_sha: headSha,
+    repository: { full_name: 'JueZ/api' },
+    head_repository: { full_name: 'JueZ/api' },
+  };
+}
+
+function trustedArtifact(runId = 12345) {
+  return {
+    ...trustedReviewEvidence({ runId }).artifact,
+    expired: false,
+    workflow_run: { id: runId, head_sha: headSha },
+  };
+}
+
 test('canonical autonomous policy is internally valid', () => {
   assert.deepEqual(validateAutonomousPolicy(policy), []);
   assert.equal(policy.merge.allowAdminBypass, false);
@@ -87,6 +144,11 @@ test('canonical autonomous policy is internally valid', () => {
   assert.equal(policy.autonomousReview.maxDiffBytes, 40_000);
   assert.equal(policy.autonomousReview.maxOutputTokens, 1_500);
   assert.equal(policy.autonomousReview.maxEstimatedCostUsd, 0.31);
+  assert.equal(policy.autonomousReview.trustedWorkflowId, 276132077);
+  assert.equal(
+    policy.autonomousReview.trustedWorkflowRef,
+    'JueZ/api/.github/workflows/codex-automerge.yml@refs/heads/main',
+  );
   assert.match(codexAutomergeWorkflow, /Wait for free deterministic exact-head checks/);
   assert.match(codexAutomergeWorkflow, /AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'/);
   assert.match(codexAutomergeWorkflow, /ready_for_review, labeled, unlabeled/);
@@ -101,6 +163,8 @@ test('canonical autonomous policy is internally valid', () => {
       codexAutomergeWorkflow.indexOf('Run deterministic classification and independent review'),
   );
   assert.match(autonomousControllerSource, /maxRetries: 0/);
+  assert.match(codexAutomergeWorkflow, /output\[text\]=\$evidence/);
+  assert.match(codexAutomergeWorkflow, /artifact-digest/);
 });
 
 test('Codex auto-merge completion dispatches exact main CI through one delivery controller', () => {
@@ -408,7 +472,7 @@ test('high-risk autonomous review uses one cost-bounded call and records sanitiz
   const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-bounded-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const requests = [];
-  const github = {
+  const github = withFreeChecks({
     async getPullRequest() {
       return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
     },
@@ -418,7 +482,7 @@ test('high-risk autonomous review uses one cost-bounded call and records sanitiz
     async getPullRequestDiff() {
       return 'diff --git a/example b/example';
     },
-  };
+  });
   const client = {
     responses: {
       async create(request) {
@@ -485,7 +549,7 @@ test('high-risk autonomous review does not retry or accept an incomplete respons
     summary: 'No blocking findings.',
     findings: [],
   });
-  const github = {
+  const github = withFreeChecks({
     async getPullRequest() {
       return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
     },
@@ -495,7 +559,7 @@ test('high-risk autonomous review does not retry or accept an incomplete respons
     async getPullRequestDiff() {
       return 'diff --git a/example b/example';
     },
-  };
+  });
   const client = {
     responses: {
       async create(request) {
@@ -532,7 +596,7 @@ test('high-risk autonomous review fails closed after one structurally invalid de
   const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-invalid-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   let attempts = 0;
-  const github = {
+  const github = withFreeChecks({
     async getPullRequest() {
       return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
     },
@@ -542,7 +606,7 @@ test('high-risk autonomous review fails closed after one structurally invalid de
     async getPullRequestDiff() {
       return 'diff --git a/example b/example';
     },
-  };
+  });
   const client = {
     responses: {
       async create() {
@@ -583,7 +647,7 @@ test('persistent empty model output fails closed with sanitized review evidence'
   const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-empty-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const reviewFile = join(directory, 'review.json');
-  const github = {
+  const github = withFreeChecks({
     async getPullRequest() {
       return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
     },
@@ -593,7 +657,7 @@ test('persistent empty model output fails closed with sanitized review evidence'
     async getPullRequestDiff() {
       return 'diff --git a/example b/example';
     },
-  };
+  });
   const client = {
     responses: {
       async create() {
@@ -636,7 +700,7 @@ test('autonomous review cost ceiling blocks before any API request', async (cont
   context.after(() => rm(directory, { recursive: true, force: true }));
   const reviewFile = join(directory, 'review.json');
   let attempts = 0;
-  const github = {
+  const github = withFreeChecks({
     async getPullRequest() {
       return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
     },
@@ -646,7 +710,7 @@ test('autonomous review cost ceiling blocks before any API request', async (cont
     async getPullRequestDiff() {
       return 'diff --git a/example b/example';
     },
-  };
+  });
   const client = {
     responses: {
       async create() {
@@ -668,6 +732,59 @@ test('autonomous review cost ceiling blocks before any API request', async (cont
   assert.equal(attempts, 0);
   assert.equal(review.modelInvoked, false);
   assert.equal(review.reviewBudget.status, 'blocked_before_api');
+});
+
+test('paid review revalidates every free check immediately before the API call', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-boundary-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  let attempts = 0;
+  const releasedClaims = [];
+  const github = {
+    async getPullRequest() {
+      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
+    },
+    async getPullRequestFiles() {
+      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
+    },
+    async getPullRequestDiff() {
+      return 'diff --git a/example b/example';
+    },
+    async getCheckRuns() {
+      return successfulFreeChecks().map((check) =>
+        check.name === 'lint' ? { ...check, conclusion: 'failure' } : check,
+      );
+    },
+    async releaseReviewClaim(claim) {
+      releasedClaims.push(claim);
+    },
+  };
+  const client = {
+    responses: {
+      async create() {
+        attempts += 1;
+      },
+    },
+  };
+
+  await assert.rejects(
+    runReview(
+      {
+        repository: 'JueZ/api',
+        prNumber: 1,
+        headSha,
+        runId: 12345,
+        claimCheckRunId: 77,
+        reviewFile: join(directory, 'review.json'),
+      },
+      policy,
+      github,
+      client,
+    ),
+    /paid-call boundary: lint: failure/,
+  );
+  assert.equal(attempts, 0);
+  assert.equal(releasedClaims.length, 1);
+  assert.match(releasedClaims[0].externalId, /:released:12345$/);
 });
 
 test('paid review preflight excludes its own check and requires every free exact-head check', async () => {
@@ -712,7 +829,13 @@ test('durable exact-head claim is created once, reuses approval, and consumes fa
       return pullRequest();
     },
     async getCheckRuns() {
-      return [];
+      return successfulFreeChecks();
+    },
+    async getWorkflowRun(runId) {
+      return trustedWorkflowRun(runId);
+    },
+    async getWorkflowRunArtifacts(runId) {
+      return [trustedArtifact(runId)];
     },
     async createReviewClaim(claim) {
       createdClaims.push(claim);
@@ -738,6 +861,7 @@ test('durable exact-head claim is created once, reuses approval, and consumes fa
   assert.equal(createdClaims[0].detailsUrl, 'https://github.com/JueZ/api/actions/runs/12345');
 
   github.getCheckRuns = async () => [
+    ...successfulFreeChecks(),
     {
       id: 77,
       name: policy.autonomousReview.checkName,
@@ -746,16 +870,24 @@ test('durable exact-head claim is created once, reuses approval, and consumes fa
       status: 'completed',
       conclusion: 'success',
       details_url: 'https://github.com/JueZ/api/actions/runs/12345',
+      app: {
+        id: policy.autonomousReview.trustedCheckAppId,
+        slug: policy.autonomousReview.trustedCheckAppSlug,
+      },
+      output: { text: JSON.stringify(trustedReviewEvidence()) },
     },
   ];
   assert.deepEqual(await claimAutonomousReview(options, policy, github), {
     status: 'reuse',
     checkRunId: 77,
     reuseRunId: 12345,
+    artifactId: 555,
+    artifactDigest: `sha256:${'d'.repeat(64)}`,
   });
   assert.equal(createdClaims.length, 1);
 
   github.getCheckRuns = async () => [
+    ...successfulFreeChecks(),
     {
       id: 77,
       name: policy.autonomousReview.checkName,
@@ -790,6 +922,31 @@ test('only a valid approved exact-head artifact can be reused', async (context) 
       assert.equal(check.conclusion, 'success');
       return { id: 99 };
     },
+    async getCheckRuns() {
+      return [
+        ...successfulFreeChecks(),
+        {
+          id: 77,
+          name: policy.autonomousReview.checkName,
+          head_sha: headSha,
+          external_id: reviewClaimExternalId('JueZ/api', 1, headSha),
+          status: 'completed',
+          conclusion: 'success',
+          details_url: 'https://github.com/JueZ/api/actions/runs/12345',
+          app: {
+            id: policy.autonomousReview.trustedCheckAppId,
+            slug: policy.autonomousReview.trustedCheckAppSlug,
+          },
+          output: { text: JSON.stringify(trustedReviewEvidence({ prNumber: 1 })) },
+        },
+      ];
+    },
+    async getWorkflowRun(runId) {
+      return trustedWorkflowRun(runId);
+    },
+    async getWorkflowRunArtifacts(runId) {
+      return [trustedArtifact(runId)];
+    },
   };
   const approved = {
     decision: 'approve',
@@ -803,7 +960,7 @@ test('only a valid approved exact-head artifact can be reused', async (context) 
   assert.equal(
     (
       await reuseAutonomousReview(
-        { repository: 'JueZ/api', prNumber: 1, headSha, runId: 12345, reviewFile },
+        { repository: 'JueZ/api', prNumber: 1, headSha, runId: 12345, sourceRunId: 12345, reviewFile },
         policy,
         github,
       )
@@ -813,8 +970,72 @@ test('only a valid approved exact-head artifact can be reused', async (context) 
 
   await writeFile(reviewFile, JSON.stringify({ ...approved, reviewedHeadSha: 'b'.repeat(40) }));
   await assert.rejects(
-    reuseAutonomousReview({ repository: 'JueZ/api', prNumber: 1, headSha, runId: 12345, reviewFile }, policy, github),
+    reuseAutonomousReview(
+      { repository: 'JueZ/api', prNumber: 1, headSha, runId: 12345, sourceRunId: 12345, reviewFile },
+      policy,
+      github,
+    ),
     /Stored exact-head review is not reusable/,
+  );
+});
+
+test('forged app, workflow run, or artifact provenance consumes the claim without reuse', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-forged-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const reviewFile = join(directory, 'review.json');
+  const options = { repository: 'JueZ/api', prNumber: 42, headSha, runId: 98765, reviewFile };
+  let checkApp = {
+    id: policy.autonomousReview.trustedCheckAppId,
+    slug: policy.autonomousReview.trustedCheckAppSlug,
+  };
+  let workflowRun = trustedWorkflowRun();
+  let artifact = trustedArtifact();
+  const github = {
+    async getPullRequest() {
+      return pullRequest();
+    },
+    async getCheckRuns() {
+      return [
+        ...successfulFreeChecks(),
+        {
+          id: 77,
+          name: policy.autonomousReview.checkName,
+          head_sha: headSha,
+          external_id: reviewClaimExternalId('JueZ/api', 42, headSha),
+          status: 'completed',
+          conclusion: 'success',
+          details_url: 'https://github.com/JueZ/api/actions/runs/12345',
+          app: checkApp,
+          output: { text: JSON.stringify(trustedReviewEvidence()) },
+        },
+      ];
+    },
+    async getWorkflowRun() {
+      return workflowRun;
+    },
+    async getWorkflowRunArtifacts() {
+      return [artifact];
+    },
+    async createReviewDecisionCheck() {
+      return { id: 88 };
+    },
+  };
+
+  checkApp = { id: 1, slug: 'untrusted' };
+  assert.equal((await claimAutonomousReview(options, policy, github)).reason, 'approved_claim_wrong_github_app');
+
+  checkApp = {
+    id: policy.autonomousReview.trustedCheckAppId,
+    slug: policy.autonomousReview.trustedCheckAppSlug,
+  };
+  workflowRun = { ...trustedWorkflowRun(), conclusion: 'failure' };
+  assert.equal((await claimAutonomousReview(options, policy, github)).reason, 'approved_claim_untrusted_workflow_run');
+
+  workflowRun = trustedWorkflowRun();
+  artifact = { ...trustedArtifact(), digest: `sha256:${'e'.repeat(64)}` };
+  assert.equal(
+    (await claimAutonomousReview(options, policy, github)).reason,
+    'approved_claim_artifact_provenance_mismatch',
   );
 });
 
