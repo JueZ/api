@@ -1,5 +1,12 @@
 # Current state
 
+## 2026-08-01 Test accepted; production storage preparation remains fail closed
+
+- PR #300 passed exact-head CI, Policy, CodeQL, and independent review, then squash-merged as `d578cc5e335a938f9563d3be704e34c340b4d348`. Exact-main CI `30708995802` passed and Deploy Test `30709082286` accepted that exact SHA with complete deployment, public and authenticated smokes, telemetry, release ledger, and provenance. Live test health reports the same SHA and deployment run.
+- The production environment now contains the canonical non-secret container variables `BRING_MUTATION_CONTAINER=bring-mutations` and `BRING_AUDIT_CONTAINER=bring-audit`; these match application and Bicep defaults. No credential, secret, trust route, or permission was added or changed.
+- Storage-only attempt `30709256278` failed before Azure login because those two variables were absent. Attempt `30709314964` then passed immutable checkout, source/provenance validation, Azure OIDC, and the unchanged-production health baseline, but failed before Bicep what-if because the storage job had not exported its already verified current-main controller SHA to `DEPLOYMENT_CONTROL_REF` for the shared mutation guard.
+- Neither failed attempt provisioned the target storage account, copied a blob, or deployed the production Function/frontend. The bounded repair exports the controller SHA only after the job proves it still equals protected `main`; every later what-if, provision, copy, and verification guard remains fail closed.
+
 ## 2026-08-01 Reusable deployment checkout security repair accepted
 
 - GitHub Actions CodeQL identified the existing explicit `actions/checkout` reference in the privileged reusable deployment workflow as an untrusted artifact source under `workflow_call`; later runtime SHA validation does not sanitize that static dataflow.

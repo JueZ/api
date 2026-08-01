@@ -417,6 +417,17 @@ test('production private-storage preparation is isolated, exact-source, and dige
   assert.match(preparationJob, /and \.run_attempt == 1/);
   assert.match(preparationJob, /Pinned test provenance is not acceptable for production preparation/);
   assert.match(preparationJob, /name: Preview bounded private-storage preparation/);
+  const verifiedCurrentMainIndex = preparationJob.indexOf('[ "$controller_ref" = "$(git rev-parse origin/main)" ]');
+  const exportCurrentMainIndex = preparationJob.indexOf(
+    'echo "DEPLOYMENT_CONTROL_REF=$controller_ref" >> "$GITHUB_ENV"',
+  );
+  const previewPreparationIndex = preparationJob.indexOf('name: Preview bounded private-storage preparation');
+  assert.ok(
+    verifiedCurrentMainIndex >= 0 &&
+      verifiedCurrentMainIndex < exportCurrentMainIndex &&
+      exportCurrentMainIndex < previewPreparationIndex,
+  );
+  assert.equal(preparationJob.match(/DEPLOYMENT_CONTROL_REF=\$controller_ref/g)?.length, 1);
   assert.match(preparationJob, /--template-file infra\/prepare-private-storage\.bicep/);
   assert.match(preparationJob, /changeType != "Delete"/);
   assert.match(preparationJob, /name: Migrate one digest-pinned WLH reference blob/);
