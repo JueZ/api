@@ -2,17 +2,17 @@
 
 ## Test is accepted; production remains intentionally unpromoted
 
-- Deploy Test run `30666921988` accepted exact main commit `6cadc861954af706cd752c022b194c742c0aa6fd` after every infrastructure, package, runtime, authenticated-smoke, telemetry, ledger, and provenance gate passed.
-- The previous fail-open auth, ARM settings cycle, boolean casing, Entra GUID, missing service-role, and legacy federated-subject failures are resolved for test.
+- Deploy Test run `30695340416` accepted exact main commit `5d9e3cc87ed0f8e18e70544b6b1587ae2ddcf56c` after every infrastructure, package, runtime, authenticated-smoke, telemetry, ledger, and provenance gate passed.
+- The previous fail-open auth, ARM settings cycle, boolean casing, Entra GUID, missing service-role, legacy federated-subject, review-cost, and monthly budget-rollover failures are resolved for test.
 - Production was not dispatched and remains disabled. A later production request must revalidate current-main ancestry, exact accepted test evidence, production identity/configuration, full authenticated smokes, telemetry, ledger, and rollback bundle before promotion.
 
-## Review-permission successor awaits repaired test acceptance
+## Review-permission successor is accepted in test
 
 - PR #286 exhausted its two autonomous-review repairs and is closed as superseded by PR #287.
 - PR #287 exact-head CI, Policy Check, and CodeQL passed. The provenance and paid-boundary findings were repaired, but final review run `30687126474` rejected the optional service-identity verifier's incomplete whole-identity validation.
-- The operator removed repository-side service-identity setup/audit from scope. PR #289 repaired the predecessor review findings and GitHub claim integration. Reviews then exposed omitted executable helpers, insufficient output allowance for the complete diff, omitted classified security/ADR documentation in mixed capsules, and a second output exhaustion once that context was included. The final repair includes every non-documentation path and every high-risk document under the unchanged 200 KB and `$0.31` gates, reserves final-JSON capacity, and raises only the static output allowance to 3,500. Until it is approved, merged, and test-deployed, the last accepted test release remains online without the successor controls.
+- The operator removed repository-side service-identity setup/audit from scope. PR #289 repaired the predecessor review findings and GitHub claim integration. Reviews then exposed omitted executable helpers, insufficient output allowance for the complete diff, omitted classified security/ADR documentation in mixed capsules, and a second output exhaustion once that context was included. The accepted repair includes every non-documentation path and every high-risk document under the unchanged 200 KB and `$0.31` gates, reserves final-JSON capacity, and uses a 3,500-token static output allowance.
 
-Update: PR #289 is merged as `7907708d3db92a698bbfb549cb8ccfa91a1e86c8`; its exact main CI passed. The first test rollout stopped before package mutation because Azure budgets do not permit changing their start date after monthly rollover. PR #290 reviews rejected first fail-open lookup handling and then reliance on a response-body semantic code. The final repair uses the real ARM HTTP status with a memory-only short-lived token: only 404 receives a default, while all other failures stop before Bicep. The old accepted test release remains online until the successor rollout passes every gate.
+Update: PR #289 merged as `7907708d3db92a698bbfb549cb8ccfa91a1e86c8`; PR #290 merged the fail-closed monthly budget rollover repair as `5d9e3cc87ed0f8e18e70544b6b1587ae2ddcf56c`. Deploy Test `30695340416` accepted the successor after Bicep, runtime, authenticated smokes, telemetry, ledger, provenance, and independent live bundled-MCP verification all passed.
 
 ## One orphaned GitHub Actions run cannot currently be deleted
 
@@ -41,7 +41,7 @@ Update: PR #289 is merged as `7907708d3db92a698bbfb549cb8ccfa91a1e86c8`; its exa
 
 - An intentionally failing or pending-check PR must be shown unable to merge.
 - High-risk exact-head independent review and no-bypass branch rules must be verified on GitHub.
-- First-attempt CI/test pinning, immutable Function activation, activation-last frontend convergence, fail-closed auth, authenticated REST, MCP origin/REC behavior, telemetry correlation, and accepted test provenance are proven by run `30666921988` and its artifacts.
+- First-attempt CI/test pinning, immutable Function activation, activation-last frontend convergence, fail-closed auth, authenticated REST, MCP origin/REC behavior, telemetry correlation, and accepted test provenance are proven by run `30695340416`, its artifacts, and independent live probes.
 - A live authenticated MCP provider call was not separately executed outside the authenticated workflow smoke. Local API/MCP tests and live unauthenticated MCP REC behavior pass; add a token-safe authenticated MCP smoke to a future workflow change if this must become an explicit deployment gate.
 - Bring remains disabled in test, so live Bring read-only behavior and private/session migration remain intentionally unaccepted.
 

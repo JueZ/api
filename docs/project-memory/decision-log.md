@@ -5,13 +5,13 @@
 - Decision: For a high-risk PR, build the independent-review capsule from the complete contextual diff of every changed non-`docs/` path in GitHub's authoritative file list, not only paths matched by the high-risk classifier, plus every classifier-matched high-risk document. Include every changed document when the PR has no non-documentation changes. Reject missing, duplicate, ambiguous, source-oversized, or capsule-oversized input; never silently truncate executable or high-risk policy context.
 - Decision: Cap the complete capsule at 200,000 bytes. After one durable exact-head claim, make one OpenAI input-token count request using the same model, reasoning, schema, and input as generation. Permit at most one generation with up to 3,500 output tokens and explicit final-JSON capacity reservation only when the exact-input plus maximum-output calculation is no more than `$0.31`; disable SDK retries and revalidate free gates and claim ownership before both external-request boundaries.
 - Rationale: PR #289 review `30692285462` correctly found that the 40 KB high-risk-only capsule omitted executable policy helpers and reviewed only 39,357 of 162,829 source-diff bytes. Exact token counting allows complete relevant context without reverting to unsafe byte-as-token overestimation or raising the dollar ceiling.
-- Status: Review `30693386513` correctly found omitted mixed high-risk documentation. The complete repaired capsule then reached `30693881648`, but that review used all 3,000 output tokens internally and emitted no JSON. The final availability repair raises only the static output limit to 3,500 and reserves final-answer capacity; the exact `$0.31` cap, one-generation limit, medium reasoning, and fail-closed behavior remain unchanged. Fresh free gates, one new-head review, merge, and test-only acceptance remain pending. Production is unauthorized.
+- Status: Accepted through PR #289 review/merge `30694244308` and test deployment `30695340416`. The final review emitted an approving decision with no findings under the unchanged `$0.31` cap; production remains unauthorized.
 
 ## 2026-08-01 — Use medium reasoning inside the fixed autonomous-review output cap
 
 - Decision: Keep `gpt-5.6-sol`, one permanent claim, 1,500 output tokens, and the conservative `$0.31` ceiling, but use medium reasoning for the repository review.
 - Rationale: Review run `30691998861` consumed all 1,500 output tokens as high-effort reasoning and emitted no structured text. Raising the token or dollar ceiling would conflict with the operator's cost constraint; medium effort leaves capacity for the required fail-closed JSON decision.
-- Status: Implemented on the new exact head after preserving the consumed failed head. Free gates and one final bounded review remain required. Production remains unauthorized.
+- Status: Superseded by the complete-capsule 3,500-token decision above and accepted through review/merge `30694244308`. Production remains unauthorized.
 
 ## 2026-08-01 — Make paid-call ownership inseparable from the trusted review run
 
@@ -20,14 +20,14 @@
 - Decision: Require the live API path to execute inside the exact `Codex Auto-Merge` GitHub Actions run. Exact-name allowlist all workflow secrets and reject dynamic/bracket expressions, inherited secret sets, alternate token-minting actions/shell paths, non-built-in GitHub-auth values, and non-controller raw check-run access.
 - Superseded detail: The initial repair selected exact zero-context changes only for classifier-matched executable/governance paths. Review `30692285462` proved that selection incomplete; the newer decision above requires every non-documentation changed path with context and exact token budgeting.
 - Rationale: PR #289 review run `30689779148` correctly identified that separate claim/review operations and a name-focused credential heuristic did not prove durable ownership at the paid boundary.
-- Status: Implemented in one batched repair on draft PR #289. Full local/free remote gates, one final independent review, merge, and test-only acceptance remain pending. Production is not authorized.
+- Status: Accepted through PR #289 review/merge `30694244308` and Deploy Test `30695340416`. Production is not authorized.
 
 ## 2026-08-01 — Enforce effective workflow permissions without a new trust route
 
 - Decision: Require an explicit top-level permission map in every workflow, compute each job's effective permission map after overrides, and allow `checks: write` only in the three named trusted-controller jobs. Reject alternate GitHub App/PAT minting actions, suspicious GitHub credential secrets, and non-built-in values in workflow GitHub-auth token channels.
 - Decision: Keep repository default workflow permissions read-only and Actions PR approval disabled as defense in depth, but do not add an administration token, service identity, or external trust route merely so the workflow can inspect that mutable setting. Static policy and the trusted pre-call audit make omitted defaults irrelevant to check-writer isolation.
 - Rationale: Final PR #288 review correctly found that searching only literal write blocks was not a fail-closed effective-permission audit. GitHub's administration endpoint is an operator control plane and would require a stronger token than the least-privilege workflow token.
-- Status: Implemented on the fresh test-only successor; local/remote gates, independent review, merge, and exact test acceptance remain pending. Production is not authorized.
+- Status: Accepted through PR #289 review/merge `30694244308` and Deploy Test `30695340416`. No administration token or new trust route was added. Production is not authorized.
 
 ## 2026-08-01 — Make the paid-review limit durable per exact head
 
@@ -49,7 +49,7 @@
 ## 2026-07-31 — Preserve workflow-bound OIDC and repair only existing test federation
 
 - Decision: Keep GitHub's repository/environment/`job_workflow_ref` OIDC subject and rebind only the two existing test federated credentials to that exact subject. Do not restore the broader legacy subject.
-- Decision: The operator deferred credential rotation and an independent trust-root bootstrap. Open unmerged PR #285 remains a separate proposal and does not block the accepted test-only recovery requested by the operator.
+- Decision: The operator deferred credential rotation and an independent trust-root bootstrap. Superseded PR #285 is closed and does not block the accepted test-only recovery requested by the operator.
 - Consequences: The completed federation repair created no new identity, key, secret, permission, app role, or RBAC grant. Production federation and deployment remain unchanged and disabled. Future identity maintenance is a privileged operator procedure outside repository delivery; no service-identity helper remains in this repository.
 - Status: Test recovery validated by first-attempt run `30666921988`; repository-side service-identity maintenance is intentionally removed from current scope.
 
@@ -57,26 +57,26 @@
 
 - Decision: Validate `OIDC_ALLOWED_OBJECT_IDS` and `OIDC_ALLOWED_TENANTS` with the Microsoft GUID shape only. Retain the stricter RFC-versioned UUID pattern for Bring list identifiers.
 - Rationale: Microsoft Entra `oid` and `tid` claims are GUID strings and are not promised to carry RFC UUID version/variant marker bits. Test startup telemetry from run `30651802409` proved that applying the Bring UUID constraint to an existing Entra object ID rejected an otherwise exact, deployment-verified configuration.
-- Status: Implemented locally with a non-versioned-GUID regression test. Fresh PR and test-only validation remain required; production remains untouched.
+- Status: Accepted in test by Deploy Test `30695340416`; production remains untouched.
 
 ## 2026-07-31 — Normalize boolean Function settings to lowercase strings
 
 - Decision: Every Bicep boolean written to Function App settings must use `toLower(string(value))`; direct `string(bool)` conversions are prohibited by architecture regression coverage.
 - Rationale: ARM persisted `string(bool)` as title-cased `True`/`False`, while the Node runtime and deployment safety policy intentionally require exact lowercase `true`/`false`. Test run `30651053281` proved that only the seven boolean-derived settings diverged; all non-boolean settings and exact Key Vault reference identities matched.
-- Status: Implemented after the repaired nested settings deployment passed Bicep but failed closed before package activation. Fresh PR and test-only validation remain required; production remains untouched.
+- Status: Accepted in test by Deploy Test `30695340416`; production remains untouched.
 
 ## 2026-07-31 — Reconcile preserved Function settings through a secure nested deployment
 
 - Decision: Keep the parent-template read and strict allowlist of release-owned Function settings, but move the complete `Microsoft.Web/sites/config` write into a local nested Bicep module with a `secureObject` parameter.
 - Rationale: ARM rejects a template that both lists and directly writes the same `appsettings` child as circular. The nested deployment depends on the Function App and secret resources, receives only the complete intended settings object, and prevents secret-bearing values from being retained in deployment history.
-- Status: Implemented after test run `30650254586` failed before package mutation; PR validation and a fresh test-only dispatch remain pending.
+- Status: Accepted in test by Deploy Test `30695340416`; Bicep and complete settings reconciliation passed.
 
 ## 2026-07-31 — Pin immutable Function versions and activate the frontend entrypoint last
 
 - Decision: A digest-addressed Function blob name is insufficient by itself. Resolve its Azure Blob version ID, download and hash that exact immutable version, put the encoded `versionid` in `WEBSITE_RUN_FROM_PACKAGE`, and verify the exact setting through the management plane before restart.
 - Decision: Do not delete from the active static site before a complete replacement is available. Upload and verify all non-entrypoint files while the prior `index.html` remains active; upload `index.html` last; verify every expected byte; then delete only inventory-proven stale blobs and require a final exact name/content match.
 - Rationale: Azure blob versions are immutable, while a current blob URL can be rebound by overwrite. Activation-last frontend deployment prevents an upload failure from first removing dependencies required by the previously active site.
-- Status: Implemented on the fresh successor after PR #279 exhausted its two high-risk review attempts; fresh remote validation and test-only deployment remain pending.
+- Status: Accepted in test by Deploy Test `30695340416`; immutable Function activation and activation-last frontend convergence passed.
 
 ## 2026-07-31 — Bind deployment evidence to one attempt and preserve exact rendered packages
 
@@ -84,20 +84,20 @@
 - Decision: Correlation is part of release-ledger, test-provenance, and accepted-production-bundle artifact names. Consumers also validate the exact run identity, source SHA, title, embedded run ID, and embedded correlation.
 - Decision: Test provenance separately records the immutable CI frontend-source digest and the environment-rendered frontend digest. Production promotes the exact Function, SBOM, and frontend-source digests, then hashes its own rendered archive before either Function or static deployment. The exact rendered production bundle is preserved for rollback.
 - Decision: Production promotion and rollback must deploy both Function and frontend packages. Rollback is strictly package-only. Current `main` supplies controller/validation code; existing resources, safety settings, and the complete rendered frontend are validated read-only before mutation; Bicep and safety-setting reconciliation are skipped; release blobs cannot be created; and the preserved frontend is uploaded unchanged.
-- Status: Implemented on the fresh successor branch after PR #276 exhausted its two high-risk review attempts; fresh remote validation and test-only deployment remain pending.
+- Status: Accepted in test by Deploy Test `30695340416`; exact CI/run correlation, package digests, ledger, and provenance passed.
 
 ## 2026-07-31 — Use deterministic-first REC across REST and the bundled MCP server
 
 - Decision: Every service-generated failure uses REC. Predefined deterministic mappings run first; only `diagnostic_uncertain` sanitized capsules may use the OpenAI Responses API, and model output must pass schema and policy gates.
 - Decision: Keep one repository `OPENAI_API_KEY` for test and production deployment configuration, with Key Vault references and no secret value in repository memory.
 - Decision: MCP retains one server and exposes REC at `structuredContent.repairable_problem`; model-generated JSON Patch is rejected unless a future deterministic verifier is added.
-- Status: Implemented locally; PR and test-only rollout authorized. Production rollout is not authorized for this delivery.
+- Status: Accepted in test at `5d9e3cc87ed0f8e18e70544b6b1587ae2ddcf56c` by Deploy Test `30695340416`. Deterministic REST and MCP REC behavior was independently verified live. Production rollout is not authorized for this delivery.
 - Reference: `docs/adr/0005-deterministic-first-repairable-errors.md`.
 
 ## 2026-07-31 — Keep one bundled MCP gateway
 
 - Decision: Health, authentication, Reddit, Willhaben, and Bring tools remain bundled behind one `/mcp` route and one `McpServer` instance. Registration helpers must not create additional servers or endpoints.
-- Status: Enforced in the local working tree; not committed, merged, or deployed.
+- Status: Enforced on main and accepted in test at `5d9e3cc87ed0f8e18e70544b6b1587ae2ddcf56c`. Live MCP initialization and `tools/list` expose one server and exactly 14 tools on `/mcp`; production remains unchanged.
 - Reference: `docs/adr/0004-single-bundled-mcp-gateway.md`.
 
 ## 2026-07-30 — AI-native authorization, delivery, and Bring safety model
@@ -106,7 +106,7 @@
 - Decision: Replace generic `api.access` authorization with operation permissions: `catalogue.read`, `reddit.read`, `wlh.read`, `bring.read`, `bring.write`, `bring.complete`, and `bring.remove`.
 - Decision: Keep the current Bring technical account; make test structurally read-only; permit production writes only to explicit own-list UUIDs; require durable idempotency for add and two-phase confirmation for complete/remove.
 - Decision: Split Azure storage trust boundaries, use Key Vault references and managed identities, and promote immutable test-proven artifacts to production.
-- Status: Implemented only in the local working tree; not committed, merged, configured, or deployed.
+- Status: Accepted in test at `5d9e3cc87ed0f8e18e70544b6b1587ae2ddcf56c` by Deploy Test `30695340416`; production remains intentionally unchanged.
 - References: `docs/adr/0001-autonomous-high-risk-review.md`, `docs/adr/0002-bring-environment-policy.md`, `docs/adr/0003-storage-secrets-and-artifacts.md`.
 
 ## 2026-06-09 — Identity-based Azure Functions host storage

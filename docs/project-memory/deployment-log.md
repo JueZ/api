@@ -1,5 +1,13 @@
 # Deployment log
 
+## 2026-08-01 — Budget rollover repair and security controls accepted in test
+
+- PR #290 final head `00285974178e402c8104ea7097dabc04d506a1b2` passed CI `30695135412`, Policy Check `30695135427`, CodeQL `30695135428`, and independent review/merge `30695207692`, then squash-merged as `5d9e3cc87ed0f8e18e70544b6b1587ae2ddcf56c`. Exact first-attempt main CI `30695268947` passed.
+- First-attempt Deploy Test run `30695340416` accepted that exact SHA and CI evidence. Bicep reused the existing immutable budget start date and passed without deleting or recreating the €10 budget. Function and frontend packages then deployed successfully.
+- Runtime smoke, authenticated hello and Reddit smokes, telemetry correlation, final generation checks, release-ledger publication, and test-provenance publication all passed. The ledger records five correlated smoke evidence rows and zero exceptions, HTTP 5xx responses, or failed requests.
+- Independent live verification confirmed exact `/health` SHA/run metadata, deterministic unauthenticated REST REC, the single `/mcp` server, all 14 schema-bearing MCP tools, and deterministic protected-tool REC.
+- Result: test accepted at `5d9e3cc87ed0f8e18e70544b6b1587ae2ddcf56c`. Deployment/controller workflows were disabled again, `DEPLOY_PRODUCTION_ENABLED=false`, and production was not dispatched or changed.
+
 ## 2026-08-01 — Review controls merged; first test rollout stopped before package mutation
 
 - PR #289 passed exact-head CI `30694157626`, Policy `30694157876`, CodeQL `30694157622`, and bounded independent review/merge `30694244308`, then squash-merged as `7907708d3db92a698bbfb549cb8ccfa91a1e86c8`. The approved review used 34,447 input and 1,844 output tokens with a `$0.227555` estimated upper-bound cost.
