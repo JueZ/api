@@ -28,6 +28,8 @@ The combined budget intent is €25: test €10 and production €15.
 
 Before the first split-storage cutover, copy existing WLH reference/session data into the new private account/container using an authorized, logged, read-then-write migration. Verify hashes/counts and retain the old data until runtime validation succeeds. Do not make the normal deployment workflow guess or silently migrate private data.
 
+For the production WLH cutover, `prepare-production-private-storage.yml` calls the existing workflow-bound deployment identity in storage-preparation-only mode. It requires exact current-main CI and accepted Deploy Test provenance pinned through the non-secret `PREP_CI_RUN_ID`, `PREP_CI_CORRELATION`, `PREP_TEST_RUN_ID`, and `PREP_TEST_CORRELATION` repository variables; only the explicit confirmation remains a dispatch input. It previews a shared-Bicep storage-only change set, permits only the fixed approved source/target/blob/digest tuple, refuses overwrite, verifies the copied bytes and storage policy, and proves the production Function still reports the prior accepted runtime identity. Keep this workflow disabled outside its bounded preparation window.
+
 ## Rollout
 
 1. Validate locally and in PR.

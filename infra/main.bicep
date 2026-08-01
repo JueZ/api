@@ -272,15 +272,23 @@ resource staticStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   properties: storageProperties
 }
 
-resource privateStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
-  name: privateStorageName
-  location: location
-  sku: {
-    name: 'Standard_LRS'
+module privateStorageDeployment './modules/private-storage.bicep' = {
+  name: 'private-storage-${environmentName}'
+  params: {
+    location: location
+    environmentName: environmentName
+    workloadName: workloadName
+    storageAccountName: privateStorageName
+    deploymentPrincipalObjectId: deploymentPrincipalObjectId
+    wlhCategoryBlobContainer: wlhCategoryBlobContainer
+    bringSessionCacheContainer: bringSessionCacheContainer
+    bringMutationContainer: bringMutationContainer
+    bringAuditContainer: bringAuditContainer
   }
-  kind: 'StorageV2'
-  tags: union(tags, { purpose: 'private-integration-state' })
-  properties: storageProperties
+}
+
+resource privateStorage 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
+  name: privateStorageName
 }
 
 resource hostBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
@@ -330,20 +338,9 @@ resource staticBlobService 'Microsoft.Storage/storageAccounts/blobServices@2025-
   }
 }
 
-resource privateBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+resource privateBlobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' existing = {
   parent: privateStorage
   name: 'default'
-  properties: {
-    isVersioningEnabled: true
-    deleteRetentionPolicy: {
-      enabled: true
-      days: 30
-    }
-    containerDeleteRetentionPolicy: {
-      enabled: true
-      days: 30
-    }
-  }
 }
 
 resource releaseContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
@@ -354,36 +351,24 @@ resource releaseContainer 'Microsoft.Storage/storageAccounts/blobServices/contai
   }
 }
 
-resource wlhReferenceContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+resource wlhReferenceContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
   parent: privateBlobService
   name: wlhCategoryBlobContainer
-  properties: {
-    publicAccess: 'None'
-  }
 }
 
-resource bringSessionContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+resource bringSessionContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
   parent: privateBlobService
   name: bringSessionCacheContainer
-  properties: {
-    publicAccess: 'None'
-  }
 }
 
-resource bringMutationStoreContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+resource bringMutationStoreContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
   parent: privateBlobService
   name: bringMutationContainer
-  properties: {
-    publicAccess: 'None'
-  }
 }
 
-resource bringAuditStoreContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+resource bringAuditStoreContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
   parent: privateBlobService
   name: bringAuditContainer
-  properties: {
-    publicAccess: 'None'
-  }
 }
 
 resource staticWebContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
@@ -420,85 +405,6 @@ resource releaseLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@
               ]
               prefixMatch: [
                 'function-releases/'
-              ]
-            }
-          }
-        }
-      ]
-    }
-  }
-}
-
-resource privateLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05-01' = {
-  parent: privateStorage
-  name: 'default'
-  properties: {
-    policy: {
-      rules: [
-        {
-          name: 'expire-bring-replay-records'
-          enabled: true
-          type: 'Lifecycle'
-          definition: {
-            actions: {
-              baseBlob: {
-                delete: {
-                  daysAfterModificationGreaterThan: 35
-                }
-              }
-              version: {
-                delete: {
-                  daysAfterCreationGreaterThan: 35
-                }
-              }
-            }
-            filters: {
-              blobTypes: [
-                'blockBlob'
-              ]
-              prefixMatch: [
-                '${bringMutationContainer}/operations/'
-              ]
-            }
-          }
-        }
-        {
-          name: 'retain-bring-audit-for-one-year'
-          enabled: true
-          type: 'Lifecycle'
-          definition: {
-            actions: {
-              baseBlob: {
-                delete: {
-                  daysAfterModificationGreaterThan: 365
-                }
-              }
-            }
-            filters: {
-              blobTypes: [
-                'blockBlob'
-              ]
-              prefixMatch: [
-                '${bringAuditContainer}/events/'
-              ]
-            }
-          }
-        }
-        {
-          name: 'expire-private-blob-versions'
-          enabled: true
-          type: 'Lifecycle'
-          definition: {
-            actions: {
-              version: {
-                delete: {
-                  daysAfterCreationGreaterThan: 30
-                }
-              }
-            }
-            filters: {
-              blobTypes: [
-                'blockBlob'
               ]
             }
           }
@@ -808,6 +714,9 @@ resource functionWlhReaderRole 'Microsoft.Authorization/roleAssignments@2022-04-
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
+  dependsOn: [
+    privateStorageDeployment
+  ]
 }
 
 resource functionBringSessionRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
@@ -818,6 +727,9 @@ resource functionBringSessionRole 'Microsoft.Authorization/roleAssignments@2022-
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
+  dependsOn: [
+    privateStorageDeployment
+  ]
 }
 
 resource functionBringMutationRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
@@ -828,6 +740,9 @@ resource functionBringMutationRole 'Microsoft.Authorization/roleAssignments@2022
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
+  dependsOn: [
+    privateStorageDeployment
+  ]
 }
 
 resource functionBringAuditRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
@@ -838,6 +753,9 @@ resource functionBringAuditRole 'Microsoft.Authorization/roleAssignments@2022-04
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
+  dependsOn: [
+    privateStorageDeployment
+  ]
 }
 
 resource functionKeyVaultRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
@@ -863,16 +781,6 @@ resource deploymentReleaseWriterRole 'Microsoft.Authorization/roleAssignments@20
 resource deploymentStaticWriterRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(staticWebContainer.id, deploymentPrincipalObjectId, 'deployment-static-writer')
   scope: staticWebContainer
-  properties: {
-    roleDefinitionId: storageBlobDataContributorRole
-    principalId: deploymentPrincipalObjectId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource deploymentWlhWriterRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(wlhReferenceContainer.id, deploymentPrincipalObjectId, 'deployment-wlh-writer')
-  scope: wlhReferenceContainer
   properties: {
     roleDefinitionId: storageBlobDataContributorRole
     principalId: deploymentPrincipalObjectId

@@ -53,6 +53,31 @@ on:
         required: false
         default: false
         type: boolean
+      preparePrivateStorageOnly:
+        description: Provision and migrate only the bounded production private-storage boundary.
+        required: false
+        default: false
+        type: boolean
+      migrationSourceStorageAccount:
+        description: Existing production account containing the approved WLH reference blob.
+        required: false
+        default: ''
+        type: string
+      migrationTargetStorageAccount:
+        description: Expected production private-storage account resolved by shared Bicep.
+        required: false
+        default: ''
+        type: string
+      migrationExpectedSha256:
+        description: Independently verified SHA-256 digest of the one approved WLH reference blob.
+        required: false
+        default: ''
+        type: string
+      migrationConfirmation:
+        description: Exact one-time production private-storage preparation confirmation.
+        required: false
+        default: ''
+        type: string
       deliveryCorrelation:
         description: Unique value binding this deployment to one workflow dispatch and release ledger.
         required: true
@@ -134,6 +159,7 @@ permissions:
 
 jobs:
   deploy:
+    if: ${{ !inputs.preparePrivateStorageOnly }}
     name: deploy ${{ inputs.environmentName }}
     timeout-minutes: 90
     runs-on: ubuntu-latest
@@ -1655,6 +1681,553 @@ jobs:
               `Commit: ${context.sha}`,
               '',
               'Automation must fail closed. Investigate logs and create a bounded repair PR if safe.'
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['production-failure', 'codex-repair']
+            });
+
+  prepare-private-storage:
+    if: ${{ inputs.preparePrivateStorageOnly }}
+    name: prepare private storage ${{ inputs.environmentName }}
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.githubEnvironment }}
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID: ${{ vars.AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID }}
+      AZURE_RESOURCE_GROUP: ${{ inputs.azureResourceGroup }}
+      ENVIRONMENT_NAME: ${{ inputs.environmentName }}
+      GITHUB_ENVIRONMENT_NAME: ${{ inputs.githubEnvironment }}
+      SOURCE_REF: ${{ inputs.sourceRef }}
+      CONTROLLER_REF: ${{ inputs.controllerRef }}
+      CONTROLLER_WORKFLOW_SHA: ${{ inputs.controllerWorkflowSha }}
+      DELIVERY_CORRELATION: ${{ inputs.deliveryCorrelation }}
+      CI_RUN_ID: ${{ inputs.ciRunId }}
+      CI_DELIVERY_CORRELATION: ${{ inputs.ciDeliveryCorrelation }}
+      TEST_DELIVERY_CORRELATION: ${{ inputs.testDeliveryCorrelation }}
+      TEST_DELIVERY_RUN_ID: ${{ inputs.testDeliveryRunId }}
+      DEPLOY_PRODUCTION_ENABLED: ${{ vars.DEPLOY_PRODUCTION_ENABLED }}
+      WLH_CATEGORY_BLOB_NAME: ${{ vars.WLH_CATEGORY_BLOB_NAME }}
+      WLH_CATEGORY_BLOB_CONTAINER: ${{ vars.WLH_CATEGORY_BLOB_CONTAINER }}
+      BRING_SESSION_CACHE_CONTAINER: ${{ vars.BRING_SESSION_CACHE_CONTAINER }}
+      BRING_MUTATION_CONTAINER: ${{ vars.BRING_MUTATION_CONTAINER }}
+      BRING_AUDIT_CONTAINER: ${{ vars.BRING_AUDIT_CONTAINER }}
+      MIGRATION_SOURCE_STORAGE_ACCOUNT: ${{ inputs.migrationSourceStorageAccount }}
+      MIGRATION_TARGET_STORAGE_ACCOUNT: ${{ inputs.migrationTargetStorageAccount }}
+      MIGRATION_EXPECTED_SHA256: ${{ inputs.migrationExpectedSha256 }}
+      MIGRATION_CONFIRMATION: ${{ inputs.migrationConfirmation }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout current preparation controller
+        shell: bash
+        env:
+          CHECKOUT_CONTROLLER_REF: ${{ inputs.controllerRef }}
+        run: |
+          set -euo pipefail
+          # CHECKOUT_CONTROLLER_REF is assigned through the workflow step environment.
+          # shellcheck disable=SC2153
+          controller_ref="$CHECKOUT_CONTROLLER_REF"
+          if [[ ! "$controller_ref" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "controllerRef must be a full lowercase commit SHA before repository fetch." >&2
+            exit 1
+          fi
+          if [ "$(pwd -P)" != "$(realpath "$GITHUB_WORKSPACE")" ] ||
+             [ -n "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+            echo "Preparation controller checkout requires the exact empty GitHub workspace." >&2
+            exit 1
+          fi
+
+          git init .
+          git remote add origin https://github.com/JueZ/api.git
+          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
+          fetched_main="$(git rev-parse refs/remotes/origin/main)"
+          if [ "$fetched_main" != "$controller_ref" ]; then
+            echo "Fetched protected main does not equal the immutable preparation controller." >&2
+            exit 1
+          fi
+          git checkout --detach "$controller_ref"
+          git reset --hard "$controller_ref"
+          [ "$(git rev-parse HEAD)" = "$controller_ref" ] || {
+            echo "Checked-out preparation controller does not equal controllerRef." >&2
+            exit 1
+          }
+          if [ -n "$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" ] ||
+             [ -n "$(git clean -ndx)" ]; then
+            echo "Preparation controller workspace contains content outside the exact commit." >&2
+            exit 1
+          fi
+      - name: Validate bounded preparation source and evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${AZURE_CLIENT_ID:?AZURE_CLIENT_ID environment variable is required}"
+          : "${AZURE_TENANT_ID:?AZURE_TENANT_ID environment variable is required}"
+          : "${AZURE_SUBSCRIPTION_ID:?AZURE_SUBSCRIPTION_ID environment variable is required}"
+          : "${AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID:?AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID environment variable is required}"
+          : "${WLH_CATEGORY_BLOB_CONTAINER:?WLH_CATEGORY_BLOB_CONTAINER environment variable is required}"
+          : "${WLH_CATEGORY_BLOB_NAME:?WLH_CATEGORY_BLOB_NAME environment variable is required}"
+          : "${BRING_SESSION_CACHE_CONTAINER:?BRING_SESSION_CACHE_CONTAINER environment variable is required}"
+          : "${BRING_MUTATION_CONTAINER:?BRING_MUTATION_CONTAINER environment variable is required}"
+          : "${BRING_AUDIT_CONTAINER:?BRING_AUDIT_CONTAINER environment variable is required}"
+
+          deployment_ref="$SOURCE_REF"
+          # CONTROLLER_REF is assigned through the workflow job environment.
+          # shellcheck disable=SC2153
+          controller_ref="$CONTROLLER_REF"
+          checked_out_controller="$(git rev-parse HEAD)"
+          expected_title="Prepare Production Private Storage $deployment_ref $DELIVERY_CORRELATION"
+          if [ "$ENVIRONMENT_NAME" != "prod" ] ||
+             [ "$GITHUB_ENVIRONMENT_NAME" != "production" ] ||
+             [ "$AZURE_RESOURCE_GROUP" != "rg-api-prod" ] ||
+             [ "${DEPLOY_PRODUCTION_ENABLED:-false}" != "true" ] ||
+             [ "$GITHUB_RUN_ATTEMPT" != "1" ]; then
+            echo "Private-storage preparation is restricted to first-attempt guarded production runs." >&2
+            exit 1
+          fi
+          if [[ ! "$deployment_ref" =~ ^[0-9a-f]{40}$ ]] ||
+             [[ ! "$controller_ref" =~ ^[0-9a-f]{40}$ ]] ||
+             [ "$controller_ref" != "$CONTROLLER_WORKFLOW_SHA" ] ||
+             [ "$controller_ref" != "$GITHUB_SHA" ] ||
+             [ "$controller_ref" != "$checked_out_controller" ] ||
+             [ "$deployment_ref" != "$controller_ref" ]; then
+            echo "Preparation source and controller must equal the exact current-main workflow generation." >&2
+            exit 1
+          fi
+          if [[ ! "$DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]] ||
+             [[ ! "$CI_RUN_ID" =~ ^[0-9]+$ ]] ||
+             [[ ! "$CI_DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]] ||
+             [[ ! "$TEST_DELIVERY_RUN_ID" =~ ^[0-9]+$ ]] ||
+             [[ ! "$TEST_DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]; then
+            echo "Preparation requires exact CI/test run IDs and opaque correlations." >&2
+            exit 1
+          fi
+          if [ "$MIGRATION_CONFIRMATION" != "PREPARE_PRODUCTION_PRIVATE_STORAGE" ] ||
+             [ "$MIGRATION_SOURCE_STORAGE_ACCOUNT" != "stapicatalogueprodbfjsts" ] ||
+             [ "$MIGRATION_TARGET_STORAGE_ACCOUNT" != "stapicatalogueprodpbfjst" ] ||
+             [ "$MIGRATION_EXPECTED_SHA256" != "4b2651b8d842854716b4fb2e20ecd9482f59f2ea6ee2352401bec5d42e8c6ed0" ]; then
+            echo "The production preparation request does not match the approved one-blob cutover." >&2
+            exit 1
+          fi
+
+          current_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")"
+          if ! jq -e \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg controller_ref "$controller_ref" \
+            --arg title "$expected_title" \
+            '(.id | tostring) == $run_id
+              and .repository.full_name == $repository
+              and .head_sha == $controller_ref
+              and .head_branch == "main"
+              and .event == "workflow_dispatch"
+              and .path == ".github/workflows/prepare-production-private-storage.yml"
+              and (.name == "Prepare Production Private Storage" or .name == $title)
+              and .display_title == $title
+              and .run_attempt == 1
+              and (.status == "queued" or .status == "in_progress")' \
+            <<<"$current_run_json" >/dev/null; then
+            echo "Current preparation run identity is not the exact trusted caller." >&2
+            exit 1
+          fi
+
+          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
+          [ "$controller_ref" = "$(git rev-parse origin/main)" ] || {
+            echo "Preparation controller is no longer current main." >&2
+            exit 1
+          }
+
+          ci_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}")"
+          expected_ci_title="CI $deployment_ref $CI_DELIVERY_CORRELATION"
+          if ! jq -e \
+            --arg run_id "$CI_RUN_ID" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg source_ref "$deployment_ref" \
+            --arg title "$expected_ci_title" \
+            '(.id | tostring) == $run_id
+              and .repository.full_name == $repository
+              and .path == ".github/workflows/ci.yml"
+              and (.name == "CI" or .name == $title)
+              and .event == "workflow_dispatch"
+              and .conclusion == "success"
+              and .head_branch == "main"
+              and .head_sha == $source_ref
+              and .display_title == $title
+              and .run_attempt == 1' \
+            <<<"$ci_run_json" >/dev/null; then
+            echo "Pinned CI evidence does not match exact current main." >&2
+            exit 1
+          fi
+
+          test_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TEST_DELIVERY_RUN_ID}")"
+          expected_test_title="Deploy Test $deployment_ref $TEST_DELIVERY_CORRELATION"
+          if ! jq -e \
+            --arg run_id "$TEST_DELIVERY_RUN_ID" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg source_ref "$deployment_ref" \
+            --arg title "$expected_test_title" \
+            '(.id | tostring) == $run_id
+              and .repository.full_name == $repository
+              and .path == ".github/workflows/deploy-test.yml"
+              and (.name == "Deploy Test" or .name == $title)
+              and .event == "workflow_dispatch"
+              and .conclusion == "success"
+              and .head_branch == "main"
+              and .head_sha == $source_ref
+              and .display_title == $title
+              and .run_attempt == 1' \
+            <<<"$test_run_json" >/dev/null; then
+            echo "Pinned Deploy Test evidence does not match exact current main." >&2
+            exit 1
+          fi
+
+          provenance_dir="$(mktemp -d)"
+          gh run download "$TEST_DELIVERY_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "deploy-test-provenance-${deployment_ref}-${TEST_DELIVERY_CORRELATION}" \
+            --dir "$provenance_dir"
+          provenance_file="$provenance_dir/deploy-test-provenance.json"
+          if ! jq -e \
+            --arg source_ref "$deployment_ref" \
+            --arg test_run_id "$TEST_DELIVERY_RUN_ID" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg correlation "$TEST_DELIVERY_CORRELATION" \
+            --arg ci_run_id "$CI_RUN_ID" \
+            --arg ci_correlation "$CI_DELIVERY_CORRELATION" \
+            '.environmentName == "test"
+              and .sourceRef == $source_ref
+              and .resolvedHead == $source_ref
+              and .runId == $test_run_id
+              and .workflow == "Deploy Test"
+              and .repository == $repository
+              and .deliveryCorrelation == $correlation
+              and .ciRunId == $ci_run_id
+              and .ciDeliveryCorrelation == $ci_correlation
+              and .runAttempt == "1"
+              and .deployFrontend == "true"
+              and .deployFunctions == "true"
+              and .eventName == "workflow_dispatch"
+              and (.artifacts.functionappSha256 | test("^[0-9a-f]{64}$"))
+              and (.artifacts.sourceFrontendSha256 | test("^[0-9a-f]{64}$"))
+              and (.artifacts.frontendSha256 | test("^[0-9a-f]{64}$"))
+              and (.artifacts.sbomSha256 | test("^[0-9a-f]{64}$"))
+              and .authenticatedSmokeStatus == "passed"
+              and .telemetryStatus == "passed"' \
+            "$provenance_file" >/dev/null; then
+            echo "Pinned test provenance is not acceptable for production preparation." >&2
+            exit 1
+          fi
+      - name: Azure OIDC login
+        uses: azure/login@2dd0bbf4064d5a1812889dc200bb8eed2597f82a # tag=v3
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Capture unchanged production runtime baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t function_hosts < <(az functionapp list \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query '[].defaultHostName' \
+            -o tsv)
+          if [ "${#function_hosts[@]}" -ne 1 ] || [ -z "${function_hosts[0]}" ]; then
+            echo "Expected exactly one production Function App hostname." >&2
+            exit 1
+          fi
+          production_function_host="${function_hosts[0]}"
+          curl --fail --silent --show-error --max-time 30 \
+            --retry 4 --retry-delay 5 --retry-all-errors \
+            "https://${production_function_host}/health" > "$RUNNER_TEMP/production-health-before.json"
+          jq -e '
+            .status == "ok"
+            and .environmentName == "prod"
+            and (.deployedCommitSha | test("^[0-9a-f]{40}$"))
+            and (.deploymentRunId | test("^[0-9]+$"))
+          ' "$RUNNER_TEMP/production-health-before.json" >/dev/null
+          echo "PRODUCTION_FUNCTION_HOST=$production_function_host" >> "$GITHUB_ENV"
+      - name: Preview bounded private-storage preparation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/assert-current-main.mjs
+          expected_target_id="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/${MIGRATION_TARGET_STORAGE_ACCOUNT}"
+          az deployment group what-if \
+            --name prepare-private-storage-prod \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/prepare-private-storage.bicep \
+            --parameters environmentName=prod \
+              deploymentPrincipalObjectId="$AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID" \
+              wlhCategoryBlobContainer="$WLH_CATEGORY_BLOB_CONTAINER" \
+              bringSessionCacheContainer="$BRING_SESSION_CACHE_CONTAINER" \
+              bringMutationContainer="$BRING_MUTATION_CONTAINER" \
+              bringAuditContainer="$BRING_AUDIT_CONTAINER" \
+            --result-format ResourceIdOnly \
+            -o json > "$RUNNER_TEMP/private-storage-what-if.json"
+          jq -e --arg prefix "${expected_target_id,,}" '
+            [(.properties.changes // .changes // [])[]
+              | select(.changeType != "Ignore" and .changeType != "NoChange")]
+            | all(.[];
+                .changeType != "Delete"
+                and ((.resourceId // .id // "") | ascii_downcase | startswith($prefix)))
+          ' "$RUNNER_TEMP/private-storage-what-if.json" >/dev/null || {
+            echo "Private-storage what-if contained an out-of-bound or destructive resource change." >&2
+            exit 1
+          }
+      - name: Provision bounded private-storage boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/assert-current-main.mjs
+          deployment_outputs="$(az deployment group create \
+            --name prepare-private-storage-prod \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/prepare-private-storage.bicep \
+            --parameters environmentName=prod \
+              deploymentPrincipalObjectId="$AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID" \
+              wlhCategoryBlobContainer="$WLH_CATEGORY_BLOB_CONTAINER" \
+              bringSessionCacheContainer="$BRING_SESSION_CACHE_CONTAINER" \
+              bringMutationContainer="$BRING_MUTATION_CONTAINER" \
+              bringAuditContainer="$BRING_AUDIT_CONTAINER" \
+            --query properties.outputs \
+            -o json)"
+          prepared_name="$(jq -r '.privateStorageAccountResourceName.value // empty' <<<"$deployment_outputs")"
+          prepared_id="$(jq -r '.privateStorageAccountResourceId.value // empty' <<<"$deployment_outputs")"
+          if [ "$prepared_name" != "$MIGRATION_TARGET_STORAGE_ACCOUNT" ] || [ -z "$prepared_id" ]; then
+            echo "Shared Bicep resolved an unexpected production private-storage target." >&2
+            exit 1
+          fi
+          {
+            echo "PREPARED_PRIVATE_STORAGE_ACCOUNT=$prepared_name"
+            echo "PREPARED_PRIVATE_STORAGE_ID=$prepared_id"
+          } >> "$GITHUB_ENV"
+      - name: Migrate one digest-pinned WLH reference blob
+        shell: bash
+        run: |
+          set -euo pipefail
+          migration_dir="$(mktemp -d)"
+          source_file="$migration_dir/source.bin"
+          target_file="$migration_dir/target.bin"
+          az storage blob download \
+            --auth-mode login \
+            --account-name "$MIGRATION_SOURCE_STORAGE_ACCOUNT" \
+            --container-name "$WLH_CATEGORY_BLOB_CONTAINER" \
+            --name "$WLH_CATEGORY_BLOB_NAME" \
+            --file "$source_file" \
+            --overwrite true \
+            -o none
+          source_digest="$(sha256sum "$source_file" | awk '{print $1}')"
+          [ "$source_digest" = "$MIGRATION_EXPECTED_SHA256" ] || {
+            echo "Production source blob digest does not match the approved digest." >&2
+            exit 1
+          }
+
+          target_exists=''
+          for _ in $(seq 1 18); do
+            if target_exists="$(az storage blob exists \
+              --auth-mode login \
+              --account-name "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
+              --container-name "$WLH_CATEGORY_BLOB_CONTAINER" \
+              --name "$WLH_CATEGORY_BLOB_NAME" \
+              --query exists \
+              -o tsv 2>/dev/null)"; then
+              break
+            fi
+            sleep 10
+          done
+          if [ "$target_exists" != "true" ] && [ "$target_exists" != "false" ]; then
+            echo "Azure RBAC did not become ready for the prepared private container." >&2
+            exit 1
+          fi
+          if [ "$target_exists" = "true" ]; then
+            migration_result='already-present'
+          else
+            node scripts/assert-current-main.mjs
+            az storage blob upload \
+              --auth-mode login \
+              --account-name "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
+              --container-name "$WLH_CATEGORY_BLOB_CONTAINER" \
+              --name "$WLH_CATEGORY_BLOB_NAME" \
+              --file "$source_file" \
+              --overwrite false \
+              -o none
+            migration_result='migrated'
+          fi
+
+          az storage blob download \
+            --auth-mode login \
+            --account-name "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
+            --container-name "$WLH_CATEGORY_BLOB_CONTAINER" \
+            --name "$WLH_CATEGORY_BLOB_NAME" \
+            --file "$target_file" \
+            --overwrite true \
+            -o none
+          target_digest="$(sha256sum "$target_file" | awk '{print $1}')"
+          [ "$target_digest" = "$MIGRATION_EXPECTED_SHA256" ] || {
+            echo "Prepared target blob digest does not match the approved digest." >&2
+            exit 1
+          }
+          exact_blob_count="$(az storage blob list \
+            --auth-mode login \
+            --account-name "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
+            --container-name "$WLH_CATEGORY_BLOB_CONTAINER" \
+            --prefix "$WLH_CATEGORY_BLOB_NAME" \
+            --query "[?name=='$WLH_CATEGORY_BLOB_NAME'] | length(@)" \
+            -o tsv)"
+          [ "$exact_blob_count" = "1" ] || {
+            echo "Expected exactly one approved WLH target blob." >&2
+            exit 1
+          }
+          echo "MIGRATION_RESULT=$migration_result" >> "$GITHUB_ENV"
+      - name: Verify private-storage policy and unchanged production runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/assert-current-main.mjs
+          az storage account show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
+            -o json > "$RUNNER_TEMP/private-storage-account.json"
+          jq -e '
+            .allowBlobPublicAccess == false
+            and .allowCrossTenantReplication == false
+            and .allowSharedKeyAccess == false
+            and .defaultToOAuthAuthentication == true
+            and .minimumTlsVersion == "TLS1_2"
+            and .publicNetworkAccess == "Enabled"
+            and .enableHttpsTrafficOnly == true
+            and .sku.name == "Standard_LRS"
+            and .kind == "StorageV2"
+            and .tags.environment == "prod"
+            and .tags.dataBoundary == "prod"
+            and .tags.purpose == "private-integration-state"
+            and .tags.managedBy == "bicep"
+          ' "$RUNNER_TEMP/private-storage-account.json" >/dev/null
+          az storage account blob-service-properties show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --account-name "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
+            -o json > "$RUNNER_TEMP/private-storage-blob-policy.json"
+          jq -e '
+            .isVersioningEnabled == true
+            and .deleteRetentionPolicy.enabled == true
+            and .deleteRetentionPolicy.days == 30
+            and .containerDeleteRetentionPolicy.enabled == true
+            and .containerDeleteRetentionPolicy.days == 30
+          ' "$RUNNER_TEMP/private-storage-blob-policy.json" >/dev/null
+          for container in \
+            "$WLH_CATEGORY_BLOB_CONTAINER" \
+            "$BRING_SESSION_CACHE_CONTAINER" \
+            "$BRING_MUTATION_CONTAINER" \
+            "$BRING_AUDIT_CONTAINER"; do
+            container_id="${PREPARED_PRIVATE_STORAGE_ID}/blobServices/default/containers/${container}"
+            public_access="$(az resource show \
+              --ids "$container_id" \
+              --api-version 2023-05-01 \
+              --query properties.publicAccess \
+              -o tsv)"
+            [ "$public_access" = "None" ] || {
+              echo "Prepared private container does not deny public access." >&2
+              exit 1
+            }
+          done
+          wlh_container_id="${PREPARED_PRIVATE_STORAGE_ID}/blobServices/default/containers/${WLH_CATEGORY_BLOB_CONTAINER}"
+          writer_count="$(az role assignment list \
+            --assignee-object-id "$AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID" \
+            --scope "$wlh_container_id" \
+            --query "[?roleDefinitionName=='Storage Blob Data Contributor'] | length(@)" \
+            -o tsv)"
+          [ "$writer_count" = "1" ] || {
+            echo "Prepared WLH container lacks the exact deployment-writer role." >&2
+            exit 1
+          }
+
+          curl --fail --silent --show-error --max-time 30 \
+            --retry 4 --retry-delay 5 --retry-all-errors \
+            "https://${PRODUCTION_FUNCTION_HOST}/health" > "$RUNNER_TEMP/production-health-after.json"
+          jq -e --slurpfile before "$RUNNER_TEMP/production-health-before.json" '
+            .status == "ok"
+            and .environmentName == "prod"
+            and .deployedCommitSha == $before[0].deployedCommitSha
+            and .deployedSourceRef == $before[0].deployedSourceRef
+            and .deploymentRunId == $before[0].deploymentRunId
+          ' "$RUNNER_TEMP/production-health-after.json" >/dev/null
+
+          jq -n \
+            --arg environmentName "$ENVIRONMENT_NAME" \
+            --arg sourceRef "$SOURCE_REF" \
+            --arg controllerRef "$CONTROLLER_REF" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg deliveryCorrelation "$DELIVERY_CORRELATION" \
+            --arg ciRunId "$CI_RUN_ID" \
+            --arg ciDeliveryCorrelation "$CI_DELIVERY_CORRELATION" \
+            --arg testRunId "$TEST_DELIVERY_RUN_ID" \
+            --arg testDeliveryCorrelation "$TEST_DELIVERY_CORRELATION" \
+            --arg sourceStorageAccount "$MIGRATION_SOURCE_STORAGE_ACCOUNT" \
+            --arg targetStorageAccount "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
+            --arg container "$WLH_CATEGORY_BLOB_CONTAINER" \
+            --arg blobName "$WLH_CATEGORY_BLOB_NAME" \
+            --arg sha256 "$MIGRATION_EXPECTED_SHA256" \
+            --arg migrationResult "$MIGRATION_RESULT" \
+            --arg runtimeCommit "$(jq -r '.deployedCommitSha' "$RUNNER_TEMP/production-health-after.json")" \
+            --arg runtimeRunId "$(jq -r '.deploymentRunId' "$RUNNER_TEMP/production-health-after.json")" \
+            --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+              environmentName: $environmentName,
+              sourceRef: $sourceRef,
+              controllerRef: $controllerRef,
+              repository: $repository,
+              runId: $runId,
+              runAttempt: $runAttempt,
+              deliveryCorrelation: $deliveryCorrelation,
+              ciRunId: $ciRunId,
+              ciDeliveryCorrelation: $ciDeliveryCorrelation,
+              testRunId: $testRunId,
+              testDeliveryCorrelation: $testDeliveryCorrelation,
+              migration: {
+                sourceStorageAccount: $sourceStorageAccount,
+                targetStorageAccount: $targetStorageAccount,
+                container: $container,
+                blobName: $blobName,
+                sha256: $sha256,
+                result: $migrationResult,
+                status: "passed"
+              },
+              storagePolicyStatus: "passed",
+              productionRuntime: {
+                status: "unchanged",
+                deployedCommitSha: $runtimeCommit,
+                deploymentRunId: $runtimeRunId
+              },
+              verifiedAt: $verifiedAt
+            }' > "$RUNNER_TEMP/production-private-storage-evidence.json"
+      - name: Upload production private-storage evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
+        with:
+          name: production-private-storage-${{ inputs.sourceRef }}-${{ inputs.deliveryCorrelation }}
+          path: ${{ runner.temp }}/production-private-storage-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Create production preparation issue on failure
+        if: ${{ failure() }}
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # tag=v8
+        with:
+          script: |
+            const title = `Production private-storage preparation failed for ${context.sha.substring(0, 7)}`;
+            const body = [
+              'Production private-storage preparation or digest verification failed.',
+              '',
+              `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              `Commit: ${context.sha}`,
+              '',
+              'No application deployment is authorized by this workflow. Investigate the bounded storage preparation evidence.'
             ].join('\n');
             await github.rest.issues.create({
               owner: context.repo.owner,
