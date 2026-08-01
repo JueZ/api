@@ -1,11 +1,19 @@
 # Current state
 
+## 2026-08-01 Bounded production private-storage preparation authorized
+
+- The operator explicitly authorized provisioning the production private-storage boundary and migrating the one approved WLH reference blob without deploying or changing the production Function or frontend.
+- Fresh Deploy Test run `30704470979` accepted exact main `5f033da73e4fd24de2f5f41c1abba97159f4b56b`. Azure OIDC, immutable artifacts, Bicep, complete runtime settings, private reference data, Function/frontend activation, public and authenticated smokes, telemetry correlation, release ledger, and test provenance all passed. Live `/health` reported that exact SHA and run.
+- The production source blob exists at the legacy storage boundary and independently hashes to `4b2651b8d842854716b4fb2e20ecd9482f59f2ea6ee2352401bec5d42e8c6ed0`. Production remains healthy on accepted commit `9d99dfc041893070eeb817e24ad0baeadaee11e1` and run `30168788236`.
+- The bounded preparation path reuses the existing workflow-bound `deploy-environment.yml` OIDC identity; it adds no federated credential, secret, identity, broader subject, or alternate trust route. It requires exact-current-main CI and accepted test provenance, a fixed source/target/blob/digest tuple, an explicit confirmation, storage-only what-if, no-overwrite copy, post-copy digest verification, and proof that production runtime identity stayed unchanged.
+- `Promote Production`, `Rollback Production`, and `Codex Main Delivery` remain outside this authorization. The preparation workflow must be disabled again after its bounded run, and a later application promotion still requires separate control and every normal production acceptance gate.
+
 ## 2026-08-01 Production release latch explicitly enabled under disabled promotion controls
 
 - The operator explicitly authorized setting the repository variable `DEPLOY_PRODUCTION_ENABLED=true`, and the repository now reports that exact value. This authorizes the fail-closed production latch only; it is not standalone authorization to dispatch or accept production.
 - Exact-main test revalidation run `30699788985` accepted `d359035b1fda01a00b90a4e892399526b6c2a03c` with infrastructure, complete settings, immutable packages, public and authenticated smokes, telemetry, ledger, and provenance all passing. The later documentation merge `b7bc4b5c8fa7111f711dac09ecf670f5d30ff881` advanced `main`, so a future promotion still needs fresh exact-current-main test provenance.
 - Two contemporaneous operator-named production dispatches failed closed. Run `30699926656` stopped at configuration while the latch was false. Run `30700059811` subsequently passed complete production configuration validation with the latch true, then Azure login failed with `AADSTS700213` because no existing federated identity credential matched the workflow-bound production subject. Every infrastructure, package, frontend, smoke, telemetry, and acceptance step was skipped, so production was not mutated. Repair issues #292 and #294 remain open with the run evidence.
-- `Promote Production`, `Rollback Production`, `Codex Main Delivery`, and `Codex Auto-Merge` are disabled between bounded delivery windows. Production promotion remains blocked pending explicit authorization to repair or verify the existing production federation without adding a broader or alternate trust route, fresh Deploy Test acceptance for the exact current `main`, and digest-verified migration of the WLH reference blob into the production private-storage boundary created by the current infrastructure.
+- `Promote Production`, `Rollback Production`, `Codex Main Delivery`, and `Codex Auto-Merge` are disabled between bounded delivery windows. The operator subsequently authorized only the bounded private-storage preparation described above; production application promotion remains separately controlled.
 - Production remains unchanged at its previously accepted release until a separately controlled promotion passes every required gate.
 
 ## 2026-08-01 Security-review controls and budget rollover repair accepted in test

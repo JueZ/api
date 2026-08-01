@@ -1,5 +1,12 @@
 # Deployment log
 
+## 2026-08-01 — Exact-main test revalidation passed before storage preparation
+
+- Exact first-attempt main CI run `30700328426` passed for `5f033da73e4fd24de2f5f41c1abba97159f4b56b` and produced the immutable release bundle.
+- First-attempt Deploy Test run `30704470979` accepted that exact SHA and CI correlation. Azure OIDC, immutable release verification, Bicep, complete runtime settings, private WLH data, immutable Function activation, activation-last frontend deployment, current-generation checks, runtime smoke, authenticated `GET /api/hello` and `POST /api/reddit/thread`, telemetry correlation, release ledger, and test provenance all passed.
+- Independent live `/health` verification reported test environment, the exact SHA, and deployment run `30704470979`. The ledger and promotion provenance artifacts validated locally. The deployment workflow was disabled immediately after dispatch.
+- Production remained healthy and unchanged at commit `9d99dfc041893070eeb817e24ad0baeadaee11e1`, run `30168788236`. No production application deployment was dispatched.
+
 ## 2026-08-01 — Budget rollover repair and security controls accepted in test
 
 - PR #290 final head `00285974178e402c8104ea7097dabc04d506a1b2` passed CI `30695135412`, Policy Check `30695135427`, CodeQL `30695135428`, and independent review/merge `30695207692`, then squash-merged as `5d9e3cc87ed0f8e18e70544b6b1587ae2ddcf56c`. Exact first-attempt main CI `30695268947` passed.

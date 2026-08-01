@@ -1,0 +1,78 @@
+name: Prepare Production Private Storage
+run-name: Prepare Production Private Storage ${{ inputs.commit_sha || github.sha }} ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact current-main commit whose accepted test evidence authorizes preparation.
+        required: false
+        type: string
+      delivery_correlation:
+        description: Unique opaque correlation for the preparation evidence.
+        required: true
+        type: string
+      test_delivery_correlation:
+        description: Exact correlation from the successful current-main Deploy Test run.
+        required: true
+        type: string
+      test_run_id:
+        description: Exact successful current-main Deploy Test workflow run.
+        required: true
+        type: string
+      ci_run_id:
+        description: Exact successful first-attempt current-main CI run.
+        required: true
+        type: string
+      ci_delivery_correlation:
+        description: Exact correlation in the selected current-main CI run title.
+        required: true
+        type: string
+      confirmation:
+        description: Enter PREPARE_PRODUCTION_PRIVATE_STORAGE to authorize only this bounded storage preparation.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+  issues: write
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  prepare-production-private-storage:
+    name: prepare production private storage
+    uses: ./.github/workflows/deploy-environment.yml
+    secrets:
+      REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
+      BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
+      BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
+      BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
+      BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
+      BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
+    with:
+      environmentName: prod
+      azureResourceGroup: rg-api-prod
+      githubEnvironment: production
+      deployFrontend: false
+      deployFunctions: false
+      sourceRef: ${{ inputs.commit_sha || github.sha }}
+      controllerRef: ${{ github.sha }}
+      controllerWorkflowSha: ${{ github.workflow_sha }}
+      updateProductionVariables: false
+      preparePrivateStorageOnly: true
+      deliveryCorrelation: ${{ inputs.delivery_correlation }}
+      testDeliveryCorrelation: ${{ inputs.test_delivery_correlation }}
+      testDeliveryRunId: ${{ inputs.test_run_id }}
+      ciRunId: ${{ inputs.ci_run_id }}
+      ciDeliveryCorrelation: ${{ inputs.ci_delivery_correlation }}
+      migrationSourceStorageAccount: stapicatalogueprodbfjsts
+      migrationTargetStorageAccount: stapicatalogueprodpbfjst
+      migrationExpectedSha256: 4b2651b8d842854716b4fb2e20ecd9482f59f2ea6ee2352401bec5d42e8c6ed0
+      migrationConfirmation: ${{ inputs.confirmation }}

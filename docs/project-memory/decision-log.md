@@ -1,5 +1,13 @@
 # Decision log
 
+## 2026-08-01 — Prepare production private storage without application cutover
+
+- Decision: Provision and migrate only the production private-integration storage subtree before application promotion. Reuse the exact existing `deploy-environment.yml` workflow-bound OIDC identity through a separate reusable-workflow job; do not add or broaden an Entra federated credential.
+- Decision: Require exact current-main controller, first-attempt main CI, accepted first-attempt Deploy Test provenance, `DEPLOY_PRODUCTION_ENABLED=true`, the fixed legacy source account, deterministic new target account, fixed blob path and independently verified SHA-256, explicit confirmation, storage-only Azure what-if, no-overwrite upload, target re-download/digest verification, policy/RBAC verification, and unchanged production `/health` identity.
+- Decision: Share the private-storage Bicep module between normal environment deployment and the bounded preparation root template so storage security, lifecycle, containers, tags, and deployment-writer RBAC cannot drift. The preparation workflow cannot run the normal Function/frontend deployment job and shares the production deployment concurrency lock.
+- Rationale: The new private account must exist and contain the approved reference blob before the split-storage Function configuration can safely cut over. A failed full promotion is not an acceptable bootstrap mechanism because Bicep could change runtime configuration before the missing-data gate stops package deployment.
+- Scope: This authorization does not include production Function/frontend deployment or promotion. Production remains on its previous accepted release until a later separately controlled promotion passes all gates.
+
 ## 2026-08-01 — Contain failed production attempts at the existing trust boundary
 
 - Decision: Keep `Promote Production`, `Rollback Production`, `Codex Main Delivery`, and `Codex Auto-Merge` disabled after the contemporaneous operator-named production attempts. Do not create a new, broader, or alternate Azure trust route to bypass the production OIDC failure.

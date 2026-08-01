@@ -55,6 +55,10 @@ const promoteProductionWorkflow = readFileSync(
   new URL('../../.github/workflows/promote-production.yml', import.meta.url),
   'utf8',
 );
+const prepareProductionPrivateStorageWorkflow = readFileSync(
+  new URL('../../.github/workflows/prepare-production-private-storage.yml', import.meta.url),
+  'utf8',
+);
 const rollbackProductionWorkflow = readFileSync(
   new URL('../../.github/workflows/rollback-production.yml', import.meta.url),
   'utf8',
@@ -64,6 +68,14 @@ const runtimeSettingsPolicy = readFileSync(
   'utf8',
 );
 const mainBicep = readFileSync(new URL('../../infra/main.bicep', import.meta.url), 'utf8');
+const preparePrivateStorageBicep = readFileSync(
+  new URL('../../infra/prepare-private-storage.bicep', import.meta.url),
+  'utf8',
+);
+const privateStorageModule = readFileSync(
+  new URL('../../infra/modules/private-storage.bicep', import.meta.url),
+  'utf8',
+);
 
 function pullRequest(overrides = {}) {
   return {
@@ -328,6 +340,58 @@ test('rollback changes only accepted application packages and leaves infrastruct
     functionDeployment,
     /if \[ "\$ALLOW_ROLLBACK" != "true" \]; then\n\s+package_settings\+=\("DEPLOYED_ENVIRONMENT_NAME=\$ENVIRONMENT_NAME"\)/,
   );
+});
+
+test('production private-storage preparation is isolated, exact-source, and digest pinned', () => {
+  assert.match(deployEnvironmentWorkflow, /deploy:\n\s+if: \$\{\{ !inputs\.preparePrivateStorageOnly \}\}/);
+  assert.match(prepareProductionPrivateStorageWorkflow, /uses: \.\/\.github\/workflows\/deploy-environment\.yml/);
+  assert.match(prepareProductionPrivateStorageWorkflow, /githubEnvironment: production/);
+  assert.match(prepareProductionPrivateStorageWorkflow, /deployFrontend: false/);
+  assert.match(prepareProductionPrivateStorageWorkflow, /deployFunctions: false/);
+  assert.match(prepareProductionPrivateStorageWorkflow, /preparePrivateStorageOnly: true/);
+  assert.match(prepareProductionPrivateStorageWorkflow, /controllerRef: \$\{\{ github\.sha \}\}/);
+  assert.match(prepareProductionPrivateStorageWorkflow, /controllerWorkflowSha: \$\{\{ github\.workflow_sha \}\}/);
+  assert.match(prepareProductionPrivateStorageWorkflow, /migrationSourceStorageAccount: stapicatalogueprodbfjsts/);
+  assert.match(prepareProductionPrivateStorageWorkflow, /migrationTargetStorageAccount: stapicatalogueprodpbfjst/);
+  assert.match(
+    prepareProductionPrivateStorageWorkflow,
+    /migrationExpectedSha256: 4b2651b8d842854716b4fb2e20ecd9482f59f2ea6ee2352401bec5d42e8c6ed0/,
+  );
+  assert.match(prepareProductionPrivateStorageWorkflow, /PREPARE_PRODUCTION_PRIVATE_STORAGE/);
+
+  const preparationIndex = deployEnvironmentWorkflow.indexOf('  prepare-private-storage:');
+  assert.ok(preparationIndex > 0);
+  const preparationJob = deployEnvironmentWorkflow.slice(preparationIndex);
+  assert.match(preparationJob, /if: \$\{\{ inputs\.preparePrivateStorageOnly \}\}/);
+  assert.match(preparationJob, /\.path == "\.github\/workflows\/prepare-production-private-storage\.yml"/);
+  assert.match(preparationJob, /and \.run_attempt == 1/);
+  assert.match(preparationJob, /Pinned test provenance is not acceptable for production preparation/);
+  assert.match(preparationJob, /name: Preview bounded private-storage preparation/);
+  assert.match(preparationJob, /--template-file infra\/prepare-private-storage\.bicep/);
+  assert.match(preparationJob, /changeType != "Delete"/);
+  assert.match(preparationJob, /name: Migrate one digest-pinned WLH reference blob/);
+  assert.match(preparationJob, /--overwrite false/);
+  assert.equal(preparationJob.match(/source_digest.*MIGRATION_EXPECTED_SHA256/g)?.length, 1);
+  assert.equal(preparationJob.match(/target_digest.*MIGRATION_EXPECTED_SHA256/g)?.length, 1);
+  assert.ok(
+    preparationJob.indexOf('node scripts/assert-current-main.mjs\n            az storage blob upload') <
+      preparationJob.indexOf('--overwrite false'),
+  );
+  assert.match(preparationJob, /production-health-before\.json/);
+  assert.match(preparationJob, /production-health-after\.json/);
+  assert.match(preparationJob, /productionRuntime:[\s\S]*status: "unchanged"/);
+  assert.doesNotMatch(preparationJob, /infra\/main\.bicep/);
+  assert.doesNotMatch(preparationJob, /az functionapp deployment/);
+  assert.doesNotMatch(preparationJob, /az storage blob upload-batch/);
+
+  assert.match(mainBicep, /module privateStorageDeployment '\.\/modules\/private-storage\.bicep'/);
+  assert.match(preparePrivateStorageBicep, /module privateStorage '\.\/modules\/private-storage\.bicep'/);
+  assert.match(privateStorageModule, /allowBlobPublicAccess: false/);
+  assert.match(privateStorageModule, /allowSharedKeyAccess: false/);
+  assert.match(privateStorageModule, /defaultToOAuthAuthentication: true/);
+  assert.match(privateStorageModule, /isVersioningEnabled: true/);
+  assert.match(privateStorageModule, /daysAfterModificationGreaterThan: 365/);
+  assert.match(privateStorageModule, /deployment-wlh-writer/);
 });
 
 test('frontend rendering is finalized, hashed, and preserved before either application package is deployed', () => {
