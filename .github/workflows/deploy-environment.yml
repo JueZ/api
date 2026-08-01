@@ -1694,6 +1694,8 @@ jobs:
           : "${BRING_AUDIT_CONTAINER:?BRING_AUDIT_CONTAINER environment variable is required}"
 
           deployment_ref="$SOURCE_REF"
+          # CONTROLLER_REF is assigned through the workflow job environment.
+          # shellcheck disable=SC2153
           controller_ref="$CONTROLLER_REF"
           checked_out_controller="$(git rev-parse HEAD)"
           expected_title="Prepare Production Private Storage $deployment_ref $DELIVERY_CORRELATION"
@@ -1943,7 +1945,7 @@ jobs:
           }
 
           target_exists=''
-          for attempt in $(seq 1 18); do
+          for _ in $(seq 1 18); do
             if target_exists="$(az storage blob exists \
               --auth-mode login \
               --account-name "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
