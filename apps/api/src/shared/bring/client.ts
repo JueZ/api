@@ -76,6 +76,12 @@ export class BringClient {
     return this.request(`v2/bringlists/${encodeURIComponent(listUuid)}`, {}, session, { operation: 'get_items' });
   }
 
+  async getListUsers(session: BringSession, listUuid: string): Promise<unknown> {
+    return this.request(`v2/bringlists/${encodeURIComponent(listUuid)}/users`, {}, session, {
+      operation: 'get_list_users',
+    });
+  }
+
   async updateItems(
     session: BringSession,
     listUuid: string,
@@ -204,7 +210,7 @@ export class BringClient {
     }
     const expiresIn = numberAt(data, ['expires_in', 'expiresIn']) ?? 3600;
     const defaultListUuid =
-      stringAt(data, ['defaultListUuid', 'default_list_uuid', 'listUuid']) ??
+      stringAt(data, ['defaultListUuid', 'default_list_uuid', 'bringListUUID', 'bringListUuid', 'listUuid']) ??
       prior?.defaultListUuid ??
       this.config.defaultListUuid;
     const refreshToken = stringAt(data, ['refresh_token', 'refreshToken']) ?? prior?.refreshToken;

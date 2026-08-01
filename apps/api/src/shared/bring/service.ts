@@ -157,7 +157,7 @@ export class BringService {
     this.assertMutationEnabled(operation);
     const items = validateItems(input);
     const id = await this.resolveListUuid(listUuid);
-    await this.assertWritableOwnList(id);
+    await this.assertWritableList(id);
 
     if (expectedListVersion) {
       if (!/^[0-9a-f]{64}$/.test(expectedListVersion)) {
@@ -184,14 +184,34 @@ export class BringService {
     }
   }
 
-  private async assertWritableOwnList(listUuid: string): Promise<void> {
+  private async assertWritableList(listUuid: string): Promise<void> {
     if (!this.config.writableListUuids.includes(listUuid)) {
       throw new BringPolicyError('Bring list is not in the writable allowlist.');
     }
     const lists = await this.listLists();
     const selected = lists.lists.find((list) => list.uuid === listUuid);
     if (!selected) throw new BringPolicyError('Bring list is not readable by this environment.');
-    if (selected.shared) throw new BringPolicyError('Shared Bring lists are never writable.');
+    const shared = selected.shared || (await this.isSharedList(listUuid));
+    if (shared && !this.config.writableSharedListUuids.includes(listUuid)) {
+      throw new BringPolicyError('Shared Bring list is not in the explicit shared-write allowlist.');
+    }
+  }
+
+  private async isSharedList(listUuid: string): Promise<boolean> {
+    const raw = await this.authorized((session) => this.client.getListUsers(session, listUuid));
+    const users = userRows(raw);
+    if (!users) {
+      throw new BringUpstreamError('Bring list-membership response shape changed.', 502, 'version_skew');
+    }
+    const session = await this.authenticate();
+    const currentPublicUuid = session.publicUserUuid.toLowerCase();
+    const currentUserPresent = users.some(
+      (user) => stringAt(asRecord(user), ['publicUuid', 'publicUserUuid'])?.toLowerCase() === currentPublicUuid,
+    );
+    if (!currentUserPresent) {
+      throw new BringPolicyError('Authenticated Bring account is not a member of the requested list.');
+    }
+    return users.length > 1;
   }
 
   private async resolveListUuid(value?: string): Promise<string> {
@@ -313,6 +333,12 @@ function listRows(value: unknown): unknown[] | undefined {
   if (Array.isArray(value)) return value;
   const record = asRecord(value);
   return Array.isArray(record['lists']) ? record['lists'] : undefined;
+}
+
+function userRows(value: unknown): unknown[] | undefined {
+  if (Array.isArray(value)) return value;
+  const record = asRecord(value);
+  return Array.isArray(record['users']) ? record['users'] : undefined;
 }
 
 function normalizeListSummary(value: unknown, defaultListUuid: string | undefined): BringListSummary | undefined {

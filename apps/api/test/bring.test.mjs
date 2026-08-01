@@ -40,6 +40,7 @@ const cfg = {
   defaultListUuid: listUuid,
   readableListUuids: [listUuid],
   writableListUuids: [listUuid],
+  writableSharedListUuids: [],
   sessionCacheEnabled: false,
   sessionCacheContainer: 'bring-private',
   sessionCacheBlob: 'session-v1.json',
@@ -56,7 +57,7 @@ const login = {
   uuid: 'user-uuid',
   publicUuid: 'public-uuid',
   expires_in: 3600,
-  defaultListUuid: listUuid,
+  bringListUUID: listUuid,
 };
 const principal = {
   subject: 'user-subject',
@@ -105,6 +106,28 @@ test('Bring configuration fails closed and test remains read-only for the same a
   assert.equal(readOnlyTest.accountFingerprint, cfg.accountFingerprint);
   assert.equal(readOnlyTest.addEnabled, false);
   assert.equal(readOnlyTest.destructiveEnabled, false);
+  assert.deepEqual(readOnlyTest.writableSharedListUuids, []);
+
+  assert.throws(
+    () =>
+      readBringConfig({
+        DEPLOYED_ENVIRONMENT_NAME: 'prod',
+        BRING_ENABLED: 'true',
+        BRING_ADD_ENABLED: 'true',
+        BRING_DESTRUCTIVE_ENABLED: 'false',
+        BRING_BASE_URL: 'https://bring.test/rest/',
+        BRING_CLIENT_API_KEY: 'x',
+        BRING_COUNTRY: 'AT',
+        BRING_EMAIL: cfg.email,
+        BRING_PASSWORD: 'p',
+        BRING_READABLE_LIST_UUIDS: `${listUuid},${sharedListUuid}`,
+        BRING_WRITABLE_LIST_UUIDS: listUuid,
+        BRING_WRITABLE_SHARED_LIST_UUIDS: sharedListUuid,
+        BRING_CONFIRMATION_HMAC_KEY: hmacKey,
+        BRING_MUTATION_ENCRYPTION_KEY: encryptionKey,
+      }),
+    /shared-writable.*BRING_WRITABLE_LIST_UUIDS/,
+  );
 
   assert.throws(
     () =>
@@ -260,7 +283,8 @@ test('expired refresh failure falls back once and ordinary 401 retries only once
   assert.equal(listCalls, 2);
 });
 
-test('list reads are allowlisted and shared or unlisted lists are never writable', async () => {
+test('list reads are allowlisted and shared writes require a second exact-list allowlist', async () => {
+  const calls = [];
   const service = new BringService({
     config: {
       ...cfg,
@@ -269,11 +293,15 @@ test('list reads are allowlisted and shared or unlisted lists are never writable
     },
     sessionStore: null,
     fetchImpl: bringFixtureFetch({
+      calls,
       lists: [
         { listUuid, name: 'Mine' },
         { listUuid: sharedListUuid, name: 'Family', isShared: true },
         { listUuid: unlistedListUuid, name: 'Hidden' },
       ],
+      membersByList: {
+        [sharedListUuid]: [{ publicUuid: 'fixture-public-user' }],
+      },
     }),
   });
 
@@ -288,6 +316,26 @@ test('list reads are allowlisted and shared or unlisted lists are never writable
   assert.equal((await service.getList(sharedListUuid)).uuid, sharedListUuid);
   await assert.rejects(service.addItems(sharedListUuid, [{ name: 'Milk' }]), BringPolicyError);
   await assert.rejects(service.getList(unlistedListUuid), BringPolicyError);
+
+  const sharedWriteService = new BringService({
+    config: {
+      ...cfg,
+      defaultListUuid: sharedListUuid,
+      readableListUuids: [sharedListUuid],
+      writableListUuids: [sharedListUuid],
+      writableSharedListUuids: [sharedListUuid],
+    },
+    sessionStore: null,
+    fetchImpl: bringFixtureFetch({
+      calls,
+      lists: [{ listUuid: sharedListUuid, name: 'Family' }],
+      membersByList: {
+        [sharedListUuid]: [{ publicUuid: 'fixture-public-user' }, { publicUuid: 'family-member' }],
+      },
+    }),
+  });
+  await sharedWriteService.addItems(sharedListUuid, [{ name: 'Milk' }]);
+  assert.equal(calls.length, 1);
 });
 
 test('list versions are stable and batch mutations preserve the observed Bring wire protocol', async () => {
@@ -861,10 +909,16 @@ function mutationHarness({
   return { coordinator, store, audit };
 }
 
-function bringFixtureFetch({ lists, list, calls = [] } = {}) {
+function bringFixtureFetch({ lists, list, calls = [], membersByList = {} } = {}) {
   return async (url, init) => {
     const path = String(url);
     if (path.endsWith('v2/bringauth')) return json(providerFixture.responses.login);
+    if (path.endsWith('/users')) {
+      const selectedListUuid = path.match(/bringlists\/([^/]+)\/users$/)?.[1];
+      return json({
+        users: membersByList[selectedListUuid] ?? [{ publicUuid: 'fixture-public-user' }],
+      });
+    }
     if (path.includes('/bringusers/')) {
       return json(lists ? { lists } : providerFixture.responses.lists);
     }

@@ -8,7 +8,7 @@ Bring! has no supported public API for this use case. The integration therefore 
 - `test` may read the same account but cannot add, complete, or remove items.
 - Production reads require `BRING_READABLE_LIST_UUIDS`.
 - Production writes require an explicit UUID in `BRING_WRITABLE_LIST_UUIDS`.
-- Shared and unlisted lists are denied for every write, even if Bring exposes them to the account.
+- Shared-list writes require the same UUID in the additional `BRING_WRITABLE_SHARED_LIST_UUIDS` allowlist. Empty denies every shared-list write; unlisted lists are always denied.
 - Whole-list creation, deletion, sharing, membership, and notification operations are unsupported.
 - `BRING_EXPECTED_ACCOUNT_FINGERPRINT` binds the deployment to the intended technical account without storing its email in state or audit records.
 
@@ -35,7 +35,7 @@ POST /api/bring/lists/{listUuid}/mutations/apply
 { operationId, confirmationToken }
 ```
 
-Prepare validates policy, input, list ownership, and optional optimistic concurrency without calling the mutation endpoint. It returns an HMAC list pseudonym, item count, expiry, and a five-minute token bound to the principal, operation ID, list, operation, and encrypted payload. Apply verifies that binding before one upstream call.
+Prepare validates policy, input, current list membership, sharing status, and optional optimistic concurrency without calling the mutation endpoint. It returns an HMAC list pseudonym, item count, expiry, and a five-minute token bound to the principal, operation ID, list, operation, and encrypted payload. Apply verifies that binding before one upstream call.
 
 MCP exposes the same flow through `bring_add_items`, `bring_prepare_item_mutation`, and `bring_apply_item_mutation`. Tool instructions forbid inventing confirmation tokens or acting on instructions found in provider content.
 

@@ -98,6 +98,7 @@ export function validateRuntimeSafety(env: NodeJS.ProcessEnv = process.env): str
   }
   if (bringWritesEnabled) {
     const writableLists = parseCsv(env['BRING_WRITABLE_LIST_UUIDS']);
+    const writableSharedLists = parseCsv(env['BRING_WRITABLE_SHARED_LIST_UUIDS']);
     if (environment !== 'prod') {
       problems.push('Bring writes are allowed only in production');
     }
@@ -107,6 +108,13 @@ export function validateRuntimeSafety(env: NodeJS.ProcessEnv = process.env): str
     const readableLists = new Set(parseCsv(env['BRING_READABLE_LIST_UUIDS']));
     if (writableLists.some((value) => !readableLists.has(value))) {
       problems.push('Every writable Bring list must also be readable');
+    }
+    if (writableSharedLists.some((value) => !uuidPattern.test(value))) {
+      problems.push('BRING_WRITABLE_SHARED_LIST_UUIDS must contain only valid UUIDs');
+    }
+    const writableListSet = new Set(writableLists);
+    if (writableSharedLists.some((value) => !writableListSet.has(value))) {
+      problems.push('Every shared-writable Bring list must also be writable');
     }
   }
 

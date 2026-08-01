@@ -1,5 +1,13 @@
 # Current state
 
+## 2026-08-01 Bring authorization-context recovery prepared
+
+- Live production diagnostics proved the bundled MCP 403 responses were deployment-policy denials, not a Bring provider outage: `BRING_ENABLED`, add, and destructive flags were false, while the readable and writable list allowlists were empty.
+- Read-only provider discovery through the existing cached session found three account lists and confirmed all three currently have multiple members. No item content, account email, provider token, password, or raw list identifier was logged or added to project memory.
+- The client now recognizes Bring's observed `bringListUUID` login field so the provider-designated default list is retained. Mutation policy verifies current list membership through the provider's list-users endpoint instead of trusting the list-summary shape, which does not carry membership data.
+- Shared-list mutations remain fail closed by default. Production may authorize only an exact UUID that is present in both `BRING_WRITABLE_LIST_UUIDS` and the additional `BRING_WRITABLE_SHARED_LIST_UUIDS`; test writes remain prohibited, service tokens remain unable to complete/remove, and destructive calls retain delegated-user prepare/apply confirmation.
+- Runtime restoration still requires environment configuration, exact-main CI, Deploy Test acceptance, production promotion, and live MCP verification before it can be reported as operational.
+
 ## 2026-08-01 Bundled MCP OAuth scope repair accepted in test and production
 
 - PR #312 exact head `469449018e73db25fba6f3b6fb53ab77cbad8555` passed CI, Policy, CodeQL, and the single bounded independent review, then the exact-head controller squash-merged it as `2183222c3122e79b7d8d2cf7a20c7b9890998f7c`.
