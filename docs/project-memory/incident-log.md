@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-01 — Review found high-risk documentation omitted from mixed capsules
+
+- Evidence: Exact-head CI `30693294597`, Policy `30693294596`, and CodeQL `30693294603` passed for `670fa5c62d25e79db7cbf10f9684c3b8e9dd82ec`. Review `30693386513` returned a valid rejection because mixed capsules omitted classified high-risk files including `docs/security/autonomous-guardrails.md` and `docs/adr/0001-autonomous-high-risk-review.md`. It used 32,389 input and 1,848 output tokens, with 1,655 reasoning tokens and an estimated upper-bound cost of `$0.217385`.
+- Root cause: The complete-diff repair selected every non-documentation path but treated the entire `docs/` subtree as optional whenever executable files were present. File metadata did not provide the policy content required for independent review.
+- Repair: Preserve the consumed head. Include every non-documentation path plus every classifier-matched high-risk document, retain all documentation for documentation-only high-risk PRs, and omit only ordinary mixed documentation. Keep the 200 KB, 3,000-token, and exact `$0.31` gates unchanged.
+- Status: First scoped repair for this finding is in progress. No merge or deployment occurred; production remained disabled.
+
 ## 2026-08-01 — Complete-diff medium review exhausted the initial output cap
 
 - Evidence: Exact-head CI `30692962446`, Policy `30692962452`, and CodeQL `30692962458` passed for `c1a4efacaa5dfce6b3dabc68487e4cda3d993329`. Review `30693113238` created one durable claim, counted exactly 32,304 input tokens, made one generation, and returned `empty_output` after all 1,500 output tokens were hidden reasoning. The estimated upper-bound cost was `$0.20652`; no retry occurred.
