@@ -1,5 +1,38 @@
 # Incident log
 
+## 2026-08-01 — PR #287 review rejected optional service-identity verification
+
+- Evidence: Exact-head CI, Policy Check, and CodeQL passed, then autonomous review run `30686104064` rejected head `8b43ae26d6416979f036b98aaa85467915560f71` with three high findings and one medium finding. The sanitized artifact identified forgeable reuse provenance, identity/role/FIC mutations before a fully pinned boundary, and missing free-check revalidation at the paid-call boundary.
+- Cost handling: The diagnosis used the one bootstrap workflow only; no rerun was requested. Ordinary tests remained fake-backed. The next head is the first and only scoped repair attempt for PR #287.
+- Repair: Reusable evidence was bound to the pinned GitHub Actions App, controller workflow identity, successful first run attempt, exact repository/head, and unique artifact digest; free-gate validation was repeated at claim and API boundaries. Final review run `30687126474` then rejected the optional read-only verifier because it did not reject every additional credential, FIC, or API-resource role assignment.
+- Resolution: The operator confirmed that repository-side service-identity setup/audit was not wanted. The verifier, its dedicated test, and setup references are removed from the reduced successor instead of expanding identity inspection or creating a new trust-management route.
+- Safety: No production workflow ran. No Azure identity, FIC, credential, role, assignment, app setting, or GitHub environment variable was changed.
+- CI follow-up: Repair head `4e443239b5dbbdb3012d49b16b00fd106f3f3534` passed remote Actionlint/ShellCheck, policy, and CodeQL, but secret scan rejected a duplicated public API client GUID under the generic-key heuristic. Controller run `30686876997` was canceled before evidence publication to limit spend. The repair commit is amended to derive the identifier from the canonical contract, removing the duplicate from branch history instead of allowlisting or weakening Gitleaks.
+
+## 2026-08-01 — PR #286 review exposed cross-run cost and federation gaps
+
+- Symptom: PR #286's final permitted review rejected an otherwise locally and remotely green head because one-call enforcement was scoped only to a controller invocation, caller-selected repository/environment values could rebind the existing FIC, and label transitions no longer triggered immediate evaluation.
+- Evidence: Exact-head review run `30670820873` returned three sanitized findings: no durable repository/PR/head claim, a workflow ref derived from caller-controlled repository/environment values, and removed `labeled`/`unlabeled` triggers. The PR was returned to draft and repository Actions were disabled; no third paid attempt ran.
+- Root cause: SDK retries and a single `responses.create` call do not deduplicate separate workflow runs. The helper validated self-consistency rather than an immutable complete test tuple. Removing label triggers treated duplicate-cost symptoms rather than making review idempotent.
+- Repair: The fresh successor serializes controller runs, claims one durable exact head after free gates, reuses only a trusted approval artifact, publishes current failure/success checks for label transitions, restores label triggers, and locks the helper to the unique existing approved test app/FIC without creating trust.
+- Status: Local validation in progress; successor PR, merge, and test-only deployment acceptance remain pending. Production is unchanged.
+
+## 2026-07-31 — Repeated high-cost autonomous review exhausted OpenAI credits
+
+- Symptom: The operator observed approximately $9 of OpenAI API spend during delivery testing and the final PR review failed with `credit_balance_exhausted` despite ordinary repository tests passing.
+- Evidence: 23 same-day `Codex Auto-Merge` artifacts report `modelInvoked=true` with `gpt-5.6-sol`; two final artifacts explicitly report two request attempts, establishing at least 25 paid Responses API requests. The trusted controller allowed two attempts with 6,000 then 12,000 output tokens, high reasoning, and up to 1.5 MB of diff. Local/API tests use mocks and made no live OpenAI request.
+- Root cause: Each pushed high-risk exact head started paid review immediately, including heads that had not yet passed deterministic checks, and model-output/API failures automatically doubled the request. The model and token/diff bounds were unsuitable for frequent delivery checks.
+- Repair: Gate paid review behind free exact-head checks; retain the required Sol/high-assurance analysis while allowing one call with SDK retries disabled, 40 KB diff, 1,500 output tokens, and a conservative $0.31 pre-call ceiling; record sanitized usage; require explicit live enablement. Runtime REC remains Luna/low, caps sanitized input at 24 KB and output at 700 tokens, disables SDK retries, and preserves deterministic-first fallback including serialization failures.
+- Status: PR #286 exhausted its two repairs; the remaining cross-run idempotency and federation findings are tracked in the 2026-08-01 successor incident above.
+
+## 2026-07-31 — Disabled Actions and legacy FIC subjects blocked test recovery
+
+- Symptom: run `30663819848` remained queued with zero jobs after a test dispatch while repository Actions was disabled. After Actions was restored, the replacement run instantiated but Azure login failed with `AADSTS700213` because GitHub emitted the strengthened workflow-bound subject and the Azure test credentials still trusted the former environment-only subject.
+- Root cause: enabling an individual workflow did not override the repository-wide Actions gate, and changing the repository OIDC claim template intentionally changed the assertion subject without rebinding the two existing test federated credentials.
+- Repair: re-enabled the repository gate only for the bounded test run, rebound the existing test deployment and smoke FICs in place to the exact repository/environment/workflow subject, and dispatched a new first-attempt run. No broad/default subject, long-lived secret, new trust root, production identity, or production workflow was enabled.
+- Verification: run `30666921988` passed every deployment, runtime, authenticated-smoke, telemetry, ledger, and provenance gate. Actions and Deploy Test were disabled again afterward. The original zero-job run still returns HTTP 500 to both cancel APIs and remains contained while Actions is disabled.
+- Status: test runtime incident resolved; orphaned GitHub run remains an operational cleanup item.
+
 ## 2026-07-31 — Entra GUID was rejected as a non-versioned UUID at Function startup
 
 - Symptom: test-only run `30651802409` passed infrastructure, complete settings reconciliation, immutable Function activation, and frontend activation, but every Function route returned `404`. Application Insights recorded the fail-closed entry-point error `OIDC_ALLOWED_OBJECT_IDS must contain at least one valid user object ID in test`.

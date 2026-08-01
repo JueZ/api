@@ -41,6 +41,27 @@ test('MCP stays bundled behind one server and one Function route', () => {
   assert.deepEqual(bundledMcpFindings(), []);
 });
 
+test('runtime REC model analysis remains deterministic-first and cost bounded', () => {
+  const analyzer = readFileSync(
+    new URL('../../apps/api/src/shared/errors/llmDiagnosticAnalyzer.ts', import.meta.url),
+    'utf8',
+  );
+  const service = readFileSync(
+    new URL('../../apps/api/src/shared/errors/repairableErrorService.ts', import.meta.url),
+    'utf8',
+  );
+  assert.match(service, /deterministic\.classification !== 'diagnostic_uncertain'/);
+  assert.match(analyzer, /const DEFAULT_MODEL = 'gpt-5\.6-luna'/);
+  assert.match(analyzer, /const MAX_INPUT_BYTES = 24_000/);
+  assert.match(analyzer, /const MAX_OUTPUT_TOKENS = 700/);
+  assert.match(analyzer, /reasoning: \{ effort: 'low' \}/);
+  assert.match(analyzer, /verbosity: 'low'/);
+  assert.match(analyzer, /maxRetries: 0/);
+  assert.match(analyzer, /configured === DEFAULT_MODEL \? configured : null/);
+  assert.match(analyzer, /try \{\s+const capsuleJson = JSON\.stringify\(args\.capsule\)/);
+  assert.doesNotMatch(analyzer, /gpt-5\.6-sol/);
+});
+
 test('Azure Functions loads the fail-closed composition root before registering functions', () => {
   const apiPackage = JSON.parse(readFileSync(new URL('../../apps/api/package.json', import.meta.url), 'utf8'));
   const compositionRoot = readFileSync(new URL('../../apps/api/src/index.ts', import.meta.url), 'utf8');

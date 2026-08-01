@@ -42,6 +42,8 @@ Complete repository-changing work through the required autonomous delivery loop 
 
 2. Run the smallest relevant local validation set for the change when the environment allows.
 
+   Batch the complete locally validated change before pushing. Every new exact head on a high-risk PR can require one paid independent review, so do not push exploratory, partially validated, or no-op repair commits. A failed remote head may receive at most the documented meaningful repair attempts.
+
    Common examples:
 
    ```bash

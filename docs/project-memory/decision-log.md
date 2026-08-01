@@ -1,5 +1,29 @@
 # Decision log
 
+## 2026-08-01 — Make the paid-review limit durable per exact head
+
+- Decision: Serialize every PR/manual/label controller event per pull request. After all free exact-head gates pass and immediately before a paid request, atomically create one durable check-run claim whose external identity binds repository, PR number, and full head SHA.
+- Decision: Reuse only when the claim creator is the pinned GitHub Actions App, the independently queried source is a successful first attempt of the pinned main controller workflow ID/path/ref/event for the exact repository/head, and the unique artifact ID/SHA-256 digest matches evidence sealed into the check. Any mismatch publishes failure and cannot call again.
+- Decision: Revalidate every free exact-head check both before the durable claim and immediately before the OpenAI request.
+- Decision: Remove service-identity setup and verification from repository scope. Application delivery consumes the already configured external test identity but does not create, repair, rotate, or audit its credentials, federation, roles, or trust routes.
+- Rationale: PR #286's terminal independent review showed that SDK/controller retry limits did not prevent repeated workflow events from charging the same head, and that deriving trusted values from caller inputs allowed federation rebinding.
+- Status: PR #287 free gates passed, but final review run `30687126474` rejected the optional verifier's incomplete whole-identity validation. The operator removed that feature and requested a reduced successor. Production remains disabled.
+
+## 2026-07-31 — Bound paid autonomous review before any model call
+
+- Decision: Wait for all free exact-head CI, Policy Check, and CodeQL requirements before independent AI review. Retain `gpt-5.6-sol` with high reasoning, but allow at most 40,000 diff bytes, 1,500 output tokens, one controller/SDK call, and a conservative $0.31 pre-call ceiling.
+- Decision: Record the request ceiling and sanitized response token usage in the review artifact. Fail closed without controller or SDK retries. Require an explicit live-API environment gate so local and ordinary test execution cannot spend against a present key.
+- Context: 23 autonomous-review runs invoked `gpt-5.6-sol` on 2026-07-31 and produced at least 25 API requests; repeated high-reasoning review, not `npm test`, caused the unexpected account spend.
+- Consequences: Batch locally validated changes before pushing. An over-budget or oversized high-risk change cannot merge until its review payload is reduced while retaining the single bundled MCP server. Runtime REC permits only Luna and falls back deterministically above a 24,000-byte sanitized capsule or on any model/configuration failure. The Platform project hard spend limit remains the monthly account-level backstop. The first bootstrap review rejected Luna/low as an assurance regression, so the repair preserves Sol/high and obtains savings from sequencing and hard request bounds instead.
+- Status: Implemented on PR #286 but superseded by the durable 2026-08-01 decision after that PR exhausted two review repairs. Shared future-deployment variable `REPAIRABLE_ERRORS_LLM_MODEL=gpt-5.6-luna` was applied without reading or changing the API key.
+
+## 2026-07-31 — Preserve workflow-bound OIDC and repair only existing test federation
+
+- Decision: Keep GitHub's repository/environment/`job_workflow_ref` OIDC subject and rebind only the two existing test federated credentials to that exact subject. Do not restore the broader legacy subject.
+- Decision: The operator deferred credential rotation and an independent trust-root bootstrap. Open unmerged PR #285 remains a separate proposal and does not block the accepted test-only recovery requested by the operator.
+- Consequences: The completed federation repair created no new identity, key, secret, permission, app role, or RBAC grant. Production federation and deployment remain unchanged and disabled. Future identity maintenance is a privileged operator procedure outside repository delivery; no service-identity helper remains in this repository.
+- Status: Test recovery validated by first-attempt run `30666921988`; repository-side service-identity maintenance is intentionally removed from current scope.
+
 ## 2026-07-31 — Validate Entra identifiers as GUIDs, not versioned UUIDs
 
 - Decision: Validate `OIDC_ALLOWED_OBJECT_IDS` and `OIDC_ALLOWED_TENANTS` with the Microsoft GUID shape only. Retain the stricter RFC-versioned UUID pattern for Bring list identifiers.

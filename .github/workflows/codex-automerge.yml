@@ -18,7 +18,7 @@ permissions:
 
 concurrency:
   group: codex-automerge-${{ github.event.pull_request.number || inputs.pr_number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   resolve:
@@ -33,7 +33,6 @@ jobs:
       eligible: ${{ steps.resolve.outputs.eligible }}
       pr_number: ${{ steps.resolve.outputs.pr_number }}
       head_sha: ${{ steps.resolve.outputs.head_sha }}
-      review_check_run_id: ${{ steps.resolve.outputs.review_check_run_id }}
     steps:
       - name: Resolve immutable pull-request identity
         id: resolve
@@ -77,31 +76,41 @@ jobs:
             echo "head_sha=$head_sha"
           } >> "$GITHUB_OUTPUT"
 
-          check_run_id="$(gh api \
-            --method POST \
-            "repos/$REPOSITORY/check-runs" \
-            -f name='Autonomous review complete' \
-            -f head_sha="$head_sha" \
-            -f status='in_progress' \
-            -f 'output[title]=Autonomous review started' \
-            -f 'output[summary]=The trusted default-branch controller is evaluating this exact pull-request head.' \
-            --jq '.id')"
-          echo "review_check_run_id=$check_run_id" >> "$GITHUB_OUTPUT"
+          if [ "$eligible" != "true" ]; then
+            gh api \
+              --method POST \
+              "repos/$REPOSITORY/check-runs" \
+              -f name='Autonomous review complete' \
+              -f head_sha="$head_sha" \
+              -f status='completed' \
+              -f conclusion='failure' \
+              -f external_id="juez-autonomous-review-eligibility:v1:$REPOSITORY:pull:$pr_number:head:$head_sha:run:${{ github.run_id }}" \
+              -f details_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              -f 'output[title]=Autonomous review ineligible' \
+              -f 'output[summary]=The pull request is draft, forked, outside the allowed branch/label policy, or carries a blocking label.' \
+              >/dev/null
+          fi
 
   autonomous-review:
     name: perform autonomous review
     needs: resolve
     if: needs.resolve.outputs.eligible == 'true'
-    timeout-minutes: 30
+    timeout-minutes: 75
     runs-on: ubuntu-latest
     permissions:
+      actions: read
+      checks: write
       contents: read
       pull-requests: read
     outputs:
-      decision: ${{ steps.review.outputs.decision }}
-      reviewed_head_sha: ${{ steps.review.outputs.reviewed_head_sha }}
-      high_risk: ${{ steps.review.outputs.high_risk }}
-      model_invoked: ${{ steps.review.outputs.model_invoked }}
+      decision: ${{ steps.review.outputs.decision || steps.reuse.outputs.decision || steps.claim.outputs.decision }}
+      reviewed_head_sha: ${{ steps.review.outputs.reviewed_head_sha || steps.reuse.outputs.reviewed_head_sha || steps.claim.outputs.reviewed_head_sha }}
+      high_risk: ${{ steps.review.outputs.high_risk || steps.reuse.outputs.high_risk || steps.claim.outputs.high_risk }}
+      model_invoked: ${{ steps.review.outputs.model_invoked || steps.reuse.outputs.model_invoked || steps.claim.outputs.model_invoked }}
+      claim_status: ${{ steps.claim.outputs.claim_status }}
+      claim_check_run_id: ${{ steps.claim.outputs.claim_check_run_id }}
+      review_artifact_id: ${{ steps.review_artifact.outputs.artifact-id }}
+      review_artifact_digest: ${{ steps.review_artifact.outputs.artifact-digest }}
     steps:
       - name: Checkout trusted controller
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
@@ -117,11 +126,59 @@ jobs:
       - name: Install trusted controller dependencies
         shell: bash
         run: npm ci --ignore-scripts
+      - name: Wait for free deterministic exact-head checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/autonomous-merge-controller.mjs preflight \
+            --repository "${{ github.repository }}" \
+            --pr "${{ needs.resolve.outputs.pr_number }}" \
+            --head-sha "${{ needs.resolve.outputs.head_sha }}" \
+            --wait-seconds 3600 \
+            --poll-seconds 15
+      - name: Atomically claim or reuse the exact-head paid review
+        id: claim
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/autonomous-merge-controller.mjs claim \
+            --repository "${{ github.repository }}" \
+            --pr "${{ needs.resolve.outputs.pr_number }}" \
+            --head-sha "${{ needs.resolve.outputs.head_sha }}" \
+            --run-id "${{ github.run_id }}" \
+            --review-file "$RUNNER_TEMP/autonomous-review.json"
+      - name: Reuse approved exact-head review evidence
+        id: reuse
+        if: steps.claim.outputs.claim_status == 'reuse'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/reused-autonomous-review"
+          gh run download "${{ steps.claim.outputs.reuse_run_id }}" \
+            --repo "${{ github.repository }}" \
+            --name "autonomous-review-${{ needs.resolve.outputs.head_sha }}" \
+            --dir "$RUNNER_TEMP/reused-autonomous-review"
+          cp "$RUNNER_TEMP/reused-autonomous-review/autonomous-review.json" "$RUNNER_TEMP/autonomous-review.json"
+          node scripts/autonomous-merge-controller.mjs reuse \
+            --repository "${{ github.repository }}" \
+            --pr "${{ needs.resolve.outputs.pr_number }}" \
+            --head-sha "${{ needs.resolve.outputs.head_sha }}" \
+            --run-id "${{ github.run_id }}" \
+            --source-run-id "${{ steps.claim.outputs.reuse_run_id }}" \
+            --review-file "$RUNNER_TEMP/autonomous-review.json"
       - name: Run deterministic classification and independent review
         id: review
+        if: steps.claim.outputs.claim_status == 'new'
         env:
           GH_TOKEN: ${{ github.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -129,8 +186,17 @@ jobs:
             --repository "${{ github.repository }}" \
             --pr "${{ needs.resolve.outputs.pr_number }}" \
             --head-sha "${{ needs.resolve.outputs.head_sha }}" \
+            --run-id "${{ github.run_id }}" \
+            --claim-check-run-id "${{ steps.claim.outputs.claim_check_run_id }}" \
             --review-file "$RUNNER_TEMP/autonomous-review.json"
+      - name: Fail closed after a consumed exact-head review claim
+        if: steps.claim.outputs.claim_status == 'consumed'
+        shell: bash
+        run: |
+          echo "This exact head already consumed its one durable paid-review claim." >&2
+          exit 1
       - name: Upload sanitized review evidence
+        id: review_artifact
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
         with:
@@ -142,7 +208,7 @@ jobs:
   publish-review-check:
     name: publish autonomous review check
     needs: [resolve, autonomous-review]
-    if: always() && needs.resolve.result == 'success'
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.eligible == 'true'
     timeout-minutes: 5
     runs-on: ubuntu-latest
     permissions:
@@ -153,34 +219,86 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          CHECK_RUN_ID: ${{ needs.resolve.outputs.review_check_run_id }}
+          CHECK_RUN_ID: ${{ needs.autonomous-review.outputs.claim_check_run_id }}
+          CLAIM_STATUS: ${{ needs.autonomous-review.outputs.claim_status }}
           REVIEW_RESULT: ${{ needs.autonomous-review.result }}
           REVIEW_DECISION: ${{ needs.autonomous-review.outputs.decision }}
           REVIEWED_HEAD_SHA: ${{ needs.autonomous-review.outputs.reviewed_head_sha }}
           EXPECTED_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
           HIGH_RISK: ${{ needs.autonomous-review.outputs.high_risk }}
           MODEL_INVOKED: ${{ needs.autonomous-review.outputs.model_invoked }}
+          ARTIFACT_ID: ${{ needs.autonomous-review.outputs.review_artifact_id }}
+          ARTIFACT_DIGEST: ${{ needs.autonomous-review.outputs.review_artifact_digest }}
+          ARTIFACT_NAME: autonomous-review-${{ needs.resolve.outputs.head_sha }}
+          PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          WORKFLOW_ID: '276132077'
+          WORKFLOW_PATH: .github/workflows/codex-automerge.yml
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          WORKFLOW_EVENT: ${{ github.event_name }}
         shell: bash
         run: |
           set -euo pipefail
+          if [ "$CLAIM_STATUS" = "reuse" ] &&
+             [ "$REVIEW_RESULT" = "success" ] &&
+             [ "$REVIEW_DECISION" = "approve" ] &&
+             [ "$REVIEWED_HEAD_SHA" = "$EXPECTED_HEAD_SHA" ]; then
+            exit 0
+          fi
+          if [ "$CLAIM_STATUS" != "new" ] || ! [[ "$CHECK_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "Exact-head review claim was not newly acquired and no approved review was reusable." >&2
+            exit 1
+          fi
           conclusion=failure
           title='Autonomous review failed'
           summary='The review workflow did not approve this exact pull-request head.'
+          evidence=''
           if [ "$REVIEW_RESULT" = "success" ] &&
              [ "$REVIEW_DECISION" = "approve" ] &&
              [ "$REVIEWED_HEAD_SHA" = "$EXPECTED_HEAD_SHA" ]; then
+            if ! [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]] ||
+               ! [[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+               [ "$RUN_ATTEMPT" != "1" ] ||
+               [ "$WORKFLOW_REF" != 'JueZ/api/.github/workflows/codex-automerge.yml@refs/heads/main' ] ||
+               ! [[ "$WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] ||
+               [ "$WORKFLOW_EVENT" != "pull_request_target" ]; then
+              echo "Approved review evidence lacks immutable trusted artifact provenance." >&2
+              exit 1
+            fi
+            evidence="$(jq -cn \
+              --arg repository "$REPOSITORY" \
+              --argjson prNumber "$PR_NUMBER" \
+              --arg headSha "$EXPECTED_HEAD_SHA" \
+              --argjson runId "$RUN_ID" \
+              --argjson runAttempt "$RUN_ATTEMPT" \
+              --argjson workflowId "$WORKFLOW_ID" \
+              --arg workflowPath "$WORKFLOW_PATH" \
+              --arg workflowRef "$WORKFLOW_REF" \
+              --arg workflowSha "$WORKFLOW_SHA" \
+              --arg event "$WORKFLOW_EVENT" \
+              --argjson artifactId "$ARTIFACT_ID" \
+              --arg artifactName "$ARTIFACT_NAME" \
+              --arg artifactDigest "$ARTIFACT_DIGEST" \
+              '{version:1,repository:$repository,prNumber:$prNumber,headSha:$headSha,runId:$runId,runAttempt:$runAttempt,workflowId:$workflowId,workflowPath:$workflowPath,workflowRef:$workflowRef,workflowSha:$workflowSha,event:$event,artifact:{id:$artifactId,name:$artifactName,digest:$artifactDigest}}')"
             conclusion=success
             title='Autonomous review approved'
             summary="Exact head $EXPECTED_HEAD_SHA passed autonomous review (high-risk: ${HIGH_RISK:-unknown}, model invoked: ${MODEL_INVOKED:-unknown})."
           fi
 
-          gh api \
-            --method PATCH \
-            "repos/$REPOSITORY/check-runs/$CHECK_RUN_ID" \
-            -f status=completed \
-            -f conclusion="$conclusion" \
-            -f "output[title]=$title" \
-            -f "output[summary]=$summary" >/dev/null
+          patch_args=(
+            --method PATCH
+            "repos/$REPOSITORY/check-runs/$CHECK_RUN_ID"
+            -f status=completed
+            -f conclusion="$conclusion"
+            -f "output[title]=$title"
+            -f "output[summary]=$summary"
+          )
+          if [ -n "$evidence" ]; then
+            patch_args+=(-f "output[text]=$evidence")
+          fi
+          gh api "${patch_args[@]}" >/dev/null
 
           if [ "$conclusion" != "success" ]; then
             exit 1
