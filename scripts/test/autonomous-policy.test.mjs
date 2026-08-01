@@ -430,6 +430,9 @@ test('production private-storage preparation is isolated, exact-source, and dige
   assert.equal(preparationJob.match(/DEPLOYMENT_CONTROL_REF=\$controller_ref/g)?.length, 1);
   assert.match(preparationJob, /--template-file infra\/prepare-private-storage\.bicep/);
   assert.match(preparationJob, /--result-format ResourceIdOnly \\\n\s+--no-pretty-print \\\n\s+-o json/);
+  assert.match(preparationJob, /--name "prepare-private-storage-prod-preview-\$\{GITHUB_RUN_ID\}"/);
+  assert.match(preparationJob, /--name "prepare-private-storage-prod-\$\{GITHUB_RUN_ID\}"/);
+  assert.equal(preparationJob.match(/--name "prepare-private-storage-prod[^\n]+\$\{GITHUB_RUN_ID\}"/g)?.length, 2);
   assert.match(preparationJob, /changeType != "Delete"/);
   assert.match(preparationJob, /name: Migrate one digest-pinned WLH reference blob/);
   assert.match(preparationJob, /--overwrite false/);
