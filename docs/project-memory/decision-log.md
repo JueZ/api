@@ -7,6 +7,7 @@
 - Rationale: The production Entra API registration already uses `catalogue.read` and `reddit.read` as application-role values. Microsoft Graph rejects delegated scopes with the same values as duplicate application permissions, so the previous assumption that a custom resource app could expose matching scope and app-role values was false in this tenant.
 - Migration: Deliver and verify the backward-compatible runtime normalization before changing Entra. Then rename the existing role values in place, expose the seven canonical delegated scopes, pre-authorize the existing bundled MCP OAuth client, deduplicate its legacy `api.access` manifest entries, and re-run authenticated deployment/runtime verification.
 - Security: No issuer, audience, JWT signature validation, allowlist, token-type restriction, destructive-operation policy, secret, credential, federation, or RBAC rule is weakened. The temporary Codex Graph grant is `Application.ReadWrite.OwnedBy` and applies only to app registrations that the operator explicitly made it own.
+- Status: Completed through PR #312 merge `2183222c3122e79b7d8d2cf7a20c7b9890998f7c`, post-migration Deploy Test `30720746830`, and Promote Production `30720874197`. Both environments report the exact SHA and advertise all seven canonical delegated scopes; authenticated smoke and telemetry passed in both deployment evidence chains.
 
 ## 2026-08-01 — Repair the existing production smoke trust in place and accept production
 
