@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-01 — High-effort bounded review returned no structured output
+
+- Evidence: PR #289 review run `30691998861` created exact-head claim `91348292399`, made one Responses API call, and returned `empty_output`. Sanitized usage recorded 12,066 input tokens and 1,500 output/reasoning tokens, with an estimated upper-bound cost of `$0.10533`.
+- Root cause: The required high reasoning effort consumed the complete fixed 1,500-token output allowance before emitting structured text.
+- Repair: Preserve the consumed head, keep the same model and exact capsule, and use medium reasoning under the unchanged one-call, no-retry, 1,500-token, and `$0.31` controls. No production or deployment workflow ran.
+- Status: Repair pending exact-head free gates and one final bounded review; the failed head will not be retried.
+
 ## 2026-08-01 — PR #289 review rejected a separable claim path and incomplete credential audit
 
 - Evidence: Exact-head CI run `30689701559`, Policy Check run `30689701551`, and CodeQL run `30689701547` passed for `c069be9b9f3203d0625248eb6b9fd1d6fab83040`. Final bounded review run `30689779148` rejected because paid review remained callable separately from durable claim acquisition and the credential audit could be bypassed with alternate secret expression forms or an insufficiently bound marker identity.

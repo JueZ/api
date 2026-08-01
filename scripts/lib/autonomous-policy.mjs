@@ -55,8 +55,8 @@ export function validateAutonomousPolicy(policy) {
   if (!Object.hasOwn(AUTONOMOUS_REVIEW_MODEL_PRICING, policy.autonomousReview?.model)) {
     errors.push('autonomousReview.model must use an approved cost-bounded model');
   }
-  if (policy.autonomousReview?.reasoningEffort !== 'high') {
-    errors.push('autonomousReview.reasoningEffort must be high');
+  if (policy.autonomousReview?.reasoningEffort !== 'medium') {
+    errors.push('autonomousReview.reasoningEffort must be medium');
   }
   if (
     !Number.isInteger(policy.autonomousReview?.maxDiffBytes) ||

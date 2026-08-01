@@ -121,7 +121,7 @@ test('canonical autonomous policy is internally valid', () => {
   assert.equal(policy.merge.allowAdminBypass, false);
   assert.equal(policy.autonomousReview.humanApprovalRequired, false);
   assert.equal(policy.autonomousReview.model, 'gpt-5.6-sol');
-  assert.equal(policy.autonomousReview.reasoningEffort, 'high');
+  assert.equal(policy.autonomousReview.reasoningEffort, 'medium');
   assert.equal(policy.autonomousReview.maxDiffBytes, 40_000);
   assert.equal(policy.autonomousReview.maxOutputTokens, 1_500);
   assert.equal(policy.autonomousReview.maxEstimatedCostUsd, 0.31);
@@ -521,7 +521,7 @@ test('high-risk autonomous review uses one cost-bounded call and records sanitiz
   assert.deepEqual(review.reviewClaim, { status: 'new', checkRunId: 777, runId: 12345 });
   assert.equal(requests.length, 1);
   assert.equal(requests[0].model, 'gpt-5.6-sol');
-  assert.deepEqual(requests[0].reasoning, { effort: 'high' });
+  assert.deepEqual(requests[0].reasoning, { effort: 'medium' });
   assert.equal(requests[0].text.verbosity, 'low');
   assert.equal(requests[0].max_output_tokens, 1500);
   assert.doesNotMatch(JSON.stringify(requests[0].input), /Review this change\./);

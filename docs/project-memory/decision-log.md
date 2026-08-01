@@ -1,5 +1,11 @@
 # Decision log
 
+## 2026-08-01 — Use medium reasoning inside the fixed autonomous-review output cap
+
+- Decision: Keep `gpt-5.6-sol`, the exact executable/governance capsule, one permanent claim, one SDK call, 1,500 output tokens, and the conservative `$0.31` ceiling, but use medium reasoning for the repository review.
+- Rationale: Review run `30691998861` consumed all 1,500 output tokens as high-effort reasoning and emitted no structured text. Raising the token or dollar ceiling would conflict with the operator's cost constraint; medium effort leaves capacity for the required fail-closed JSON decision.
+- Status: Implemented on the new exact head after preserving the consumed failed head. Free gates and one final bounded review remain required. Production remains unauthorized.
+
 ## 2026-08-01 — Make paid-call ownership inseparable from the trusted review run
 
 - Decision: Remove the standalone review-claim command and create the permanent marker inside `runReview` after free gates and cost checks pass. Require one serialized controller run per PR and exactly one workflow invocation of the review command.

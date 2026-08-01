@@ -9,7 +9,7 @@
 
 ## Operational rollout
 
-1. Deliver draft PR #289 with mandatory explicit/effective workflow permissions, only the three approved controller checks writers, an exact workflow-secret allowlist, no dynamic/inherited/alternate GitHub credential paths, and claim creation plus canonical ownership verification inside the only review command. Permit one final independent review only after the repaired head passes all free gates.
+1. Deliver PR #289 with the completed permission/claim repairs and medium-effort structured review under the unchanged one-call, 1,500-token, and `$0.31` caps. Permit one final independent review only after the repaired head passes all free gates; never retry a consumed exact head.
 2. Deploy the merged successor only to test, then require exact `/health`, unauthenticated and authenticated REST smokes, bundled MCP/REC behavior, telemetry correlation, release ledger, provenance, and runtime-truth evidence. Keep `DEPLOY_PRODUCTION_ENABLED=false` and production workflows disabled.
 3. Have a privileged Entra operator verify the granular delegated scopes/application roles and exact current test SPA redirect. Keep complete/remove unavailable to service tokens.
 4. Add a token-safe authenticated MCP smoke to the deployment workflow if live MCP provider execution must become a formal release gate; retain the existing REST authenticated smokes.
