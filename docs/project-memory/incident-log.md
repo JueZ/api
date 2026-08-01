@@ -6,8 +6,9 @@
 - Impact: The workflow stopped before Function/frontend package mutation, runtime acceptance, or evidence publication. The prior accepted test release stayed online. Production was not dispatched and `DEPLOY_PRODUCTION_ENABLED=false`.
 - Repair: Before Bicep, query the exact environment budget resource through ARM. Reuse its start date when present, otherwise use the current UTC month for a new budget. Strictly accept only an exact first-of-month UTC timestamp and pass it explicitly to Bicep. Do not delete or recreate the budget.
 - Review follow-up: PR #290 review `30694704403` correctly rejected the initial shell implementation because it treated every Azure lookup failure as absence. The review used 1,729 input and 784 output tokens with a `$0.032165` estimated upper-bound cost.
-- Repair follow-up: A dedicated resolver now accepts the default only for Azure CLI's exact structured `Not Found` envelope with error code `404`. Authorization, throttling, server, timeout, malformed response, invalid date, and process failures stop before Bicep without emitting raw Azure errors. Unit tests cover the existing, absent, and non-404 paths.
-- Status: First scoped repair for the review finding is in progress.
+- Second review follow-up: Review `30694951631` rejected dependence on the Azure error body's semantic code because valid HTTP 404 responses may use codes such as `ResourceNotFound`. It used 3,575 input and 1,126 output tokens with a `$0.051655` estimated upper-bound cost.
+- Final repair: The resolver obtains the short-lived ARM token from the already authenticated Azure CLI, retains it only in process memory, calls ARM without shell interpolation, and branches on the actual HTTP status. Only HTTP 404 permits the new-budget default; 200 requires a validated existing start date, and every other status, network/auth failure, or malformed response stops before Bicep without logging tokens or response bodies.
+- Status: Second and final scoped repair for the lookup finding is in progress. If the same area fails again, stop rather than loop.
 
 ## 2026-08-01 — Complete high-risk-document review exhausted 3,000 output tokens
 

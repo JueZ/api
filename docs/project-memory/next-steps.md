@@ -9,7 +9,7 @@
 
 ## Operational rollout
 
-1. Deliver the budget-date successor that preserves the existing Azure budget start date across monthly rollovers without deleting or recreating the €10 test budget, accepting a new-budget default only after a definitive Azure 404.
+1. Deliver the budget-date successor that preserves the existing Azure budget start date across monthly rollovers without deleting or recreating the €10 test budget, accepting a new-budget default only after an actual ARM HTTP 404. Stop if the final repair fails the same lookup area.
 2. Run exact main CI and deploy the successor only to test, then require exact `/health`, unauthenticated and authenticated REST smokes, bundled MCP/REC behavior, telemetry correlation, release ledger, provenance, and runtime-truth evidence. Keep `DEPLOY_PRODUCTION_ENABLED=false` and production workflows disabled.
 3. Have a privileged Entra operator verify the granular delegated scopes/application roles and exact current test SPA redirect. Keep complete/remove unavailable to service tokens.
 4. Add a token-safe authenticated MCP smoke to the deployment workflow if live MCP provider execution must become a formal release gate; retain the existing REST authenticated smokes.
