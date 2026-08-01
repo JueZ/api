@@ -174,7 +174,7 @@ export async function runReview(options, policy, github, openAIClient) {
   if (!openAIClient && !process.env.OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is required for high-risk autonomous review.');
   }
-  assertRuntimeWorkflowIdentity(options, { requireGitHubActions: !openAIClient });
+  assertRuntimeWorkflowIdentity(options, { enforceGitHubActions: !openAIClient });
 
   const sourceDiff = await github.getPullRequestDiff(options.prNumber);
   assertExpectedHead(await github.getPullRequest(options.prNumber), options.headSha);
@@ -277,7 +277,9 @@ export async function runReview(options, policy, github, openAIClient) {
     throw new Error('Autonomous review blocked before API call: cost_ceiling_exceeded.');
   }
 
-  const reviewClaim = await claimAutonomousReview(options, policy, github);
+  const reviewClaim = await claimAutonomousReview(options, policy, github, {
+    enforceGitHubActions: !openAIClient,
+  });
   if (reviewClaim.status !== 'new') {
     throw new Error(`Autonomous review claim is unavailable (${reviewClaim.reason ?? reviewClaim.status}).`);
   }
@@ -450,8 +452,8 @@ export async function runRequiredCheckPreflight(options, policy, github) {
   return evaluation;
 }
 
-export async function claimAutonomousReview(options, policy, github) {
-  assertRuntimeWorkflowIdentity(options);
+export async function claimAutonomousReview(options, policy, github, { enforceGitHubActions = true } = {}) {
+  assertRuntimeWorkflowIdentity(options, { enforceGitHubActions });
   await assertExclusiveWorkflowCheckWriter();
   const pullRequest = await github.getPullRequest(options.prNumber);
   assertExpectedHead(pullRequest, options.headSha);
@@ -830,14 +832,14 @@ function collectSecretExpressionFindings(value, workflowName, path, findings) {
   }
 }
 
-function assertRuntimeWorkflowIdentity(options, { requireGitHubActions = false } = {}) {
+function assertRuntimeWorkflowIdentity(options, { enforceGitHubActions = true } = {}) {
   if (!Number.isSafeInteger(options.runId) || options.runId < 1) {
     throw new Error('Autonomous review requires a positive trusted workflow run ID.');
   }
-  if (requireGitHubActions && process.env.GITHUB_ACTIONS !== 'true') {
+  if (!enforceGitHubActions) return;
+  if (process.env.GITHUB_ACTIONS !== 'true') {
     throw new Error('Live autonomous review must execute in the trusted GitHub Actions workflow.');
   }
-  if (process.env.GITHUB_ACTIONS !== 'true') return;
   if (process.env.GITHUB_REPOSITORY !== options.repository) {
     throw new Error('Autonomous review repository does not match the current GitHub Actions run.');
   }

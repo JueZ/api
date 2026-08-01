@@ -149,7 +149,7 @@ test('canonical autonomous policy is internally valid', () => {
       "assertReviewClaimOwnership(options, github, reviewClaim, 'paid-call boundary')",
     ) < autonomousControllerSource.indexOf('response = await client.responses.create'),
   );
-  assert.match(autonomousControllerSource, /requireGitHubActions: !openAIClient/);
+  assert.match(autonomousControllerSource, /enforceGitHubActions: !openAIClient/);
   assert.match(autonomousControllerSource, /maxRetries: 0/);
   assert.match(codexAutomergeWorkflow, /ref: \$\{\{ github\.workflow_sha \}\}/);
   assert.doesNotMatch(codexAutomergeWorkflow, /source-run-id|Reuse approved exact-head review evidence/);
@@ -922,19 +922,20 @@ test('permanent exact-head marker is created once and any existing marker consum
     reviewFile,
   };
 
-  const created = await claimAutonomousReview(options, policy, github);
+  const testRuntime = { enforceGitHubActions: false };
+  const created = await claimAutonomousReview(options, policy, github, testRuntime);
   assert.deepEqual(created, { status: 'new', checkRunId: 77, runId: 12345 });
   assert.equal(createdClaims.length, 1);
   assert.equal(createdClaims[0].name, reviewClaimName(42));
   assert.equal(createdClaims[0].externalId, reviewClaimExternalId('JueZ/api', 42, headSha, 12345));
   assert.equal(createdClaims[0].detailsUrl, 'https://github.com/JueZ/api/actions/runs/12345');
 
-  const alreadyConsumed = await claimAutonomousReview(options, policy, github);
+  const alreadyConsumed = await claimAutonomousReview(options, policy, github, testRuntime);
   assert.equal(alreadyConsumed.status, 'consumed');
   assert.equal(alreadyConsumed.reason, 'exact_head_claim_exists');
 
   marker = { ...marker, external_id: 'fields-may-change-without-restoring-the-paid-call' };
-  const consumed = await claimAutonomousReview(options, policy, github);
+  const consumed = await claimAutonomousReview(options, policy, github, testRuntime);
   assert.equal(consumed.status, 'consumed');
   assert.equal(consumed.checkRunId, 77);
   assert.equal(consumed.decisionCheckRunId, 88);
@@ -946,6 +947,30 @@ test('permanent exact-head marker is created once and any existing marker consum
   assert.equal(rejection.decision, 'reject');
   assert.equal(rejection.modelInvoked, false);
   assert.equal(rejection.reviewClaim.reason, 'invalid_or_multiple_exact_head_claims');
+});
+
+test('review claims enforce trusted GitHub Actions identity by default', async () => {
+  const originalGitHubActions = process.env.GITHUB_ACTIONS;
+  process.env.GITHUB_ACTIONS = 'false';
+
+  try {
+    await assert.rejects(
+      claimAutonomousReview(
+        {
+          repository: 'JueZ/api',
+          prNumber: 42,
+          headSha,
+          runId: 12345,
+        },
+        policy,
+        {},
+      ),
+      /must execute in the trusted GitHub Actions workflow/,
+    );
+  } finally {
+    if (originalGitHubActions === undefined) delete process.env.GITHUB_ACTIONS;
+    else process.env.GITHUB_ACTIONS = originalGitHubActions;
+  }
 });
 
 test('review budget uses conservative byte-token accounting and a one-call cap', () => {
