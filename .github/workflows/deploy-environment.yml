@@ -285,8 +285,8 @@ jobs:
             echo "Fetched protected main does not equal the immutable deployment controller." >&2
             exit 1
           fi
-          git checkout --detach "$controller_ref"
-          git reset --hard "$controller_ref"
+          git checkout --detach refs/remotes/origin/main
+          git reset --hard refs/remotes/origin/main
           [ "$(git rev-parse HEAD)" = "$controller_ref" ] || {
             echo "Checked-out deployment controller does not equal controllerRef." >&2
             exit 1
@@ -1752,8 +1752,8 @@ jobs:
             echo "Fetched protected main does not equal the immutable preparation controller." >&2
             exit 1
           fi
-          git checkout --detach "$controller_ref"
-          git reset --hard "$controller_ref"
+          git checkout --detach refs/remotes/origin/main
+          git reset --hard refs/remotes/origin/main
           [ "$(git rev-parse HEAD)" = "$controller_ref" ] || {
             echo "Checked-out preparation controller does not equal controllerRef." >&2
             exit 1

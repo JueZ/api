@@ -253,8 +253,8 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.match(deployEnvironmentWorkflow, /\[ "\$fetched_main" != "\$controller_ref" \]/);
   assert.match(deployEnvironmentWorkflow, /\[ "\$\(pwd -P\)" != "\$\(realpath "\$GITHUB_WORKSPACE"\)" \]/);
   assert.match(deployEnvironmentWorkflow, /find \. -mindepth 1 -maxdepth 1 -print -quit/);
-  assert.match(deployEnvironmentWorkflow, /git checkout --detach "\$controller_ref"/);
-  assert.match(deployEnvironmentWorkflow, /git reset --hard "\$controller_ref"/);
+  assert.equal(deployEnvironmentWorkflow.match(/git checkout --detach refs\/remotes\/origin\/main/g)?.length, 2);
+  assert.equal(deployEnvironmentWorkflow.match(/git reset --hard refs\/remotes\/origin\/main/g)?.length, 2);
   assert.match(deployEnvironmentWorkflow, /\[ "\$\(git rev-parse HEAD\)" = "\$controller_ref" \]/);
   assert.match(deployEnvironmentWorkflow, /git status --porcelain=v1 --untracked-files=all --ignored=matching/);
   assert.match(deployEnvironmentWorkflow, /git clean -ndx/);
@@ -388,7 +388,8 @@ test('production private-storage preparation is isolated, exact-source, and dige
   assert.match(preparationJob, /name: Checkout current preparation controller/);
   assert.doesNotMatch(preparationJob, /uses: actions\/checkout/);
   assert.match(preparationJob, /Preparation controller checkout requires the exact empty GitHub workspace/);
-  assert.match(preparationJob, /git reset --hard "\$controller_ref"/);
+  assert.match(preparationJob, /git checkout --detach refs\/remotes\/origin\/main/);
+  assert.match(preparationJob, /git reset --hard refs\/remotes\/origin\/main/);
   assert.match(preparationJob, /git clean -ndx/);
   assert.match(preparationJob, /if: \$\{\{ inputs\.preparePrivateStorageOnly \}\}/);
   assert.match(preparationJob, /\.path == "\.github\/workflows\/prepare-production-private-storage\.yml"/);
