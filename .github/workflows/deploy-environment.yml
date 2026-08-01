@@ -1998,6 +1998,7 @@ jobs:
               bringMutationContainer="$BRING_MUTATION_CONTAINER" \
               bringAuditContainer="$BRING_AUDIT_CONTAINER" \
             --result-format ResourceIdOnly \
+            --no-pretty-print \
             -o json > "$RUNNER_TEMP/private-storage-what-if.json"
           jq -e --arg prefix "${expected_target_id,,}" '
             [(.properties.changes // .changes // [])[]

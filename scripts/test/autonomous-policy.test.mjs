@@ -429,6 +429,7 @@ test('production private-storage preparation is isolated, exact-source, and dige
   );
   assert.equal(preparationJob.match(/DEPLOYMENT_CONTROL_REF=\$controller_ref/g)?.length, 1);
   assert.match(preparationJob, /--template-file infra\/prepare-private-storage\.bicep/);
+  assert.match(preparationJob, /--result-format ResourceIdOnly \\\n\s+--no-pretty-print \\\n\s+-o json/);
   assert.match(preparationJob, /changeType != "Delete"/);
   assert.match(preparationJob, /name: Migrate one digest-pinned WLH reference blob/);
   assert.match(preparationJob, /--overwrite false/);
