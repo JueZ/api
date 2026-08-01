@@ -300,7 +300,7 @@ test('list reads are allowlisted and shared writes require a second exact-list a
         { listUuid: unlistedListUuid, name: 'Hidden' },
       ],
       membersByList: {
-        [sharedListUuid]: [{ publicUuid: 'fixture-public-user' }, { publicUuid: 'family-member' }],
+        [sharedListUuid]: [{ publicUuid: 'fixture-public-user' }],
       },
     }),
   });
