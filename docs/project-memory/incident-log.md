@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-01 — Complete-diff medium review exhausted the initial output cap
+
+- Evidence: Exact-head CI `30692962446`, Policy `30692962452`, and CodeQL `30692962458` passed for `c1a4efacaa5dfce6b3dabc68487e4cda3d993329`. Review `30693113238` created one durable claim, counted exactly 32,304 input tokens, made one generation, and returned `empty_output` after all 1,500 output tokens were hidden reasoning. The estimated upper-bound cost was `$0.20652`; no retry occurred.
+- Root cause: Complete contextual coverage increased the review from roughly 12,000 to 32,000 input tokens. Medium reasoning required more than the initial 1,500-token allowance before it could emit the structured decision.
+- Repair: Preserve the consumed head and unchanged complete input. Raise the static output cap to 3,000 while retaining medium reasoning, zero SDK retries, one generation, and the exact `$0.31` gate. At the observed input size, the conservative maximum becomes `$0.251521`.
+- Status: This is the final scoped availability repair. If the new head again produces no decision, stop rather than widening the cap or retrying. No merge or deployment occurred; production remained disabled.
+
 ## 2026-08-01 — Medium review found incomplete executable coverage
 
 - Evidence: PR #289 review `30692285462` ran only after exact-head CI `30692211088`, Policy `30692211086`, and CodeQL `30692211107` passed at `faa21750223eb20f72232f4dbb2e5d83f48ea4f1`. It rejected because `buildReviewDiffCapsule` selected only `risk.highRiskPaths`, omitting executable changes such as `scripts/lib/autonomous-policy.mjs`; the capsule covered 39,357 of 162,829 source-diff bytes. Sanitized usage recorded 12,083 input tokens and 1,048 output tokens, with an estimated upper-bound cost of `$0.091855`.

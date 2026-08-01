@@ -68,9 +68,9 @@ export function validateAutonomousPolicy(policy) {
   if (
     !Number.isInteger(policy.autonomousReview?.maxOutputTokens) ||
     policy.autonomousReview.maxOutputTokens < 200 ||
-    policy.autonomousReview.maxOutputTokens > 1_500
+    policy.autonomousReview.maxOutputTokens > 3_000
   ) {
-    errors.push('autonomousReview.maxOutputTokens must be an integer from 200 to 1500');
+    errors.push('autonomousReview.maxOutputTokens must be an integer from 200 to 3000');
   }
   if (
     typeof policy.autonomousReview?.maxEstimatedCostUsd !== 'number' ||

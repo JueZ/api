@@ -138,7 +138,7 @@ test('canonical autonomous policy is internally valid', () => {
   assert.equal(policy.autonomousReview.model, 'gpt-5.6-sol');
   assert.equal(policy.autonomousReview.reasoningEffort, 'medium');
   assert.equal(policy.autonomousReview.maxDiffBytes, 200_000);
-  assert.equal(policy.autonomousReview.maxOutputTokens, 1_500);
+  assert.equal(policy.autonomousReview.maxOutputTokens, 3_000);
   assert.equal(policy.autonomousReview.maxEstimatedCostUsd, 0.31);
   assert.match(codexAutomergeWorkflow, /Wait for free deterministic exact-head checks/);
   assert.match(codexAutomergeWorkflow, /AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'/);
@@ -558,7 +558,7 @@ test('high-risk autonomous review uses one cost-bounded generation and records s
   assert.equal(requests[0].model, 'gpt-5.6-sol');
   assert.deepEqual(requests[0].reasoning, { effort: 'medium' });
   assert.equal(requests[0].text.verbosity, 'low');
-  assert.equal(requests[0].max_output_tokens, 1500);
+  assert.equal(requests[0].max_output_tokens, 3000);
   assert.doesNotMatch(JSON.stringify(requests[0].input), /Review this change\./);
   const reviewPayload = JSON.parse(requests[0].input[1].content);
   assert.deepEqual(reviewPayload.changedFiles, [{ filename: '.github/workflows/example.yml', status: 'modified' }]);
@@ -1099,8 +1099,14 @@ test('review budget uses the exact count and caps counting and generation to one
   assert.equal(budget.inputTokenCountRequestLimit, 1);
   assert.equal(budget.modelGenerationRequestLimit, 1);
   assert.equal(budget.totalOpenAIRequestLimit, 2);
-  assert.equal(budget.maximumOutputTokens, 1500);
+  assert.equal(budget.maximumOutputTokens, 3000);
   assert.ok(budget.estimatedMaximumCostUsd < 0.31);
+  const completeDiffBudget = calculateReviewBudget(
+    { input: [{ role: 'user', content: 'complete diff' }], text: { verbosity: 'low' } },
+    policy,
+    32_304,
+  );
+  assert.equal(completeDiffBudget.estimatedMaximumCostUsd, 0.251521);
   assert.throws(
     () => calculateReviewBudget({ input: [], text: {} }, policy),
     /exact positive input-token count is required/,

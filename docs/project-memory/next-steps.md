@@ -9,7 +9,7 @@
 
 ## Operational rollout
 
-1. Deliver PR #289 with the completed permission/claim repairs and complete contextual non-documentation review capsule. After a durable claim, permit one exact input-token count request and at most one medium-effort generation under the 1,500-token and `$0.31` caps. Run the next independent review only after the repaired head passes all free gates; never retry a consumed exact head.
+1. Deliver PR #289 with the completed permission/claim repairs and complete contextual non-documentation review capsule. After a durable claim, permit one exact input-token count request and at most one medium-effort generation under the 3,000-token static cap and unchanged `$0.31` calculated cap. Run the final independent review only after the repaired head passes all free gates; never retry a consumed exact head, and stop if structured output is unavailable again.
 2. Deploy the merged successor only to test, then require exact `/health`, unauthenticated and authenticated REST smokes, bundled MCP/REC behavior, telemetry correlation, release ledger, provenance, and runtime-truth evidence. Keep `DEPLOY_PRODUCTION_ENABLED=false` and production workflows disabled.
 3. Have a privileged Entra operator verify the granular delegated scopes/application roles and exact current test SPA redirect. Keep complete/remove unavailable to service tokens.
 4. Add a token-safe authenticated MCP smoke to the deployment workflow if live MCP provider execution must become a formal release gate; retain the existing REST authenticated smokes.
