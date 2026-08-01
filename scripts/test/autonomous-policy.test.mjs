@@ -249,13 +249,13 @@ test('environment deployment rechecks current main at mutation and acceptance bo
     deployEnvironmentWorkflow,
     /git fetch --no-tags --prune origin "\+refs\/heads\/main:refs\/remotes\/origin\/main"/,
   );
-  assert.match(deployEnvironmentWorkflow, /fetched_main="\$\(git rev-parse refs\/remotes\/origin\/main\)"/);
-  assert.match(deployEnvironmentWorkflow, /\[ "\$fetched_main" != "\$controller_ref" \]/);
+  assert.doesNotMatch(deployEnvironmentWorkflow, /CHECKOUT_CONTROLLER_REF/);
   assert.match(deployEnvironmentWorkflow, /\[ "\$\(pwd -P\)" != "\$\(realpath "\$GITHUB_WORKSPACE"\)" \]/);
   assert.match(deployEnvironmentWorkflow, /find \. -mindepth 1 -maxdepth 1 -print -quit/);
   assert.equal(deployEnvironmentWorkflow.match(/git checkout --detach refs\/remotes\/origin\/main/g)?.length, 2);
   assert.equal(deployEnvironmentWorkflow.match(/git reset --hard refs\/remotes\/origin\/main/g)?.length, 2);
-  assert.match(deployEnvironmentWorkflow, /\[ "\$\(git rev-parse HEAD\)" = "\$controller_ref" \]/);
+  assert.match(deployEnvironmentWorkflow, /checked_out_controller="\$\(git rev-parse HEAD\)"/);
+  assert.match(deployEnvironmentWorkflow, /\[ "\$controller_ref" != "\$checked_out_controller" \]/);
   assert.match(deployEnvironmentWorkflow, /git status --porcelain=v1 --untracked-files=all --ignored=matching/);
   assert.match(deployEnvironmentWorkflow, /git clean -ndx/);
   assert.match(
