@@ -8,7 +8,7 @@
 - Review follow-up: PR #290 review `30694704403` correctly rejected the initial shell implementation because it treated every Azure lookup failure as absence. The review used 1,729 input and 784 output tokens with a `$0.032165` estimated upper-bound cost.
 - Second review follow-up: Review `30694951631` rejected dependence on the Azure error body's semantic code because valid HTTP 404 responses may use codes such as `ResourceNotFound`. It used 3,575 input and 1,126 output tokens with a `$0.051655` estimated upper-bound cost.
 - Final repair: The resolver obtains the short-lived ARM token from the already authenticated Azure CLI, retains it only in process memory, calls ARM without shell interpolation, and branches on the actual HTTP status. Only HTTP 404 permits the new-budget default; 200 requires a validated existing start date, and every other status, network/auth failure, or malformed response stops before Bicep without logging tokens or response bodies.
-- Status: Second and final scoped repair for the lookup finding is in progress. If the same area fails again, stop rather than loop.
+- Resolution: PR #290 final head `00285974178e402c8104ea7097dabc04d506a1b2` passed all exact-head gates and independent review, merged as `5d9e3cc87ed0f8e18e70544b6b1587ae2ddcf56c`, and Deploy Test `30695340416` passed Bicep plus every deployment/runtime/evidence gate. The existing budget was preserved; production was not dispatched.
 
 ## 2026-08-01 — Complete high-risk-document review exhausted 3,000 output tokens
 
