@@ -5,7 +5,9 @@
 - Evidence: Deploy Test `30694406216` for exact main `7907708d3db92a698bbfb549cb8ccfa91a1e86c8` failed in `Deploy Bicep infrastructure` with Azure `400`: `Start date of budgets cannot be updated`. Read-only Azure inspection confirmed the retained test budget starts at `2026-07-01T00:00:00Z`; Bicep's `utcNow('yyyy-MM-01T00:00:00Z')` default had advanced to August.
 - Impact: The workflow stopped before Function/frontend package mutation, runtime acceptance, or evidence publication. The prior accepted test release stayed online. Production was not dispatched and `DEPLOY_PRODUCTION_ENABLED=false`.
 - Repair: Before Bicep, query the exact environment budget resource through ARM. Reuse its start date when present, otherwise use the current UTC month for a new budget. Strictly accept only an exact first-of-month UTC timestamp and pass it explicitly to Bicep. Do not delete or recreate the budget.
-- Status: First scoped repair for the test-deployment area is in progress.
+- Review follow-up: PR #290 review `30694704403` correctly rejected the initial shell implementation because it treated every Azure lookup failure as absence. The review used 1,729 input and 784 output tokens with a `$0.032165` estimated upper-bound cost.
+- Repair follow-up: A dedicated resolver now accepts the default only for Azure CLI's exact structured `Not Found` envelope with error code `404`. Authorization, throttling, server, timeout, malformed response, invalid date, and process failures stop before Bicep without emitting raw Azure errors. Unit tests cover the existing, absent, and non-404 paths.
+- Status: First scoped repair for the review finding is in progress.
 
 ## 2026-08-01 — Complete high-risk-document review exhausted 3,000 output tokens
 
