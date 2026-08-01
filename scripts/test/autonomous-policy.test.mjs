@@ -203,6 +203,11 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
 
 test('environment deployment rechecks current main at mutation and acceptance boundaries', () => {
   assert.ok((deployEnvironmentWorkflow.match(/node scripts\/assert-current-main\.mjs/g) ?? []).length >= 9);
+  assert.match(deployEnvironmentWorkflow, /Microsoft\.Consumption\/budgets\/budget-api-catalogue-/);
+  assert.match(deployEnvironmentWorkflow, /--query properties\.timePeriod\.startDate/);
+  assert.match(deployEnvironmentWorkflow, /Budget start date is not an exact UTC month boundary/);
+  assert.match(deployEnvironmentWorkflow, /budgetStartDate="\$budget_start_date"/);
+  assert.match(mainBicep, /deployment callers preserve an existing value/);
   assert.match(deployEnvironmentWorkflow, /name: Verify complete deployed runtime safety policy/);
   assert.match(deployEnvironmentWorkflow, /node scripts\/validate-deployed-runtime-settings\.mjs --arm-response/);
   assert.doesNotMatch(deployEnvironmentWorkflow, /runtime-setting-names\.json|runtime-safety-settings\.json/);

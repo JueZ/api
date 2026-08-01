@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-01 — Monthly rollover made Bicep attempt an immutable budget-date update
+
+- Evidence: Deploy Test `30694406216` for exact main `7907708d3db92a698bbfb549cb8ccfa91a1e86c8` failed in `Deploy Bicep infrastructure` with Azure `400`: `Start date of budgets cannot be updated`. Read-only Azure inspection confirmed the retained test budget starts at `2026-07-01T00:00:00Z`; Bicep's `utcNow('yyyy-MM-01T00:00:00Z')` default had advanced to August.
+- Impact: The workflow stopped before Function/frontend package mutation, runtime acceptance, or evidence publication. The prior accepted test release stayed online. Production was not dispatched and `DEPLOY_PRODUCTION_ENABLED=false`.
+- Repair: Before Bicep, query the exact environment budget resource through ARM. Reuse its start date when present, otherwise use the current UTC month for a new budget. Strictly accept only an exact first-of-month UTC timestamp and pass it explicitly to Bicep. Do not delete or recreate the budget.
+- Status: First scoped repair for the test-deployment area is in progress.
+
 ## 2026-08-01 — Complete high-risk-document review exhausted 3,000 output tokens
 
 - Evidence: Exact-head CI `30693681909`, Policy `30693681916`, and CodeQL `30693681915` passed for `cbe2dc71f7815b282cb1e485ff7ec5ad27074ce9`. Review `30693881648` included every one of the eight classifier-matched high-risk paths, counted exactly 34,178 input tokens, and made one generation. The response ended `incomplete` after all 3,000 output tokens, including 2,974 hidden reasoning tokens, with an estimated upper-bound cost of `$0.26089`; no retry occurred.
