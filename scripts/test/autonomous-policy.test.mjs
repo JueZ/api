@@ -249,11 +249,25 @@ test('environment deployment rechecks current main at mutation and acceptance bo
     deployEnvironmentWorkflow,
     /git fetch --no-tags --prune origin "\+refs\/heads\/main:refs\/remotes\/origin\/main"/,
   );
-  assert.doesNotMatch(deployEnvironmentWorkflow, /CHECKOUT_CONTROLLER_REF/);
+  assert.equal(
+    deployEnvironmentWorkflow.match(/CHECKOUT_CONTROLLER_REF: \$\{\{ inputs\.controllerRef \}\}/g)?.length,
+    2,
+  );
+  assert.equal(
+    deployEnvironmentWorkflow.match(/controllerRef must equal the immutable caller SHA before repository fetch/g)
+      ?.length,
+    2,
+  );
+  assert.equal(
+    deployEnvironmentWorkflow.match(/fetched_main="\$\(git rev-parse refs\/remotes\/origin\/main\)"/g)?.length,
+    2,
+  );
+  assert.equal(deployEnvironmentWorkflow.match(/\[ "\$fetched_main" != "\$immutable_controller_ref" \]/g)?.length, 2);
   assert.match(deployEnvironmentWorkflow, /\[ "\$\(pwd -P\)" != "\$\(realpath "\$GITHUB_WORKSPACE"\)" \]/);
   assert.match(deployEnvironmentWorkflow, /find \. -mindepth 1 -maxdepth 1 -print -quit/);
-  assert.equal(deployEnvironmentWorkflow.match(/git checkout --detach refs\/remotes\/origin\/main/g)?.length, 2);
-  assert.equal(deployEnvironmentWorkflow.match(/git reset --hard refs\/remotes\/origin\/main/g)?.length, 2);
+  assert.equal(deployEnvironmentWorkflow.match(/git checkout --detach "\$immutable_controller_ref"/g)?.length, 2);
+  assert.equal(deployEnvironmentWorkflow.match(/git reset --hard "\$immutable_controller_ref"/g)?.length, 2);
+  assert.equal(deployEnvironmentWorkflow.match(/git rev-parse HEAD\)" != "\$immutable_controller_ref"/g)?.length, 2);
   assert.match(deployEnvironmentWorkflow, /checked_out_controller="\$\(git rev-parse HEAD\)"/);
   assert.match(deployEnvironmentWorkflow, /\[ "\$controller_ref" != "\$checked_out_controller" \]/);
   assert.match(deployEnvironmentWorkflow, /git status --porcelain=v1 --untracked-files=all --ignored=matching/);
@@ -395,8 +409,8 @@ test('production private-storage preparation is isolated, exact-source, and dige
   assert.match(preparationJob, /name: Checkout current preparation controller/);
   assert.doesNotMatch(preparationJob, /uses: actions\/checkout/);
   assert.match(preparationJob, /Preparation controller checkout requires the exact empty GitHub workspace/);
-  assert.match(preparationJob, /git checkout --detach refs\/remotes\/origin\/main/);
-  assert.match(preparationJob, /git reset --hard refs\/remotes\/origin\/main/);
+  assert.match(preparationJob, /git checkout --detach "\$immutable_controller_ref"/);
+  assert.match(preparationJob, /git reset --hard "\$immutable_controller_ref"/);
   assert.match(preparationJob, /git clean -ndx/);
   assert.match(preparationJob, /if: \$\{\{ inputs\.preparePrivateStorageOnly \}\}/);
   assert.match(preparationJob, /\.path == "\.github\/workflows\/prepare-production-private-storage\.yml"/);

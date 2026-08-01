@@ -260,8 +260,18 @@ jobs:
     steps:
       - name: Checkout current deployment controller
         shell: bash
+        env:
+          CHECKOUT_CONTROLLER_REF: ${{ inputs.controllerRef }}
         run: |
           set -euo pipefail
+          controller_ref="$CHECKOUT_CONTROLLER_REF"
+          immutable_controller_ref="$GITHUB_SHA"
+          if [[ ! "$controller_ref" =~ ^[0-9a-f]{40}$ ]] ||
+             [[ ! "$immutable_controller_ref" =~ ^[0-9a-f]{40}$ ]] ||
+             [ "$controller_ref" != "$immutable_controller_ref" ]; then
+            echo "controllerRef must equal the immutable caller SHA before repository fetch." >&2
+            exit 1
+          fi
           if [ "$(pwd -P)" != "$(realpath "$GITHUB_WORKSPACE")" ] ||
              [ -n "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]; then
             echo "Deployment controller checkout requires the exact empty GitHub workspace." >&2
@@ -271,8 +281,17 @@ jobs:
           git init .
           git remote add origin https://github.com/JueZ/api.git
           git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
-          git checkout --detach refs/remotes/origin/main
-          git reset --hard refs/remotes/origin/main
+          fetched_main="$(git rev-parse refs/remotes/origin/main)"
+          if [ "$fetched_main" != "$immutable_controller_ref" ]; then
+            echo "Fetched protected main does not equal the immutable deployment controller." >&2
+            exit 1
+          fi
+          git checkout --detach "$immutable_controller_ref"
+          git reset --hard "$immutable_controller_ref"
+          if [ "$(git rev-parse HEAD)" != "$immutable_controller_ref" ]; then
+            echo "Checked-out deployment controller does not equal the immutable caller SHA." >&2
+            exit 1
+          fi
           if [ -n "$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" ] ||
              [ -n "$(git clean -ndx)" ]; then
             echo "Deployment controller workspace contains content outside the exact commit." >&2
@@ -1727,8 +1746,18 @@ jobs:
     steps:
       - name: Checkout current preparation controller
         shell: bash
+        env:
+          CHECKOUT_CONTROLLER_REF: ${{ inputs.controllerRef }}
         run: |
           set -euo pipefail
+          controller_ref="$CHECKOUT_CONTROLLER_REF"
+          immutable_controller_ref="$GITHUB_SHA"
+          if [[ ! "$controller_ref" =~ ^[0-9a-f]{40}$ ]] ||
+             [[ ! "$immutable_controller_ref" =~ ^[0-9a-f]{40}$ ]] ||
+             [ "$controller_ref" != "$immutable_controller_ref" ]; then
+            echo "controllerRef must equal the immutable caller SHA before repository fetch." >&2
+            exit 1
+          fi
           if [ "$(pwd -P)" != "$(realpath "$GITHUB_WORKSPACE")" ] ||
              [ -n "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]; then
             echo "Preparation controller checkout requires the exact empty GitHub workspace." >&2
@@ -1738,8 +1767,17 @@ jobs:
           git init .
           git remote add origin https://github.com/JueZ/api.git
           git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
-          git checkout --detach refs/remotes/origin/main
-          git reset --hard refs/remotes/origin/main
+          fetched_main="$(git rev-parse refs/remotes/origin/main)"
+          if [ "$fetched_main" != "$immutable_controller_ref" ]; then
+            echo "Fetched protected main does not equal the immutable preparation controller." >&2
+            exit 1
+          fi
+          git checkout --detach "$immutable_controller_ref"
+          git reset --hard "$immutable_controller_ref"
+          if [ "$(git rev-parse HEAD)" != "$immutable_controller_ref" ]; then
+            echo "Checked-out preparation controller does not equal the immutable caller SHA." >&2
+            exit 1
+          fi
           if [ -n "$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" ] ||
              [ -n "$(git clean -ndx)" ]; then
             echo "Preparation controller workspace contains content outside the exact commit." >&2
