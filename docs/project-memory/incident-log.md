@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-01 — PR #288 final review rejected incomplete effective-permission handling
+
+- Evidence: Exact-head CI run `30688624142`, Policy Check `30688624984`, and CodeQL `30688625872` passed for `9129ea7416df291ced7598b3c2b792d9b349aa13`. Final bounded review run `30688708482` rejected because the controller audit treated omitted workflow permissions as harmless and did not compute effective job inheritance, while GitHub repository defaults can be changed independently.
+- Root cause: The static/runtime audit searched only literal `checks: write` or `write-all` blocks. It did not require every workflow to have an explicit top-level permission map and did not reject alternate GitHub token sources.
+- Repair: A fresh successor requires explicit top-level maps, evaluates job overrides with inheritance, permits checks write only in `resolve`, `autonomous-review`, and `publish-review-check`, rejects alternate GitHub App/PAT minting and non-built-in GitHub-auth tokens, and regression-tests omitted/default and inherited-write cases. The live repository default was independently verified as read-only with Actions PR approval disabled; the controller no longer relies on that default.
+- Safety/cost: PR #288 was returned to draft after its second permitted review and will be closed as superseded. No rejected head was merged or deployed, no third paid call ran, and production remained disabled.
+
 ## 2026-08-01 — PR #288 review rejected mutable paid-call claims and approval reuse
 
 - Evidence: After exact-head CI run `30687904523`, Policy Check `30687905396`, and CodeQL `30687906106` passed, the only paid review run `30687989661` rejected head `274e56fa3945bbed80e314ba668628dce6eee2de`. The sanitized findings showed that mutable check-run fields could hide a prior claim and that reusable approval was not independently bound to an immutable controller revision.

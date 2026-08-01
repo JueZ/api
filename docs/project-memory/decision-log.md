@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-08-01 — Enforce effective workflow permissions without a new trust route
+
+- Decision: Require an explicit top-level permission map in every workflow, compute each job's effective permission map after overrides, and allow `checks: write` only in the three named trusted-controller jobs. Reject alternate GitHub App/PAT minting actions, suspicious GitHub credential secrets, and non-built-in values in workflow GitHub-auth token channels.
+- Decision: Keep repository default workflow permissions read-only and Actions PR approval disabled as defense in depth, but do not add an administration token, service identity, or external trust route merely so the workflow can inspect that mutable setting. Static policy and the trusted pre-call audit make omitted defaults irrelevant to check-writer isolation.
+- Rationale: Final PR #288 review correctly found that searching only literal write blocks was not a fail-closed effective-permission audit. GitHub's administration endpoint is an operator control plane and would require a stronger token than the least-privilege workflow token.
+- Status: Implemented on the fresh test-only successor; local/remote gates, independent review, merge, and exact test acceptance remain pending. Production is not authorized.
+
 ## 2026-08-01 — Make the paid-review limit durable per exact head
 
 - Decision: Serialize every PR/manual/label controller event per pull request. After all free exact-head gates pass and immediately before a paid request, create one completed neutral marker whose name binds the PR and whose external identity binds repository, PR number, and full head SHA.

@@ -6,17 +6,17 @@
 - The previous fail-open auth, ARM settings cycle, boolean casing, Entra GUID, missing service-role, and legacy federated-subject failures are resolved for test.
 - Production was not dispatched and remains disabled. A later production request must revalidate current-main ancestry, exact accepted test evidence, production identity/configuration, full authenticated smokes, telemetry, ledger, and rollback bundle before promotion.
 
-## Durable review-cost successor is not yet delivered
+## Final review-permission successor is not yet delivered
 
 - PR #286 exhausted its two autonomous-review repairs and is closed as superseded by PR #287.
 - PR #287 exact-head CI, Policy Check, and CodeQL passed. The provenance and paid-boundary findings were repaired, but final review run `30687126474` rejected the optional service-identity verifier's incomplete whole-identity validation.
-- The operator removed repository-side service-identity setup/audit from scope. Review run `30687989661` then rejected mutable claim fields and approval reuse. The reduced successor deletes the verifier, removes reuse entirely, creates an unpatched permanent paid-call marker, makes `checks: write` controller-exclusive, and retains the free-gate, cost, label-trigger, and deterministic REC controls. Until it is approved, merged, and test-deployed, the last accepted test release remains online without those successor controls.
+- The operator removed repository-side service-identity setup/audit from scope. PR #288 then used its two permitted review attempts: run `30687989661` rejected mutable claim fields and approval reuse, and run `30688708482` rejected incomplete handling of inherited workflow permissions. The fresh successor retains the unpatched marker and adds mandatory explicit workflow permissions, effective job-permission evaluation, an exact approved checks-writer job set, and rejection of alternate GitHub credential sources. Until it is approved, merged, and test-deployed, the last accepted test release remains online without those successor controls.
 
-## One orphaned GitHub Actions run cannot be cancelled
+## One orphaned GitHub Actions run is approved for cleanup
 
 - Deploy Test run `30663819848` was dispatched while repository Actions was disabled. GitHub retained it as `queued` with zero jobs or check runs and no concurrency-group membership.
 - Both normal and force-cancel APIs returned HTTP 500. It did not block the successful replacement run and cannot execute while repository Actions remains disabled.
-- Preserve the run as evidence. Retry cancellation through GitHub or support rather than deleting it unless deletion is explicitly approved.
+- The operator has now explicitly requested historical-run cleanup. Delete only this orphan after preserving its public-safe identifier in project memory; retain accepted deployment and security-review evidence.
 
 ## Granular Entra configuration and new test SPA redirect need privileged verification
 

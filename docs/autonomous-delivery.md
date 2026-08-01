@@ -12,7 +12,7 @@ For each candidate it:
 2. checks branch/label eligibility and blocks forks/hold labels;
 3. classifies high-risk paths deterministically;
 4. waits for every free canonical check from the expected `github-actions` app;
-5. serializes controller runs per pull request, revalidates every free exact-head check, and creates one completed permanent repository/PR/head-SHA paid-call marker immediately before any paid request;
+5. serializes controller runs per pull request, revalidates every free exact-head check, verifies every workflow has an explicit permission map and computes each job's effective permissions, rejects alternate GitHub credential injection, and creates one completed permanent repository/PR/head-SHA paid-call marker immediately before any paid request;
 6. revalidates the free checks again at the API boundary and permits the single bounded request only while they still pass;
 7. never patches, releases, or reuses a paid-call marker or approval; any existing marker permanently blocks another request for that PR/head;
 8. runs at most one independent structured AI request for a newly claimed high-risk head with `store=false`;
@@ -21,6 +21,8 @@ For each candidate it:
 11. squash-merges only the reviewed head SHA.
 
 Critical/high review findings, a duplicate/consumed paid-review claim, stale heads, missing/wrong-app checks, forks, merge conflicts, and policy errors fail closed. Label changes are controller events, so adding/removing eligibility or hold labels is evaluated immediately without permitting a second exact-head paid request. Routine and high-risk changes do not require human approval under the selected policy.
+
+Repository workflow defaults are kept read-only with Actions unable to approve pull requests. The controller does not rely on that mutable setting for check-writer isolation: every workflow must declare an explicit top-level permission map, job overrides are evaluated with GitHub inheritance semantics, only the approved controller jobs may receive `checks: write`, and GitHub App/PAT minting or alternate credentials in GitHub-auth token channels are rejected. The required check's GitHub App identity is still verified on the exact head.
 
 If a free gate changes in the narrow interval after marker creation but before the API boundary, the controller fails closed and the marker remains consumed. Retrying a paid review requires a genuinely repaired new commit and a fresh full set of free gates.
 

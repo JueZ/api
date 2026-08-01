@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import {
   architectureFindings,
@@ -44,6 +47,37 @@ test('MCP stays bundled behind one server and one Function route', () => {
 
 test('only the trusted autonomous controller can write GitHub check runs', async () => {
   assert.deepEqual(await exclusiveWorkflowCheckWriteFindings(), []);
+});
+
+test('workflow permission policy rejects inherited defaults and alternate GitHub credentials', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'workflow-permissions-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(
+    join(directory, 'codex-automerge.yml'),
+    `permissions:\n  contents: read\njobs:\n  resolve:\n    permissions:\n      checks: write\n  autonomous-review:\n    permissions:\n      checks: write\n  publish-review-check:\n    permissions:\n      checks: write\n`,
+  );
+  await writeFile(
+    join(directory, 'unsafe.yml'),
+    `jobs:\n  inherited:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/create-github-app-token@v2\n      - run: gh api repos/example/example/check-runs\n        env:\n          GH_TOKEN: \${{ secrets.REPOSITORY_PAT }}\n`,
+  );
+
+  const findings = await exclusiveWorkflowCheckWriteFindings(directory);
+  assert.ok(findings.some((finding) => finding.includes('top-level permissions must be an explicit mapping')));
+  assert.ok(findings.some((finding) => finding.includes('token minting actions are not allowed')));
+  assert.ok(findings.some((finding) => finding.includes('GitHub authentication must use the built-in job token')));
+  assert.ok(findings.some((finding) => finding.includes('alternate GitHub credential secret REPOSITORY_PAT')));
+});
+
+test('workflow permission policy computes effective job-level checks write', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'workflow-effective-permissions-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(
+    join(directory, 'codex-automerge.yml'),
+    `permissions:\n  checks: write\njobs:\n  resolve:\n    runs-on: ubuntu-latest\n  autonomous-review:\n    runs-on: ubuntu-latest\n  publish-review-check:\n    runs-on: ubuntu-latest\n  unexpected:\n    runs-on: ubuntu-latest\n`,
+  );
+
+  const findings = await exclusiveWorkflowCheckWriteFindings(directory);
+  assert.ok(findings.some((finding) => finding.includes('codex-automerge.yml:unexpected')));
 });
 
 test('runtime REC model analysis remains deterministic-first and cost bounded', () => {

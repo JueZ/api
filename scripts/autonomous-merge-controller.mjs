@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
 import { appendFile, readFile, readdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import process from 'node:process';
 import OpenAI from 'openai';
 import { parse as parseYaml } from 'yaml';
@@ -13,6 +14,12 @@ import {
 
 const REVIEW_INPUT_TOKEN_OVERHEAD = 4096;
 const REVIEW_CLAIM_VERSION = 'v3';
+const CONTROLLER_WORKFLOW = 'codex-automerge.yml';
+const CONTROLLER_CHECK_WRITER_JOBS = new Set(['resolve', 'autonomous-review', 'publish-review-check']);
+const BUILTIN_GITHUB_TOKEN_EXPRESSIONS = new Set(['${{ github.token }}', '${{ secrets.GITHUB_TOKEN }}']);
+const GITHUB_AUTH_KEYS = new Set(['gh_token', 'github_token', 'github-token', 'github_pat', 'token']);
+const GITHUB_TOKEN_MINTING_ACTION = /(?:create-github-app-token|github-app-token)/i;
+const SUSPICIOUS_GITHUB_SECRET = /(?:^|_)(?:gh|github|pat)(?:_|$)|(?:^|_)github_app(?:_|$)/i;
 
 const reviewSchema = {
   type: 'object',
@@ -610,19 +617,51 @@ export function reviewClaimName(prNumber) {
 export async function exclusiveWorkflowCheckWriteFindings(
   directory = new URL('../.github/workflows/', import.meta.url),
 ) {
+  const findings = [];
   const writers = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     if (!entry.isFile() || !/\.ya?ml$/i.test(entry.name)) continue;
-    const workflow = parseYaml(await readFile(new URL(entry.name, directory), 'utf8'));
-    const permissionBlocks = [
-      workflow?.permissions,
-      ...Object.values(workflow?.jobs ?? {}).map((job) => job?.permissions),
-    ];
-    if (permissionBlocks.some((permissions) => grantsChecksWrite(permissions))) writers.push(entry.name);
+    const workflowPath = typeof directory === 'string' ? join(directory, entry.name) : new URL(entry.name, directory);
+    const workflow = parseYaml(await readFile(workflowPath, 'utf8'));
+    if (!isRecord(workflow)) {
+      findings.push(`${entry.name}: workflow must be a YAML mapping`);
+      continue;
+    }
+
+    if (!isExplicitPermissionMap(workflow.permissions)) {
+      findings.push(`${entry.name}: top-level permissions must be an explicit mapping`);
+    }
+
+    const jobs = isRecord(workflow.jobs) ? workflow.jobs : {};
+    if (!isRecord(workflow.jobs)) findings.push(`${entry.name}: jobs must be a mapping`);
+    for (const [jobName, candidate] of Object.entries(jobs)) {
+      if (!isRecord(candidate)) {
+        findings.push(`${entry.name}:${jobName}: job must be a mapping`);
+        continue;
+      }
+      if (candidate.permissions !== undefined && !isExplicitPermissionMap(candidate.permissions)) {
+        findings.push(`${entry.name}:${jobName}: job permissions must be an explicit mapping`);
+        continue;
+      }
+      const effectivePermissions = candidate.permissions ?? workflow.permissions;
+      if (!isExplicitPermissionMap(effectivePermissions)) continue;
+      if (effectivePermissions.checks === 'write') writers.push(`${entry.name}:${jobName}`);
+    }
+
+    collectUnsafeGithubTokenFindings(workflow, entry.name, findings);
   }
-  return writers.length === 1 && writers[0] === 'codex-automerge.yml'
-    ? []
-    : [`checks:write must be exclusive to codex-automerge.yml; found: ${writers.join(', ') || 'none'}`];
+
+  const expectedWriters = [...CONTROLLER_CHECK_WRITER_JOBS].map((job) => `${CONTROLLER_WORKFLOW}:${job}`).sort();
+  const actualWriters = [...writers].sort();
+  if (
+    actualWriters.length !== expectedWriters.length ||
+    actualWriters.some((writer, index) => writer !== expectedWriters[index])
+  ) {
+    findings.push(
+      `checks:write must be exclusive to the approved controller jobs; expected: ${expectedWriters.join(', ')}; found: ${actualWriters.join(', ') || 'none'}`,
+    );
+  }
+  return findings;
 }
 
 async function assertExclusiveWorkflowCheckWriter() {
@@ -630,8 +669,41 @@ async function assertExclusiveWorkflowCheckWriter() {
   if (findings.length > 0) throw new Error(`Autonomous review permission policy failed: ${findings.join('; ')}.`);
 }
 
-function grantsChecksWrite(permissions) {
-  return permissions === 'write-all' || (isRecord(permissions) && permissions.checks === 'write');
+function isExplicitPermissionMap(permissions) {
+  return isRecord(permissions);
+}
+
+function collectUnsafeGithubTokenFindings(value, workflowName, findings, path = []) {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      collectUnsafeGithubTokenFindings(item, workflowName, findings, [...path, String(index)]),
+    );
+    return;
+  }
+  if (!isRecord(value)) return;
+
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = [...path, key];
+    if (key === 'uses' && typeof child === 'string' && GITHUB_TOKEN_MINTING_ACTION.test(child)) {
+      findings.push(`${workflowName}:${childPath.join('.')}: GitHub App/PAT token minting actions are not allowed`);
+    }
+    if (GITHUB_AUTH_KEYS.has(key.toLowerCase()) && typeof child === 'string') {
+      if (!BUILTIN_GITHUB_TOKEN_EXPRESSIONS.has(child.trim())) {
+        findings.push(`${workflowName}:${childPath.join('.')}: GitHub authentication must use the built-in job token`);
+      }
+    }
+    if (typeof child === 'string') {
+      for (const match of child.matchAll(/\$\{\{\s*secrets\.([A-Za-z0-9_]+)\s*\}\}/g)) {
+        const secretName = match[1];
+        if (secretName !== 'GITHUB_TOKEN' && SUSPICIOUS_GITHUB_SECRET.test(secretName)) {
+          findings.push(
+            `${workflowName}:${childPath.join('.')}: alternate GitHub credential secret ${secretName} is not allowed`,
+          );
+        }
+      }
+    }
+    collectUnsafeGithubTokenFindings(child, workflowName, findings, childPath);
+  }
 }
 
 async function assertFreeExactHeadChecks(options, policy, github, boundary) {
