@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-01 — Production startup and authenticated-smoke blockers resolved
+
+- Evidence: Promotion `30711503917` deployed infrastructure/packages but public smoke found `/health` unavailable because the production `OIDC_REQUIRED_SCOPES` setting still used legacy `api.access,api.service`; fail-closed runtime safety therefore registered no Function routes. After the canonical granular catalogue restored live health, recovery `30712220640` remained rejected because it had captured the unavailable pre-dispatch health state. Acceptance attempt `30712337225` then passed public deployment gates but Microsoft Entra returned `401 invalid_client` while exchanging the GitHub OIDC assertion for the existing production smoke application.
+- Root causes: Production non-secret authorization configuration had not converged with the test-proven granular permission catalogue, and the external smoke application's existing federated credential still did not match GitHub's exact repository/environment/reusable-workflow subject. The production SPA redirect and browser scope also still targeted the legacy static-site generation and `api.access`.
+- Repair: Apply the canonical runtime scope catalogue, update the one existing smoke federated identity record in place, verify/assign only `catalogue.read` and `reddit.read`, preserve prior SPA redirects while adding the exact new production redirect, and configure the frontend to request `catalogue.read`. No secret, identity, credential record, alternate trust route, rotation, revocation, or RBAC grant was created.
+- Resolution: First-attempt Promote Production `30715766542` passed Azure OIDC, deployment, public and authenticated smokes, telemetry correlation, accepted ledger, and rollback-bundle preservation for exact SHA `3810259823ce0694623a306eb5b390c2781d4b68`. Independent live health/frontend/auth-gate checks agree. Issues #294 and #308-#310 are closed with the evidence; failed runs remain retained.
+
 ## 2026-08-01 — Monthly rollover made Bicep attempt an immutable budget-date update
 
 - Evidence: Deploy Test `30694406216` for exact main `7907708d3db92a698bbfb549cb8ccfa91a1e86c8` failed in `Deploy Bicep infrastructure` with Azure `400`: `Start date of budgets cannot be updated`. Read-only Azure inspection confirmed the retained test budget starts at `2026-07-01T00:00:00Z`; Bicep's `utcNow('yyyy-MM-01T00:00:00Z')` default had advanced to August.

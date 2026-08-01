@@ -1,5 +1,13 @@
 # Decision log
 
+## 2026-08-01 — Repair the existing production smoke trust in place and accept production
+
+- Decision: Under the operator's explicit authorization, update only the one existing production smoke federated identity credential to GitHub's exact repository/environment/`deploy-environment.yml` subject. Do not create or delete a federated credential, identity, secret, RBAC assignment, broader subject, alternate trust route, or credential rotation/revocation path.
+- Decision: Verify or add only the existing API application's `catalogue.read` and `reddit.read` application-role assignments to the existing smoke service principal. Preserve any unrelated existing assignment rather than revoking it. Add the exact new production static-site URI to the existing SPA redirect collection without removing prior redirects.
+- Decision: Correct the non-secret production browser scope and redirect variables, then dispatch one first-attempt production promotion for exact test-proven main `3810259823ce0694623a306eb5b390c2781d4b68`. Require every normal provenance, deployment, authenticated-smoke, telemetry, ledger, and rollback-bundle gate; disable the workflow after the terminal result.
+- Evidence: Promote Production `30715766542` passed every gate, live health and frontend metadata report the exact SHA/run, and unauthenticated protection remains enforced. Repair issues #294 and #308-#310 were closed with that evidence.
+- Consequence: Production is accepted on the same immutable release proven by CI `30710606677` and Deploy Test `30710685029`. `DEPLOY_PRODUCTION_ENABLED=true` remains an explicit latch, while deployment controllers stay disabled between bounded windows.
+
 ## 2026-08-01 — Prepare production private storage without application cutover
 
 - Decision: Provision and migrate only the production private-integration storage subtree before application promotion. Reuse the exact existing `deploy-environment.yml` workflow-bound OIDC identity through a separate reusable-workflow job; do not add or broaden an Entra federated credential.

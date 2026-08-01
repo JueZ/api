@@ -1,5 +1,14 @@
 # Current state
 
+## 2026-08-01 Production accepted on the exact test-proven release
+
+- Exact first-attempt main CI `30710606677` and Deploy Test `30710685029` accepted commit `3810259823ce0694623a306eb5b390c2781d4b68`. Production private-storage preparation `30710816387` completed before the application cutover.
+- Earlier production runs failed closed at distinct gates: `30711503917` exposed a stale production `OIDC_REQUIRED_SCOPES` value that prevented Function route registration, `30712220640` started while live health was still unavailable, and `30712337225` reached authenticated smoke token exchange but the existing production smoke application's GitHub federation did not match the exact workflow-bound subject. None of those runs published accepted production evidence.
+- The operator authorized a bounded external Entra repair. One existing production smoke federated identity credential was updated in place to the exact repository/environment/`deploy-environment.yml` subject; no identity, secret, credential record, alternate trust route, rotation, revocation, or RBAC grant was created. Only the existing `catalogue.read` and `reddit.read` application roles were verified/assigned, and the new production SPA redirect was added while preserving existing redirects.
+- Production promotion `30715766542`, correlation `prod-entra-fix-3810259-20260801t1953z`, then passed immutable source/test provenance, Azure OIDC, Bicep, complete runtime safety settings, private WLH data, exact Function/frontend deployment, generation checks, public smoke, GitHub-OIDC token minting, authenticated hello and Reddit smokes, telemetry correlation, final generation validation, accepted release-ledger publication, and rollback-bundle preservation.
+- Independent live verification reports `/health` status `ok`, exact deployed SHA `3810259823ce0694623a306eb5b390c2781d4b68`, and deployment run `30715766542`; unauthenticated `/api/hello` returns `401`. The production frontend returns `200` and contains the exact current redirect URI, `catalogue.read` scope, API base URL, commit, and deployment-run metadata.
+- `DEPLOY_PRODUCTION_ENABLED=true` remains the explicit persistent latch. Codex Auto-Merge, Codex Main Delivery, Deploy Test, Promote Production, and Rollback Production are disabled between bounded delivery windows. Repair issues #294 and #308-#310 were closed with the accepted deployment/runtime evidence; failed workflow history remains available as audit evidence.
+
 ## 2026-08-01 Test accepted; production storage preparation remains fail closed
 
 - PR #300 passed exact-head CI, Policy, CodeQL, and independent review, then squash-merged as `d578cc5e335a938f9563d3be704e34c340b4d348`. Exact-main CI `30708995802` passed and Deploy Test `30709082286` accepted that exact SHA with complete deployment, public and authenticated smokes, telemetry, release ledger, and provenance. Live test health reports the same SHA and deployment run.
