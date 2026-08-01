@@ -520,6 +520,7 @@ test('high-risk autonomous review uses one cost-bounded call and records sanitiz
   assert.deepEqual(requests[0].reasoning, { effort: 'high' });
   assert.equal(requests[0].text.verbosity, 'low');
   assert.equal(requests[0].max_output_tokens, 1500);
+  assert.doesNotMatch(JSON.stringify(requests[0].input), /Review this change\./);
   const expectedIdempotencyKey = reviewRequestIdempotencyKey('JueZ/api', 1, headSha);
   assert.equal(requestOptions[0].idempotencyKey, expectedIdempotencyKey);
   assert.equal(requestOptions[0].headers['Idempotency-Key'], expectedIdempotencyKey);
@@ -856,7 +857,7 @@ test('paid review preflight excludes its own check and requires every free exact
   );
   const github = {
     async getPullRequest() {
-      return pullRequest();
+      return pullRequest({ mergeable_state: 'blocked' });
     },
     async getCheckRuns() {
       return successfulChecks().filter((check) => check.name !== policy.autonomousReview.checkName);
@@ -1040,6 +1041,12 @@ test('pull request state rejects forks, stale heads, and behind branches', () =>
   assert.equal(evaluatePullRequestState(pullRequest({ mergeable_state: 'dirty' }), headSha, policy).ok, false);
   assert.equal(evaluatePullRequestState(pullRequest({ mergeable_state: 'blocked' }), headSha, policy).ok, false);
   assert.equal(
+    evaluatePullRequestState(pullRequest({ mergeable_state: 'blocked' }), headSha, policy, {
+      allowBlockedBeforeOwnReview: true,
+    }).ok,
+    true,
+  );
+  assert.equal(
     evaluatePullRequestState(pullRequest({ mergeable: null, mergeable_state: 'unknown' }), headSha, policy).ok,
     false,
   );
@@ -1049,6 +1056,17 @@ test('pull request state rejects forks, stale heads, and behind branches', () =>
 test('merge decision requires pull request state, checks, and review to all pass', () => {
   const checkEvaluation = evaluateRequiredChecks(successfulChecks(), headSha, policy.requiredChecks);
   const review = { decision: 'approve', reviewedHeadSha: headSha, summary: 'Approved.', findings: [] };
+  assert.equal(
+    mergeGateDecision({
+      pullRequest: pullRequest({ mergeable_state: 'blocked' }),
+      expectedHeadSha: headSha,
+      checkEvaluation,
+      review,
+      policy,
+    }).ok,
+    false,
+  );
+
   assert.equal(
     mergeGateDecision({
       pullRequest: pullRequest(),

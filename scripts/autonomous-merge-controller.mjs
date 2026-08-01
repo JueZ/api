@@ -108,9 +108,14 @@ export function validateAutonomousReview(review, expectedHeadSha, policy) {
   return { ok: errors.length === 0, errors, blockingFindings };
 }
 
-export function evaluatePullRequestState(pullRequest, expectedHeadSha, policy) {
+export function evaluatePullRequestState(
+  pullRequest,
+  expectedHeadSha,
+  policy,
+  { allowBlockedBeforeOwnReview = false } = {},
+) {
   const errors = [];
-  const allowedMergeableStates = new Set(['clean', 'unstable']);
+  const allowedMergeableStates = new Set(['clean', 'unstable', ...(allowBlockedBeforeOwnReview ? ['blocked'] : [])]);
   if (!isAutomergeCandidate(pullRequest, policy)) errors.push('pull request is not an auto-merge candidate');
   if (pullRequest.state !== 'open') errors.push('pull request is not open');
   if (pullRequest.head?.sha !== expectedHeadSha) errors.push('pull request head changed');
@@ -121,10 +126,11 @@ export function evaluatePullRequestState(pullRequest, expectedHeadSha, policy) {
   if (policy.merge.requireUpToDate && pullRequest.mergeable_state === 'behind') {
     errors.push('pull request branch is behind main');
   }
-  // GitHub reports `unstable` while a mergeable PR has a non-passing status,
-  // including this controller's own in-progress exact-head gate. The gate
-  // independently validates every policy-required check against the exact
-  // head, so `unstable` is safe here; all other non-clean states fail closed.
+  // GitHub can report `unstable` or `blocked` while a mergeable PR is waiting
+  // on this controller's own exact-head review check. Preflight and durable
+  // claim creation may opt into `blocked` because they independently validate
+  // every free required check. The final merge gate never opts in and remains
+  // fail closed for a blocked merge state.
   if (pullRequest.mergeable !== true || !allowedMergeableStates.has(pullRequest.mergeable_state)) {
     errors.push(`pull request is not mergeable (${pullRequest.mergeable_state ?? 'unknown'})`);
   }
@@ -226,7 +232,6 @@ export async function runReview(options, policy, github, openAIClient) {
           pullRequest: options.prNumber,
           expectedHeadSha: options.headSha,
           title: pullRequest.title,
-          body: pullRequest.body ?? '',
           changedFiles: files.map((file) => ({
             filename: file.filename,
             status: file.status,
@@ -428,7 +433,9 @@ export async function runRequiredCheckPreflight(options, policy, github) {
   do {
     const pullRequest = await github.getPullRequest(options.prNumber);
     assertExpectedHead(pullRequest, options.headSha);
-    const pullRequestState = evaluatePullRequestState(pullRequest, options.headSha, policy);
+    const pullRequestState = evaluatePullRequestState(pullRequest, options.headSha, policy, {
+      allowBlockedBeforeOwnReview: true,
+    });
     if (!pullRequestState.ok) {
       throw new Error(
         `Autonomous review preflight rejected the pull request:\n- ${pullRequestState.errors.join('\n- ')}`,
@@ -457,7 +464,9 @@ export async function claimAutonomousReview(options, policy, github, { enforceGi
   await assertExclusiveWorkflowCheckWriter();
   const pullRequest = await github.getPullRequest(options.prNumber);
   assertExpectedHead(pullRequest, options.headSha);
-  const pullRequestState = evaluatePullRequestState(pullRequest, options.headSha, policy);
+  const pullRequestState = evaluatePullRequestState(pullRequest, options.headSha, policy, {
+    allowBlockedBeforeOwnReview: true,
+  });
   if (!pullRequestState.ok) {
     throw new Error(`Autonomous review claim rejected the pull request:\n- ${pullRequestState.errors.join('\n- ')}`);
   }
