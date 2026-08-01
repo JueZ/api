@@ -11,7 +11,7 @@
 ## Operational rollout
 
 1. Merge the bounded storage-preparation workflow through protected CI/policy/review, then run and accept Deploy Test for that exact current `main`.
-2. Enable only `Prepare Production Private Storage` for one first-attempt run. Require its exact OIDC login, storage-only what-if, shared-Bicep deployment, fixed-digest no-overwrite migration, policy/RBAC checks, evidence artifact, and unchanged production runtime identity; disable it again immediately after dispatch.
+2. Pin the accepted exact-main evidence in `PREP_CI_RUN_ID`, `PREP_CI_CORRELATION`, `PREP_TEST_RUN_ID`, and `PREP_TEST_CORRELATION`. Enable only `Prepare Production Private Storage` for one first-attempt run. Require its exact OIDC login, storage-only what-if, shared-Bicep deployment, fixed-digest no-overwrite migration, policy/RBAC checks, evidence artifact, and unchanged production runtime identity; disable it again immediately after dispatch.
 3. Keep production application workflows disabled after storage preparation. A later separately authorized promotion must still pass production authenticated smoke, telemetry, ledger/runtime truth, and rollback-bundle verification.
 4. Have a privileged Entra operator verify the granular delegated scopes/application roles and exact current test SPA redirect. Keep complete/remove unavailable to service tokens.
 5. Add a token-safe authenticated MCP smoke to the deployment workflow if live MCP provider execution must become a formal release gate; retain the existing REST authenticated smokes. The deployed server, all 14 tools, and deterministic protected-tool REC are already independently verified without a provider call.

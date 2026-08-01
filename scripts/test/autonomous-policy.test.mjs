@@ -349,6 +349,10 @@ test('production private-storage preparation is isolated, exact-source, and dige
   assert.match(prepareProductionPrivateStorageWorkflow, /deployFrontend: false/);
   assert.match(prepareProductionPrivateStorageWorkflow, /deployFunctions: false/);
   assert.match(prepareProductionPrivateStorageWorkflow, /preparePrivateStorageOnly: true/);
+  assert.doesNotMatch(prepareProductionPrivateStorageWorkflow, /inputs\.commit_sha|inputs\.ci_run_id/);
+  assert.match(prepareProductionPrivateStorageWorkflow, /sourceRef: \$\{\{ github\.sha \}\}/);
+  assert.match(prepareProductionPrivateStorageWorkflow, /ciRunId: \$\{\{ vars\.PREP_CI_RUN_ID \}\}/);
+  assert.match(prepareProductionPrivateStorageWorkflow, /testDeliveryRunId: \$\{\{ vars\.PREP_TEST_RUN_ID \}\}/);
   assert.match(prepareProductionPrivateStorageWorkflow, /controllerRef: \$\{\{ github\.sha \}\}/);
   assert.match(prepareProductionPrivateStorageWorkflow, /controllerWorkflowSha: \$\{\{ github\.workflow_sha \}\}/);
   assert.match(prepareProductionPrivateStorageWorkflow, /migrationSourceStorageAccount: stapicatalogueprodbfjsts/);

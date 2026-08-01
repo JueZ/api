@@ -1,33 +1,9 @@
 name: Prepare Production Private Storage
-run-name: Prepare Production Private Storage ${{ inputs.commit_sha || github.sha }} ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
+run-name: Prepare Production Private Storage ${{ github.sha }} ${{ format('prepare-{0}-{1}', github.run_id, github.run_attempt) }}
 
 on:
   workflow_dispatch:
     inputs:
-      commit_sha:
-        description: Exact current-main commit whose accepted test evidence authorizes preparation.
-        required: false
-        type: string
-      delivery_correlation:
-        description: Unique opaque correlation for the preparation evidence.
-        required: true
-        type: string
-      test_delivery_correlation:
-        description: Exact correlation from the successful current-main Deploy Test run.
-        required: true
-        type: string
-      test_run_id:
-        description: Exact successful current-main Deploy Test workflow run.
-        required: true
-        type: string
-      ci_run_id:
-        description: Exact successful first-attempt current-main CI run.
-        required: true
-        type: string
-      ci_delivery_correlation:
-        description: Exact correlation in the selected current-main CI run title.
-        required: true
-        type: string
       confirmation:
         description: Enter PREPARE_PRODUCTION_PRIVATE_STORAGE to authorize only this bounded storage preparation.
         required: true
@@ -62,16 +38,16 @@ jobs:
       githubEnvironment: production
       deployFrontend: false
       deployFunctions: false
-      sourceRef: ${{ inputs.commit_sha || github.sha }}
+      sourceRef: ${{ github.sha }}
       controllerRef: ${{ github.sha }}
       controllerWorkflowSha: ${{ github.workflow_sha }}
       updateProductionVariables: false
       preparePrivateStorageOnly: true
-      deliveryCorrelation: ${{ inputs.delivery_correlation }}
-      testDeliveryCorrelation: ${{ inputs.test_delivery_correlation }}
-      testDeliveryRunId: ${{ inputs.test_run_id }}
-      ciRunId: ${{ inputs.ci_run_id }}
-      ciDeliveryCorrelation: ${{ inputs.ci_delivery_correlation }}
+      deliveryCorrelation: ${{ format('prepare-{0}-{1}', github.run_id, github.run_attempt) }}
+      testDeliveryCorrelation: ${{ vars.PREP_TEST_CORRELATION }}
+      testDeliveryRunId: ${{ vars.PREP_TEST_RUN_ID }}
+      ciRunId: ${{ vars.PREP_CI_RUN_ID }}
+      ciDeliveryCorrelation: ${{ vars.PREP_CI_CORRELATION }}
       migrationSourceStorageAccount: stapicatalogueprodbfjsts
       migrationTargetStorageAccount: stapicatalogueprodpbfjst
       migrationExpectedSha256: 4b2651b8d842854716b4fb2e20ecd9482f59f2ea6ee2352401bec5d42e8c6ed0
