@@ -1,5 +1,13 @@
 # Deployment log
 
+## 2026-08-01 — Exact test-proven release accepted in production
+
+- Main CI `30710606677` and Deploy Test `30710685029` passed at first attempt for exact commit `3810259823ce0694623a306eb5b390c2781d4b68`; bounded private-storage preparation `30710816387` had already completed.
+- After the operator repaired the existing production smoke federation record in place and verified only the existing `catalogue.read`/`reddit.read` application roles plus the production SPA redirect, first-attempt Promote Production run `30715766542` completed successfully with correlation `prod-entra-fix-3810259-20260801t1953z`. No secret, new identity, new federated credential, alternate trust route, rotation, revocation, or new RBAC grant was introduced.
+- The run passed immutable bundle and provenance verification, Azure OIDC, Bicep, complete runtime settings, private-data validation, Function/frontend deployment, pre/post generation checks, public smoke, GitHub-OIDC service-token minting, authenticated hello and Reddit smokes, telemetry correlation, release-ledger publication, and accepted rollback-bundle preservation.
+- Independent verification found live `/health` status `ok` on the exact SHA and deployment run, unauthenticated `/api/hello` at `401`, the new production frontend at `200`, and rendered frontend configuration using the current redirect and `catalogue.read` scope.
+- Result: production accepted at run `30715766542`. The bounded workflow was disabled after completion. Repair issues #294 and #308-#310 were closed with evidence; historical failed runs were retained for auditability.
+
 ## 2026-08-01 — Reusable deployment checkout security repair merged without deployment
 
 - PR #298 exact head `59b17b6bcb9cc4bceb099554029635078334f7f0` passed CI `30707131034`, Policy Check `30707131051`, CodeQL `30707131086`, and independent review/merge `30707224277`, then squash-merged as `0fcaf64c6270fc1b7d00b1af2ee76f97f7564601`.

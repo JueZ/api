@@ -1,10 +1,10 @@
 # Known issues and unresolved risks
 
-## Test is accepted; production remains intentionally unpromoted
+## Test and production are accepted on the same immutable release
 
-- Deploy Test run `30695340416` accepted exact main commit `5d9e3cc87ed0f8e18e70544b6b1587ae2ddcf56c` after every infrastructure, package, runtime, authenticated-smoke, telemetry, ledger, and provenance gate passed.
-- The previous fail-open auth, ARM settings cycle, boolean casing, Entra GUID, missing service-role, legacy federated-subject, review-cost, and monthly budget-rollover failures are resolved for test.
-- Production was not dispatched and remains disabled. A later production request must revalidate current-main ancestry, exact accepted test evidence, production identity/configuration, full authenticated smokes, telemetry, ledger, and rollback bundle before promotion.
+- Main CI `30710606677`, Deploy Test `30710685029`, and Promote Production `30715766542` accepted exact commit `3810259823ce0694623a306eb5b390c2781d4b68` after every infrastructure, package, runtime, authenticated-smoke, telemetry, ledger, provenance, and rollback-bundle gate passed.
+- Live production health reports the exact SHA and deployment run, unauthenticated access remains rejected, and the deployed frontend contains the current redirect and granular `catalogue.read` scope.
+- Production repair issues #294 and #308-#310 are resolved. Deployment controllers remain disabled between bounded windows; a future runtime release must obtain fresh exact-main CI/test evidence and pass the full production promotion gates again.
 
 ## Review-permission successor is accepted in test
 
@@ -20,11 +20,6 @@ Update: PR #289 merged as `7907708d3db92a698bbfb549cb8ccfa91a1e86c8`; PR #290 me
 - Autonomous-review run `30693764586` is a second zero-job orphan created when its workflow was disabled before scheduling. Replacement run `30693881648` acquired the only durable paid-call claim; the orphan cannot make an OpenAI request for that consumed head.
 - Normal and force-cancel APIs returned HTTP 500, and the deletion API returned HTTP 403. Briefly enabling the workflow did not materialize or cancel it. It did not block the successful replacement run and cannot execute while repository Actions or Deploy Test remains disabled.
 - The operator explicitly authorized historical-run cleanup, but GitHub has not exposed a successful removal path. Keep the identifier documented, do not repeatedly toggle deployment workflows for it, and retain accepted deployment/security-review evidence.
-
-## Granular Entra configuration and new test SPA redirect need privileged verification
-
-- The current operator identity lacks Microsoft Graph permissions needed to inspect or update the API application's delegated scopes/application roles and SPA redirect registrations.
-- The split-storage deployment created a new test web origin. A privileged Entra operator must verify the granular scope/role catalogue and register the exact current test redirect URI before browser authentication can be accepted.
 
 ## Remaining private/session storage migration requires review
 
