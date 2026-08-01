@@ -1,5 +1,12 @@
 # Current state
 
+## 2026-08-01 Reusable deployment checkout security repair in progress
+
+- GitHub Actions CodeQL identified the existing explicit `actions/checkout` reference in the privileged reusable deployment workflow as an untrusted artifact source under `workflow_call`; later runtime SHA validation does not sanitize that static dataflow.
+- The bounded repair validates the immutable controller SHA before repository access, requires the exact GitHub workspace to be empty, fetches only the public protected `JueZ/api` `main` ref from a literal HTTPS repository URL, requires its fetched tip to equal that exact controller SHA, and checks out and hard-resets to that SHA detached. It rejects any untracked or ignored workspace content and retains the caller SHA, workflow SHA, checked-out HEAD, current-main, first-attempt, and Actions API identity gates before any Azure login or mutation.
+- Step outputs used by deployment shell code are passed through step environment variables instead of direct expression interpolation. No authentication, deployment, smoke, telemetry, policy, or branch-protection gate is weakened.
+- This repair is delivered separately from production private-storage preparation with application deployment skipped. Production application state remains unchanged.
+
 ## 2026-08-01 Production release latch explicitly enabled under disabled promotion controls
 
 - The operator explicitly authorized setting the repository variable `DEPLOY_PRODUCTION_ENABLED=true`, and the repository now reports that exact value. This authorizes the fail-closed production latch only; it is not standalone authorization to dispatch or accept production.

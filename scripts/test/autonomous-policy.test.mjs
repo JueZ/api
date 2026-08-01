@@ -230,7 +230,26 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.doesNotMatch(deployEnvironmentWorkflow, /actions\/workflows\/ci\.yml\/runs\?branch=main/);
   assert.match(deployEnvironmentWorkflow, /effective_web_api_base_url="\$EFFECTIVE_BASE_URL"/);
   assert.match(deployEnvironmentWorkflow, /name: Checkout current deployment controller/);
-  assert.match(deployEnvironmentWorkflow, /ref: \$\{\{ inputs\.controllerRef \}\}/);
+  assert.doesNotMatch(deployEnvironmentWorkflow, /uses: actions\/checkout/);
+  assert.doesNotMatch(deployEnvironmentWorkflow, /git clone .*--branch main/);
+  assert.match(deployEnvironmentWorkflow, /\^\[0-9a-f\]\{40\}\$/);
+  assert.match(
+    deployEnvironmentWorkflow,
+    /git fetch --no-tags --prune origin "\+refs\/heads\/main:refs\/remotes\/origin\/main"/,
+  );
+  assert.match(deployEnvironmentWorkflow, /fetched_main="\$\(git rev-parse refs\/remotes\/origin\/main\)"/);
+  assert.match(deployEnvironmentWorkflow, /\[ "\$fetched_main" != "\$controller_ref" \]/);
+  assert.match(deployEnvironmentWorkflow, /\[ "\$\(pwd -P\)" != "\$\(realpath "\$GITHUB_WORKSPACE"\)" \]/);
+  assert.match(deployEnvironmentWorkflow, /find \. -mindepth 1 -maxdepth 1 -print -quit/);
+  assert.match(deployEnvironmentWorkflow, /git checkout --detach "\$controller_ref"/);
+  assert.match(deployEnvironmentWorkflow, /git reset --hard "\$controller_ref"/);
+  assert.match(deployEnvironmentWorkflow, /\[ "\$\(git rev-parse HEAD\)" = "\$controller_ref" \]/);
+  assert.match(deployEnvironmentWorkflow, /git status --porcelain=v1 --untracked-files=all --ignored=matching/);
+  assert.match(deployEnvironmentWorkflow, /git clean -ndx/);
+  assert.match(
+    deployEnvironmentWorkflow,
+    /INFRA_FUNCTION_APP_NAME: \$\{\{ steps\.infra\.outputs\.function_app_name \}\}[\s\S]*?effective_functionapp_name="\$INFRA_FUNCTION_APP_NAME"/,
+  );
   assert.match(deployEnvironmentWorkflow, /CONTROLLER_WORKFLOW_SHA/);
   assert.match(deployEnvironmentWorkflow, /actions\/runs\/\$\{GITHUB_RUN_ID\}/);
   assert.match(deployEnvironmentWorkflow, /\.head_sha == \$controller_ref/);
