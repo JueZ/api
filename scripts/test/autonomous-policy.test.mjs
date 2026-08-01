@@ -242,7 +242,15 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.doesNotMatch(deployEnvironmentWorkflow, /actions\/workflows\/ci\.yml\/runs\?branch=main/);
   assert.match(deployEnvironmentWorkflow, /effective_web_api_base_url="\$EFFECTIVE_BASE_URL"/);
   assert.match(deployEnvironmentWorkflow, /name: Checkout current deployment controller/);
-  assert.match(deployEnvironmentWorkflow, /ref: \$\{\{ inputs\.controllerRef \}\}/);
+  assert.doesNotMatch(deployEnvironmentWorkflow, /ref: \$\{\{ inputs\.controllerRef \}\}/);
+  assert.match(
+    deployEnvironmentWorkflow,
+    /name: Checkout current deployment controller[\s\S]*?with:\n\s+fetch-depth: 0/,
+  );
+  assert.match(
+    deployEnvironmentWorkflow,
+    /INFRA_FUNCTION_APP_NAME: \$\{\{ steps\.infra\.outputs\.function_app_name \}\}[\s\S]*?effective_functionapp_name="\$INFRA_FUNCTION_APP_NAME"/,
+  );
   assert.match(deployEnvironmentWorkflow, /CONTROLLER_WORKFLOW_SHA/);
   assert.match(deployEnvironmentWorkflow, /actions\/runs\/\$\{GITHUB_RUN_ID\}/);
   assert.match(deployEnvironmentWorkflow, /\.head_sha == \$controller_ref/);

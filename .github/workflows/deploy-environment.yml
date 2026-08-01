@@ -261,7 +261,6 @@ jobs:
       - name: Checkout current deployment controller
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ inputs.controllerRef }}
           fetch-depth: 0
       - name: Validate deployment source
         id: source
@@ -673,6 +672,10 @@ jobs:
           run-id: ${{ inputs.rollbackReleaseRunId }}
       - name: Verify immutable release bundle
         shell: bash
+        env:
+          APPROVED_FUNCTION_DIGEST: ${{ steps.source.outputs.approved_function_digest }}
+          APPROVED_FRONTEND_DIGEST: ${{ steps.source.outputs.approved_frontend_digest }}
+          APPROVED_SBOM_DIGEST: ${{ steps.source.outputs.approved_sbom_digest }}
         run: |
           set -euo pipefail
           release_dir="$RUNNER_TEMP/release"
@@ -687,9 +690,9 @@ jobs:
             echo "SBOM_SHA256=$sbom_digest"
           } >> "$GITHUB_ENV"
           if [ "$ENVIRONMENT_NAME" = "prod" ]; then
-            approved_function_digest="${{ steps.source.outputs.approved_function_digest }}"
-            approved_frontend_digest="${{ steps.source.outputs.approved_frontend_digest }}"
-            approved_sbom_digest="${{ steps.source.outputs.approved_sbom_digest }}"
+            approved_function_digest="$APPROVED_FUNCTION_DIGEST"
+            approved_frontend_digest="$APPROVED_FRONTEND_DIGEST"
+            approved_sbom_digest="$APPROVED_SBOM_DIGEST"
             if [ "$function_digest" != "$approved_function_digest" ] ||
                [ "$frontend_digest" != "$approved_frontend_digest" ] ||
                [ "$sbom_digest" != "$approved_sbom_digest" ]; then
@@ -817,15 +820,23 @@ jobs:
       - name: Resolve runtime settings
         id: resolve
         shell: bash
+        env:
+          INFRA_FUNCTION_APP_NAME: ${{ steps.infra.outputs.function_app_name }}
+          INFRA_RELEASE_STORAGE_ACCOUNT_NAME: ${{ steps.infra.outputs.release_storage_account_name }}
+          INFRA_STATIC_STORAGE_ACCOUNT_NAME: ${{ steps.infra.outputs.static_storage_account_name }}
+          INFRA_PRIVATE_STORAGE_ACCOUNT_NAME: ${{ steps.infra.outputs.private_storage_account_name }}
+          INFRA_HOST_STORAGE_ACCOUNT_NAME: ${{ steps.infra.outputs.host_storage_account_name }}
+          INFRA_APPLICATION_INSIGHTS_NAME: ${{ steps.infra.outputs.application_insights_name }}
+          INFRA_KEY_VAULT_NAME: ${{ steps.infra.outputs.key_vault_name }}
         run: |
           set -euo pipefail
-          effective_functionapp_name="${{ steps.infra.outputs.function_app_name }}"
-          effective_release_storage="${{ steps.infra.outputs.release_storage_account_name }}"
-          effective_static_storage="${{ steps.infra.outputs.static_storage_account_name }}"
-          effective_private_storage="${{ steps.infra.outputs.private_storage_account_name }}"
-          effective_host_storage="${{ steps.infra.outputs.host_storage_account_name }}"
-          effective_app_insights="${{ steps.infra.outputs.application_insights_name }}"
-          effective_key_vault="${{ steps.infra.outputs.key_vault_name }}"
+          effective_functionapp_name="$INFRA_FUNCTION_APP_NAME"
+          effective_release_storage="$INFRA_RELEASE_STORAGE_ACCOUNT_NAME"
+          effective_static_storage="$INFRA_STATIC_STORAGE_ACCOUNT_NAME"
+          effective_private_storage="$INFRA_PRIVATE_STORAGE_ACCOUNT_NAME"
+          effective_host_storage="$INFRA_HOST_STORAGE_ACCOUNT_NAME"
+          effective_app_insights="$INFRA_APPLICATION_INSIGHTS_NAME"
+          effective_key_vault="$INFRA_KEY_VAULT_NAME"
 
           resolve_storage_by_purpose() {
             local purpose="$1"
@@ -1474,6 +1485,8 @@ jobs:
           npm run --silent ops:mint-smoke-token
       - name: Run authenticated smoke tests
         shell: bash
+        env:
+          REDDIT_SHARE_URL_SMOKE_REQUESTED: ${{ inputs.redditShareUrlSmokeEnabled && 'true' || 'false' }}
         run: |
           set -euo pipefail
           smoke_dir="$RUNNER_TEMP/smoke"
@@ -1483,7 +1496,7 @@ jobs:
           export ENVIRONMENT_NAME
           export SMOKE_RUN_ID
           export REQUIRE_AUTH_SMOKE=true
-          export REDDIT_SHARE_URL_SMOKE_ENABLED="${{ inputs.redditShareUrlSmokeEnabled && 'true' || 'false' }}"
+          export REDDIT_SHARE_URL_SMOKE_ENABLED="$REDDIT_SHARE_URL_SMOKE_REQUESTED"
           export REDDIT_SHARE_URL_SMOKE_URL="https://www.reddit.com/r/macbookpro/s/nnlryuZCNX"
           export REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID="1tryldy"
           npm run --silent ops:smoke:auth | tee "$smoke_dir/auth-smoke.json"
@@ -1677,7 +1690,6 @@ jobs:
       - name: Checkout current preparation controller
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ inputs.controllerRef }}
           fetch-depth: 0
       - name: Validate bounded preparation source and evidence
         shell: bash
