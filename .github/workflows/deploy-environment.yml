@@ -1870,6 +1870,7 @@ jobs:
             echo "Preparation controller is no longer current main." >&2
             exit 1
           }
+          echo "DEPLOYMENT_CONTROL_REF=$controller_ref" >> "$GITHUB_ENV"
 
           ci_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}")"
           expected_ci_title="CI $deployment_ref $CI_DELIVERY_CORRELATION"
