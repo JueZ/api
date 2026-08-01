@@ -1,5 +1,15 @@
 # Current state
 
+## 2026-08-01 Bundled MCP OAuth scope repair accepted in test and production
+
+- PR #312 exact head `469449018e73db25fba6f3b6fb53ab77cbad8555` passed CI, Policy, CodeQL, and the single bounded independent review, then the exact-head controller squash-merged it as `2183222c3122e79b7d8d2cf7a20c7b9890998f7c`.
+- The runtime now maps service-only Entra role claims `catalogue.service.read` and `reddit.service.read` to canonical operation permissions only after app-only classification, tenant validation, and explicit service-client allowlisting. Delegated users do not receive that normalization, and all JWT, issuer, audience, allowlist, and operation-permission checks remain fail closed.
+- Microsoft Entra now exposes the seven canonical delegated scopes `catalogue.read`, `reddit.read`, `wlh.read`, `bring.read`, `bring.write`, `bring.complete`, and `bring.remove`. The legacy `api.access` scope remains enabled for unrelated compatibility. The two existing application-role IDs and assignments were preserved while their claim values were renamed to the service-only aliases.
+- The existing bundled MCP OAuth client is pre-authorized for the exact seven new scope IDs. Its duplicate legacy `api.access` requests were replaced by one unique entry for each granular scope. No MCP endpoint or server was split; production and test continue to expose the single bundled `/mcp` server.
+- Pre-migration Deploy Test `30720449914` accepted the compatibility build. Post-migration Deploy Test `30720746830` then accepted the same exact SHA with public smoke, authenticated protected-endpoint smoke, telemetry correlation, ledger, and provenance all passing. Promote Production `30720874197` accepted that exact post-migration test provenance with public smoke, authenticated smoke, telemetry, release ledger, and rollback-bundle preservation all passing.
+- Independent live `/health` checks in test and production report `status=ok` and exact deployed SHA `2183222c3122e79b7d8d2cf7a20c7b9890998f7c`. Both OAuth protected-resource documents advertise the same API resource and all seven fully qualified canonical scopes.
+- The operator-granted Codex Graph application permission remains limited to `Application.ReadWrite.OwnedBy` and the two explicitly owned app registrations. It cannot read the tenant service-principal object and was not expanded. Interactive ChatGPT reconnection remains the final operator-side confirmation because it requires the user's browser session.
+
 ## 2026-08-01 Production accepted on the exact test-proven release
 
 - Exact first-attempt main CI `30710606677` and Deploy Test `30710685029` accepted commit `3810259823ce0694623a306eb5b390c2781d4b68`. Production private-storage preparation `30710816387` completed before the application cutover.
