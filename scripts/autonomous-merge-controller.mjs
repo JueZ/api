@@ -96,6 +96,77 @@ export function evaluateRequiredChecks(checkRuns, headSha, requiredChecks) {
   return { ok: failures.length === 0 && pending.length === 0, failures, pending, passed };
 }
 
+const PASSING_CHECK_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
+
+function workflowRunIdFromCheck(checkRun, expectedRepository) {
+  if (typeof checkRun?.details_url !== 'string') return undefined;
+  try {
+    const url = new URL(checkRun.details_url);
+    if (url.protocol !== 'https:' || url.hostname !== 'github.com') return undefined;
+    const match = url.pathname.match(/^\/([^/]+\/[^/]+)\/actions\/runs\/(\d+)(?:\/job\/\d+)?\/?$/);
+    if (!match) return undefined;
+    if (match[1].toLowerCase() !== expectedRepository.toLowerCase()) return undefined;
+    const runId = Number(match[2]);
+    return Number.isSafeInteger(runId) && runId > 0 ? runId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function evaluateCompleteCheckRollup(checkRuns, commitStatuses, headSha, currentRunId, repository) {
+  const latestByIdentity = new Map();
+  for (const checkRun of checkRuns) {
+    if (checkRun.head_sha !== headSha) continue;
+    const identity = `${checkRun.app?.id ?? checkRun.app?.slug ?? 'unknown'}:${checkRun.name}`;
+    const previous = latestByIdentity.get(identity);
+    if (!previous || Number(checkRun.id) > Number(previous.id)) latestByIdentity.set(identity, checkRun);
+  }
+
+  const failures = [];
+  const pending = [];
+  const currentControllerChecks = [];
+  for (const checkRun of latestByIdentity.values()) {
+    if (checkRun.status !== 'completed') {
+      const isCurrentMergeJob =
+        checkRun.name === 'merge exact PR head' &&
+        checkRun.app?.slug === 'github-actions' &&
+        workflowRunIdFromCheck(checkRun, repository) === currentRunId;
+      if (isCurrentMergeJob) {
+        currentControllerChecks.push(checkRun.name);
+      } else {
+        pending.push({ check: checkRun.name, reason: checkRun.status ?? 'missing_status' });
+      }
+      continue;
+    }
+    if (!PASSING_CHECK_CONCLUSIONS.has(checkRun.conclusion)) {
+      failures.push({ check: checkRun.name, reason: checkRun.conclusion ?? 'no_conclusion' });
+    }
+  }
+
+  const latestStatusByContext = new Map();
+  for (const status of commitStatuses) {
+    if (status.sha !== headSha) continue;
+    const previous = latestStatusByContext.get(status.context);
+    if (!previous || Number(status.id) > Number(previous.id)) latestStatusByContext.set(status.context, status);
+  }
+  for (const status of latestStatusByContext.values()) {
+    if (status.state === 'success') continue;
+    if (status.state === 'pending') {
+      pending.push({ check: status.context, reason: 'pending_status' });
+    } else {
+      failures.push({ check: status.context, reason: status.state ?? 'missing_state' });
+    }
+  }
+
+  return {
+    ok: failures.length === 0 && pending.length === 0,
+    explainsControllerUnstable: currentControllerChecks.length === 1,
+    failures,
+    pending,
+    currentControllerChecks,
+  };
+}
+
 export function validateAutonomousReview(review, expectedHeadSha, policy) {
   const errors = validateReviewPayload(review, expectedHeadSha, policy);
 
@@ -111,10 +182,14 @@ export function evaluatePullRequestState(
   pullRequest,
   expectedHeadSha,
   policy,
-  { allowBlockedBeforeOwnReview = false } = {},
+  { allowBlockedBeforeOwnReview = false, allowExpectedControllerUnstable = false } = {},
 ) {
   const errors = [];
-  const allowedMergeableStates = new Set(['clean', ...(allowBlockedBeforeOwnReview ? ['unstable', 'blocked'] : [])]);
+  const allowedMergeableStates = new Set([
+    'clean',
+    ...(allowBlockedBeforeOwnReview || allowExpectedControllerUnstable ? ['unstable'] : []),
+    ...(allowBlockedBeforeOwnReview ? ['blocked'] : []),
+  ]);
   if (!isAutomergeCandidate(pullRequest, policy)) errors.push('pull request is not an auto-merge candidate');
   if (pullRequest.state !== 'open') errors.push('pull request is not open');
   if (pullRequest.head?.sha !== expectedHeadSha) errors.push('pull request head changed');
@@ -128,25 +203,50 @@ export function evaluatePullRequestState(
   // GitHub can report `unstable` or `blocked` while a mergeable PR is waiting
   // on this controller's own exact-head review check. Preflight and durable
   // claim creation may opt into those states because they independently
-  // validate every free required check. The final merge gate never opts in and
-  // remains fail closed by requiring GitHub's aggregate mergeable state to be
-  // clean.
+  // validate every free required check. The final merge gate accepts unstable
+  // only after the complete check rollup proves the sole pending check is the
+  // current trusted merge job; blocked and unexplained unstable remain denied.
   if (pullRequest.mergeable !== true || !allowedMergeableStates.has(pullRequest.mergeable_state)) {
     errors.push(`pull request is not mergeable (${pullRequest.mergeable_state ?? 'unknown'})`);
   }
   return { ok: errors.length === 0, errors };
 }
 
-export function mergeGateDecision({ pullRequest, expectedHeadSha, checkEvaluation, review, policy }) {
-  const pullRequestState = evaluatePullRequestState(pullRequest, expectedHeadSha, policy);
+export function mergeGateDecision({
+  pullRequest,
+  expectedHeadSha,
+  checkEvaluation,
+  aggregateCheckEvaluation,
+  review,
+  policy,
+}) {
+  const pullRequestState = evaluatePullRequestState(pullRequest, expectedHeadSha, policy, {
+    allowExpectedControllerUnstable:
+      pullRequest.mergeable_state === 'unstable' &&
+      aggregateCheckEvaluation?.ok === true &&
+      aggregateCheckEvaluation.explainsControllerUnstable === true,
+  });
   const reviewState = validateAutonomousReview(review, expectedHeadSha, policy);
   const errors = [
     ...pullRequestState.errors,
     ...checkEvaluation.failures.map((failure) => `${failure.check}: ${failure.reason}`),
     ...checkEvaluation.pending.map((pending) => `${pending.check}: ${pending.reason}`),
+    ...(aggregateCheckEvaluation?.failures ?? []).map(
+      (failure) => `aggregate check ${failure.check}: ${failure.reason}`,
+    ),
+    ...(aggregateCheckEvaluation?.pending ?? []).map(
+      (pending) => `aggregate check ${pending.check}: ${pending.reason}`,
+    ),
     ...reviewState.errors,
   ];
-  return { ok: errors.length === 0, errors, pullRequestState, checkEvaluation, reviewState };
+  return {
+    ok: errors.length === 0,
+    errors,
+    pullRequestState,
+    checkEvaluation,
+    aggregateCheckEvaluation,
+    reviewState,
+  };
 }
 
 export async function runReview(options, policy, github, openAIClient) {
@@ -578,23 +678,48 @@ export async function claimAutonomousReview(options, policy, github, { enforceGi
 
 async function runGate(options, policy, github) {
   let lastEvaluation;
+  let aggregateCheckEvaluation;
   const deadline = Date.now() + options.waitSeconds * 1000;
   do {
     const pullRequest = await github.getPullRequest(options.prNumber);
     assertExpectedHead(pullRequest, options.headSha);
-    const checkRuns = await github.getCheckRuns(options.headSha);
+    const [checkRuns, commitStatuses] = await Promise.all([
+      github.getCheckRuns(options.headSha),
+      github.getCommitStatuses(options.headSha),
+    ]);
     lastEvaluation = evaluateRequiredChecks(checkRuns, options.headSha, policy.requiredChecks);
-    if (lastEvaluation.failures.length > 0) break;
-    if (lastEvaluation.pending.length === 0) break;
+    aggregateCheckEvaluation = evaluateCompleteCheckRollup(
+      checkRuns,
+      commitStatuses,
+      options.headSha,
+      options.runId,
+      options.repository,
+    );
+    if (lastEvaluation.failures.length > 0 || aggregateCheckEvaluation.failures.length > 0) break;
+    if (lastEvaluation.pending.length === 0 && aggregateCheckEvaluation.pending.length === 0) break;
     await delay(options.pollSeconds * 1000);
   } while (Date.now() < deadline);
 
   const pullRequest = await github.getPullRequest(options.prNumber);
+  assertExpectedHead(pullRequest, options.headSha);
+  const [finalCheckRuns, finalCommitStatuses] = await Promise.all([
+    github.getCheckRuns(options.headSha),
+    github.getCommitStatuses(options.headSha),
+  ]);
+  lastEvaluation = evaluateRequiredChecks(finalCheckRuns, options.headSha, policy.requiredChecks);
+  aggregateCheckEvaluation = evaluateCompleteCheckRollup(
+    finalCheckRuns,
+    finalCommitStatuses,
+    options.headSha,
+    options.runId,
+    options.repository,
+  );
   const review = JSON.parse(await readFile(options.reviewFile, 'utf8'));
   const decision = mergeGateDecision({
     pullRequest,
     expectedHeadSha: options.headSha,
     checkEvaluation: lastEvaluation,
+    aggregateCheckEvaluation,
     review,
     policy,
   });
@@ -665,6 +790,15 @@ function createGithubClient(repository, token) {
         if (all.length >= (response.total_count ?? all.length) || rows.length < 100) return all;
       }
       throw new Error('Commit contains more than 10000 check runs.');
+    },
+    async getCommitStatuses(headSha) {
+      const all = [];
+      for (let page = 1; page <= 100; page += 1) {
+        const rows = await (await request(`/commits/${headSha}/statuses?per_page=100&page=${page}`)).json();
+        all.push(...rows);
+        if (rows.length < 100) return all;
+      }
+      throw new Error('Commit contains more than 10000 status contexts.');
     },
     async createReviewClaim({ name, headSha, externalId, detailsUrl }) {
       return (
@@ -751,8 +885,8 @@ function parseOptions(argv) {
   if (!Number.isInteger(prNumber) || prNumber < 1) throw new Error('--pr must be a positive integer');
   if (!/^[0-9a-f]{40}$/i.test(headSha ?? '')) throw new Error('--head-sha must be a full commit SHA');
   const runId = Number(values.get('--run-id') ?? process.env.GITHUB_RUN_ID);
-  if (command === 'review' && (!Number.isSafeInteger(runId) || runId < 1)) {
-    throw new Error('--run-id must be a positive workflow run ID for review');
+  if (['review', 'gate'].includes(command) && (!Number.isSafeInteger(runId) || runId < 1)) {
+    throw new Error('--run-id must be a positive workflow run ID for review and gate commands');
   }
   return {
     command,

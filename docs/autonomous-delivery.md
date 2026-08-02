@@ -17,7 +17,7 @@ For each candidate it:
 7. never patches, releases, or reuses a paid-call marker or approval; any existing marker permanently blocks another request for that PR/head;
 8. makes one exact input-token count request and, only when the complete request remains within the cost ceiling, at most one independent structured model-generation request with `store=false`, a 3,500-token static output cap, and explicit final-JSON capacity reservation;
 9. publishes `Autonomous review complete` for that exact SHA;
-10. rechecks open/current/non-behind PR state;
+10. rechecks open/current/non-behind PR state and the complete latest exact-head check-run and legacy-status rollup; aggregate `unstable` is accepted only when its sole pending cause is the current trusted `merge exact PR head` job;
 11. squash-merges only the reviewed head SHA.
 
 Critical/high review findings, a duplicate/consumed paid-review claim, stale heads, missing/wrong-app checks, forks, merge conflicts, and policy errors fail closed. Label changes are controller events, so adding/removing eligibility or hold labels is evaluated immediately without permitting a second exact-head paid request. Routine and high-risk changes do not require human approval under the selected policy.
@@ -42,6 +42,8 @@ The live API path is accepted only from the exact `Codex Auto-Merge` GitHub Acti
 The live branch ruleset must require the exact names in `.github/autonomous-policy.yml`, disallow direct/force pushes and `main` deletion, require up-to-date PRs, and prevent admin bypass. CODEOWNERS records accountability but is not a routine approval gate.
 
 ## Build and delivery
+
+The steady-state operating model is always-on autonomous delivery. `Codex Auto-Merge`, `Codex Main Delivery`, `Deploy Test`, and `Promote Production` remain enabled so an eligible Codex PR can proceed through exact-head review, protected merge, exact-main CI, test acceptance, and production promotion without a human acting as the routine watcher. Codex monitors every terminal gate, applies only scoped repairs within the repository repair limit, and reports any concrete blocker. Disabling one of these workflows is an exceptional fail-closed incident or maintenance action; it must be time-bounded, documented in project memory, and restored after the blocker is resolved. Rollback remains a separate explicitly requested operational action.
 
 Main CI builds the Function, frontend source bundle, and CycloneDX SBOM once. The release manifest contains the full source SHA and SHA-256 digests; main artifacts receive build provenance attestations. Each environment then renders its approved runtime frontend configuration before deployment, updates the manifest and checksums with the rendered archive digest, and preserves the exact accepted production archive for rollback.
 

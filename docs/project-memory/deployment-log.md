@@ -1,5 +1,12 @@
 # Deployment log
 
+## 2026-08-02 — Always-on autonomous-delivery canary accepted
+
+- Source: PR #318 exact head `de88f6eacddf6f795ce51484f54058e54622f2b3`, squash-merged as `e8e1070b4a4f2e67b9d60b97a3586bf16b3bfeea` after CI `30743179098`, Policy `30743179152`, CodeQL `30743179115`, and autonomous review/merge `30744502912` passed.
+- Main delivery: controller `30744545928` automatically dispatched exact-main CI `30744552173`, Deploy Test `30744611475`, and Promote Production `30744732911` without a human merge or deployment dispatch.
+- Acceptance: test and production passed exact-generation validation, public runtime smoke, authenticated protected-endpoint smoke, telemetry correlation, and release-ledger publication for the exact merge.
+- Operational state: Codex Auto-Merge, Codex Main Delivery, Deploy Test, and Promote Production remain active as the steady state. Production rollback remains a separately requested action.
+
 ## 2026-08-01 — Exact test-proven release accepted in production
 
 - Main CI `30710606677` and Deploy Test `30710685029` passed at first attempt for exact commit `3810259823ce0694623a306eb5b390c2781d4b68`; bounded private-storage preparation `30710816387` had already completed.

@@ -2,9 +2,9 @@
 
 ## Test and production are accepted on the same immutable release
 
-- Main CI `30710606677`, Deploy Test `30710685029`, and Promote Production `30715766542` accepted exact commit `3810259823ce0694623a306eb5b390c2781d4b68` after every infrastructure, package, runtime, authenticated-smoke, telemetry, ledger, provenance, and rollback-bundle gate passed.
-- Live production health reports the exact SHA and deployment run, unauthenticated access remains rejected, and the deployed frontend contains the current redirect and granular `catalogue.read` scope.
-- Production repair issues #294 and #308-#310 are resolved. Deployment controllers remain disabled between bounded windows; a future runtime release must obtain fresh exact-main CI/test evidence and pass the full production promotion gates again.
+- Main CI `30744552173`, Deploy Test `30744611475`, and Promote Production `30744732911` accepted exact commit `e8e1070b4a4f2e67b9d60b97a3586bf16b3bfeea` after exact-generation, runtime, authenticated-smoke, telemetry, ledger, and provenance gates passed.
+- Codex Auto-Merge, Codex Main Delivery, Deploy Test, and Promote Production are active for normal autonomous delivery. Any future main release still requires fresh exact-main CI/test evidence and the complete production promotion gates.
+- Production repair issues #294 and #308-#310 remain resolved. Rollback remains separately authorized rather than part of the automatic forward-delivery chain.
 
 ## Review-permission successor is accepted in test
 
@@ -18,8 +18,8 @@ Update: PR #289 merged as `7907708d3db92a698bbfb549cb8ccfa91a1e86c8`; PR #290 me
 
 - Deploy Test run `30663819848` was dispatched while repository Actions was disabled. GitHub retained it as `queued` with zero jobs or check runs and no concurrency-group membership.
 - Autonomous-review run `30693764586` is a second zero-job orphan created when its workflow was disabled before scheduling. Replacement run `30693881648` acquired the only durable paid-call claim; the orphan cannot make an OpenAI request for that consumed head.
-- Normal and force-cancel APIs returned HTTP 500, and the deletion API returned HTTP 403. Briefly enabling the workflow did not materialize or cancel it. It did not block the successful replacement run and cannot execute while repository Actions or Deploy Test remains disabled.
-- The operator explicitly authorized historical-run cleanup, but GitHub has not exposed a successful removal path. Keep the identifier documented, do not repeatedly toggle deployment workflows for it, and retain accepted deployment/security-review evidence.
+- Normal and force-cancel APIs returned HTTP 500, and the deletion API returned HTTP 403. Restoring the normal controllers for accepted deliveries did not materialize or execute either orphan. The paid-review head is permanently consumed and both records remain obsolete zero-job platform artifacts.
+- The operator explicitly authorized historical-run cleanup, but GitHub has not exposed a successful removal path. Keep the identifiers documented and retain accepted deployment/security-review evidence; their continued presence is not a reason to disable normal delivery.
 
 ## Remaining private/session storage migration requires review
 
