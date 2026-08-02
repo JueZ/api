@@ -31,8 +31,6 @@
     "ops:check-architecture": "node scripts/check-architecture.mjs",
     "ops:validate-agent-skills": "node scripts/validate-agent-skills.mjs",
     "ops:check-lockfile": "node scripts/check-lockfile-policy.mjs",
-    "quality:baseline": "node scripts/quality-report.mjs --collect-baseline docs/quality/evidence/phase-0-baseline.json",
-    "quality:check": "node scripts/quality-report.mjs --output-dir .quality-report",
     "eval:agents": "npm run build:api --silent && node scripts/run-agent-evals.mjs",
     "docs:check-operations": "npm run build:api --silent && node scripts/generate-operation-docs.mjs --check"
   },

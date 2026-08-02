@@ -16,7 +16,7 @@ Use Node.js 22 and the exact source ref recorded in the evidence file:
 
 ```bash
 npm ci
-npm run quality:baseline -- --source-ref 56f4208070ad5777267326f5e2d70e43dd64073c
+node scripts/quality-report.mjs --collect-baseline docs/quality/evidence/phase-0-baseline.json --source-ref 56f4208070ad5777267326f5e2d70e43dd64073c
 ```
 
 The collector measures production TypeScript, compiler/lint settings, operation schemas, test availability, bundle output, configured supply-chain checks, known operational gaps, and the relevant local deterministic commands. It does not use repository credentials or an LLM.
@@ -24,7 +24,7 @@ The collector measures production TypeScript, compiler/lint settings, operation 
 ## Evaluate gates
 
 ```bash
-npm run quality:check
+node scripts/quality-report.mjs --output-dir .quality-report
 ```
 
 The command writes `.quality-report/quality-report.json` and `.quality-report/quality-report.md`. It exits nonzero while any required gate lacks evidence or fails. This is expected until the ordered program phases supply and accept every mandatory result.
