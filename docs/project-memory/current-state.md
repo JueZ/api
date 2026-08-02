@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-02 Main-delivery trigger identity repair in progress
+
+- PR #319 exact head `9d130a65a3bc4eef866b6198902e9afcf425c243` passed PR CI `30745662331`, Policy `30745662330`, CodeQL `30745662351`, and independent high-risk review in controller run `30745661913`. The trusted controller still running from predecessor main then reproduced its known clean-only self-deadlock. Codex performed one protected exact-head squash bootstrap without admin bypass; main commit `d24fe187ce5b3aeaf238e5b66e0339c5ccc7afbd` passed push CI `30745774623` and Policy `30745774629`.
+- GitHub created Main Delivery run `30745842177` for that successful push CI but skipped its only job. The trigger run API reported `.name` as the dynamic `run-name` value `CI <sha> <run-id>`, while the job condition expected static `CI`; the immutable `.path` remained `.github/workflows/ci.yml`.
+- The focused repair binds both supported trigger branches and downstream selection to exact workflow paths. It does not loosen source SHA, first-attempt, current-main, provenance, test, production, smoke, telemetry, or release-ledger gates. Acceptance requires a fresh protected PR and a complete live delivery chain.
+
 ## 2026-08-02 Always-on autonomous delivery restored and accepted
 
 - The operator confirmed that normal repository operation is unattended autonomous delivery overseen by Codex, not human-supervised bounded delivery windows. `Codex Auto-Merge`, `Codex Main Delivery`, `Deploy Test`, and `Promote Production` are active and are intended to remain active. `DEPLOY_PRODUCTION_ENABLED=true` remains the separate persistent production latch; it was not changed. Rollback remains a separately requested operational action.
