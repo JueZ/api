@@ -319,10 +319,10 @@ jobs:
           if [ -f package-lock.json ]; then
             npm audit --audit-level=high
           elif [ -f package.json ]; then
-            npm install --package-lock-only
+            npm install --package-lock-only --ignore-scripts
             npm audit --audit-level=high
           else
-            echo "No npm package files found; dependency audit is not applicable yet."
+            echo "No package files found; dependency audit is not applicable yet."
           fi
 
   release-artifacts:

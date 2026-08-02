@@ -21,7 +21,13 @@ const GITHUB_AUTH_KEYS = new Set(['authorization', 'gh_token', 'github_token', '
 const GITHUB_TOKEN_MINTING_ACTION = /(?:github.*(?:app-)?token|(?:app-)?token.*github|create.*app.*token)/i;
 const GITHUB_TOKEN_MINTING_SHELL =
   /(?:gh\s+auth\s+login|\/app\/installations\/|app\/installations\/[^\s"']*\/access_tokens|openssl[^\n]*(?:jwt|private[-_ ]key))/i;
-const REPOSITORY_PACKAGE_SCRIPT_INDIRECTION = /(?:^|[\s;&|()])npm\s+(?:run(?:\s|$)|test(?:\s|$))/m;
+const PACKAGE_MANAGER_TOKEN = /(?:^|[^a-z0-9_.-])(?:npm|npx|yarn|yarnpkg|pnpm|pnpx|corepack|bun)(?=$|[^a-z0-9_.-])/i;
+const NODE_PACKAGE_SCRIPT_DISPATCH = /(?:^|[^a-z0-9_.-])node\s+--run(?:=|\s|$)/i;
+const ALLOWED_WORKFLOW_PACKAGE_MANAGER_COMMANDS = Object.freeze([
+  /^\s*npm ci --ignore-scripts\s*$/,
+  /^\s*npm audit --audit-level=high\s*$/,
+  /^\s*npm install --package-lock-only --ignore-scripts\s*$/,
+]);
 const ALLOWED_WORKFLOW_SECRET_NAMES = new Set([
   'GITHUB_TOKEN',
   'OPENAI_API_KEY',
@@ -1016,10 +1022,12 @@ function collectUnsafeGithubTokenFindings(value, workflowName, findings, path = 
     }
     if (typeof child === 'string') {
       collectSecretExpressionFindings(child, workflowName, childPath, findings);
-      if (REPOSITORY_PACKAGE_SCRIPT_INDIRECTION.test(child)) {
-        findings.push(
-          `${workflowName}:${childPath.join('.')}: workflow shell must not dispatch repository-controlled npm scripts`,
-        );
+      if (key === 'run') {
+        for (const lineNumber of unsafeWorkflowPackageManagerLines(child)) {
+          findings.push(
+            `${workflowName}:${childPath.join('.')}: line ${lineNumber} uses a non-allowlisted package-manager command`,
+          );
+        }
       }
       if (GITHUB_TOKEN_MINTING_SHELL.test(child)) {
         findings.push(`${workflowName}:${childPath.join('.')}: shell-based GitHub token minting is not allowed`);
@@ -1030,6 +1038,17 @@ function collectUnsafeGithubTokenFindings(value, workflowName, findings, path = 
     }
     collectUnsafeGithubTokenFindings(child, workflowName, findings, childPath);
   }
+}
+
+export function unsafeWorkflowPackageManagerLines(script) {
+  return String(script)
+    .split('\n')
+    .map((line, index) => ({ line, lineNumber: index + 1 }))
+    .filter(({ line }) => PACKAGE_MANAGER_TOKEN.test(line) || NODE_PACKAGE_SCRIPT_DISPATCH.test(line))
+    .filter(
+      ({ line }) => !ALLOWED_WORKFLOW_PACKAGE_MANAGER_COMMANDS.some((allowedPattern) => allowedPattern.test(line)),
+    )
+    .map(({ lineNumber }) => lineNumber);
 }
 
 function collectSecretExpressionFindings(value, workflowName, path, findings) {

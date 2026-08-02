@@ -25,6 +25,7 @@ import {
   reviewRequestIdempotencyKey,
   runRequiredCheckPreflight,
   runReview,
+  unsafeWorkflowPackageManagerLines,
   validateAutonomousReview,
 } from '../autonomous-merge-controller.mjs';
 
@@ -224,6 +225,49 @@ test('required checks and deployment never dispatch repository-controlled npm sc
   assert.match(deployEnvironmentWorkflow, /node scripts\/smoke-runtime\.mjs/);
   assert.match(deployEnvironmentWorkflow, /node scripts\/validate-release-ledger\.mjs/);
   assert.deepEqual(await exclusiveWorkflowCheckWriteFindings(), []);
+});
+
+test('workflow package-manager audit permits only exact non-script commands', () => {
+  assert.deepEqual(
+    unsafeWorkflowPackageManagerLines(
+      [
+        'npm ci --ignore-scripts',
+        'npm audit --audit-level=high',
+        'npm install --package-lock-only --ignore-scripts',
+      ].join('\n'),
+    ),
+    [],
+  );
+
+  const bypasses = [
+    'npm --silent run lint',
+    'npm -s test',
+    'npm --prefix . run lint',
+    'npm run-script lint',
+    'npm start',
+    'npm stop',
+    'npm restart',
+    'npm t',
+    'npm tst',
+    'npx eslint apps',
+    'yarn lint',
+    'yarnpkg lint',
+    'pnpm test',
+    'pnpx eslint apps',
+    'corepack yarn lint',
+    'bun run lint',
+    'node --run lint',
+    'node --run=lint',
+    '/usr/bin/npm run lint',
+    'command npm run lint',
+    '${NPM} run lint',
+    'npm \\',
+    '  run lint',
+  ];
+  assert.deepEqual(
+    unsafeWorkflowPackageManagerLines(bypasses.join('\n')),
+    bypasses.map((_, index) => index + 1).filter((lineNumber) => lineNumber !== bypasses.length),
+  );
 });
 
 test('Codex auto-merge completion dispatches exact main CI through one delivery controller', () => {
