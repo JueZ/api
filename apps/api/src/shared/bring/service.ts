@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { BringClient, BringUpstreamError, type BringFetch } from './client.js';
+import { BringClient, BringUpstreamError, bringUpstreamTelemetryDetails, type BringFetch } from './client.js';
 import { readBringConfig } from './config.js';
 import {
   AzureBlobBringSessionStore,
@@ -270,7 +270,7 @@ export class BringService {
       component: 'bring_upstream',
       error_kind: error.kind,
       retry_count: retryCount,
-      ...error.diagnostics,
+      ...bringUpstreamTelemetryDetails(error),
     });
   }
 

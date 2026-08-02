@@ -8,9 +8,9 @@ interface BringErrorDiagnostics {
   method: string;
   path: string;
   upstreamStatus?: number;
-  responseContentType?: string;
-  responseExcerpt?: string;
 }
+
+export type BringUpstreamTelemetryDetails = BringErrorDiagnostics;
 
 export class BringUpstreamError extends Error {
   constructor(
@@ -158,8 +158,6 @@ export class BringClient {
     const responseDiagnostics = {
       ...baseDiagnostics,
       upstreamStatus: response.status,
-      responseContentType: response.headers.get('content-type')?.slice(0, 100) ?? 'unknown',
-      ...(!options.auth && !response.ok && text ? { responseExcerpt: sanitizeExcerpt(text) } : {}),
     };
     let data: unknown = null;
     if (text) {
@@ -227,14 +225,15 @@ export class BringClient {
   }
 }
 
-function sanitizeExcerpt(value: string): string {
-  return value
-    .replace(/[\r\n\t]+/g, ' ')
-    .replace(
-      /(access[_-]?token|refresh[_-]?token|authorization|password|email|cookie)\s*["'=:\s]+[^\s,;"}]+/gi,
-      '$1=[redacted]',
-    )
-    .slice(0, 240);
+export function bringUpstreamTelemetryDetails(error: BringUpstreamError): BringUpstreamTelemetryDetails | undefined {
+  const diagnostics = error.diagnostics;
+  if (!diagnostics) return undefined;
+  return {
+    operation: diagnostics.operation,
+    method: diagnostics.method,
+    path: diagnostics.path,
+    ...(diagnostics.upstreamStatus === undefined ? {} : { upstreamStatus: diagnostics.upstreamStatus }),
+  };
 }
 
 function safePath(path: string): string {

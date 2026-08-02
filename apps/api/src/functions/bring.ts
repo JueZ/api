@@ -16,7 +16,7 @@ import {
   type BringOperationId,
 } from '../shared/bring/problem.js';
 import { BringInputError } from '../shared/bring/service.js';
-import { BringUpstreamError } from '../shared/bring/client.js';
+import { BringUpstreamError, bringUpstreamTelemetryDetails } from '../shared/bring/client.js';
 import { createBringApplication } from '../infrastructure/composition/bring.js';
 
 type BringHandlerDependencies = {
@@ -108,7 +108,7 @@ export function createBringHandler(
           diagnostic_id: problem.diagnostic_id,
           classification: problem.classification,
           status: problem.status,
-          ...(error instanceof BringUpstreamError && error.diagnostics ? error.diagnostics : {}),
+          ...(error instanceof BringUpstreamError ? bringUpstreamTelemetryDetails(error) : {}),
         });
       }
       return bringProblemResponse(problem, cors);
