@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-02 — Dynamic workflow run name skipped Main Delivery
+
+- Impact: PR #319 merged through protected main after all authoritative exact-head gates passed, and push CI `30745774623` succeeded, but Main Delivery run `30745842177` skipped its only job before test or production dispatch.
+- Root cause: The `workflow_run` job condition treated `.name` as the static workflow name. CI defines a dynamic `run-name`, and GitHub supplied that rendered value as `.name`; the exact workflow `.path` remained stable and correct.
+- Repair: Authorize and select the two supported triggers by exact immutable paths `.github/workflows/ci.yml` and `.github/workflows/codex-automerge.yml`, retain event/branch/attempt/SHA/API identity checks, and add governance assertions that prohibit `.workflow_run.name` as the trigger identity.
+- Status: Repair is in progress on `codex/quality-10-main-delivery-trigger`. No deployment was attempted by the skipped run; the previously accepted test and production release remains active until the repaired full chain passes.
+
 ## 2026-08-02 — Clean-only final merge gate self-deadlocked
 
 - Impact: The first PR evaluated by the PR #318 controller passed every canonical exact-head check and autonomous review but could not merge because GitHub reported aggregate `unstable` while the controller's own `merge exact PR head` job was in progress.

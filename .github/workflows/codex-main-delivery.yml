@@ -19,7 +19,7 @@ jobs:
   deliver:
     name: >-
       ${{
-        github.event.workflow_run.name == 'Codex Auto-Merge' &&
+        github.event.workflow_run.path == '.github/workflows/codex-automerge.yml' &&
         'run main delivery after Codex auto-merge' ||
         'run main delivery after successful push CI'
       }}
@@ -30,12 +30,12 @@ jobs:
         github.event.workflow_run.run_attempt == 1 &&
         (
           (
-            github.event.workflow_run.name == 'CI' &&
+            github.event.workflow_run.path == '.github/workflows/ci.yml' &&
             github.event.workflow_run.event == 'push' &&
             github.event.workflow_run.head_branch == 'main'
           ) ||
           (
-            github.event.workflow_run.name == 'Codex Auto-Merge' &&
+            github.event.workflow_run.path == '.github/workflows/codex-automerge.yml' &&
             github.event.workflow_run.event == 'pull_request_target'
           )
         )
@@ -53,7 +53,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          TRIGGER_WORKFLOW: ${{ github.event.workflow_run.name }}
+          TRIGGER_WORKFLOW_PATH: ${{ github.event.workflow_run.path }}
           TRIGGER_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
           TRIGGER_RUN_URL: ${{ github.event.workflow_run.html_url }}
@@ -198,7 +198,7 @@ jobs:
           fi
 
           trigger_run_json="$(gh api "repos/$REPOSITORY/actions/runs/$TRIGGER_RUN_ID")"
-          if [ "$TRIGGER_WORKFLOW" = "Codex Auto-Merge" ]; then
+          if [ "$TRIGGER_WORKFLOW_PATH" = ".github/workflows/codex-automerge.yml" ]; then
             # shellcheck disable=SC2016
             trigger_identity_filter='(.id | tostring) == $run_id
               and .repository.full_name == $repository
@@ -246,7 +246,7 @@ jobs:
           CI_DELIVERY_CORRELATION=""
           associated_pr=""
 
-          if [ "$TRIGGER_WORKFLOW" = "Codex Auto-Merge" ]; then
+          if [ "$TRIGGER_WORKFLOW_PATH" = ".github/workflows/codex-automerge.yml" ]; then
             if ! [[ "$TRIGGER_RUN_ID" =~ ^[0-9]+$ ]]; then
               echo "Auto-merge workflow did not provide a valid run ID." >&2
               exit 1

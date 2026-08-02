@@ -209,6 +209,13 @@ test('canonical autonomous policy is internally valid', () => {
 test('Codex auto-merge completion dispatches exact main CI through one delivery controller', () => {
   assert.match(mainDeliveryWorkflow, /workflows: \[CI, Codex Auto-Merge\]/);
   assert.match(mainDeliveryWorkflow, /run main delivery after Codex auto-merge/);
+  assert.match(mainDeliveryWorkflow, /github\.event\.workflow_run\.path == '\.github\/workflows\/ci\.yml'/);
+  assert.match(
+    mainDeliveryWorkflow,
+    /github\.event\.workflow_run\.path == '\.github\/workflows\/codex-automerge\.yml'/,
+  );
+  assert.match(mainDeliveryWorkflow, /TRIGGER_WORKFLOW_PATH: \$\{\{ github\.event\.workflow_run\.path \}\}/);
+  assert.doesNotMatch(mainDeliveryWorkflow, /github\.event\.workflow_run\.name/);
   assert.match(mainDeliveryWorkflow, /gh run download "\$TRIGGER_RUN_ID"/);
   assert.match(mainDeliveryWorkflow, /\[ "\$pr_head" != "\$reviewed_head" \]/);
   assert.match(mainDeliveryWorkflow, /-f delivery_correlation="\$ci_correlation"/);
