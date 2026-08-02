@@ -45,6 +45,10 @@ const codexAutomergeWorkflow = readFileSync(
   new URL('../../.github/workflows/codex-automerge.yml', import.meta.url),
   'utf8',
 );
+const codexSecurityWorkflow = readFileSync(
+  new URL('../../.github/workflows/codex-security.yml', import.meta.url),
+  'utf8',
+);
 const autonomousControllerSource = readFileSync(new URL('../autonomous-merge-controller.mjs', import.meta.url), 'utf8');
 const deployEnvironmentWorkflow = readFileSync(
   new URL('../../.github/workflows/deploy-environment.yml', import.meta.url),
@@ -211,6 +215,44 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
   assert.match(mainDeliveryWorkflow, /Pinned Deploy Test run did not emit matching successful provenance/);
   assert.match(mainDeliveryWorkflow, /Pinned production run did not emit matching successful runtime-truth evidence/);
   assert.equal(mainDeliveryWorkflow.match(/^\s+assert_current_main$/gm)?.length, 4);
+});
+
+test('Codex Security PR scanning is exact-head, credential-scoped, and advisory', () => {
+  assert.match(codexSecurityWorkflow, /pull_request:/);
+  assert.doesNotMatch(codexSecurityWorkflow, /pull_request_target/);
+  assert.match(codexSecurityWorkflow, /types: \[opened, synchronize, reopened, ready_for_review\]/);
+  assert.match(codexSecurityWorkflow, /actions: read\n {2}contents: read\n {2}security-events: write/);
+  assert.match(codexSecurityWorkflow, /group: codex-security-\$\{\{ github\.event\.pull_request\.number \}\}/);
+  assert.match(codexSecurityWorkflow, /cancel-in-progress: true/);
+  assert.match(codexSecurityWorkflow, /github\.event\.pull_request\.draft == false/);
+  assert.match(codexSecurityWorkflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+  assert.match(codexSecurityWorkflow, /github\.event\.pull_request\.user\.login != 'dependabot\[bot\]'/);
+  assert.match(codexSecurityWorkflow, /github\.actor != 'dependabot\[bot\]'/);
+  assert.ok(
+    codexSecurityWorkflow.indexOf('Install Codex Security outside the checkout') <
+      codexSecurityWorkflow.indexOf('Check out the exact pull-request head'),
+  );
+  assert.match(codexSecurityWorkflow, /@openai\/codex-security@0\.1\.3/);
+  assert.match(codexSecurityWorkflow, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(codexSecurityWorkflow, /fetch-depth: 0/);
+  assert.match(codexSecurityWorkflow, /persist-credentials: false/);
+  assert.match(codexSecurityWorkflow, /BASE_REVISION="\$\(git merge-base "\$BASE_SHA" "\$HEAD_SHA"\)"/);
+  assert.match(codexSecurityWorkflow, /OPENAI_API_KEY: \$\{\{ secrets\.CODEX_SECURITY_API_KEY \}\}/);
+  assert.match(codexSecurityWorkflow, /--mode standard/);
+  assert.match(codexSecurityWorkflow, /--model gpt-5\.6-sol/);
+  assert.match(codexSecurityWorkflow, /--effort xhigh/);
+  assert.match(codexSecurityWorkflow, /--max-cost 3/);
+  assert.match(codexSecurityWorkflow, /--knowledge-base "\$GITHUB_WORKSPACE\/docs\/security"/);
+  assert.match(codexSecurityWorkflow, /category: codex-security/);
+  assert.match(codexSecurityWorkflow, /retention-days: 7/);
+  assert.doesNotMatch(codexSecurityWorkflow, /--fail-on-severity/);
+
+  const actionReferences = [...codexSecurityWorkflow.matchAll(/^\s*uses: ([^\s]+)(?:\s+# tag=v\d+)?$/gm)];
+  assert.ok(actionReferences.length > 0);
+  for (const [line, reference] of actionReferences.map((match) => [match[0], match[1]])) {
+    assert.match(reference, /@[0-9a-f]{40}$/);
+    assert.match(line, /# tag=v\d+$/);
+  }
 });
 
 test('environment deployment rechecks current main at mutation and acceptance boundaries', () => {

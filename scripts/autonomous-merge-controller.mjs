@@ -23,6 +23,7 @@ const GITHUB_TOKEN_MINTING_SHELL =
   /(?:gh\s+auth\s+login|\/app\/installations\/|app\/installations\/[^\s"']*\/access_tokens|openssl[^\n]*(?:jwt|private[-_ ]key))/i;
 const ALLOWED_WORKFLOW_SECRET_NAMES = new Set([
   'GITHUB_TOKEN',
+  'CODEX_SECURITY_API_KEY',
   'OPENAI_API_KEY',
   'REDDIT_CLIENT_SECRET',
   'WLH_BASE_URL',
