@@ -1,5 +1,23 @@
 version: 1
 
+# Exact content allowlist for the trusted workflow set. Any workflow byte change
+# requires an independently reviewed update to this canonical manifest.
+trustedWorkflowSha256:
+  bring-readonly-canary.yml: ee34e51a9bf0c875b0f58cde2d389b76f7f673f0525fe7b6677bb388987e4ccf
+  ci.yml: 403bda22cbf2679fb808cdff1c9a8a449a190065a0a35346af71c6cdfdf74c7b
+  codeql.yml: c543422d77c3879a7f1b61e6fee0e1a036194c78a38a33f1ea16f268d4b2bc6a
+  codex-automerge.yml: 48da617fc00e5b3b66a220bb6801f516e244950f1de4eaf0f229ff932a46ba45
+  codex-main-delivery.yml: 3a8aa21d979847bba6c3284dff939eb56bef61d906d9e7013f744a142d878d63
+  deploy-environment.yml: eec7686ae1f6db1e894e7c6535df89befdce6c5df270540ccb26118e9d1603c6
+  deploy-test.yml: 30249503af8c36ceb3076e38bec52fa9217ca15b349f0cee57d7ca84f271c274
+  migrate-private-storage.yml: d21535733228a71a559bfe0163d34d63cdff9d8be05b5c97b3eb72a295983360
+  policy-check.yml: 553f5783cfbdb4dda498809b74265a9a247e5644663b74bacd1dd66c17fe23b2
+  prepare-production-private-storage.yml: 8abf389aca33ee3fd3d4f07546b5d8a7ec37369d099fe7266b8f566c5c3292c7
+  promote-production.yml: 6d0b51132e4768307cc80a3e20a8596fd0b3cd19f7f058a0944366fcde5bff25
+  repair-triage.yml: c1384abfdf12c6b8f171e50534ee6c13bc98e321e0e31e91ab69c3dcf7e1c6d3
+  rollback-production.yml: 73af772e392a2e242434c70d2c8e4c60461e8cfa6f5b04a29d6591dfe13e11ea
+  verify-azure-oidc.yml: b639da6e716892e4ea08e53b9953e0f8542392f4ea0a3f78d18b6bb36bb0442c
+
 # This file is the canonical repository policy consumed by CI, the autonomous
 # review workflow, documentation generation, and agent-instruction validation.
 requiredChecks:
@@ -51,6 +69,17 @@ requiredChecks:
     appSlug: github-actions
 
 highRiskPaths:
+  # These files can redefine, exclude, or replace code executed by required
+  # checks and release construction. They must never receive low-risk approval.
+  - package.json
+  - package-lock.json
+  - angular.json
+  - tsconfig.json
+  - eslint.config.js
+  - .prettierignore
+  - .prettierrc.json
+  - apps/**
+  - scripts/**
   - .github/workflows/**
   - .github/actions/**
   - .github/autonomous-policy.yml
@@ -86,6 +115,16 @@ highRiskPaths:
   - .agents/skills/**
 
 riskClasses:
+  supplyChain:
+    - package.json
+    - package-lock.json
+    - angular.json
+    - tsconfig.json
+    - eslint.config.js
+    - .prettierignore
+    - .prettierrc.json
+    - apps/**
+    - scripts/**
   workflow:
     - .github/workflows/**
     - .github/actions/**

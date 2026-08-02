@@ -36,15 +36,7 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install dependencies
         shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f package-lock.json ]; then
-            npm ci
-          elif [ -f package.json ]; then
-            npm install
-          else
-            echo "No root package.json found; install check is not applicable yet."
-          fi
+        run: npm ci --ignore-scripts
 
   lint:
     name: lint
@@ -59,17 +51,13 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
-        run: |
-          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+        run: npm ci --ignore-scripts
       - name: Run lint
         shell: bash
         run: |
           set -euo pipefail
-          if npm run | grep -qE '^  lint$|^    lint$| lint$'; then
-            npm run lint
-          else
-            echo "No npm lint script found; lint check is not applicable yet."
-          fi
+          ./node_modules/.bin/eslint apps scripts --max-warnings 0
+          ./node_modules/.bin/prettier --check .
 
   type-check:
     name: type-check
@@ -84,19 +72,13 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
-        run: |
-          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+        run: npm ci --ignore-scripts
       - name: Run type check
         shell: bash
         run: |
           set -euo pipefail
-          if npm run | grep -qE '^  type-check$|^    type-check$| type-check$'; then
-            npm run type-check
-          elif [ -f tsconfig.json ]; then
-            npx tsc --noEmit
-          else
-            echo "No TypeScript project found; type-check is not applicable yet."
-          fi
+          ./node_modules/.bin/tsc -p apps/api/tsconfig.json --noEmit
+          ./node_modules/.bin/ng build --configuration development --no-progress
 
   unit-tests:
     name: unit tests
@@ -111,17 +93,13 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
-        run: |
-          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+        run: npm ci --ignore-scripts
       - name: Run unit tests
         shell: bash
         run: |
           set -euo pipefail
-          if npm run | grep -qE '^  test$|^    test$| test$'; then
-            npm test -- --watch=false
-          else
-            echo "No npm test script found; unit test check is not applicable yet."
-          fi
+          ./node_modules/.bin/tsc -p apps/api/tsconfig.json
+          node --test apps/api/test/*.test.mjs apps/web/test/*.test.mjs scripts/test/*.test.mjs
 
   api-tests:
     name: API tests
@@ -136,19 +114,13 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
-        run: |
-          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+        run: npm ci --ignore-scripts
       - name: Run API tests
         shell: bash
         run: |
           set -euo pipefail
-          if npm run | grep -qE '^  test:api$|^    test:api$| test:api$'; then
-            npm run test:api
-          elif find . -path './node_modules' -prune -o -type f \( -name '*api*.test.*' -o -name '*api*.spec.*' \) -print -quit | grep -q .; then
-            npm test -- --watch=false --runInBand
-          else
-            echo "No API test target found; API tests are not applicable yet."
-          fi
+          ./node_modules/.bin/tsc -p apps/api/tsconfig.json
+          node --test apps/api/test/*.test.mjs
 
   angular-build:
     name: Angular build
@@ -163,20 +135,12 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
-        run: |
-          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+        run: npm ci --ignore-scripts
       - name: Build Angular app
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f angular.json ]; then
-            npx ng build --configuration production
-          elif find . -path './node_modules' -prune -o -name angular.json -print -quit | grep -q .; then
-            app_dir=$(dirname "$(find . -path './node_modules' -prune -o -name angular.json -print -quit)")
-            (cd "$app_dir" && npx ng build --configuration production)
-          else
-            echo "No angular.json found; Angular build is not applicable yet."
-          fi
+          ./node_modules/.bin/ng build --configuration production --no-progress
 
   azure-functions-build:
     name: Azure Functions build
@@ -191,21 +155,12 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
-        run: |
-          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+        run: npm ci --ignore-scripts
       - name: Build Azure Functions app
         shell: bash
         run: |
           set -euo pipefail
-          if npm run | grep -qE '^  build:api$|^    build:api$| build:api$'; then
-            npm run build:api
-          elif npm run | grep -qE '^  build:functions$|^    build:functions$| build:functions$'; then
-            npm run build:functions
-          elif find . -path './node_modules' -prune -o -name host.json -print -quit | grep -q .; then
-            npm run build --if-present
-          else
-            echo "No Azure Functions app found; Azure Functions build is not applicable yet."
-          fi
+          ./node_modules/.bin/tsc -p apps/api/tsconfig.json
 
   openapi-validation:
     name: OpenAPI validation
@@ -219,8 +174,7 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
-        run: |
-          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+        run: npm ci --ignore-scripts
       - name: Validate OpenAPI documents
         shell: bash
         run: |
@@ -232,13 +186,15 @@ jobs:
           fi
           for spec in "${specs[@]}"; do
             echo "Validating $spec"
-            npx redocly lint "$spec"
+            ./node_modules/.bin/redocly lint "$spec"
           done
       - name: Check OpenAPI route drift
         shell: bash
         run: |
-          npm run ops:check-openapi-drift
-          npm run ops:check-operation-drift
+          set -euo pipefail
+          node scripts/check-openapi-route-drift.mjs
+          ./node_modules/.bin/tsc -p apps/api/tsconfig.json
+          node scripts/check-operation-contract-drift.mjs
 
   bicep-validation:
     name: Bicep validation
@@ -305,13 +261,17 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
       - name: Check dependency directions
-        run: npm run ops:check-architecture
+        run: node scripts/check-architecture.mjs
       - name: Validate repository agent skills
-        run: npm run ops:validate-agent-skills
+        run: node scripts/validate-agent-skills.mjs
       - name: Run deterministic agent safety evals
-        run: npm run eval:agents
+        run: |
+          ./node_modules/.bin/tsc -p apps/api/tsconfig.json
+          node scripts/run-agent-evals.mjs
       - name: Check generated operation catalogue
-        run: npm run docs:check-operations
+        run: |
+          ./node_modules/.bin/tsc -p apps/api/tsconfig.json
+          node scripts/generate-operation-docs.mjs --check
 
   security-scan:
     name: security scan
@@ -359,10 +319,10 @@ jobs:
           if [ -f package-lock.json ]; then
             npm audit --audit-level=high
           elif [ -f package.json ]; then
-            npm install --package-lock-only
+            npm install --package-lock-only --ignore-scripts
             npm audit --audit-level=high
           else
-            echo "No npm package files found; dependency audit is not applicable yet."
+            echo "No package files found; dependency audit is not applicable yet."
           fi
 
   release-artifacts:
@@ -399,7 +359,8 @@ jobs:
           SOURCE_REF: ${{ github.sha }}
         run: |
           set -euo pipefail
-          npm run build
+          ./node_modules/.bin/ng build --configuration production --no-progress
+          ./node_modules/.bin/tsc -p apps/api/tsconfig.json
           bash scripts/build-release-artifacts.sh "$RUNNER_TEMP/release"
           node scripts/verify-release-artifacts.mjs "$RUNNER_TEMP/release" "$GITHUB_SHA"
       - name: Upload immutable release bundle

@@ -75,7 +75,7 @@ jobs:
           if ! git cat-file -e "$base_ref^{commit}" 2>/dev/null; then
             base_ref="HEAD~1"
           fi
-          BASE_REF="$base_ref" npm run ops:policy-guardrails
+          BASE_REF="$base_ref" node scripts/policy-guardrails.mjs
           echo "Guardrail policy check passed."
 
   dependency-lock-policy:

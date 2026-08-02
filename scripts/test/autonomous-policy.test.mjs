@@ -18,12 +18,14 @@ import {
   evaluateCompleteCheckRollup,
   evaluatePullRequestState,
   evaluateRequiredChecks,
+  exclusiveWorkflowCheckWriteFindings,
   mergeGateDecision,
   reviewClaimExternalId,
   reviewClaimName,
   reviewRequestIdempotencyKey,
   runRequiredCheckPreflight,
   runReview,
+  trustedWorkflowHashFindings,
   validateAutonomousReview,
 } from '../autonomous-merge-controller.mjs';
 
@@ -42,6 +44,8 @@ const mainDeliveryWorkflow = readFileSync(
   new URL('../../.github/workflows/codex-main-delivery.yml', import.meta.url),
   'utf8',
 );
+const ciWorkflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+const policyCheckWorkflow = readFileSync(new URL('../../.github/workflows/policy-check.yml', import.meta.url), 'utf8');
 const codexAutomergeWorkflow = readFileSync(
   new URL('../../.github/workflows/codex-automerge.yml', import.meta.url),
   'utf8',
@@ -204,6 +208,48 @@ test('canonical autonomous policy is internally valid', () => {
   assert.match(codexAutomergeWorkflow, /ref: \$\{\{ github\.workflow_sha \}\}/);
   assert.doesNotMatch(codexAutomergeWorkflow, /source-run-id|Reuse approved exact-head review evidence/);
   assert.doesNotMatch(autonomousControllerSource, /releaseReviewClaim|method: 'PATCH'[\s\S]*check-runs/);
+});
+
+test('required checks and deployment never dispatch repository-controlled npm scripts', async () => {
+  for (const workflow of [ciWorkflow, policyCheckWorkflow, deployEnvironmentWorkflow]) {
+    assert.doesNotMatch(workflow, /(?:^|[\s;&|()])npm\s+(?:run(?:\s|$)|test(?:\s|$))/m);
+  }
+  assert.match(ciWorkflow, /node_modules\/\.bin\/eslint apps scripts --max-warnings 0/);
+  assert.match(
+    ciWorkflow,
+    /node --test apps\/api\/test\/\*\.test\.mjs apps\/web\/test\/\*\.test\.mjs scripts\/test\/\*\.test\.mjs/,
+  );
+  assert.match(ciWorkflow, /node_modules\/\.bin\/ng build --configuration production --no-progress/);
+  assert.match(ciWorkflow, /node_modules\/\.bin\/tsc -p apps\/api\/tsconfig\.json/);
+  assert.match(policyCheckWorkflow, /BASE_REF="\$base_ref" node scripts\/policy-guardrails\.mjs/);
+  assert.match(deployEnvironmentWorkflow, /node scripts\/smoke-runtime\.mjs/);
+  assert.match(deployEnvironmentWorkflow, /node scripts\/validate-release-ledger\.mjs/);
+  assert.deepEqual(await exclusiveWorkflowCheckWriteFindings(), []);
+});
+
+test('trusted workflow hashes bind complete run blocks and reject indirect command reconstruction', () => {
+  const approvedWorkflow = 'jobs:\n  test:\n    steps:\n      - run: node --test\n';
+  const approvedDigest = 'f88f2a2a45020d781428e709a66f1e117291851f6bdf2f57cad5e97fc763b07f';
+  assert.deepEqual(trustedWorkflowHashFindings({ 'ci.yml': approvedWorkflow }, { 'ci.yml': approvedDigest }), []);
+
+  const reconstructedCommand = `${approvedWorkflow}      - run: PM=$(printf '\\156\\160\\155'); "$PM" run lint\n`;
+  assert.deepEqual(trustedWorkflowHashFindings({ 'ci.yml': reconstructedCommand }, { 'ci.yml': approvedDigest }), [
+    'ci.yml: content does not match the trusted workflow hash',
+  ]);
+  assert.deepEqual(
+    trustedWorkflowHashFindings(
+      { 'ci.yml': approvedWorkflow, 'new.yml': approvedWorkflow },
+      { 'ci.yml': approvedDigest },
+    ),
+    ['new.yml: trusted workflow hash is missing'],
+  );
+  assert.deepEqual(
+    trustedWorkflowHashFindings(
+      { 'ci.yml': approvedWorkflow },
+      { 'ci.yml': approvedDigest, 'missing.yml': approvedDigest },
+    ),
+    ['missing.yml: trusted workflow file is missing'],
+  );
 });
 
 test('Codex auto-merge completion dispatches exact main CI through one delivery controller', () => {
@@ -559,6 +605,36 @@ test('risk classification covers workflow, MCP, Bring, contracts, and agent skil
   const risk = classifyRisk(paths, policy);
   assert.equal(risk.highRisk, true);
   assert.deepEqual(risk.highRiskPaths, paths);
+});
+
+test('package scripts, build controls, and executable code always require independent review', () => {
+  const paths = [
+    'package.json',
+    'package-lock.json',
+    'angular.json',
+    'tsconfig.json',
+    'eslint.config.js',
+    '.prettierignore',
+    '.prettierrc.json',
+    'apps/web/src/app/app.ts',
+    'scripts/check-lockfile-policy.mjs',
+  ];
+  const risk = classifyRisk(paths, policy);
+  assert.equal(risk.highRisk, true);
+  assert.deepEqual(risk.highRiskPaths, paths);
+  assert.deepEqual(risk.classes.supplyChain, paths);
+
+  for (const removedPattern of ['package.json', 'package-lock.json', 'apps/**', 'scripts/**']) {
+    const weakened = {
+      ...policy,
+      highRiskPaths: policy.highRiskPaths.filter((pattern) => pattern !== removedPattern),
+    };
+    assert.ok(
+      validateAutonomousPolicy(weakened).includes(
+        `highRiskPaths must include executable control pattern: ${removedPattern}`,
+      ),
+    );
+  }
 });
 
 test('auto-merge candidates are scoped and blocked labels fail closed', () => {

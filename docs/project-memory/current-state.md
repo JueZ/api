@@ -1,5 +1,12 @@
 # Current state
 
+## 2026-08-02 Package-script CI indirection repair prepared
+
+- A local full-repository Codex Security review identified a critical supply-chain path: `package.json` could remap required lint, test, policy, and release-build npm scripts to successful no-ops while remaining outside deterministic high-risk classification. Exact-head provenance would then bind the attacker-selected revision without proving that the intended commands ran.
+- The repair makes root manifests/lockfiles, build controls, all `apps/**`, and all `scripts/**` changes high risk; the policy validator rejects removal of those classifier roots. Required CI, policy, release, deployment-smoke, telemetry, ledger, and repair-triage workflow steps now execute fixed tool or script paths and install dependencies with lifecycle scripts disabled.
+- The canonical policy hashes every complete workflow file, and the trusted controller rejects missing, additional, or byte-modified workflows. This binds reconstructed/encoded/indirect shell commands without a lexical denylist; any workflow-byte change requires an independently reviewed manifest update. Regression coverage verifies workflow tampering, package/build/executable classification, and the literal required commands. No existing security, policy, test, deployment, branch-protection, or production latch was removed or weakened.
+- This entry records the prepared repository change, not remote acceptance. Exact-head CI, Policy Check, CodeQL, independent high-risk review, merge, and applicable post-merge delivery evidence remain required before the repair is accepted.
+
 ## 2026-08-02 Always-on controller repairs accepted through production
 
 - PR #319 exact head `9d130a65a3bc4eef866b6198902e9afcf425c243` passed PR CI `30745662331`, Policy `30745662330`, CodeQL `30745662351`, and independent high-risk review in controller run `30745661913`. The trusted controller still running from predecessor main then reproduced its known clean-only self-deadlock. Codex performed one protected exact-head squash bootstrap without admin bypass; main commit `d24fe187ce5b3aeaf238e5b66e0339c5ccc7afbd` passed push CI `30745774623` and Policy `30745774629`.

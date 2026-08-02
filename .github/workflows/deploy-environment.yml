@@ -703,9 +703,7 @@ jobs:
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
       - name: Install dependencies
         shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+        run: npm ci --ignore-scripts
       - name: Download immutable CI release bundle
         if: ${{ !inputs.allowRollback }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
@@ -1493,7 +1491,7 @@ jobs:
           export SMOKE_RUN_ID="$smoke_run_id"
           export AUTH_ENABLED
           if [ "${DEPLOY_FRONTEND:-false}" = "true" ] && [ -n "${FRONTEND_BASE_URL:-}" ]; then export FRONTEND_BASE_URL; fi
-          npm run --silent ops:smoke | tee "$smoke_dir/runtime-smoke.json"
+          node scripts/smoke-runtime.mjs | tee "$smoke_dir/runtime-smoke.json"
           echo "SMOKE_RESULTS_PATH=$smoke_dir/runtime-smoke.json" >> "$GITHUB_ENV"
 
           api_cors_redirect_uri=""
@@ -1541,7 +1539,7 @@ jobs:
           set -euo pipefail
           export ENVIRONMENT_NAME
           export REQUIRE_AUTH_SMOKE=true
-          npm run --silent ops:mint-smoke-token
+          node scripts/mint-smoke-token.mjs
       - name: Run authenticated smoke tests
         shell: bash
         env:
@@ -1558,7 +1556,7 @@ jobs:
           export REDDIT_SHARE_URL_SMOKE_ENABLED="$REDDIT_SHARE_URL_SMOKE_REQUESTED"
           export REDDIT_SHARE_URL_SMOKE_URL="https://www.reddit.com/r/macbookpro/s/nnlryuZCNX"
           export REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID="1tryldy"
-          npm run --silent ops:smoke:auth | tee "$smoke_dir/auth-smoke.json"
+          node scripts/smoke-auth.mjs | tee "$smoke_dir/auth-smoke.json"
           echo "AUTH_SMOKE_RESULTS_PATH=$smoke_dir/auth-smoke.json" >> "$GITHUB_ENV"
       - name: Run telemetry gate
         shell: bash
@@ -1574,7 +1572,7 @@ jobs:
           export TELEMETRY_REQUIRE_SMOKE_CORRELATION=true
           export TELEMETRY_TIMESPAN_MINUTES=45
           export TELEMETRY_RESULTS_PATH="$smoke_dir/telemetry.json"
-          npm run --silent ops:check-telemetry
+          node scripts/check-telemetry.mjs
           echo "TELEMETRY_RESULTS_PATH=$smoke_dir/telemetry.json" >> "$GITHUB_ENV"
       - name: Verify current generation before evidence publication
         shell: bash
@@ -1597,8 +1595,8 @@ jobs:
           export RELEASE_SBOM_SHA256="$SBOM_SHA256"
           export SMOKE_RUN_ID="${SMOKE_RUN_ID:-smoke-${ENVIRONMENT_NAME}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
           export RELEASE_LEDGER_PATH="$smoke_dir/release-ledger-${ENVIRONMENT_NAME}.json"
-          npm run --silent ops:write-release-ledger -- "$RELEASE_LEDGER_PATH"
-          EXPECTED_DELIVERY_CORRELATION="$DELIVERY_CORRELATION" npm run --silent ops:validate-release-ledger -- "$RELEASE_LEDGER_PATH"
+          node scripts/write-release-ledger.mjs "$RELEASE_LEDGER_PATH"
+          EXPECTED_DELIVERY_CORRELATION="$DELIVERY_CORRELATION" node scripts/validate-release-ledger.mjs "$RELEASE_LEDGER_PATH"
           echo "RELEASE_LEDGER_PATH=$RELEASE_LEDGER_PATH" >> "$GITHUB_ENV"
       - name: Upload release ledger
         if: ${{ always() }}

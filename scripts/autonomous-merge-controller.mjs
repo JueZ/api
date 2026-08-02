@@ -21,6 +21,7 @@ const GITHUB_AUTH_KEYS = new Set(['authorization', 'gh_token', 'github_token', '
 const GITHUB_TOKEN_MINTING_ACTION = /(?:github.*(?:app-)?token|(?:app-)?token.*github|create.*app.*token)/i;
 const GITHUB_TOKEN_MINTING_SHELL =
   /(?:gh\s+auth\s+login|\/app\/installations\/|app\/installations\/[^\s"']*\/access_tokens|openssl[^\n]*(?:jwt|private[-_ ]key))/i;
+const DEFAULT_WORKFLOW_DIRECTORY = new URL('../.github/workflows/', import.meta.url);
 const ALLOWED_WORKFLOW_SECRET_NAMES = new Set([
   'GITHUB_TOKEN',
   'OPENAI_API_KEY',
@@ -927,14 +928,20 @@ export function reviewRequestIdempotencyKey(repository, prNumber, headSha) {
 }
 
 export async function exclusiveWorkflowCheckWriteFindings(
-  directory = new URL('../.github/workflows/', import.meta.url),
+  directory = DEFAULT_WORKFLOW_DIRECTORY,
+  expectedWorkflowHashes = directory === DEFAULT_WORKFLOW_DIRECTORY
+    ? loadAutonomousPolicy().trustedWorkflowSha256
+    : undefined,
 ) {
   const findings = [];
   const writers = [];
+  const workflowContents = {};
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     if (!entry.isFile() || !/\.ya?ml$/i.test(entry.name)) continue;
     const workflowPath = typeof directory === 'string' ? join(directory, entry.name) : new URL(entry.name, directory);
-    const workflow = parseYaml(await readFile(workflowPath, 'utf8'));
+    const workflowSource = await readFile(workflowPath, 'utf8');
+    workflowContents[entry.name] = workflowSource;
+    const workflow = parseYaml(workflowSource);
     if (!isRecord(workflow)) {
       findings.push(`${entry.name}: workflow must be a YAML mapping`);
       continue;
@@ -961,6 +968,10 @@ export async function exclusiveWorkflowCheckWriteFindings(
     }
 
     collectUnsafeGithubTokenFindings(workflow, entry.name, findings);
+  }
+
+  if (expectedWorkflowHashes !== undefined) {
+    findings.push(...trustedWorkflowHashFindings(workflowContents, expectedWorkflowHashes));
   }
 
   const expectedWriters = [...CONTROLLER_CHECK_WRITER_JOBS].map((job) => `${CONTROLLER_WORKFLOW}:${job}`).sort();
@@ -1024,6 +1035,28 @@ function collectUnsafeGithubTokenFindings(value, workflowName, findings, path = 
     }
     collectUnsafeGithubTokenFindings(child, workflowName, findings, childPath);
   }
+}
+
+export function trustedWorkflowHashFindings(workflowContents, expectedWorkflowHashes) {
+  if (!isRecord(workflowContents) || !isRecord(expectedWorkflowHashes)) {
+    return ['trusted workflow hash policy requires workflow-content and expected-hash mappings'];
+  }
+  const findings = [];
+  const actualNames = Object.keys(workflowContents).sort();
+  const expectedNames = Object.keys(expectedWorkflowHashes).sort();
+  for (const workflowName of actualNames.filter((name) => !expectedNames.includes(name))) {
+    findings.push(`${workflowName}: trusted workflow hash is missing`);
+  }
+  for (const workflowName of expectedNames.filter((name) => !actualNames.includes(name))) {
+    findings.push(`${workflowName}: trusted workflow file is missing`);
+  }
+  for (const workflowName of actualNames.filter((name) => expectedNames.includes(name))) {
+    const actualDigest = createHash('sha256').update(workflowContents[workflowName]).digest('hex');
+    if (actualDigest !== expectedWorkflowHashes[workflowName]) {
+      findings.push(`${workflowName}: content does not match the trusted workflow hash`);
+    }
+  }
+  return findings;
 }
 
 function collectSecretExpressionFindings(value, workflowName, path, findings) {

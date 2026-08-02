@@ -37,15 +37,7 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install dependencies
         shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f package-lock.json ]; then
-            npm ci
-          elif [ -f package.json ]; then
-            npm install
-          else
-            echo "No root package.json found; install check is not applicable yet."
-          fi
+        run: npm ci --ignore-scripts
       - name: Triage repair issues
         env:
           GH_TOKEN: ${{ github.token }}
@@ -53,4 +45,4 @@ jobs:
           REPAIR_TRIAGE_CLOSE_RESOLVED: ${{ github.event_name == 'workflow_dispatch' && inputs.close_resolved || 'false' }}
           REPAIR_TRIAGE_REQUIRE_LEDGER_FOR_PROD: 'true'
           API_BASE_URL: ${{ inputs.api_base_url || '' }}
-        run: npm run ops:triage-repair-issues
+        run: node scripts/triage-repair-issues.mjs
