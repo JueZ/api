@@ -35,6 +35,16 @@ export function validateAutonomousPolicy(policy) {
   if (!isRecord(policy)) return ['policy must be an object'];
   if (policy.version !== 1) errors.push('version must be 1');
 
+  if (!isRecord(policy.trustedWorkflowSha256) || Object.keys(policy.trustedWorkflowSha256).length === 0) {
+    errors.push('trustedWorkflowSha256 must be a non-empty mapping');
+  } else {
+    for (const [workflowName, digest] of Object.entries(policy.trustedWorkflowSha256)) {
+      if (!/^[A-Za-z0-9._-]+\.ya?ml$/.test(workflowName) || !/^[0-9a-f]{64}$/.test(digest)) {
+        errors.push(`trustedWorkflowSha256 contains an invalid entry: ${workflowName}`);
+      }
+    }
+  }
+
   if (!Array.isArray(policy.requiredChecks) || policy.requiredChecks.length === 0) {
     errors.push('requiredChecks must be a non-empty array');
   } else {

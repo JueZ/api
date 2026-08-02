@@ -25,7 +25,7 @@ import {
   reviewRequestIdempotencyKey,
   runRequiredCheckPreflight,
   runReview,
-  unsafeWorkflowPackageManagerLines,
+  trustedWorkflowHashFindings,
   validateAutonomousReview,
 } from '../autonomous-merge-controller.mjs';
 
@@ -227,46 +227,28 @@ test('required checks and deployment never dispatch repository-controlled npm sc
   assert.deepEqual(await exclusiveWorkflowCheckWriteFindings(), []);
 });
 
-test('workflow package-manager audit permits only exact non-script commands', () => {
-  assert.deepEqual(
-    unsafeWorkflowPackageManagerLines(
-      [
-        'npm ci --ignore-scripts',
-        'npm audit --audit-level=high',
-        'npm install --package-lock-only --ignore-scripts',
-      ].join('\n'),
-    ),
-    [],
-  );
+test('trusted workflow hashes bind complete run blocks and reject indirect command reconstruction', () => {
+  const approvedWorkflow = 'jobs:\n  test:\n    steps:\n      - run: node --test\n';
+  const approvedDigest = 'f88f2a2a45020d781428e709a66f1e117291851f6bdf2f57cad5e97fc763b07f';
+  assert.deepEqual(trustedWorkflowHashFindings({ 'ci.yml': approvedWorkflow }, { 'ci.yml': approvedDigest }), []);
 
-  const bypasses = [
-    'npm --silent run lint',
-    'npm -s test',
-    'npm --prefix . run lint',
-    'npm run-script lint',
-    'npm start',
-    'npm stop',
-    'npm restart',
-    'npm t',
-    'npm tst',
-    'npx eslint apps',
-    'yarn lint',
-    'yarnpkg lint',
-    'pnpm test',
-    'pnpx eslint apps',
-    'corepack yarn lint',
-    'bun run lint',
-    'node --run lint',
-    'node --run=lint',
-    '/usr/bin/npm run lint',
-    'command npm run lint',
-    '${NPM} run lint',
-    'npm \\',
-    '  run lint',
-  ];
+  const reconstructedCommand = `${approvedWorkflow}      - run: PM=$(printf '\\156\\160\\155'); "$PM" run lint\n`;
+  assert.deepEqual(trustedWorkflowHashFindings({ 'ci.yml': reconstructedCommand }, { 'ci.yml': approvedDigest }), [
+    'ci.yml: content does not match the trusted workflow hash',
+  ]);
   assert.deepEqual(
-    unsafeWorkflowPackageManagerLines(bypasses.join('\n')),
-    bypasses.map((_, index) => index + 1).filter((lineNumber) => lineNumber !== bypasses.length),
+    trustedWorkflowHashFindings(
+      { 'ci.yml': approvedWorkflow, 'new.yml': approvedWorkflow },
+      { 'ci.yml': approvedDigest },
+    ),
+    ['new.yml: trusted workflow hash is missing'],
+  );
+  assert.deepEqual(
+    trustedWorkflowHashFindings(
+      { 'ci.yml': approvedWorkflow },
+      { 'ci.yml': approvedDigest, 'missing.yml': approvedDigest },
+    ),
+    ['missing.yml: trusted workflow file is missing'],
   );
 });
 

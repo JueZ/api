@@ -21,13 +21,7 @@ const GITHUB_AUTH_KEYS = new Set(['authorization', 'gh_token', 'github_token', '
 const GITHUB_TOKEN_MINTING_ACTION = /(?:github.*(?:app-)?token|(?:app-)?token.*github|create.*app.*token)/i;
 const GITHUB_TOKEN_MINTING_SHELL =
   /(?:gh\s+auth\s+login|\/app\/installations\/|app\/installations\/[^\s"']*\/access_tokens|openssl[^\n]*(?:jwt|private[-_ ]key))/i;
-const PACKAGE_MANAGER_TOKEN = /(?:^|[^a-z0-9_.-])(?:npm|npx|yarn|yarnpkg|pnpm|pnpx|corepack|bun)(?=$|[^a-z0-9_.-])/i;
-const NODE_PACKAGE_SCRIPT_DISPATCH = /(?:^|[^a-z0-9_.-])node\s+--run(?:=|\s|$)/i;
-const ALLOWED_WORKFLOW_PACKAGE_MANAGER_COMMANDS = Object.freeze([
-  /^\s*npm ci --ignore-scripts\s*$/,
-  /^\s*npm audit --audit-level=high\s*$/,
-  /^\s*npm install --package-lock-only --ignore-scripts\s*$/,
-]);
+const DEFAULT_WORKFLOW_DIRECTORY = new URL('../.github/workflows/', import.meta.url);
 const ALLOWED_WORKFLOW_SECRET_NAMES = new Set([
   'GITHUB_TOKEN',
   'OPENAI_API_KEY',
@@ -934,14 +928,20 @@ export function reviewRequestIdempotencyKey(repository, prNumber, headSha) {
 }
 
 export async function exclusiveWorkflowCheckWriteFindings(
-  directory = new URL('../.github/workflows/', import.meta.url),
+  directory = DEFAULT_WORKFLOW_DIRECTORY,
+  expectedWorkflowHashes = directory === DEFAULT_WORKFLOW_DIRECTORY
+    ? loadAutonomousPolicy().trustedWorkflowSha256
+    : undefined,
 ) {
   const findings = [];
   const writers = [];
+  const workflowContents = {};
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     if (!entry.isFile() || !/\.ya?ml$/i.test(entry.name)) continue;
     const workflowPath = typeof directory === 'string' ? join(directory, entry.name) : new URL(entry.name, directory);
-    const workflow = parseYaml(await readFile(workflowPath, 'utf8'));
+    const workflowSource = await readFile(workflowPath, 'utf8');
+    workflowContents[entry.name] = workflowSource;
+    const workflow = parseYaml(workflowSource);
     if (!isRecord(workflow)) {
       findings.push(`${entry.name}: workflow must be a YAML mapping`);
       continue;
@@ -968,6 +968,10 @@ export async function exclusiveWorkflowCheckWriteFindings(
     }
 
     collectUnsafeGithubTokenFindings(workflow, entry.name, findings);
+  }
+
+  if (expectedWorkflowHashes !== undefined) {
+    findings.push(...trustedWorkflowHashFindings(workflowContents, expectedWorkflowHashes));
   }
 
   const expectedWriters = [...CONTROLLER_CHECK_WRITER_JOBS].map((job) => `${CONTROLLER_WORKFLOW}:${job}`).sort();
@@ -1022,13 +1026,6 @@ function collectUnsafeGithubTokenFindings(value, workflowName, findings, path = 
     }
     if (typeof child === 'string') {
       collectSecretExpressionFindings(child, workflowName, childPath, findings);
-      if (key === 'run') {
-        for (const lineNumber of unsafeWorkflowPackageManagerLines(child)) {
-          findings.push(
-            `${workflowName}:${childPath.join('.')}: line ${lineNumber} uses a non-allowlisted package-manager command`,
-          );
-        }
-      }
       if (GITHUB_TOKEN_MINTING_SHELL.test(child)) {
         findings.push(`${workflowName}:${childPath.join('.')}: shell-based GitHub token minting is not allowed`);
       }
@@ -1040,15 +1037,26 @@ function collectUnsafeGithubTokenFindings(value, workflowName, findings, path = 
   }
 }
 
-export function unsafeWorkflowPackageManagerLines(script) {
-  return String(script)
-    .split('\n')
-    .map((line, index) => ({ line, lineNumber: index + 1 }))
-    .filter(({ line }) => PACKAGE_MANAGER_TOKEN.test(line) || NODE_PACKAGE_SCRIPT_DISPATCH.test(line))
-    .filter(
-      ({ line }) => !ALLOWED_WORKFLOW_PACKAGE_MANAGER_COMMANDS.some((allowedPattern) => allowedPattern.test(line)),
-    )
-    .map(({ lineNumber }) => lineNumber);
+export function trustedWorkflowHashFindings(workflowContents, expectedWorkflowHashes) {
+  if (!isRecord(workflowContents) || !isRecord(expectedWorkflowHashes)) {
+    return ['trusted workflow hash policy requires workflow-content and expected-hash mappings'];
+  }
+  const findings = [];
+  const actualNames = Object.keys(workflowContents).sort();
+  const expectedNames = Object.keys(expectedWorkflowHashes).sort();
+  for (const workflowName of actualNames.filter((name) => !expectedNames.includes(name))) {
+    findings.push(`${workflowName}: trusted workflow hash is missing`);
+  }
+  for (const workflowName of expectedNames.filter((name) => !actualNames.includes(name))) {
+    findings.push(`${workflowName}: trusted workflow file is missing`);
+  }
+  for (const workflowName of actualNames.filter((name) => expectedNames.includes(name))) {
+    const actualDigest = createHash('sha256').update(workflowContents[workflowName]).digest('hex');
+    if (actualDigest !== expectedWorkflowHashes[workflowName]) {
+      findings.push(`${workflowName}: content does not match the trusted workflow hash`);
+    }
+  }
+  return findings;
 }
 
 function collectSecretExpressionFindings(value, workflowName, path, findings) {
