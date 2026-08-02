@@ -278,7 +278,7 @@ jobs:
             --head "$HEAD_SHA" \
             --mode standard \
             --model gpt-5.6-luna \
-            --effort minimal \
+            --effort low \
             --max-cost 0.1 \
             --knowledge-base "$TRUSTED_KB_DIR/AGENTS.md" \
             --knowledge-base "$TRUSTED_KB_DIR/.github/AGENTS.md" \
@@ -330,7 +330,7 @@ jobs:
             --mode standard \
             --auth api-key \
             --model gpt-5.6-luna \
-            --effort minimal \
+            --effort low \
             --max-cost 0.1 \
             --knowledge-base "$TRUSTED_KB_DIR/AGENTS.md" \
             --knowledge-base "$TRUSTED_KB_DIR/.github/AGENTS.md" \

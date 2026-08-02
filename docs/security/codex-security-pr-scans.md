@@ -9,11 +9,11 @@ The workflow installs the exact officially documented `@openai/codex-security@0.
 The workflow then checks out the exact PR head SHA without persisted credentials, calculates the Git merge base from the event's base and head SHAs, and runs an advisory cost-calibration scan with:
 
 - `gpt-5.6-luna`;
-- `minimal` reasoning effort during the integration canary;
+- `low` reasoning effort during the integration canary;
 - a `$0.10` estimated scan limit;
 - the repository agent instructions, security documentation, architecture documentation, and current project state from the trusted PR base commit as knowledge-base inputs.
 
-Luna is the lowest-cost GPT-5.6 option, while OpenAI recommends Sol with `xhigh` effort for the highest-quality security review. Luna/minimal is intentionally limited to the low-spend integration canary and is not sufficient evidence for an enforcement decision.
+Luna is the lowest-cost GPT-5.6 option, while OpenAI recommends Sol with `xhigh` effort for the highest-quality security review. Luna/low is intentionally limited to the low-spend integration canary and is not sufficient evidence for an enforcement decision. Although CLI 0.1.3 accepts `minimal` during local validation, the Luna API rejects that value; `low` is the least supported Luna effort.
 
 `--max-cost 0.1` is an estimated stop threshold, not a strict hard cap. A request already in progress can finish slightly above the limit, failed scans consume the work already performed, and each rerun creates additional spend. A scan that reaches this threshold before finalization is correctly reported as incomplete and produces no security verdict; ten cents cannot guarantee a sealed scan for an arbitrary pull-request diff.
 

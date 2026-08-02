@@ -320,7 +320,7 @@ test('Codex Security PR scanning is exact-head, credential-scoped, and advisory'
   assert.equal(codexSecurityWorkflow.match(/secrets\.CODEX_SECURITY_API_KEY/g)?.length, 1);
   assert.match(codexSecurityWorkflow, /--mode standard/);
   assert.match(codexSecurityWorkflow, /--model gpt-5\.6-luna/);
-  assert.match(codexSecurityWorkflow, /--effort minimal/);
+  assert.match(codexSecurityWorkflow, /--effort low/);
   assert.match(codexSecurityWorkflow, /--max-cost 0\.1/);
   assert.equal(codexSecurityWorkflow.match(/--max-cost 0\.1/g)?.length, 2);
   assert.doesNotMatch(codexSecurityWorkflow, /--max-cost (?:[1-9]|0\.[2-9])/);
