@@ -69,21 +69,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Scan committed pull-request changes
-        id: scan
+      - name: Resolve the immutable scan target
+        id: scan-target
         shell: bash
         env:
-          OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
-          CODEX_SECURITY_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
-          CODEX_SECURITY_STATE_DIR: ${{ runner.temp }}/codex-security-state
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          SCAN_DIR: ${{ runner.temp }}/codex-security-results
-          RESULT_JSON: ${{ runner.temp }}/codex-security.json
         run: |
           set -euo pipefail
-          umask 077
-          : "${OPENAI_API_KEY:?CODEX_SECURITY_API_KEY repository secret is required}"
           if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo "Pull-request base and head must be full lowercase commit SHAs." >&2
             exit 1
@@ -94,9 +87,69 @@ jobs:
           fi
           git cat-file -e "$BASE_SHA^{commit}"
           git cat-file -e "$HEAD_SHA^{commit}"
-          BASE_REVISION="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
-          if [[ ! "$BASE_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+          base_revision="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+          if [[ ! "$base_revision" =~ ^[0-9a-f]{40}$ ]]; then
             echo "Git did not resolve an immutable pull-request merge base." >&2
+            exit 1
+          fi
+          echo "base_revision=$base_revision" >> "$GITHUB_OUTPUT"
+
+      - name: Validate scan configuration without API access
+        shell: bash
+        env:
+          CODEX_SECURITY_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
+          CODEX_SECURITY_STATE_DIR: ${{ runner.temp }}/codex-security-preflight-state
+          BASE_REVISION: ${{ steps.scan-target.outputs.base_revision }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PREFLIGHT_DIR: ${{ runner.temp }}/codex-security-preflight-results
+          PREFLIGHT_JSON: ${{ runner.temp }}/codex-security-dry-run.json
+        run: |
+          set -euo pipefail
+          umask 077
+          install -d -m 700 "$CODEX_SECURITY_STATE_DIR"
+          if [ -e "$PREFLIGHT_DIR" ]; then
+            echo "Codex Security preflight output directory must start absent." >&2
+            exit 1
+          fi
+
+          "$CODEX_SECURITY_BIN" scan . \
+            --diff "$BASE_REVISION" \
+            --head "$HEAD_SHA" \
+            --mode standard \
+            --model gpt-5.6-luna \
+            --effort high \
+            --max-cost 3 \
+            --knowledge-base "$GITHUB_WORKSPACE/AGENTS.md" \
+            --knowledge-base "$GITHUB_WORKSPACE/.github/AGENTS.md" \
+            --knowledge-base "$GITHUB_WORKSPACE/docs/security" \
+            --knowledge-base "$GITHUB_WORKSPACE/docs/architecture" \
+            --knowledge-base "$GITHUB_WORKSPACE/docs/project-memory/current-state.md" \
+            --output-dir "$PREFLIGHT_DIR" \
+            --dry-run \
+            --json > "$PREFLIGHT_JSON"
+
+      - name: Scan committed pull-request changes
+        id: scan
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
+          CODEX_SECURITY_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
+          CODEX_SECURITY_STATE_DIR: ${{ runner.temp }}/codex-security-state
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REVISION: ${{ steps.scan-target.outputs.base_revision }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SCAN_DIR: ${{ runner.temp }}/codex-security-results
+          RESULT_JSON: ${{ runner.temp }}/codex-security.json
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${OPENAI_API_KEY:?CODEX_SECURITY_API_KEY repository secret is required}"
+          if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
+            echo "The checkout does not match the exact pull-request head SHA." >&2
+            exit 1
+          fi
+          if [ "$(git merge-base "$BASE_SHA" "$HEAD_SHA")" != "$BASE_REVISION" ]; then
+            echo "The pull-request merge base changed after preflight." >&2
             exit 1
           fi
 
@@ -112,8 +165,8 @@ jobs:
             --head "$HEAD_SHA" \
             --mode standard \
             --auth api-key \
-            --model gpt-5.6-sol \
-            --effort xhigh \
+            --model gpt-5.6-luna \
+            --effort high \
             --max-cost 3 \
             --knowledge-base "$GITHUB_WORKSPACE/AGENTS.md" \
             --knowledge-base "$GITHUB_WORKSPACE/.github/AGENTS.md" \
@@ -256,5 +309,6 @@ jobs:
             ${{ runner.temp }}/codex-security-results
             ${{ runner.temp }}/codex-security.json
             ${{ runner.temp }}/codex-security.sarif
+            ${{ runner.temp }}/codex-security-dry-run.json
           if-no-files-found: warn
           retention-days: 7

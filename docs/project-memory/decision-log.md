@@ -3,9 +3,10 @@
 ## 2026-08-02 — Add Codex Security as an advisory PR layer
 
 - Decision: Run the standalone Codex Security CLI in a separate `pull_request` workflow for exact committed diffs. Skip drafts, forks, and Dependabot; install the pinned CLI before checkout; expose `CODEX_SECURITY_API_KEY` only as the scan step's `OPENAI_API_KEY`; and keep results outside the worktree.
-- Decision: Use `gpt-5.6-sol` with `xhigh` effort and a `$3` estimated limit, provide repository agent/security/architecture/current-state knowledge, export sealed results to exact-head SARIF, and retain private result artifacts for seven days without automated PR comments.
+- Decision: During the advisory cost-calibration period, run a credential-free `--dry-run` preflight and then use `gpt-5.6-luna` with `high` effort and a `$3` estimated limit. Provide repository agent/security/architecture/current-state knowledge, export sealed results to exact-head SARIF, and retain private result artifacts for seven days without automated PR comments.
 - Decision: Keep the initial rollout advisory by omitting `--fail-on-severity`. Preserve real failures for authentication, scanner/runtime errors, SARIF export errors, and incomplete coverage. Do not add the workflow to protected-branch required checks yet.
-- Rationale: Context-aware review can detect issues that deterministic tools miss, but it must first establish cost, runtime, coverage, and false-positive characteristics without replacing or weakening CodeQL, Trivy, Gitleaks, dependency audit, tests, policy, architecture, deployment, or branch-protection controls.
+- Rationale: The first authorized Sol/xhigh run reached an estimated `$1.322956` but failed to author the required scan manifest, so it produced no sealed result or SARIF. Luna is the lowest-cost GPT-5.6 model and the operator selected Luna/high for calibration; representative results still need comparison with the recommended Sol/xhigh security configuration before any enforcement decision.
+- Consequence: The dry run adds no model spend and cannot prove entitlement or scan completeness. Paid runtime failures still consume completed work, retain their real exit status, and are not automatically retried. Existing CodeQL, Trivy, Gitleaks, dependency audit, tests, policy, architecture, deployment, and branch-protection controls remain mandatory and unchanged.
 
 ## 2026-08-01 — Separate Entra service-role claim values from canonical delegated scopes
 
