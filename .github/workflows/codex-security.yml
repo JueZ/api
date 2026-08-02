@@ -24,7 +24,11 @@ jobs:
         github.event.pull_request.user.login != 'dependabot[bot]' &&
         github.actor != 'dependabot[bot]'
       }}
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04 restricts unprivileged user namespaces in a way that can
+    # prevent the Codex Bubblewrap sandbox from starting. Keep this job on the
+    # supported 22.04 image until the upstream sandbox compatibility issue is
+    # resolved, and prove sandbox writes before exposing the scan credential.
+    runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:
       - name: Set up Node.js
@@ -61,6 +65,30 @@ jobs:
             exit 1
           fi
           echo "Verified Codex Security CLI version $installed_version."
+
+      - name: Verify the Codex scan sandbox can write
+        shell: bash
+        env:
+          CODEX_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex
+          CODEX_HOME: ${{ runner.temp }}/codex-security-sandbox-probe-home
+          SANDBOX_PROBE_DIR: ${{ runner.temp }}/codex-security-sandbox-probe
+        run: |
+          set -euo pipefail
+          umask 077
+          test -x "$CODEX_BIN"
+          if [ -e "$SANDBOX_PROBE_DIR" ]; then
+            echo "Codex sandbox probe directory must start absent." >&2
+            exit 1
+          fi
+          install -d -m 700 "$CODEX_HOME" "$SANDBOX_PROBE_DIR"
+
+          "$CODEX_BIN" sandbox \
+            --config 'permissions.codex_security_scan.filesystem={":root"="read",":workspace_roots"="write"}' \
+            --permission-profile codex_security_scan \
+            --cd "$SANDBOX_PROBE_DIR" \
+            /bin/sh -c 'set -eu; : > sandbox-write-probe; test -f sandbox-write-probe'
+
+          test -f "$SANDBOX_PROBE_DIR/sandbox-write-probe"
 
       - name: Check out the exact pull-request head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7

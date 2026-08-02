@@ -241,6 +241,7 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
 test('Codex Security PR scanning is exact-head, credential-scoped, and advisory', () => {
   assert.match(codexSecurityWorkflow, /pull_request:/);
   assert.doesNotMatch(codexSecurityWorkflow, /pull_request_target/);
+  assert.match(codexSecurityWorkflow, /runs-on: ubuntu-22\.04/);
   assert.match(codexSecurityWorkflow, /types: \[opened, synchronize, reopened, ready_for_review\]/);
   assert.match(codexSecurityWorkflow, /actions: read\n {2}contents: read\n {2}security-events: write/);
   assert.match(codexSecurityWorkflow, /group: codex-security-\$\{\{ github\.event\.pull_request\.number \}\}/);
@@ -253,6 +254,21 @@ test('Codex Security PR scanning is exact-head, credential-scoped, and advisory'
     codexSecurityWorkflow.indexOf('Install Codex Security outside the checkout') <
       codexSecurityWorkflow.indexOf('Check out the exact pull-request head'),
   );
+  assert.ok(
+    codexSecurityWorkflow.indexOf('Verify the Codex scan sandbox can write') <
+      codexSecurityWorkflow.indexOf('Check out the exact pull-request head'),
+  );
+  assert.ok(
+    codexSecurityWorkflow.indexOf('Verify the Codex scan sandbox can write') <
+      codexSecurityWorkflow.indexOf('Scan committed pull-request changes'),
+  );
+  assert.match(
+    codexSecurityWorkflow,
+    /permissions\.codex_security_scan\.filesystem=\{":root"="read",":workspace_roots"="write"\}/,
+  );
+  assert.match(codexSecurityWorkflow, /--permission-profile codex_security_scan/);
+  assert.match(codexSecurityWorkflow, /CODEX_HOME: \$\{\{ runner\.temp \}\}\/codex-security-sandbox-probe-home/);
+  assert.match(codexSecurityWorkflow, /sandbox-write-probe/);
   assert.match(codexSecurityWorkflow, /@openai\/codex-security@0\.1\.3/);
   assert.match(codexSecurityWorkflow, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   assert.match(codexSecurityWorkflow, /fetch-depth: 0/);

@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-08-02 — Fail fast on Codex Security sandbox incompatibility
+
+- Decision: Pin only the advisory Codex Security job to GitHub's supported `ubuntu-22.04` runner while the bundled Codex Linux sandbox is incompatible with Ubuntu 24.04's AppArmor unprivileged-user-namespace restriction.
+- Decision: Before checkout or API-key access, run the bundled Codex executable in a named permission profile matching the scanner's read-root/write-workspace shape and require it to create a regular file under `$RUNNER_TEMP`. A probe failure stops before model execution and remains a visible workflow failure.
+- Rationale: PR #315's Sol/xhigh and Luna/high runs both authenticated and accrued cost on Ubuntu 24.04, then left the result directory empty and failed while sealing the absent `scan-manifest.json`. OpenAI's public tracker documents the same downstream symptom when the scan agent cannot execute shell commands or write its draft artifacts on GitHub-hosted runners.
+- Security boundary: Do not disable sandboxing, enable a deprecated sandbox backend, alter host-wide AppArmor/sysctl policy, manufacture scan artifacts, suppress exit code `2`, or weaken any existing deterministic security or delivery check. Keep the officially documented CLI version pin until OpenAI changes its CI guidance and a sealed canary validates the replacement.
+
 ## 2026-08-02 — Keep normal autonomous delivery controllers active
 
 - Decision: Keep `Codex Auto-Merge`, `Codex Main Delivery`, `Deploy Test`, and `Promote Production` active as the repository's steady-state operating model. Codex, not a human operator, monitors exact-head review, protected merge, exact-main CI, test acceptance, production promotion, smoke, telemetry, and runtime truth and performs only bounded scoped repairs.

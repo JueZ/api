@@ -1,5 +1,11 @@
 # Known issues and unresolved risks
 
+## Codex Security Linux sandbox compatibility remains upstream-sensitive
+
+- PR #315's two paid scans ran on GitHub Ubuntu 24.04, authenticated, accrued cost, and then produced no draft artifacts. The seal error was downstream: without scan-agent shell/write capability, `scan-manifest.json`, `findings.json`, and `coverage.json` never existed.
+- The workflow pins its isolated advisory job to supported Ubuntu 22.04 and adds a credential-free sandbox write probe before the credential boundary. This avoids weakening AppArmor or disabling the Codex sandbox, but it depends on GitHub continuing to offer that runner and on the bundled Codex runtime retaining compatible sandbox behavior.
+- Do not treat a passed probe as scan evidence. A usable scan still requires a sealed manifest, complete coverage, valid findings, and successful SARIF export. Re-evaluate the runner pin when OpenAI publishes a documented compatible CLI/runtime; require both the probe and a sealed canary before removing it.
+
 ## Test and production are accepted on the same immutable release
 
 - Main CI `30744552173`, Deploy Test `30744611475`, and Promote Production `30744732911` accepted exact commit `e8e1070b4a4f2e67b9d60b97a3586bf16b3bfeea` after exact-generation, runtime, authenticated-smoke, telemetry, ledger, and provenance gates passed.

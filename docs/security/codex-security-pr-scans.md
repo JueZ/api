@@ -15,7 +15,15 @@ Luna is the lowest-cost GPT-5.6 option, while OpenAI recommends Sol with `xhigh`
 
 `--max-cost 3` is an estimated limit, not a strict hard cap. A request already in progress can finish above the limit, failed scans consume the work already performed, and each rerun creates additional spend.
 
-Before exposing the API key, the workflow runs the same immutable diff, model, effort, budget, and knowledge-base configuration with `--dry-run`. This credential-free preflight validates local inputs and Codex configuration without starting Codex or incurring model cost. The paid scan remains a separate step and receives the key only after preflight succeeds.
+Before exposing the API key, the workflow first runs a credential-free Codex sandbox probe and then runs the same immutable diff, model, effort, budget, and knowledge-base configuration with `--dry-run`. The sandbox probe uses the scan runtime's read-root/write-workspace permission shape and must create a regular file in a private runner-temporary workspace. The dry run validates local inputs and Codex configuration without starting a model or incurring model cost. The paid scan remains a separate step and receives the key only after both checks succeed.
+
+## Sandbox compatibility
+
+PR #315's failed jobs ran on GitHub's `ubuntu-latest` image after that label resolved to Ubuntu 24.04. The Codex runtime bundled with `@openai/codex-security@0.1.3` uses its Linux sandbox for every scan-agent shell command. Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, which can prevent that sandbox from starting. When this happens, the scan agent cannot author `scan-manifest.json`, `findings.json`, or `coverage.json`; the later sealing step reports the missing manifest even though the output directory itself is writable.
+
+This workflow therefore pins only the Codex Security job to GitHub's supported `ubuntu-22.04` image and proves sandbox execution and workspace writing before checkout or API-key access. It does not disable the Codex sandbox, enable a deprecated fallback backend, change host-wide AppArmor settings, or weaken another workflow. A failed sandbox probe stops the job before model spend and must not be reported as a successful or clean security scan.
+
+The diagnosis is consistent with OpenAI's public [missing-manifest report](https://github.com/openai/codex-security/issues/73), its [GitHub-hosted runner follow-up](https://github.com/openai/codex-security/issues/191), and the Codex [Ubuntu AppArmor sandbox report](https://github.com/openai/codex/issues/15057). The exact CLI pin remains the version in OpenAI's CI guide. A newer package should be adopted only after the official CI documentation changes and a credential-free sandbox probe plus a sealed canary scan both pass.
 
 ## Configure access
 
@@ -23,7 +31,7 @@ The repository owner must add `CODEX_SECURITY_API_KEY` as a GitHub Actions repos
 
 Without the secret or the required entitlement, the scan must not be reported as passing. Authentication, runtime, export, and incomplete-coverage failures retain their real failure status.
 
-The first authorized PR #315 scan used Sol/xhigh and reached an estimated `$1.322956` before the runtime failed to author `scan-manifest.json`. The CLI therefore returned exit code `2`; there was no sealed result, conclusive coverage, SARIF, or valid finding set. The Luna/high calibration does not suppress that class of failure or manufacture missing artifacts.
+The first authorized PR #315 scan used Sol/xhigh and reached an estimated `$1.322956` before the runtime failed to author `scan-manifest.json`. A Luna/high repair reproduced the same failure at an estimated `$0.0588186`. Both jobs used Ubuntu 24.04, left the result directory empty, and returned exit code `2`; there was no sealed result, conclusive coverage, SARIF, or valid finding set. The successor sandbox probe and runner pin address the agent's missing shell/write capability without suppressing the failure or manufacturing artifacts.
 
 ## Review results
 
