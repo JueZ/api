@@ -9,6 +9,17 @@ export const AUTONOMOUS_REVIEW_MODEL_PRICING = Object.freeze({
     outputUsdPerMillionTokens: 30,
   }),
 });
+const REQUIRED_EXECUTABLE_HIGH_RISK_PATTERNS = Object.freeze([
+  'package.json',
+  'package-lock.json',
+  'angular.json',
+  'tsconfig.json',
+  'eslint.config.js',
+  '.prettierignore',
+  '.prettierrc.json',
+  'apps/**',
+  'scripts/**',
+]);
 
 export function loadAutonomousPolicy(policyPath = DEFAULT_POLICY_PATH) {
   const policy = parse(readFileSync(policyPath, 'utf8'));
@@ -39,6 +50,12 @@ export function validateAutonomousPolicy(policy) {
   }
 
   validateStringArray(policy.highRiskPaths, 'highRiskPaths', errors);
+  const highRiskPatterns = new Set(Array.isArray(policy.highRiskPaths) ? policy.highRiskPaths : []);
+  for (const pattern of REQUIRED_EXECUTABLE_HIGH_RISK_PATTERNS) {
+    if (!highRiskPatterns.has(pattern)) {
+      errors.push(`highRiskPaths must include executable control pattern: ${pattern}`);
+    }
+  }
   validateStringArray(policy.merge?.allowedBranchPrefixes, 'merge.allowedBranchPrefixes', errors);
   validateStringArray(policy.merge?.allowedLabels, 'merge.allowedLabels', errors);
   validateStringArray(policy.merge?.blockedLabels, 'merge.blockedLabels', errors);

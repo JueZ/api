@@ -21,6 +21,7 @@ const GITHUB_AUTH_KEYS = new Set(['authorization', 'gh_token', 'github_token', '
 const GITHUB_TOKEN_MINTING_ACTION = /(?:github.*(?:app-)?token|(?:app-)?token.*github|create.*app.*token)/i;
 const GITHUB_TOKEN_MINTING_SHELL =
   /(?:gh\s+auth\s+login|\/app\/installations\/|app\/installations\/[^\s"']*\/access_tokens|openssl[^\n]*(?:jwt|private[-_ ]key))/i;
+const REPOSITORY_PACKAGE_SCRIPT_INDIRECTION = /(?:^|[\s;&|()])npm\s+(?:run(?:\s|$)|test(?:\s|$))/m;
 const ALLOWED_WORKFLOW_SECRET_NAMES = new Set([
   'GITHUB_TOKEN',
   'OPENAI_API_KEY',
@@ -1015,6 +1016,11 @@ function collectUnsafeGithubTokenFindings(value, workflowName, findings, path = 
     }
     if (typeof child === 'string') {
       collectSecretExpressionFindings(child, workflowName, childPath, findings);
+      if (REPOSITORY_PACKAGE_SCRIPT_INDIRECTION.test(child)) {
+        findings.push(
+          `${workflowName}:${childPath.join('.')}: workflow shell must not dispatch repository-controlled npm scripts`,
+        );
+      }
       if (GITHUB_TOKEN_MINTING_SHELL.test(child)) {
         findings.push(`${workflowName}:${childPath.join('.')}: shell-based GitHub token minting is not allowed`);
       }

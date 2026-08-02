@@ -1,5 +1,13 @@
 # Decision log
 
+## 2026-08-02 — Remove package-script indirection from trusted delivery decisions
+
+- Decision: Treat root manifests/lockfiles, lint/type/build controls, every `apps/**` path, and every `scripts/**` path as high risk so executable or check-defining changes always require the independent exact-head review.
+- Decision: Required CI, Policy Check, immutable release construction, deployment smoke/telemetry/ledger, and repair triage invoke fixed local binaries or script files instead of `npm run`/`npm test`. Install dependencies with lifecycle scripts disabled in those workflows. Make the trusted controller's workflow audit reject any reintroduced repository-package-script indirection.
+- Rationale: A PR could previously remap required root npm scripts to successful no-ops without touching a deterministically high-risk path. The checks and exact-head provenance could look successful while the intended validation and release build never ran.
+- Safety boundary: Package scripts remain available for local developer use, but they are no longer authoritative for required checks or deployment acceptance. Workflow/script/config changes remain independently reviewed, every existing deterministic and security gate remains mandatory, and production delivery retains its exact-main, test-provenance, smoke, telemetry, and ledger requirements.
+- Status: Implemented locally with regression coverage; remote PR gates and post-merge delivery evidence are still pending.
+
 ## 2026-08-02 — Keep normal autonomous delivery controllers active
 
 - Decision: Keep `Codex Auto-Merge`, `Codex Main Delivery`, `Deploy Test`, and `Promote Production` active as the repository's steady-state operating model. Codex, not a human operator, monitors exact-head review, protected merge, exact-main CI, test acceptance, production promotion, smoke, telemetry, and runtime truth and performs only bounded scoped repairs.

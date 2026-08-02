@@ -51,6 +51,17 @@ requiredChecks:
     appSlug: github-actions
 
 highRiskPaths:
+  # These files can redefine, exclude, or replace code executed by required
+  # checks and release construction. They must never receive low-risk approval.
+  - package.json
+  - package-lock.json
+  - angular.json
+  - tsconfig.json
+  - eslint.config.js
+  - .prettierignore
+  - .prettierrc.json
+  - apps/**
+  - scripts/**
   - .github/workflows/**
   - .github/actions/**
   - .github/autonomous-policy.yml
@@ -86,6 +97,16 @@ highRiskPaths:
   - .agents/skills/**
 
 riskClasses:
+  supplyChain:
+    - package.json
+    - package-lock.json
+    - angular.json
+    - tsconfig.json
+    - eslint.config.js
+    - .prettierignore
+    - .prettierrc.json
+    - apps/**
+    - scripts/**
   workflow:
     - .github/workflows/**
     - .github/actions/**
