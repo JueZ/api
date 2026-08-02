@@ -19,6 +19,21 @@ Read-only investigations, explanations, and planning tasks do not require a bran
 
 Never push directly to `main`.
 
+## Quality 10 program
+
+The long-running code-quality program is intentionally resumable and incremental. Its authoritative state is `docs/quality/quality-10-program.md`; objective gates are in `docs/quality/quality-gates.yml`, evidence is under `docs/quality/evidence/`, and any exception must be recorded in `docs/quality/waivers.yml`.
+
+When the user asks to continue, improve, or execute the next Quality 10 phase:
+
+1. Inspect current protected `main`, project memory, open PRs/issues, workflow state, and the quality ledger before selecting work.
+2. Resume the first incomplete, unblocked phase or the next exact provider-sized slice recorded in the ledger. Do not redo accepted work.
+3. Deliver one coherent, independently useful PR at a time. Do not attempt the whole program or several unrelated phases in one invocation.
+4. Keep the ledger, next exact slice, and evidence truthful. Local success is not CI evidence; merge is not deployment/runtime evidence.
+5. Add a new required CI gate only in the phase that owns it and only after the check is stable and green. Do not front-load all future tools or gates.
+6. Do not claim a category is 10/10 until every mandatory gate for it passes with accepted evidence and no material active waiver.
+
+The repository remains usable for ordinary feature, maintenance, and incident work while this program advances. Quality 10 is an ordered improvement backlog, not a global freeze or a requirement to implement every remaining phase in each run.
+
 ## Project map
 
 - `apps/web/` — Angular frontend.
@@ -30,6 +45,7 @@ Never push directly to `main`.
 - `docs/autonomous-delivery.md` — authoritative delivery-flow details.
 - `docs/security/autonomous-guardrails.md` — security, policy, and fail-closed guardrails.
 - `docs/project-memory/` — repo-based project memory and current operational state.
+- `docs/quality/` — authoritative resumable Quality 10 program, gates, waivers, and evidence.
 
 Before non-trivial work, especially architecture, auth, Azure, GitHub Actions, CI/CD, deployment, production incidents, or major bug fixes, read the relevant docs and `docs/project-memory/current-state.md`.
 
