@@ -47,7 +47,7 @@ param oidcAllowedAppObjectIds string = ''
 param oidcAllowedClientIds string = ''
 
 @description('Comma-separated allowed OAuth client IDs for delegated user tokens.')
-param oidcAllowedDelegatedClientIds string = ''
+param oidcAllowedDelegatedClientIds string
 
 @description('Comma-separated allowed tenant IDs.')
 param oidcAllowedTenants string
@@ -183,6 +183,9 @@ var validatedMcpAllowedOrigins = !empty(mcpAllowedOrigins) && !contains(mcpAllow
 var validatedOidcIssuer = !empty(oidcIssuer) ? oidcIssuer : fail('OIDC issuer is required.')
 var validatedOidcAudience = !empty(oidcAudience) ? oidcAudience : fail('OIDC audience is required.')
 var validatedOidcObjectIds = !empty(oidcAllowedObjectIds) ? oidcAllowedObjectIds : fail('At least one OIDC user object ID is required.')
+var validatedOidcDelegatedClientIds = !empty(oidcAllowedDelegatedClientIds)
+  ? oidcAllowedDelegatedClientIds
+  : fail('At least one delegated OAuth client ID is required.')
 var validatedOidcTenants = !empty(oidcAllowedTenants) ? oidcAllowedTenants : fail('At least one OIDC tenant is required.')
 var validatedBringAddEnabled = !bringEnabled && bringAddEnabled
   ? fail('Bring add operations require bringEnabled=true.')
@@ -622,7 +625,7 @@ module functionAppSettings './modules/function-app-settings.bicep' = {
       OIDC_ALLOWED_SUBJECTS: oidcAllowedSubjects
       OIDC_ALLOWED_APP_OBJECT_IDS: oidcAllowedAppObjectIds
       OIDC_ALLOWED_CLIENT_IDS: oidcAllowedClientIds
-      OIDC_ALLOWED_DELEGATED_CLIENT_IDS: oidcAllowedDelegatedClientIds
+      OIDC_ALLOWED_DELEGATED_CLIENT_IDS: validatedOidcDelegatedClientIds
       OIDC_ALLOWED_TENANTS: validatedOidcTenants
       AUTH_DEBUG: toLower(string(authDebug))
       API_CORS_ALLOWED_ORIGINS: validatedCorsOrigins

@@ -384,7 +384,7 @@ export function buildFallbackRepairableProblem(args: {
     invalid_fields = [
       { path: '/post', problem: 'The Reddit thread request must include a valid post value.', expected: 'string' },
     ];
-    correct_request_example = { post: 'abc123', sort: 'confidence', maxComments: 10000, maxMoreChildrenRequests: 1000 };
+    correct_request_example = { post: 'abc123', sort: 'confidence', maxComments: 10000, maxMoreChildrenRequests: 0 };
     repair_plan = [
       {
         action: 'provide_missing_value',

@@ -623,6 +623,7 @@ jobs:
           : "${OIDC_AUDIENCE:?OIDC_AUDIENCE repository variable is required for $ENVIRONMENT_NAME}"
           : "${OIDC_REQUIRED_SCOPES:?OIDC_REQUIRED_SCOPES repository variable is required for $ENVIRONMENT_NAME}"
           : "${OIDC_ALLOWED_OBJECT_IDS:?OIDC_ALLOWED_OBJECT_IDS repository variable is required for $ENVIRONMENT_NAME}"
+          : "${OIDC_ALLOWED_DELEGATED_CLIENT_IDS:?OIDC_ALLOWED_DELEGATED_CLIENT_IDS repository variable is required for $ENVIRONMENT_NAME}"
           : "${OIDC_ALLOWED_TENANTS:?OIDC_ALLOWED_TENANTS repository variable is required for $ENVIRONMENT_NAME}"
           : "${MCP_RESOURCE_ORIGIN:?MCP_RESOURCE_ORIGIN environment variable is required for $ENVIRONMENT_NAME}"
           : "${MCP_ALLOWED_ORIGINS:?MCP_ALLOWED_ORIGINS environment variable is required for $ENVIRONMENT_NAME}"
@@ -820,7 +821,7 @@ jobs:
                 oidcAllowedSubjects="${OIDC_ALLOWED_SUBJECTS:-}" \
                 oidcAllowedAppObjectIds="${OIDC_ALLOWED_APP_OBJECT_IDS:-}" \
                 oidcAllowedClientIds="${OIDC_ALLOWED_CLIENT_IDS:-}" \
-                oidcAllowedDelegatedClientIds="${OIDC_ALLOWED_DELEGATED_CLIENT_IDS:-}" \
+                oidcAllowedDelegatedClientIds="$OIDC_ALLOWED_DELEGATED_CLIENT_IDS" \
                 oidcAllowedTenants="${OIDC_ALLOWED_TENANTS:-}" \
                 authDebug="${AUTH_DEBUG:-false}" \
                 apiCorsAllowedOrigins="$api_cors_allowed_origins" \

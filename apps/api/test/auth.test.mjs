@@ -20,7 +20,7 @@ const baseConfig = Object.freeze({
   allowedSubjects: ['allowed-sub'],
   allowedAppObjectIds: ['allowed-app-oid'],
   allowedClientIds: ['allowed-client-id'],
-  allowedDelegatedClientIds: [],
+  allowedDelegatedClientIds: ['allowed-delegated-client-id', 'delegated-client-id'],
   allowedTenants: [],
   debug: false,
 });
@@ -141,6 +141,7 @@ test('valid token missing required scope or role returns 403', async () => {
   const result = await authorize('Bearer valid-token', {
     sub: 'allowed-sub',
     oid: 'allowed-oid',
+    azp: 'allowed-delegated-client-id',
     scp: 'other.scope',
   });
 
@@ -155,6 +156,7 @@ test('read permission cannot authorize a write operation', async () => {
     {
       sub: 'allowed-sub',
       oid: 'allowed-oid',
+      azp: 'allowed-delegated-client-id',
       scp: 'bring.read',
     },
     {},
@@ -175,6 +177,7 @@ test('operation policy rejects an otherwise authorized operation in the wrong en
     {
       sub: 'allowed-sub',
       oid: 'allowed-oid',
+      azp: 'allowed-delegated-client-id',
       scp: 'bring.write',
     },
     {},
@@ -229,6 +232,7 @@ test('valid token for allowed object ID returns 200 authorization result', async
     sub: 'user-subject',
     oid: 'allowed-oid',
     tid: 'tenant-id',
+    azp: 'allowed-delegated-client-id',
     scp: 'catalogue.read',
     preferred_username: 'martin@example.test',
   });
@@ -238,7 +242,7 @@ test('valid token for allowed object ID returns 200 authorization result', async
     subject: 'user-subject',
     objectId: 'allowed-oid',
     tenantId: 'tenant-id',
-    clientId: undefined,
+    clientId: 'allowed-delegated-client-id',
     tokenType: 'user',
     scopes: ['catalogue.read'],
     roles: [],
@@ -248,6 +252,7 @@ test('valid token for allowed object ID returns 200 authorization result', async
 test('allowed subject fallback works only when oid is absent', async () => {
   const result = await authorize('Bearer valid-token', {
     sub: 'allowed-sub',
+    azp: 'allowed-delegated-client-id',
     roles: ['catalogue.read'],
   });
 
@@ -256,7 +261,7 @@ test('allowed subject fallback works only when oid is absent', async () => {
     subject: 'allowed-sub',
     objectId: undefined,
     tenantId: undefined,
-    clientId: undefined,
+    clientId: 'allowed-delegated-client-id',
     tokenType: 'user',
     scopes: [],
     roles: ['catalogue.read'],
@@ -393,17 +398,22 @@ test('roles-only service token without idtyp but with client-credential marker c
   assert.equal(result.user.clientId, 'allowed-client-id');
 });
 
-test('delegated user token keeps accepting any OAuth client when delegated client allowlist is empty', async () => {
-  const result = await authorize('Bearer valid-token', {
-    sub: 'user-subject',
-    oid: 'allowed-oid',
-    tid: 'tenant-id',
-    azp: 'unlisted-delegated-client-id',
-    scp: 'catalogue.read',
-  });
+test('delegated user token fails closed when delegated client allowlist is empty', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'user-subject',
+      oid: 'allowed-oid',
+      tid: 'tenant-id',
+      azp: 'unlisted-delegated-client-id',
+      scp: 'catalogue.read',
+    },
+    { allowedDelegatedClientIds: [] },
+  );
 
-  assert.equal(result.ok, true);
-  assert.equal(result.user.tokenType, 'user');
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.message, 'Delegated OAuth client is not allowed.');
 });
 
 test('delegated user token with allowed azp passes delegated client allowlist', async () => {
@@ -490,7 +500,7 @@ test('roles-only token without app-only marker cannot bypass user allowlist via 
   assert.equal(result.response.jsonBody.error.message, 'User is not allowed.');
 });
 
-test('app-only service token ignores delegated client allowlist', async () => {
+test('app-only service token remains independent when delegated client allowlist is empty', async () => {
   const result = await authorize(
     'Bearer valid-token',
     {
@@ -501,7 +511,7 @@ test('app-only service token ignores delegated client allowlist', async () => {
       azp: 'service-client-id',
       roles: ['catalogue.read'],
     },
-    { allowedDelegatedClientIds: ['different-delegated-client-id'] },
+    { allowedDelegatedClientIds: [] },
   );
 
   assert.equal(result.ok, true);

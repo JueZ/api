@@ -303,6 +303,14 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.match(runtimeSettingsPolicy, /APPLICATIONINSIGHTS_CONNECTION_STRING: requiredValue/);
   assert.match(runtimeSettingsPolicy, /REDDIT_CLIENT_SECRET: requiredValue/);
   assert.match(runtimeSettingsPolicy, /OPENAI_API_KEY: openAiReference/);
+  assert.match(runtimeSettingsPolicy, /OIDC_ALLOWED_DELEGATED_CLIENT_IDS: requiredValue/);
+  assert.match(
+    deployEnvironmentWorkflow,
+    /OIDC_ALLOWED_DELEGATED_CLIENT_IDS:\?OIDC_ALLOWED_DELEGATED_CLIENT_IDS repository variable is required/,
+  );
+  assert.match(mainBicep, /param oidcAllowedDelegatedClientIds string\s/);
+  assert.doesNotMatch(mainBicep, /param oidcAllowedDelegatedClientIds string = ''/);
+  assert.match(mainBicep, /validatedOidcDelegatedClientIds = !empty\(oidcAllowedDelegatedClientIds\)/);
   assert.match(deployEnvironmentWorkflow, /actions\/runs\/\$\{CI_RUN_ID\}/);
   assert.match(deployEnvironmentWorkflow, /expected_ci_title="CI \$deployment_ref \$CI_DELIVERY_CORRELATION"/);
   assert.match(deployEnvironmentWorkflow, /\(\.name == \$workflow_name or \.name == \$title\)/);

@@ -14,6 +14,7 @@ import {
   type RepairableProblemExpected,
 } from '../shared/errors/repairableProblem.js';
 import { mapRedditError, RedditThreadService } from '../shared/reddit/service.js';
+import { withRedditPrincipalConcurrency } from '../shared/reddit/concurrency.js';
 import type { RedditThreadRequest } from '../shared/reddit/types.js';
 import { authorizeRequestForOperation } from '../shared/security/auth.js';
 import { OPERATION_IDS } from '../application/operations/registry.js';
@@ -70,7 +71,9 @@ export async function redditThreadHandler(request: HttpRequest, context: Invocat
   }
 
   try {
-    const response = await redditThreadService.fetchThread(body);
+    const response = await withRedditPrincipalConcurrency(authorization.user, () =>
+      redditThreadService.fetchThread(body),
+    );
     return withCors(
       {
         status: 200,

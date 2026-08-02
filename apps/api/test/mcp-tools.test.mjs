@@ -345,6 +345,37 @@ test('MCP wlh_search exposes only effective filters and reports how each one is 
   });
 });
 
+test('MCP rejects concurrent Reddit expansion work for the same principal', async () => {
+  const services = stubServices();
+  const fetchThread = services.reddit.fetchThread;
+  let signalEntered;
+  let release;
+  const entered = new Promise((resolve) => {
+    signalEntered = resolve;
+  });
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  services.reddit.fetchThread = async (args) => {
+    calls += 1;
+    signalEntered();
+    await blocked;
+    return fetchThread(args);
+  };
+
+  await withEnv(authEnv, async () => {
+    const first = mcpCall('reddit_get_thread', { postId: 'abc' }, 'Bearer local-dev-token', services);
+    await entered;
+    const second = await mcpCall('reddit_get_thread', { postId: 'def' }, 'Bearer local-dev-token', services);
+    assertToolError(second, 'upstream_rate_limited', 'reddit');
+    assert.equal(calls, 1);
+    release();
+    const completed = await first;
+    assert.equal(completed.jsonBody.result.structuredContent.post.id, 'abc');
+  });
+});
+
 test('MCP validation rejects invalid Reddit and WLH arguments with safe tool errors', async () => {
   await withEnv(authEnv, async () => {
     await assertToolError(await mcpCall('reddit_get_thread', {}, 'Bearer local-dev-token'), 'invalid_arguments');
@@ -457,6 +488,7 @@ test('MCP Bring errors preserve safe classifications and upstream status without
 });
 
 async function mcpRequest(body, authorization = undefined, services = stubServices()) {
+  const serializedBody = JSON.stringify(body);
   return handleMcpHttpRequest(
     {
       method: 'POST',
@@ -465,10 +497,19 @@ async function mcpRequest(body, authorization = undefined, services = stubServic
         accept: 'application/json, text/event-stream',
         'content-type': 'application/json',
         host: 'localhost:7071',
+        'content-length': String(Buffer.byteLength(serializedBody)),
         ...(authorization ? { authorization } : {}),
       }),
       params: {},
-      json: async () => body,
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(serializedBody));
+          controller.close();
+        },
+      }),
+      json: async () => {
+        throw new Error('MCP gateway must use the bounded body reader');
+      },
     },
     { invocationId: 'mcp-tools-test', warn: () => undefined },
     services,

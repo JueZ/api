@@ -1,5 +1,13 @@
 # Decision log
 
+## 2026-08-02 — Bound anonymous protocol input and authenticated provider work
+
+- Decision: Require a bearer header before reading deployed MCP POST bodies, stream them through a 256 KiB cap, and pass bounded raw JSON to the SDK without reserializing a parsed object. Preserve an explicit local-development bypass only when deployed environment is `local` and authentication is disabled.
+- Decision: Make Reddit expansion server-owned: default zero, hard maximum 10 MoreChildren calls, abortable 20-second deadline across provider retries and body reads, 10-request provider quota reserve, per-principal per-worker concurrency gate, and continuation preservation for deferred children.
+- Decision: Interpret an empty delegated OAuth-client allowlist as deny-all. Require a non-empty exact value in deployment validation, Bicep, startup runtime-safety validation, and runtime-settings verification while keeping app-only service authorization on its separate allowlists.
+- Rationale: The full-repository Codex Security review found pre-authentication MCP memory amplification, a caller-selected thousands-of-calls Reddit multiplier, and delegated-client fail-open behavior. The bounded controls remove those source-proven amplification and authorization paths without changing permissions, providers, credentials, or branch/deployment guardrails.
+- Residual boundary: The Reddit concurrency gate is per Function worker rather than distributed across scale-out; hard request, time, and provider-reserve limits still apply to every invocation. Remote PR and deployment evidence are pending.
+
 ## 2026-08-02 — Remove package-script indirection from trusted delivery decisions
 
 - Decision: Treat root manifests/lockfiles, lint/type/build controls, every `apps/**` path, and every `scripts/**` path as high risk so executable or check-defining changes always require the independent exact-head review.

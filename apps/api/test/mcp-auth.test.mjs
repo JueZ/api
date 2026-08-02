@@ -4,7 +4,7 @@ import test from 'node:test';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { authorizeBearerToken } from '../dist/shared/security/auth.js';
 import { oauthProtectedResourceHandler } from '../dist/functions/oauthProtectedResource.js';
-import { handleMcpHttpRequest } from '../dist/mcp/server.js';
+import { handleMcpHttpRequest, MCP_REQUEST_BODY_MAX_BYTES } from '../dist/mcp/server.js';
 
 const baseEnv = {
   AUTH_ENABLED: 'true',
@@ -15,7 +15,7 @@ const baseEnv = {
   OIDC_ALLOWED_SUBJECTS: '',
   OIDC_ALLOWED_APP_OBJECT_IDS: '',
   OIDC_ALLOWED_CLIENT_IDS: '',
-  OIDC_ALLOWED_DELEGATED_CLIENT_IDS: '',
+  OIDC_ALLOWED_DELEGATED_CLIENT_IDS: 'allowed-client-id',
   MCP_RESOURCE_ORIGIN: 'https://mcp.example.test',
   MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
 };
@@ -101,19 +101,44 @@ test('deployed MCP rejects spoofed hosts, forwarded schemes, and browser origins
   });
 });
 
-test('unauthenticated private MCP tool fails closed with OAuth challenge metadata', async () => {
+test('unauthenticated MCP POST fails before reading or forwarding its body', async () => {
   await withEnv({ ...baseEnv, OIDC_ISSUER: 'https://login.example.test/tenant/v2.0' }, async () => {
-    const response = await mcpCall('hello_authenticated');
-    assert.equal(response.status, 200);
-    const result = response.jsonBody.result;
-    assert.equal(result.isError, true);
-    assert.equal(result.structuredContent.error, 'invalid_token');
-    assert.equal(result.structuredContent.repairable_problem.rec_version, '1.0');
-    assert.equal(result.structuredContent.repairable_problem.classification, 'authorization_context_mismatch');
-    assertChallenge(result, {
-      error: 'invalid_token',
-      errorDescription: 'Missing bearer token.',
+    const unreadRequest = request('POST', 'https://mcp.example.test/mcp', { jsonrpc: '2.0' });
+    Object.defineProperty(unreadRequest, 'body', {
+      get() {
+        throw new Error('unauthenticated body must not be read');
+      },
     });
+    const response = await handleMcpHttpRequest(unreadRequest, contextStub(), stubServices());
+    assert.equal(response.status, 401);
+    assert.equal(response.jsonBody.classification, 'authorization_context_mismatch');
+    assert.match(response.headers['WWW-Authenticate'], /error_description="Missing bearer token\."/);
+  });
+});
+
+test('MCP rejects declared and chunked oversized POST bodies before JSON parsing', async () => {
+  await withEnv({ ...baseEnv, OIDC_ISSUER: 'https://login.example.test/tenant/v2.0' }, async () => {
+    const declared = request('POST', 'https://mcp.example.test/mcp', {}, 'Bearer unverified-token');
+    declared.headers.set('content-length', String(MCP_REQUEST_BODY_MAX_BYTES + 1));
+    Object.defineProperty(declared, 'body', {
+      get() {
+        throw new Error('declared oversized body must not be read');
+      },
+    });
+    const declaredResponse = await handleMcpHttpRequest(declared, contextStub(), stubServices());
+    assert.equal(declaredResponse.status, 413);
+    assert.match(declaredResponse.jsonBody.detail, /262144-byte limit/);
+
+    const chunked = request('POST', 'https://mcp.example.test/mcp', {}, 'Bearer unverified-token');
+    chunked.headers.delete('content-length');
+    chunked.body = bodyStream([
+      new Uint8Array(Math.floor(MCP_REQUEST_BODY_MAX_BYTES / 2)),
+      new Uint8Array(Math.floor(MCP_REQUEST_BODY_MAX_BYTES / 2)),
+      new Uint8Array(1),
+    ]);
+    const chunkedResponse = await handleMcpHttpRequest(chunked, contextStub(), stubServices());
+    assert.equal(chunkedResponse.status, 413);
+    assert.match(chunkedResponse.jsonBody.detail, /262144-byte limit/);
   });
 });
 
@@ -276,7 +301,27 @@ function request(method, url, body, authorization) {
     host: new URL(url).host,
   });
   if (authorization) headers.set('authorization', authorization);
-  return { method, url, headers, params: {}, json: async () => body };
+  const serializedBody = body === undefined ? undefined : JSON.stringify(body);
+  if (serializedBody !== undefined) headers.set('content-length', String(Buffer.byteLength(serializedBody)));
+  return {
+    method,
+    url,
+    headers,
+    params: {},
+    body: serializedBody === undefined ? null : bodyStream([new TextEncoder().encode(serializedBody)]),
+    json: async () => {
+      throw new Error('MCP gateway must use the bounded body reader');
+    },
+  };
+}
+
+function bodyStream(chunks) {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
 }
 
 async function mcpCall(name, args = {}, authorization, services = stubServices()) {
@@ -336,7 +381,7 @@ async function withEnv(values, fn) {
 }
 
 async function signToken(privateKey, kid, issuer, claims, audience = 'api://catalogue-test') {
-  return new SignJWT(claims)
+  return new SignJWT({ azp: 'allowed-client-id', ...claims })
     .setProtectedHeader({ alg: 'RS256', kid })
     .setIssuer(issuer)
     .setAudience(audience)
