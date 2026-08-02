@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-08-02 — Remove standing Azure setup secrets and provider content from telemetry
+
+- Decision: Authenticate the local Codex Azure CLI setup with the Azure compute host's system-assigned managed identity by default, with an optional non-secret client ID for a user-assigned identity. Discard legacy Azure service-principal variables before starting any child process and prohibit service-principal password arguments in regression coverage.
+- Decision: Retain only server-owned Bring operation, method, UUID-sanitized path, and numeric upstream-status metadata in upstream errors. Both the service and Function warning boundaries reconstruct that exact allowlist; provider response bodies, content-type values, and unknown diagnostic fields never enter telemetry.
+- Rationale: The sealed full-repository Codex Security review found a short process-argument exposure window for the standing Azure client secret and deterministic retention of arbitrary Bring failure content in two telemetry sinks. Removing the credential and content channels closes both paths instead of relying on process isolation or regex redaction.
+- Residual boundary: The Azure host identity and least-privilege RBAC must be provisioned by an operator before first setup. After verifying managed-identity login, the obsolete service-principal credential still requires normal operator revocation; this change does not rotate or expose it. Remote PR and deployment evidence are pending.
+
 ## 2026-08-02 — Bound anonymous protocol input and authenticated provider work
 
 - Decision: Require a bearer header before reading deployed MCP POST bodies, stream them through a 256 KiB cap, and pass bounded raw JSON to the SDK without reserializing a parsed object. Preserve an explicit local-development bypass only when deployed environment is `local` and authentication is disabled.

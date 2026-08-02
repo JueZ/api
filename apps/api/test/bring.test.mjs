@@ -398,11 +398,13 @@ test('list versions are stable and batch mutations preserve the observed Bring w
   });
 });
 
-test('mutation failures retain only bounded sanitized diagnostics', async () => {
+test('mutation failures retain metadata-only diagnostics and no provider response content', async () => {
+  const privateProviderText =
+    'Family list: medication PIN 4829; password=private-password; bearer alternate-secret; email private@example.test';
   const client = new BringClient(
     cfg,
     async () =>
-      new Response('password=private-password access_token=access-secret detail=invalid changes', {
+      new Response(privateProviderText, {
         status: 400,
         headers: { 'content-type': 'text/plain' },
       }),
@@ -425,10 +427,92 @@ test('mutation failures retain only bounded sanitized diagnostics', async () => 
       assert.equal(error.diagnostics.upstreamStatus, 400);
       assert.equal(error.diagnostics.operation, 'add_items');
       assert.equal(error.diagnostics.path, 'v2/bringlists/{uuid}/items');
-      assert.match(error.diagnostics.responseExcerpt, /\[redacted\]/);
-      assert.doesNotMatch(JSON.stringify(error), /private-password|access-secret/);
+      assert.deepEqual(Object.keys(error.diagnostics).sort(), ['method', 'operation', 'path', 'upstreamStatus']);
+      for (const fragment of ['Family list', 'medication', '4829', 'private-password', 'alternate-secret']) {
+        assert.doesNotMatch(JSON.stringify(error), new RegExp(fragment));
+      }
       return true;
     },
+  );
+});
+
+test('Bring service warning telemetry retains only provider metadata', async () => {
+  const warnings = [];
+  const privateProviderText = 'Family list medication; api_key=alternate-secret; phone=+43-555-0199';
+  const service = new BringService({
+    config: cfg,
+    sessionStore: null,
+    warn: (message, details) => warnings.push({ message, details }),
+    fetchImpl: async (url) =>
+      String(url).endsWith('v2/bringauth')
+        ? json(login)
+        : new Response(privateProviderText, {
+            status: 503,
+            headers: { 'content-type': 'private/provider-detail' },
+          }),
+  });
+
+  await assert.rejects(service.getList(listUuid), BringUpstreamError);
+  assert.deepEqual(warnings, [
+    {
+      message: 'Bring upstream request failed.',
+      details: {
+        component: 'bring_upstream',
+        error_kind: 'upstream',
+        retry_count: 0,
+        operation: 'get_items',
+        method: 'GET',
+        path: 'v2/bringlists/{uuid}',
+        upstreamStatus: 503,
+      },
+    },
+  ]);
+  assert.doesNotMatch(JSON.stringify(warnings), /Family list|medication|alternate-secret|555-0199|provider-detail/);
+});
+
+test('Bring Function warning telemetry rejects unapproved upstream diagnostic fields', async () => {
+  const warnings = [];
+  const privateProviderText = 'Family medication item; api_key=alternate-secret; private@example.test';
+  const application = {
+    listLists: async () => {
+      throw new BringUpstreamError('Bring dependency request failed.', 502, 'upstream', {
+        operation: 'list_lists',
+        method: 'GET',
+        path: 'bringusers/{uuid}/lists',
+        upstreamStatus: 503,
+        responseExcerpt: privateProviderText,
+        responseContentType: 'private/provider-detail',
+        unapproved: 'must-not-be-logged',
+      });
+    },
+  };
+  const handler = createBringHandler({ getApplication: () => application });
+
+  await withEnv({ AUTH_ENABLED: 'false', DEPLOYED_ENVIRONMENT_NAME: 'local' }, async () => {
+    const response = await handler(
+      request('GET', 'https://api.test/api/bring/lists'),
+      context({ functionName: 'bringListLists', warn: (message, details) => warnings.push({ message, details }) }),
+    );
+    assert.equal(response.status, 502);
+  });
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].message, 'Bring request failed with a sanitized repairable error.');
+  assert.deepEqual(Object.keys(warnings[0].details).sort(), [
+    'classification',
+    'diagnostic_id',
+    'method',
+    'operation',
+    'operation_id',
+    'path',
+    'status',
+    'upstreamStatus',
+  ]);
+  assert.equal(warnings[0].details.operation, 'list_lists');
+  assert.equal(warnings[0].details.path, 'bringusers/{uuid}/lists');
+  assert.doesNotMatch(
+    JSON.stringify(warnings),
+    /Family medication|alternate-secret|private@example|provider-detail|must-not-be-logged/,
   );
 });
 

@@ -17,6 +17,10 @@ reject_shell_tracing() {
 
 reject_shell_tracing
 
+# Legacy service-principal setup variables must not be inherited by any child
+# process. Azure authentication below uses the host's managed identity.
+unset CODEX_AZURE_CLIENT_ID CODEX_AZURE_CLIENT_SECRET CODEX_AZURE_TENANT_ID
+
 require_env() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
@@ -107,18 +111,18 @@ GITHUB_CLI_SOURCES
 
 login_azure() {
   reject_shell_tracing
-  require_env CODEX_AZURE_CLIENT_ID
-  require_env CODEX_AZURE_CLIENT_SECRET
-  require_env CODEX_AZURE_TENANT_ID
   require_env AZURE_SUBSCRIPTION_ID
 
-  echo "Logging into Azure CLI with Codex service principal credentials."
-  az login \
-    --service-principal \
-    --username "${CODEX_AZURE_CLIENT_ID}" \
-    --password "${CODEX_AZURE_CLIENT_SECRET}" \
-    --tenant "${CODEX_AZURE_TENANT_ID}" \
-    --output none
+  if [[ -n "${CODEX_AZURE_MANAGED_IDENTITY_CLIENT_ID:-}" ]]; then
+    echo "Logging into Azure CLI with the configured user-assigned managed identity."
+    az login \
+      --identity \
+      --client-id "${CODEX_AZURE_MANAGED_IDENTITY_CLIENT_ID}" \
+      --output none
+  else
+    echo "Logging into Azure CLI with the host system-assigned managed identity."
+    az login --identity --output none
+  fi
   az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
   az account show --query '{name:name, id:id, tenantId:tenantId}' --output table
 }
@@ -136,11 +140,17 @@ login_github() {
   gh auth status
 }
 
-install_tools
-az version --output table
-gh --version
-login_azure
-login_github
-configure_git_remote
+main() {
+  install_tools
+  az version --output table
+  gh --version
+  login_azure
+  login_github
+  configure_git_remote
 
-echo "Codex environment setup complete."
+  echo "Codex environment setup complete."
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

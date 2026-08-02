@@ -119,7 +119,7 @@ one. It covers:
 - federated credentials
 - Azure RBAC
 - GitHub repository variables
-- Codex direct Azure service principal
+- Codex host Azure managed identity
 - Codex environment secrets
 - Codex setup and maintenance scripts
 
@@ -134,12 +134,11 @@ Use placeholders for repository-specific values:
 - `PRODUCTION_AZURE_RESOURCE_GROUP`
 - `LOCATION`
 - `GHA_APP_NAME`
-- `CODEX_APP_NAME`
 - `GHA_APP_ID`
 - `GHA_SP_OBJECT_ID`
-- `CODEX_APP_ID`
-- `CODEX_SP_OBJECT_ID`
-- `CODEX_AZURE_CLIENT_SECRET`
+- `CODEX_HOST_RESOURCE_GROUP`
+- `CODEX_HOST_VM_NAME`
+- `CODEX_IDENTITY_PRINCIPAL_ID`
 - `CODEX_GH_TOKEN`
 - `PRODUCTION_BASE_URL`
 
@@ -151,7 +150,6 @@ For the current repository, the non-secret values used were:
 - `TEST_AZURE_RESOURCE_GROUP=rg-api-test`
 - `PRODUCTION_AZURE_RESOURCE_GROUP=rg-api-prod`
 - `GHA_APP_NAME=github-actions-api-prod`
-- `CODEX_APP_NAME=codex-direct-api-devops`
 
 Do not include real secret values in documentation, chat, issues, pull requests, shell history, or logs. Keep production promotion manual or protected by GitHub Environment approval until test deployment and smoke tests are verified.
 
@@ -279,7 +277,8 @@ export AZURE_RESOURCE_GROUP="rg-api-prod"
 export GH_OWNER="OWNER"
 export GH_REPO_NAME="REPO"
 export GHA_APP_NAME="github-actions-api-prod"
-export CODEX_APP_NAME="codex-direct-api-devops"
+export CODEX_HOST_RESOURCE_GROUP="<codex-host-resource-group>"
+export CODEX_HOST_VM_NAME="<codex-host-vm-name>"
 export SCOPE="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP"
 ```
 
@@ -415,34 +414,27 @@ gh variable set AZURE_STATIC_WEB_STORAGE_ACCOUNT \
   --repo "$GH_OWNER/$GH_REPO_NAME"
 ```
 
-### 10. Create Codex direct Azure identity
+### 10. Configure the Codex host managed identity
 
-This identity is separate from the GitHub Actions identity. It is for Codex direct `az` CLI access. It uses a client
-secret stored in Codex environment secrets; do not store that secret in the README or GitHub variables.
+The Codex host identity is separate from the GitHub Actions identity and is used for direct `az` CLI access. Run the
+host on Azure compute with a system-assigned or user-assigned managed identity. The setup script defaults to the
+system-assigned identity; set the non-secret `CODEX_AZURE_MANAGED_IDENTITY_CLIENT_ID` only when the host has more than
+one identity and a user-assigned identity must be selected.
+
+For an Azure VM using a system-assigned identity, an operator can attach the identity and record only its non-secret
+principal ID:
 
 ```bash
-CODEX_APP_ID="$(az ad app create \
-  --display-name "$CODEX_APP_NAME" \
-  --query appId \
-  -o tsv)"
+az vm identity assign \
+  --resource-group "$CODEX_HOST_RESOURCE_GROUP" \
+  --name "$CODEX_HOST_VM_NAME" \
+  --output none
 
-CODEX_SP_OBJECT_ID="$(az ad sp create \
-  --id "$CODEX_APP_ID" \
-  --query id \
-  -o tsv)"
-
-echo "CODEX_APP_ID=$CODEX_APP_ID"
-echo "CODEX_SP_OBJECT_ID=$CODEX_SP_OBJECT_ID"
-
-CODEX_AZURE_CLIENT_SECRET=$(az ad app credential reset \
-  --id "$CODEX_APP_ID" \
-  --append \
-  --display-name "codex-direct-secret" \
-  --years 1 \
-  --query password \
-  -o tsv)
-
-echo "Store CODEX_AZURE_CLIENT_SECRET in Codex secrets now. Do not paste it into chat, README, issues, or PRs."
+CODEX_IDENTITY_PRINCIPAL_ID="$(az vm show \
+  --resource-group "$CODEX_HOST_RESOURCE_GROUP" \
+  --name "$CODEX_HOST_VM_NAME" \
+  --query identity.principalId \
+  --output tsv)"
 ```
 
 ### 11. Assign Azure RBAC for Codex direct access
@@ -451,14 +443,14 @@ Give Codex read visibility at subscription scope and write access only at the pr
 
 ```bash
 az role assignment create \
-  --assignee-object-id "$CODEX_SP_OBJECT_ID" \
+  --assignee-object-id "$CODEX_IDENTITY_PRINCIPAL_ID" \
   --assignee-principal-type ServicePrincipal \
   --role "Reader" \
   --scope "/subscriptions/$AZURE_SUBSCRIPTION_ID" \
   --output table
 
 az role assignment create \
-  --assignee-object-id "$CODEX_SP_OBJECT_ID" \
+  --assignee-object-id "$CODEX_IDENTITY_PRINCIPAL_ID" \
   --assignee-principal-type ServicePrincipal \
   --role "Contributor" \
   --scope "$SCOPE" \
@@ -472,20 +464,18 @@ az role assignment create \
 
 Configure Codex environment secrets:
 
-- `CODEX_AZURE_CLIENT_SECRET`
 - `CODEX_GH_TOKEN`
 
 Configure Codex non-secret variables:
 
-- `CODEX_AZURE_CLIENT_ID`
-- `CODEX_AZURE_TENANT_ID`
 - `AZURE_SUBSCRIPTION_ID`
+- `CODEX_AZURE_MANAGED_IDENTITY_CLIENT_ID` only for a selected user-assigned identity
 - `TEST_AZURE_RESOURCE_GROUP`
 - `PRODUCTION_AZURE_RESOURCE_GROUP`
 
-`CODEX_AZURE_TENANT_ID` is canonical for Codex setup, and `CODEX_GH_TOKEN` is canonical for Codex setup GitHub
-authentication. Do not use `GH_TOKEN` or `GITHUB_TOKEN` for Codex setup auth if you want `gh` to persist credentials.
-The setup script clears `GH_TOKEN` and `GITHUB_TOKEN` before running `gh auth login`.
+Do not configure a standing Azure client secret for Codex setup. `CODEX_GH_TOKEN` is canonical for setup GitHub
+authentication. Do not use `GH_TOKEN` or `GITHUB_TOKEN` for Codex setup auth if you want `gh` to persist credentials;
+the setup script clears both before running `gh auth login`.
 
 ### 13. Codex setup and maintenance scripts
 
@@ -501,7 +491,7 @@ Run maintenance on an existing Codex host.
 sudo scripts/maintain-codex-env.sh
 ```
 
-The setup script installs `az` and `gh`, logs into Azure using the Codex service principal, and logs into `gh` using
+The setup script installs `az` and `gh`, logs into Azure using the host managed identity, and logs into `gh` using
 `CODEX_GH_TOKEN`. The maintenance script reinstalls or verifies CLIs and verifies cached authentication. Maintenance
 does not use or print secrets. Neither script deploys anything.
 

@@ -25,11 +25,9 @@ This skill is for:
 The canonical Codex direct Azure setup variables are:
 
 ```text
-CODEX_AZURE_CLIENT_ID
-CODEX_AZURE_CLIENT_<secret value>
-CODEX_AZURE_TENANT_ID
 AZURE_SUBSCRIPTION_ID
 AZURE_RESOURCE_GROUP
+CODEX_AZURE_MANAGED_IDENTITY_CLIENT_ID (optional, for a user-assigned identity)
 ```
 
 Known project resource groups:
@@ -39,7 +37,7 @@ rg-api-test
 rg-api-prod
 ```
 
-Do not use `AZURE_TENANT_ID` for Codex direct Azure setup unless the setup script is explicitly changed later.
+Codex hosts authenticate with their Azure managed identity. Do not add a standing Azure client secret to the setup environment or pass one through Azure CLI arguments.
 
 Do not print any secret values.
 
