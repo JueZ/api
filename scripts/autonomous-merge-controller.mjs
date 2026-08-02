@@ -114,7 +114,7 @@ export function evaluatePullRequestState(
   { allowBlockedBeforeOwnReview = false } = {},
 ) {
   const errors = [];
-  const allowedMergeableStates = new Set(['clean', 'unstable', ...(allowBlockedBeforeOwnReview ? ['blocked'] : [])]);
+  const allowedMergeableStates = new Set(['clean', ...(allowBlockedBeforeOwnReview ? ['unstable', 'blocked'] : [])]);
   if (!isAutomergeCandidate(pullRequest, policy)) errors.push('pull request is not an auto-merge candidate');
   if (pullRequest.state !== 'open') errors.push('pull request is not open');
   if (pullRequest.head?.sha !== expectedHeadSha) errors.push('pull request head changed');
@@ -127,9 +127,10 @@ export function evaluatePullRequestState(
   }
   // GitHub can report `unstable` or `blocked` while a mergeable PR is waiting
   // on this controller's own exact-head review check. Preflight and durable
-  // claim creation may opt into `blocked` because they independently validate
-  // every free required check. The final merge gate never opts in and remains
-  // fail closed for a blocked merge state.
+  // claim creation may opt into those states because they independently
+  // validate every free required check. The final merge gate never opts in and
+  // remains fail closed by requiring GitHub's aggregate mergeable state to be
+  // clean.
   if (pullRequest.mergeable !== true || !allowedMergeableStates.has(pullRequest.mergeable_state)) {
     errors.push(`pull request is not mergeable (${pullRequest.mergeable_state ?? 'unknown'})`);
   }

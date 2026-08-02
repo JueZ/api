@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-02 — Final merge gate accepted unexplained unstable states
+
+- Impact: The privileged final merge decision accepted GitHub's aggregate `unstable` state after validating only the statically configured required check-run names. An unlisted failing or pending check could therefore leave the pull request unstable without blocking the controller itself.
+- Root cause: The self-gating repair for PR #270 allowed `unstable` in the shared default pull-request state evaluation rather than limiting that exception to the pre-review path that must coexist with its own in-progress check.
+- Repair: Require `clean` for the default/final merge decision. Only the explicit pre-review/preflight option may accept `unstable` or `blocked`, after its separate exact-head free-check validation; the merge API path does not use that option.
+- Status: The local repair and regression coverage pass; merge, CI/policy acceptance, and delivery evidence remain pending.
+
 ## 2026-08-01 — Bundled MCP OAuth authorization rejected missing delegated scopes
 
 - Impact: ChatGPT could reach the production Microsoft Entra authorization flow for the one bundled MCP server, but authorization returned `AADSTS650053` because requested granular delegated scopes such as `bring.write` and `catalogue.read` were not exposed by the API registration.

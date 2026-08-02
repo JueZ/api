@@ -1380,9 +1380,15 @@ test('pull request state rejects forks, stale heads, and behind branches', () =>
     false,
   );
   assert.equal(evaluatePullRequestState(pullRequest({ mergeable_state: 'behind' }), headSha, policy).ok, false);
-  assert.equal(evaluatePullRequestState(pullRequest({ mergeable_state: 'unstable' }), headSha, policy).ok, true);
+  assert.equal(evaluatePullRequestState(pullRequest({ mergeable_state: 'unstable' }), headSha, policy).ok, false);
   assert.equal(evaluatePullRequestState(pullRequest({ mergeable_state: 'dirty' }), headSha, policy).ok, false);
   assert.equal(evaluatePullRequestState(pullRequest({ mergeable_state: 'blocked' }), headSha, policy).ok, false);
+  assert.equal(
+    evaluatePullRequestState(pullRequest({ mergeable_state: 'unstable' }), headSha, policy, {
+      allowBlockedBeforeOwnReview: true,
+    }).ok,
+    true,
+  );
   assert.equal(
     evaluatePullRequestState(pullRequest({ mergeable_state: 'blocked' }), headSha, policy, {
       allowBlockedBeforeOwnReview: true,
@@ -1399,6 +1405,17 @@ test('pull request state rejects forks, stale heads, and behind branches', () =>
 test('merge decision requires pull request state, checks, and review to all pass', () => {
   const checkEvaluation = evaluateRequiredChecks(successfulChecks(), headSha, policy.requiredChecks);
   const review = { decision: 'approve', reviewedHeadSha: headSha, summary: 'Approved.', findings: [] };
+  assert.equal(
+    mergeGateDecision({
+      pullRequest: pullRequest({ mergeable_state: 'unstable' }),
+      expectedHeadSha: headSha,
+      checkEvaluation,
+      review,
+      policy,
+    }).ok,
+    false,
+  );
+
   assert.equal(
     mergeGateDecision({
       pullRequest: pullRequest({ mergeable_state: 'blocked' }),
