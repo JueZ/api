@@ -1,0 +1,9 @@
+{
+  "name": "juez-codex-security-cli",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Immutable dependency manifest for the advisory Codex Security workflow.",
+  "dependencies": {
+    "@openai/codex-security": "0.1.3"
+  }
+}

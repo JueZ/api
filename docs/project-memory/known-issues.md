@@ -5,6 +5,8 @@
 - PR #315's two paid scans ran on GitHub Ubuntu 24.04, authenticated, accrued cost, and then produced no draft artifacts. The seal error was downstream: without scan-agent shell/write capability, `scan-manifest.json`, `findings.json`, and `coverage.json` never existed.
 - The workflow pins its isolated advisory job to supported Ubuntu 22.04 and adds a credential-free sandbox write probe before the credential boundary. This avoids weakening AppArmor or disabling the Codex sandbox, but it depends on GitHub continuing to offer that runner and on the bundled Codex runtime retaining compatible sandbox behavior.
 - Do not treat a passed probe as scan evidence. A usable scan still requires a sealed manifest, complete coverage, valid findings, and successful SARIF export. Re-evaluate the runner pin when OpenAI publishes a documented compatible CLI/runtime; require both the probe and a sealed canary before removing it.
+- The workflow limits transitive-package drift with a committed integrity lock and prevents PR-controlled knowledge-base links by sourcing those files from the trusted base SHA. Same-repository workflow changes still execute with the repository's read-only Actions token, so high-risk review and branch protection remain essential even while the Codex API key is scan-step-only.
+- The current `$0.10` Luna/minimal setup cap is intentionally too small to guarantee completion for an arbitrary repository diff. Budget exhaustion must remain a visible incomplete failure with partial artifacts; do not interpret a passed free preflight or a successful official-fixture export as a clean repository scan.
 
 ## Test and production are accepted on the same immutable release
 

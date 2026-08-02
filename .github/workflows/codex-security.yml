@@ -41,16 +41,73 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install Codex Security outside the checkout
+      - name: Fetch the exact-head scanner lock outside the checkout
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPOSITORY: ${{ github.repository }}
+          SCANNER_ROOT: ${{ runner.temp }}/codex-security
         run: |
           set -euo pipefail
-          npm install \
-            --prefix "$RUNNER_TEMP/codex-security" \
+          umask 077
+          if [[ ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Pull-request head must be a full lowercase commit SHA." >&2
+            exit 1
+          fi
+          if [ -e "$SCANNER_ROOT" ]; then
+            echo "Codex Security install directory must start absent." >&2
+            exit 1
+          fi
+          install -d -m 700 "$SCANNER_ROOT"
+
+          for manifest_name in package.json package-lock.json; do
+            response_file="$RUNNER_TEMP/codex-security-$manifest_name-response.json"
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "repos/$REPOSITORY/contents/.github/codex-security/$manifest_name?ref=$HEAD_SHA" \
+              > "$response_file"
+            jq -e '
+              .type == "file" and
+              .encoding == "base64" and
+              (.content | type == "string")
+            ' "$response_file" >/dev/null
+            jq -r '.content' "$response_file" | base64 --decode > "$SCANNER_ROOT/$manifest_name"
+          done
+          chmod 600 "$SCANNER_ROOT/package.json" "$SCANNER_ROOT/package-lock.json"
+
+          jq -e '
+            .private == true and
+            (has("scripts") | not) and
+            .dependencies == {"@openai/codex-security": "0.1.3"}
+          ' "$SCANNER_ROOT/package.json" >/dev/null
+          jq -e '
+            .lockfileVersion == 3 and
+            .packages[""].dependencies == {"@openai/codex-security": "0.1.3"} and
+            .packages["node_modules/@openai/codex-security"].version == "0.1.3" and
+            all(
+              .packages | to_entries[];
+              .key == "" or
+              (
+                (.value.resolved | type == "string") and
+                (.value.resolved | startswith("https://registry.npmjs.org/")) and
+                (.value.integrity | type == "string") and
+                (.value.integrity | startswith("sha512-"))
+              )
+            )
+          ' "$SCANNER_ROOT/package-lock.json" >/dev/null
+
+      - name: Install Codex Security outside the checkout
+        shell: bash
+        env:
+          SCANNER_ROOT: ${{ runner.temp }}/codex-security
+        run: |
+          set -euo pipefail
+          npm ci \
+            --prefix "$SCANNER_ROOT" \
             --ignore-scripts \
             --no-audit \
-            --no-fund \
-            @openai/codex-security@0.1.3
+            --no-fund
 
       - name: Verify the pinned Codex Security CLI
         shell: bash
@@ -90,6 +147,28 @@ jobs:
 
           test -f "$SANDBOX_PROBE_DIR/sandbox-write-probe"
 
+      - name: Verify sealed-result export without API access
+        shell: bash
+        env:
+          CODEX_SECURITY_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
+          EXAMPLE_SCAN_DIR: ${{ runner.temp }}/codex-security/node_modules/@openai/codex-security/_bundled_plugin/examples/completed-scan
+          EXAMPLE_SARIF: ${{ runner.temp }}/codex-security-example.sarif
+        run: |
+          set -euo pipefail
+          umask 077
+          test -f "$EXAMPLE_SCAN_DIR/scan-manifest.json"
+          test -f "$EXAMPLE_SCAN_DIR/findings.json"
+          test -f "$EXAMPLE_SCAN_DIR/coverage.json"
+          "$CODEX_SECURITY_BIN" export "$EXAMPLE_SCAN_DIR" \
+            --export-format sarif \
+            --source-root "$RUNNER_TEMP" \
+            --output "$EXAMPLE_SARIF"
+          jq -e '
+            .version == "2.1.0" and
+            (.runs | type == "array") and
+            (.runs | length > 0)
+          ' "$EXAMPLE_SARIF" >/dev/null
+
       - name: Check out the exact pull-request head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7
         with:
@@ -122,6 +201,59 @@ jobs:
           fi
           echo "base_revision=$base_revision" >> "$GITHUB_OUTPUT"
 
+      - name: Prepare trusted base knowledge
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TRUSTED_KB_DIR: ${{ runner.temp }}/codex-security-knowledge-base
+        run: |
+          set -euo pipefail
+          umask 077
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Pull-request base must be a full lowercase commit SHA." >&2
+            exit 1
+          fi
+          if [ -e "$TRUSTED_KB_DIR" ]; then
+            echo "Trusted knowledge-base directory must start absent." >&2
+            exit 1
+          fi
+
+          knowledge_paths=(
+            AGENTS.md
+            .github/AGENTS.md
+            docs/security
+            docs/architecture
+            docs/project-memory/current-state.md
+          )
+          unsafe_mode="$(
+            git ls-tree -r "$BASE_SHA" -- "${knowledge_paths[@]}" |
+              awk '$1 != "100644" && $1 != "100755" { print $1; exit }'
+          )"
+          if [ -n "$unsafe_mode" ]; then
+            echo "Trusted knowledge-base inputs must contain only regular files." >&2
+            exit 1
+          fi
+
+          archive_file="$RUNNER_TEMP/codex-security-knowledge-base.tar"
+          git archive \
+            --format=tar \
+            --output="$archive_file" \
+            "$BASE_SHA" \
+            -- "${knowledge_paths[@]}"
+          install -d -m 700 "$TRUSTED_KB_DIR"
+          tar -xf "$archive_file" -C "$TRUSTED_KB_DIR"
+          chmod -R go-rwx "$TRUSTED_KB_DIR"
+
+          test -f "$TRUSTED_KB_DIR/AGENTS.md"
+          test -f "$TRUSTED_KB_DIR/.github/AGENTS.md"
+          test -d "$TRUSTED_KB_DIR/docs/security"
+          test -d "$TRUSTED_KB_DIR/docs/architecture"
+          test -f "$TRUSTED_KB_DIR/docs/project-memory/current-state.md"
+          if find "$TRUSTED_KB_DIR" -mindepth 1 ! -type d ! -type f -print -quit | grep -q .; then
+            echo "Trusted knowledge-base extraction contains a non-regular entry." >&2
+            exit 1
+          fi
+
       - name: Validate scan configuration without API access
         shell: bash
         env:
@@ -131,6 +263,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PREFLIGHT_DIR: ${{ runner.temp }}/codex-security-preflight-results
           PREFLIGHT_JSON: ${{ runner.temp }}/codex-security-dry-run.json
+          TRUSTED_KB_DIR: ${{ runner.temp }}/codex-security-knowledge-base
         run: |
           set -euo pipefail
           umask 077
@@ -145,13 +278,13 @@ jobs:
             --head "$HEAD_SHA" \
             --mode standard \
             --model gpt-5.6-luna \
-            --effort high \
-            --max-cost 3 \
-            --knowledge-base "$GITHUB_WORKSPACE/AGENTS.md" \
-            --knowledge-base "$GITHUB_WORKSPACE/.github/AGENTS.md" \
-            --knowledge-base "$GITHUB_WORKSPACE/docs/security" \
-            --knowledge-base "$GITHUB_WORKSPACE/docs/architecture" \
-            --knowledge-base "$GITHUB_WORKSPACE/docs/project-memory/current-state.md" \
+            --effort minimal \
+            --max-cost 0.1 \
+            --knowledge-base "$TRUSTED_KB_DIR/AGENTS.md" \
+            --knowledge-base "$TRUSTED_KB_DIR/.github/AGENTS.md" \
+            --knowledge-base "$TRUSTED_KB_DIR/docs/security" \
+            --knowledge-base "$TRUSTED_KB_DIR/docs/architecture" \
+            --knowledge-base "$TRUSTED_KB_DIR/docs/project-memory/current-state.md" \
             --output-dir "$PREFLIGHT_DIR" \
             --dry-run \
             --json > "$PREFLIGHT_JSON"
@@ -168,6 +301,8 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           SCAN_DIR: ${{ runner.temp }}/codex-security-results
           RESULT_JSON: ${{ runner.temp }}/codex-security.json
+          SCAN_LOG: ${{ runner.temp }}/codex-security-scan.log
+          TRUSTED_KB_DIR: ${{ runner.temp }}/codex-security-knowledge-base
         run: |
           set -euo pipefail
           umask 077
@@ -187,6 +322,7 @@ jobs:
             exit 1
           fi
           : > "$RESULT_JSON"
+          : > "$SCAN_LOG"
 
           "$CODEX_SECURITY_BIN" scan . \
             --diff "$BASE_REVISION" \
@@ -194,15 +330,16 @@ jobs:
             --mode standard \
             --auth api-key \
             --model gpt-5.6-luna \
-            --effort high \
-            --max-cost 3 \
-            --knowledge-base "$GITHUB_WORKSPACE/AGENTS.md" \
-            --knowledge-base "$GITHUB_WORKSPACE/.github/AGENTS.md" \
-            --knowledge-base "$GITHUB_WORKSPACE/docs/security" \
-            --knowledge-base "$GITHUB_WORKSPACE/docs/architecture" \
-            --knowledge-base "$GITHUB_WORKSPACE/docs/project-memory/current-state.md" \
+            --effort minimal \
+            --max-cost 0.1 \
+            --knowledge-base "$TRUSTED_KB_DIR/AGENTS.md" \
+            --knowledge-base "$TRUSTED_KB_DIR/.github/AGENTS.md" \
+            --knowledge-base "$TRUSTED_KB_DIR/docs/security" \
+            --knowledge-base "$TRUSTED_KB_DIR/docs/architecture" \
+            --knowledge-base "$TRUSTED_KB_DIR/docs/project-memory/current-state.md" \
             --output-dir "$SCAN_DIR" \
-            --json > "$RESULT_JSON"
+            --json > "$RESULT_JSON" \
+            2> >(tee "$SCAN_LOG" >&2)
 
       - name: Export sealed results to SARIF
         id: export-sarif
@@ -243,6 +380,7 @@ jobs:
         env:
           SCAN_OUTCOME: ${{ steps.scan.outcome }}
           RESULT_JSON: ${{ runner.temp }}/codex-security.json
+          SCAN_LOG: ${{ runner.temp }}/codex-security-scan.log
           SCAN_DIR: ${{ runner.temp }}/codex-security-results
           SARIF_FILE: ${{ runner.temp }}/codex-security.sarif
         run: |
@@ -290,6 +428,22 @@ jobs:
             fi
           fi
 
+          if [ -f "$SCAN_LOG" ]; then
+            budget_line="$(
+              grep -E 'Scan stopped: estimated cost [^0-9]*[0-9]+([.][0-9]+)? exceeded the [^0-9]*[0-9]+([.][0-9]+)? limit' "$SCAN_LOG" |
+                tail -n 1 || true
+            )"
+            if [ -n "$budget_line" ]; then
+              budget_cost="$(sed -nE 's/.*estimated cost [^0-9]*([0-9]+([.][0-9]+)?) exceeded.*/\1/p' <<<"$budget_line")"
+              if [[ "$budget_cost" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+                estimated_cost="$budget_cost USD"
+              fi
+              scan_status="budget exhausted before sealing"
+              coverage="incomplete (budget limit)"
+              deferred="unknown (scan incomplete)"
+            fi
+          fi
+
           counts_json='{"critical":0,"high":0,"medium":0,"low":0,"informational":0}'
           counts_available=false
           if [ -f "$findings_file" ] && jq -e '.findings | type == "array"' "$findings_file" >/dev/null 2>&1; then
@@ -322,6 +476,7 @@ jobs:
             echo "- Scanner step outcome: $scan_outcome"
             echo "- Coverage completeness: $coverage"
             echo "- Estimated cost: $estimated_cost"
+            echo "- Configured cost limit: 0.10 USD"
             echo "- Finding counts: $findings"
             echo "- SARIF produced: $sarif"
             echo "- Surfaces deferred: $deferred"

@@ -50,6 +50,12 @@ const codexSecurityWorkflow = readFileSync(
   new URL('../../.github/workflows/codex-security.yml', import.meta.url),
   'utf8',
 );
+const codexSecurityPackage = JSON.parse(
+  readFileSync(new URL('../../.github/codex-security/package.json', import.meta.url), 'utf8'),
+);
+const codexSecurityLock = JSON.parse(
+  readFileSync(new URL('../../.github/codex-security/package-lock.json', import.meta.url), 'utf8'),
+);
 const autonomousControllerSource = readFileSync(new URL('../autonomous-merge-controller.mjs', import.meta.url), 'utf8');
 const deployEnvironmentWorkflow = readFileSync(
   new URL('../../.github/workflows/deploy-environment.yml', import.meta.url),
@@ -251,6 +257,10 @@ test('Codex Security PR scanning is exact-head, credential-scoped, and advisory'
   assert.match(codexSecurityWorkflow, /github\.event\.pull_request\.user\.login != 'dependabot\[bot\]'/);
   assert.match(codexSecurityWorkflow, /github\.actor != 'dependabot\[bot\]'/);
   assert.ok(
+    codexSecurityWorkflow.indexOf('Fetch the exact-head scanner lock outside the checkout') <
+      codexSecurityWorkflow.indexOf('Install Codex Security outside the checkout'),
+  );
+  assert.ok(
     codexSecurityWorkflow.indexOf('Install Codex Security outside the checkout') <
       codexSecurityWorkflow.indexOf('Check out the exact pull-request head'),
   );
@@ -269,11 +279,37 @@ test('Codex Security PR scanning is exact-head, credential-scoped, and advisory'
   assert.match(codexSecurityWorkflow, /--permission-profile codex_security_scan/);
   assert.match(codexSecurityWorkflow, /CODEX_HOME: \$\{\{ runner\.temp \}\}\/codex-security-sandbox-probe-home/);
   assert.match(codexSecurityWorkflow, /sandbox-write-probe/);
-  assert.match(codexSecurityWorkflow, /@openai\/codex-security@0\.1\.3/);
+  assert.match(codexSecurityWorkflow, /Verify sealed-result export without API access/);
+  assert.match(codexSecurityWorkflow, /_bundled_plugin\/examples\/completed-scan/);
+  assert.ok(
+    codexSecurityWorkflow.indexOf('Verify sealed-result export without API access') <
+      codexSecurityWorkflow.indexOf('Check out the exact pull-request head'),
+  );
+  assert.match(codexSecurityWorkflow, /npm ci/);
+  assert.match(codexSecurityWorkflow, /--ignore-scripts/);
+  assert.match(codexSecurityWorkflow, /--no-audit/);
+  assert.match(codexSecurityWorkflow, /--no-fund/);
+  assert.doesNotMatch(codexSecurityWorkflow, /npm install/);
+  assert.match(codexSecurityWorkflow, /\.github\/codex-security\/\$manifest_name\?ref=\$HEAD_SHA/);
+  assert.match(codexSecurityWorkflow, /\.value\.integrity \| startswith\("sha512-"\)/);
+  assert.deepEqual(codexSecurityPackage.dependencies, { '@openai/codex-security': '0.1.3' });
+  assert.equal(codexSecurityPackage.scripts, undefined);
+  assert.equal(codexSecurityLock.lockfileVersion, 3);
+  assert.deepEqual(codexSecurityLock.packages[''].dependencies, { '@openai/codex-security': '0.1.3' });
+  assert.equal(codexSecurityLock.packages['node_modules/@openai/codex-security'].version, '0.1.3');
+  for (const [packagePath, packageEntry] of Object.entries(codexSecurityLock.packages)) {
+    if (packagePath === '') continue;
+    assert.match(packageEntry.resolved, /^https:\/\/registry\.npmjs\.org\//);
+    assert.match(packageEntry.integrity, /^sha512-/);
+  }
   assert.match(codexSecurityWorkflow, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   assert.match(codexSecurityWorkflow, /fetch-depth: 0/);
   assert.match(codexSecurityWorkflow, /persist-credentials: false/);
   assert.match(codexSecurityWorkflow, /base_revision="\$\(git merge-base "\$BASE_SHA" "\$HEAD_SHA"\)"/);
+  assert.match(codexSecurityWorkflow, /Prepare trusted base knowledge/);
+  assert.match(codexSecurityWorkflow, /git archive/);
+  assert.match(codexSecurityWorkflow, /"\$BASE_SHA"/);
+  assert.match(codexSecurityWorkflow, /Trusted knowledge-base inputs must contain only regular files/);
   assert.match(codexSecurityWorkflow, /Validate scan configuration without API access/);
   assert.match(codexSecurityWorkflow, /--dry-run/);
   assert.ok(
@@ -284,9 +320,13 @@ test('Codex Security PR scanning is exact-head, credential-scoped, and advisory'
   assert.equal(codexSecurityWorkflow.match(/secrets\.CODEX_SECURITY_API_KEY/g)?.length, 1);
   assert.match(codexSecurityWorkflow, /--mode standard/);
   assert.match(codexSecurityWorkflow, /--model gpt-5\.6-luna/);
-  assert.match(codexSecurityWorkflow, /--effort high/);
-  assert.match(codexSecurityWorkflow, /--max-cost 3/);
-  assert.match(codexSecurityWorkflow, /--knowledge-base "\$GITHUB_WORKSPACE\/docs\/security"/);
+  assert.match(codexSecurityWorkflow, /--effort minimal/);
+  assert.match(codexSecurityWorkflow, /--max-cost 0\.1/);
+  assert.equal(codexSecurityWorkflow.match(/--max-cost 0\.1/g)?.length, 2);
+  assert.doesNotMatch(codexSecurityWorkflow, /--max-cost (?:[1-9]|0\.[2-9])/);
+  assert.match(codexSecurityWorkflow, /budget exhausted before sealing/);
+  assert.match(codexSecurityWorkflow, /--knowledge-base "\$TRUSTED_KB_DIR\/docs\/security"/);
+  assert.doesNotMatch(codexSecurityWorkflow, /--knowledge-base "\$GITHUB_WORKSPACE/);
   assert.match(codexSecurityWorkflow, /category: codex-security/);
   assert.match(codexSecurityWorkflow, /retention-days: 7/);
   assert.doesNotMatch(codexSecurityWorkflow, /--fail-on-severity/);
