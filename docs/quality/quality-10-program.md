@@ -66,6 +66,14 @@ The first deterministic gate report passes 7 of 71 mandatory gates and reports 0
 
 Allowed phase states are `not_started`, `in_progress`, `accepted`, `blocked`, and `superseded`. Accepted status requires exact evidence; a merged PR alone is insufficient.
 
+## Incremental execution policy
+
+- Each future invocation resumes from the first incomplete, unblocked phase or the next exact slice recorded below.
+- One PR carries one coherent, independently useful purpose; the full program is never attempted as one change.
+- Accepted work is not repeated, and unrelated normal repository work remains allowed between phases.
+- A planned coverage, mutation, browser, accessibility, bundle, benchmark, contract, or quality-report check is not added to required CI until its owning phase makes it deterministic, stable, and green.
+- Phase 0 records the backlog and evidence rules; it does not activate every future gate.
+
 ## Phase 0 evidence
 
 - Local baseline: `docs/quality/evidence/phase-0-baseline.json`.
@@ -74,6 +82,7 @@ Allowed phase states are `not_started`, `in_progress`, `accepted`, `blocked`, an
 - Baseline local commands: architecture, OpenAPI drift, operation drift, generated operation docs, policy guardrails, full tests, production web build, and dependency audit all passed. Exact command names and statuses are recorded in the baseline JSON.
 - Phase 0 terminal delivery: `docs/quality/evidence/phase-0-delivery.json` records PR #317 head `33bf1556af77cac06a1d73c88e2f4fdbd7a6a82c`, protected-main merge `9137c53a9ad99b68cf4be9294d258b26da790a91`, and successful policy, PR CI, CodeQL, autonomous review, exact-head merge, exact-main CI, Deploy Test, Promote Production, smoke, authenticated smoke, telemetry, release-ledger, and runtime-generation evidence.
 - Always-on delivery canary: `docs/quality/evidence/always-on-delivery-canary-2026-08-02.json` records PR #318 and its fully automatic protected-main delivery after the four normal controllers were restored to their active steady state.
+- Delivery-controller repair acceptance: `docs/quality/evidence/always-on-delivery-repair-2026-08-02.json` records the PR #319 bootstrap evidence and PR #321 proof that exact-head autonomous merge, exact-main CI, test, production, smoke, telemetry, provenance, ledgers, and runtime truth complete without a human merge or deployment dispatch.
 
 ## Current risks and constraints
 
@@ -85,4 +94,4 @@ Allowed phase states are `not_started`, `in_progress`, `accepted`, `blocked`, an
 
 ## Next exact phase or slice
 
-Begin **Phase 1 — fail-closed runtime environment and explicit local-bypass slice** on `codex/quality-10-phase-1-runtime-security`, including the complete negative environment matrix, startup rejection, threat-model update, and full high-risk security/policy gates.
+On a future invocation that explicitly continues Quality 10, begin **Phase 1 — fail-closed runtime environment and explicit local-bypass slice** on `codex/quality-10-phase-1-runtime-security`, including the complete negative environment matrix, startup rejection, threat-model update, and full high-risk security/policy gates. Do not start Phase 1 merely because Phase 0 exists or while handling unrelated repository work.

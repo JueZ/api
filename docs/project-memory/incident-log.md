@@ -5,21 +5,21 @@
 - Impact: PR #319 merged through protected main after all authoritative exact-head gates passed, and push CI `30745774623` succeeded, but Main Delivery run `30745842177` skipped its only job before test or production dispatch.
 - Root cause: The `workflow_run` job condition treated `.name` as the static workflow name. CI defines a dynamic `run-name`, and GitHub supplied that rendered value as `.name`; the exact workflow `.path` remained stable and correct.
 - Repair: Authorize and select the two supported triggers by exact immutable paths `.github/workflows/ci.yml` and `.github/workflows/codex-automerge.yml`, retain event/branch/attempt/SHA/API identity checks, and add governance assertions that prohibit `.workflow_run.name` as the trigger identity.
-- Status: Repair is in progress on `codex/quality-10-main-delivery-trigger`. No deployment was attempted by the skipped run; the previously accepted test and production release remains active until the repaired full chain passes.
+- Resolution: PR #321 auto-merged as `056c7b4eb1938549d7d901f27d9b47c022f8d8f9`; Main Delivery `30746175284`, exact-main CI `30746184730`, Deploy Test `30746252148`, and Promote Production `30746368440` passed, including public/authenticated smokes, telemetry, ledgers, provenance, and runtime truth. The skipped run made no deployment.
 
 ## 2026-08-02 — Clean-only final merge gate self-deadlocked
 
 - Impact: The first PR evaluated by the PR #318 controller passed every canonical exact-head check and autonomous review but could not merge because GitHub reported aggregate `unstable` while the controller's own `merge exact PR head` job was in progress.
 - Root cause: Requiring aggregate `clean` removed the earlier unexplained-unstable risk but did not distinguish the trusted current merge job from unrelated pending or failing checks. The controller therefore rejected its own unavoidable in-progress check.
 - Repair: Evaluate the complete latest exact-head check-run rollup and every legacy commit-status context. Permit aggregate `unstable` only when every external check/status is terminal-passing except exactly one in-progress `merge exact PR head` check bound by its GitHub Actions details URL to the current trusted workflow run. Any unrelated pending, failed, cancelled, stale, timed-out, action-required, error, or failure context remains fail closed. Re-read the required and complete rollups at the final merge boundary.
-- Status: Repair attempt 1 is carried by PR #319. Acceptance requires fresh exact-head CI, Policy, CodeQL, independent review, protected merge, and delivery evidence; the failed predecessor head and run remain immutable repair evidence.
+- Resolution: PR #319 placed the scoped repair on protected main after exact-head CI, Policy, CodeQL, and independent review. PR #321 then proved the repaired controller by autonomously passing its own exact merge job and the complete production delivery chain. The failed predecessor run remains immutable incident evidence.
 
 ## 2026-08-02 — Final merge gate accepted unexplained unstable states
 
 - Impact: The privileged final merge decision accepted GitHub's aggregate `unstable` state after validating only the statically configured required check-run names. An unlisted failing or pending check could therefore leave the pull request unstable without blocking the controller itself.
 - Root cause: The self-gating repair for PR #270 allowed `unstable` in the shared default pull-request state evaluation rather than limiting that exception to the pre-review path that must coexist with its own in-progress check.
 - Repair: Require `clean` for the default/final merge decision. Only the explicit pre-review/preflight option may accept `unstable` or `blocked`, after its separate exact-head free-check validation; the merge API path does not use that option.
-- Status: The local repair and regression coverage pass; merge, CI/policy acceptance, and delivery evidence remain pending.
+- Resolution: The clean-only intermediate was superseded by the complete-rollup repair in PR #319, which permits only the current trusted merge job as the sole pending cause of `unstable`. PR #321 proved the final merge boundary and complete delivery chain without an admin bypass.
 
 ## 2026-08-01 — Bundled MCP OAuth authorization rejected missing delegated scopes
 
