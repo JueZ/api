@@ -1,0 +1,260 @@
+name: Codex Security
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codex-security-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  advisory-scan:
+    name: advisory Codex Security scan
+    if: >-
+      ${{
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.user.login != 'dependabot[bot]' &&
+        github.actor != 'dependabot[bot]'
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v7
+        with:
+          node-version: '22'
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # tag=v7
+        with:
+          python-version: '3.12'
+
+      - name: Install Codex Security outside the checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install \
+            --prefix "$RUNNER_TEMP/codex-security" \
+            --ignore-scripts \
+            --no-audit \
+            --no-fund \
+            @openai/codex-security@0.1.3
+
+      - name: Verify the pinned Codex Security CLI
+        shell: bash
+        env:
+          CODEX_SECURITY_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
+        run: |
+          set -euo pipefail
+          test -x "$CODEX_SECURITY_BIN"
+          installed_version="$("$CODEX_SECURITY_BIN" --version)"
+          if [ "$installed_version" != "0.1.3" ]; then
+            echo "Unexpected Codex Security version: $installed_version" >&2
+            exit 1
+          fi
+          echo "Verified Codex Security CLI version $installed_version."
+
+      - name: Check out the exact pull-request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan committed pull-request changes
+        id: scan
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.CODEX_SECURITY_API_KEY }}
+          CODEX_SECURITY_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
+          CODEX_SECURITY_STATE_DIR: ${{ runner.temp }}/codex-security-state
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SCAN_DIR: ${{ runner.temp }}/codex-security-results
+          RESULT_JSON: ${{ runner.temp }}/codex-security.json
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${OPENAI_API_KEY:?CODEX_SECURITY_API_KEY repository secret is required}"
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Pull-request base and head must be full lowercase commit SHAs." >&2
+            exit 1
+          fi
+          if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
+            echo "The checkout does not match the exact pull-request head SHA." >&2
+            exit 1
+          fi
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          BASE_REVISION="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+          if [[ ! "$BASE_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Git did not resolve an immutable pull-request merge base." >&2
+            exit 1
+          fi
+
+          install -d -m 700 "$CODEX_SECURITY_STATE_DIR"
+          if [ -e "$SCAN_DIR" ]; then
+            echo "Codex Security output directory must start absent." >&2
+            exit 1
+          fi
+          : > "$RESULT_JSON"
+
+          "$CODEX_SECURITY_BIN" scan . \
+            --diff "$BASE_REVISION" \
+            --head "$HEAD_SHA" \
+            --mode standard \
+            --auth api-key \
+            --model gpt-5.6-sol \
+            --effort xhigh \
+            --max-cost 3 \
+            --knowledge-base "$GITHUB_WORKSPACE/AGENTS.md" \
+            --knowledge-base "$GITHUB_WORKSPACE/.github/AGENTS.md" \
+            --knowledge-base "$GITHUB_WORKSPACE/docs/security" \
+            --knowledge-base "$GITHUB_WORKSPACE/docs/architecture" \
+            --knowledge-base "$GITHUB_WORKSPACE/docs/project-memory/current-state.md" \
+            --output-dir "$SCAN_DIR" \
+            --json > "$RESULT_JSON"
+
+      - name: Export sealed results to SARIF
+        id: export-sarif
+        if: always()
+        shell: bash
+        env:
+          CODEX_SECURITY_BIN: ${{ runner.temp }}/codex-security/node_modules/.bin/codex-security
+          SCAN_DIR: ${{ runner.temp }}/codex-security-results
+          SARIF_FILE: ${{ runner.temp }}/codex-security.sarif
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ ! -f "$SCAN_DIR/scan-manifest.json" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "No sealed scan manifest was available for SARIF export."
+            exit 0
+          fi
+
+          "$CODEX_SECURITY_BIN" export "$SCAN_DIR" \
+            --export-format sarif \
+            --source-root "$GITHUB_WORKSPACE" \
+            --output "$SARIF_FILE"
+          test -s "$SARIF_FILE"
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload exact-head SARIF
+        if: always() && steps.export-sarif.outputs.available == 'true'
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # tag=v4
+        with:
+          sarif_file: ${{ runner.temp }}/codex-security.sarif
+          ref: refs/pull/${{ github.event.pull_request.number }}/head
+          sha: ${{ github.event.pull_request.head.sha }}
+          category: codex-security
+
+      - name: Write safe scan summary
+        if: always()
+        shell: bash
+        env:
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+          RESULT_JSON: ${{ runner.temp }}/codex-security.json
+          SCAN_DIR: ${{ runner.temp }}/codex-security-results
+          SARIF_FILE: ${{ runner.temp }}/codex-security.sarif
+        run: |
+          set -euo pipefail
+          scan_status="not sealed"
+          coverage="unavailable"
+          estimated_cost="unavailable"
+          deferred="unavailable"
+          findings="unavailable"
+          scan_outcome="unknown"
+
+          # SCAN_OUTCOME is assigned through the workflow step environment.
+          # shellcheck disable=SC2153
+          case "$SCAN_OUTCOME" in
+            success|failure|cancelled|skipped) scan_outcome="$SCAN_OUTCOME" ;;
+          esac
+
+          manifest_file="$SCAN_DIR/scan-manifest.json"
+          coverage_file="$SCAN_DIR/coverage.json"
+          findings_file="$SCAN_DIR/findings.json"
+
+          if [ -f "$manifest_file" ] && jq -e '.scan.status == "completed"' "$manifest_file" >/dev/null 2>&1; then
+            scan_status="completed"
+          fi
+
+          if [ -f "$coverage_file" ] && jq -e '.completeness | type == "string"' "$coverage_file" >/dev/null 2>&1; then
+            candidate_coverage="$(jq -r '.completeness' "$coverage_file")"
+            case "$candidate_coverage" in
+              complete|partial|unknown) coverage="$candidate_coverage" ;;
+            esac
+            if jq -e '.deferred | type == "array"' "$coverage_file" >/dev/null 2>&1; then
+              deferred_count="$(jq -r '.deferred | length' "$coverage_file")"
+              if [ "$deferred_count" -gt 0 ]; then
+                deferred="yes ($deferred_count)"
+              else
+                deferred="no"
+              fi
+            fi
+          fi
+
+          if [ -f "$RESULT_JSON" ] && jq -e 'type == "object"' "$RESULT_JSON" >/dev/null 2>&1; then
+            if jq -e '.cost.estimatedUsd | type == "number" and . >= 0' "$RESULT_JSON" >/dev/null 2>&1; then
+              cost_value="$(jq -r '.cost.estimatedUsd' "$RESULT_JSON")"
+              printf -v estimated_cost '%.6f USD' "$cost_value"
+            fi
+          fi
+
+          counts_json='{"critical":0,"high":0,"medium":0,"low":0,"informational":0}'
+          counts_available=false
+          if [ -f "$findings_file" ] && jq -e '.findings | type == "array"' "$findings_file" >/dev/null 2>&1; then
+            counts_json="$(jq -c '
+              reduce (.findings[]?.severity.level // empty) as $severity
+                ({critical: 0, high: 0, medium: 0, low: 0, informational: 0};
+                  if has($severity) then .[$severity] += 1 else . end)
+            ' "$findings_file")"
+            counts_available=true
+          elif [ -f "$RESULT_JSON" ] && jq -e '.findings.findings | type == "array"' "$RESULT_JSON" >/dev/null 2>&1; then
+            counts_json="$(jq -c '
+              reduce (.findings.findings[]?.severity.level // empty) as $severity
+                ({critical: 0, high: 0, medium: 0, low: 0, informational: 0};
+                  if has($severity) then .[$severity] += 1 else . end)
+            ' "$RESULT_JSON")"
+            counts_available=true
+          fi
+          if [ "$counts_available" = "true" ]; then
+            findings="critical=$(jq -r '.critical' <<<"$counts_json"), high=$(jq -r '.high' <<<"$counts_json"), medium=$(jq -r '.medium' <<<"$counts_json"), low=$(jq -r '.low' <<<"$counts_json"), informational=$(jq -r '.informational' <<<"$counts_json")"
+          fi
+
+          sarif="no"
+          if [ -s "$SARIF_FILE" ]; then
+            sarif="yes"
+          fi
+
+          {
+            echo "### Advisory Codex Security scan"
+            echo "- Scan status: $scan_status"
+            echo "- Scanner step outcome: $scan_outcome"
+            echo "- Coverage completeness: $coverage"
+            echo "- Estimated cost: $estimated_cost"
+            echo "- Finding counts: $findings"
+            echo "- SARIF produced: $sarif"
+            echo "- Surfaces deferred: $deferred"
+            echo "- Severity policy: advisory; findings do not fail this check"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve private scan artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7
+        with:
+          name: codex-security-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/codex-security-results
+            ${{ runner.temp }}/codex-security.json
+            ${{ runner.temp }}/codex-security.sarif
+          if-no-files-found: warn
+          retention-days: 7

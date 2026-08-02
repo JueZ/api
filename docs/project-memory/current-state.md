@@ -13,6 +13,13 @@
 - The enabled controller automatically completed exact-main CI `30744552173`, Deploy Test `30744611475`, Promote Production `30744732911`, and parent Main Delivery `30744545928`. Both environments passed exact-generation checks, public and authenticated smokes, telemetry correlation, and release-ledger publication. This canary required no human merge or deployment dispatch after the eligibility event.
 - Disabling a normal delivery controller is now an exceptional fail-closed incident or maintenance action. It must be documented, time-bounded, and restored after the blocker is resolved. Codex remains responsible for monitoring terminal gates and performing no more than the allowed scoped repair attempts.
 
+## 2026-08-02 Advisory Codex Security pull-request scan added
+
+- A separate `pull_request` workflow now installs the officially pinned `@openai/codex-security@0.1.3` CLI outside the checkout and scans the exact committed PR diff with `gpt-5.6-sol`, `xhigh` effort, repository security/architecture knowledge, and a `$3` estimated limit.
+- Credentialed scans are restricted to non-draft, same-repository, non-Dependabot PRs. The secret is scoped to the scan step, outputs stay under runner-temporary private directories, sealed results upload exact-head SARIF, and complete/partial artifacts are retained for seven days.
+- The rollout is advisory and is not a required merge check; no severity threshold is configured. Scanner/runtime errors and incomplete coverage remain visible failures, and existing CodeQL, Trivy, Gitleaks, dependency audit, tests, policy, architecture, deployment, and branch-protection gates remain unchanged.
+- The repository owner must configure `CODEX_SECURITY_API_KEY` with an account that has Codex Security access. No credential was created or exposed, and no real local scan was run without that authorization.
+
 ## 2026-08-01 Bring authorization-context recovery prepared
 
 - Live production diagnostics proved the bundled MCP 403 responses were deployment-policy denials, not a Bring provider outage: `BRING_ENABLED`, add, and destructive flags were false, while the readable and writable list allowlists were empty.

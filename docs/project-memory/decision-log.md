@@ -7,6 +7,13 @@
 - Safety boundary: `DEPLOY_PRODUCTION_ENABLED` remains a separate explicit production latch. Critical/high review findings, unavailable evidence, stale or non-clean final merge state, failed required checks, failed test provenance, failed smoke/telemetry, and runtime mismatch still stop delivery. Disabling a controller is reserved for a documented, time-bounded incident or maintenance response. Rollback remains separately authorized.
 - Evidence: PR #318 merged as `e8e1070b4a4f2e67b9d60b97a3586bf16b3bfeea`; Main Delivery `30744545928`, exact-main CI `30744552173`, Deploy Test `30744611475`, and Promote Production `30744732911` all succeeded with runtime evidence.
 
+## 2026-08-02 — Add Codex Security as an advisory PR layer
+
+- Decision: Run the standalone Codex Security CLI in a separate `pull_request` workflow for exact committed diffs. Skip drafts, forks, and Dependabot; install the pinned CLI before checkout; expose `CODEX_SECURITY_API_KEY` only as the scan step's `OPENAI_API_KEY`; and keep results outside the worktree.
+- Decision: Use `gpt-5.6-sol` with `xhigh` effort and a `$3` estimated limit, provide repository agent/security/architecture/current-state knowledge, export sealed results to exact-head SARIF, and retain private result artifacts for seven days without automated PR comments.
+- Decision: Keep the initial rollout advisory by omitting `--fail-on-severity`. Preserve real failures for authentication, scanner/runtime errors, SARIF export errors, and incomplete coverage. Do not add the workflow to protected-branch required checks yet.
+- Rationale: Context-aware review can detect issues that deterministic tools miss, but it must first establish cost, runtime, coverage, and false-positive characteristics without replacing or weakening CodeQL, Trivy, Gitleaks, dependency audit, tests, policy, architecture, deployment, or branch-protection controls.
+
 ## 2026-08-01 — Separate Entra service-role claim values from canonical delegated scopes
 
 - Decision: Keep the public delegated OAuth scope values `catalogue.read` and `reddit.read` for the browser and bundled MCP client. Rename only the corresponding service-only Entra application-role claim values to `catalogue.service.read` and `reddit.service.read`, preserving their existing role IDs and assignments.
