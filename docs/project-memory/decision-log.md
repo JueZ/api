@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-08-02 — Keep normal autonomous delivery controllers active
+
+- Decision: Keep `Codex Auto-Merge`, `Codex Main Delivery`, `Deploy Test`, and `Promote Production` active as the repository's steady-state operating model. Codex, not a human operator, monitors exact-head review, protected merge, exact-main CI, test acceptance, production promotion, smoke, telemetry, and runtime truth and performs only bounded scoped repairs.
+- Rationale: The repository's exact-head trust, immutable artifacts, branch protection, independent review, deployment provenance, authenticated smoke, telemetry, and fail-closed runtime gates exist to permit autonomous production delivery. Requiring a human to open every delivery window defeats that operating objective and adds a manual availability dependency without strengthening the implemented gates.
+- Safety boundary: `DEPLOY_PRODUCTION_ENABLED` remains a separate explicit production latch. Critical/high review findings, unavailable evidence, stale or non-clean final merge state, failed required checks, failed test provenance, failed smoke/telemetry, and runtime mismatch still stop delivery. Disabling a controller is reserved for a documented, time-bounded incident or maintenance response. Rollback remains separately authorized.
+- Evidence: PR #318 merged as `e8e1070b4a4f2e67b9d60b97a3586bf16b3bfeea`; Main Delivery `30744545928`, exact-main CI `30744552173`, Deploy Test `30744611475`, and Promote Production `30744732911` all succeeded with runtime evidence.
+
 ## 2026-08-01 — Separate Entra service-role claim values from canonical delegated scopes
 
 - Decision: Keep the public delegated OAuth scope values `catalogue.read` and `reddit.read` for the browser and bundled MCP client. Rename only the corresponding service-only Entra application-role claim values to `catalogue.service.read` and `reddit.service.read`, preserving their existing role IDs and assignments.

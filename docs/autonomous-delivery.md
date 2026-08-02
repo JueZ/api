@@ -43,6 +43,8 @@ The live branch ruleset must require the exact names in `.github/autonomous-poli
 
 ## Build and delivery
 
+The steady-state operating model is always-on autonomous delivery. `Codex Auto-Merge`, `Codex Main Delivery`, `Deploy Test`, and `Promote Production` remain enabled so an eligible Codex PR can proceed through exact-head review, protected merge, exact-main CI, test acceptance, and production promotion without a human acting as the routine watcher. Codex monitors every terminal gate, applies only scoped repairs within the repository repair limit, and reports any concrete blocker. Disabling one of these workflows is an exceptional fail-closed incident or maintenance action; it must be time-bounded, documented in project memory, and restored after the blocker is resolved. Rollback remains a separate explicitly requested operational action.
+
 Main CI builds the Function, frontend source bundle, and CycloneDX SBOM once. The release manifest contains the full source SHA and SHA-256 digests; main artifacts receive build provenance attestations. Each environment then renders its approved runtime frontend configuration before deployment, updates the manifest and checksums with the rendered archive digest, and preserves the exact accepted production archive for rollback.
 
 `Codex Main Delivery` is the only normal post-merge controller. It explicitly dispatches and waits for:
