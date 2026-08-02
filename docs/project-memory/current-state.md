@@ -15,10 +15,10 @@
 
 ## 2026-08-02 Advisory Codex Security pull-request scan added
 
-- A separate `pull_request` workflow now installs the officially pinned `@openai/codex-security@0.1.3` CLI outside the checkout and scans the exact committed PR diff with `gpt-5.6-sol`, `xhigh` effort, repository security/architecture knowledge, and a `$3` estimated limit.
+- PR #315 adds a separate `pull_request` workflow that installs the officially pinned `@openai/codex-security@0.1.3` CLI outside the checkout. A credential-free dry run validates the exact committed PR diff and configuration before the paid advisory scan uses `gpt-5.6-luna`, `high` effort, repository security/architecture knowledge, and a `$3` estimated limit during cost calibration.
 - Credentialed scans are restricted to non-draft, same-repository, non-Dependabot PRs. The secret is scoped to the scan step, outputs stay under runner-temporary private directories, sealed results upload exact-head SARIF, and complete/partial artifacts are retained for seven days.
 - The rollout is advisory and is not a required merge check; no severity threshold is configured. Scanner/runtime errors and incomplete coverage remain visible failures, and existing CodeQL, Trivy, Gitleaks, dependency audit, tests, policy, architecture, deployment, and branch-protection gates remain unchanged.
-- The repository owner must configure `CODEX_SECURITY_API_KEY` with an account that has Codex Security access. No credential was created or exposed, and no real local scan was run without that authorization.
+- `CODEX_SECURITY_API_KEY` is configured; only its repository-secret metadata was inspected. The first authorized Sol/xhigh attempt, workflow run `30740259787` attempt 2, reached an estimated `$1.322956` and then failed closed because the runtime did not author `scan-manifest.json`. No sealed result, conclusive coverage, SARIF, or valid finding set was produced. The Luna/high repair does not retry automatically or suppress the same exit-code-2 condition if it recurs.
 
 ## 2026-08-01 Bring authorization-context recovery prepared
 

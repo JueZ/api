@@ -257,11 +257,18 @@ test('Codex Security PR scanning is exact-head, credential-scoped, and advisory'
   assert.match(codexSecurityWorkflow, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   assert.match(codexSecurityWorkflow, /fetch-depth: 0/);
   assert.match(codexSecurityWorkflow, /persist-credentials: false/);
-  assert.match(codexSecurityWorkflow, /BASE_REVISION="\$\(git merge-base "\$BASE_SHA" "\$HEAD_SHA"\)"/);
+  assert.match(codexSecurityWorkflow, /base_revision="\$\(git merge-base "\$BASE_SHA" "\$HEAD_SHA"\)"/);
+  assert.match(codexSecurityWorkflow, /Validate scan configuration without API access/);
+  assert.match(codexSecurityWorkflow, /--dry-run/);
+  assert.ok(
+    codexSecurityWorkflow.indexOf('Validate scan configuration without API access') <
+      codexSecurityWorkflow.indexOf('Scan committed pull-request changes'),
+  );
   assert.match(codexSecurityWorkflow, /OPENAI_API_KEY: \$\{\{ secrets\.CODEX_SECURITY_API_KEY \}\}/);
+  assert.equal(codexSecurityWorkflow.match(/secrets\.CODEX_SECURITY_API_KEY/g)?.length, 1);
   assert.match(codexSecurityWorkflow, /--mode standard/);
-  assert.match(codexSecurityWorkflow, /--model gpt-5\.6-sol/);
-  assert.match(codexSecurityWorkflow, /--effort xhigh/);
+  assert.match(codexSecurityWorkflow, /--model gpt-5\.6-luna/);
+  assert.match(codexSecurityWorkflow, /--effort high/);
   assert.match(codexSecurityWorkflow, /--max-cost 3/);
   assert.match(codexSecurityWorkflow, /--knowledge-base "\$GITHUB_WORKSPACE\/docs\/security"/);
   assert.match(codexSecurityWorkflow, /category: codex-security/);
