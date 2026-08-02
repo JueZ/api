@@ -15,6 +15,7 @@ import {
   buildReviewDiffCapsule,
   calculateReviewBudget,
   claimAutonomousReview,
+  evaluateCompleteCheckRollup,
   evaluatePullRequestState,
   evaluateRequiredChecks,
   mergeGateDecision,
@@ -103,6 +104,19 @@ function successfulChecks() {
 
 function successfulFreeChecks() {
   return successfulChecks().filter((check) => check.name !== policy.autonomousReview.checkName);
+}
+
+function currentControllerMergeCheck(runId = 1234, overrides = {}) {
+  return {
+    id: 10_000,
+    name: 'merge exact PR head',
+    head_sha: headSha,
+    status: 'in_progress',
+    conclusion: null,
+    details_url: `https://github.com/JueZ/api/actions/runs/${runId}/job/5678`,
+    app: { id: 15368, slug: 'github-actions' },
+    ...overrides,
+  };
 }
 
 function withFreeChecks(github) {
@@ -571,6 +585,77 @@ test('required checks treat pending and failed checks as non-passing', () => {
   const failed = successfulChecks();
   failed[3] = { ...failed[3], conclusion: 'failure' };
   assert.equal(evaluateRequiredChecks(failed, headSha, policy.requiredChecks).failures[0].reason, 'failure');
+});
+
+test('complete check rollup permits only the current trusted merge job to remain pending', () => {
+  const currentRunId = 1234;
+  const accepted = evaluateCompleteCheckRollup(
+    [...successfulChecks(), currentControllerMergeCheck(currentRunId)],
+    [],
+    headSha,
+    currentRunId,
+    'JueZ/api',
+  );
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.explainsControllerUnstable, true);
+
+  const unrelatedPending = evaluateCompleteCheckRollup(
+    [
+      ...successfulChecks(),
+      currentControllerMergeCheck(currentRunId),
+      currentControllerMergeCheck(9999, { id: 10_001, name: 'unlisted pending check' }),
+    ],
+    [],
+    headSha,
+    currentRunId,
+    'JueZ/api',
+  );
+  assert.equal(unrelatedPending.ok, false);
+  assert.deepEqual(unrelatedPending.pending, [{ check: 'unlisted pending check', reason: 'in_progress' }]);
+
+  const unrelatedFailure = evaluateCompleteCheckRollup(
+    [
+      ...successfulChecks(),
+      currentControllerMergeCheck(currentRunId),
+      currentControllerMergeCheck(9999, {
+        id: 10_002,
+        name: 'unlisted failing check',
+        status: 'completed',
+        conclusion: 'failure',
+      }),
+    ],
+    [],
+    headSha,
+    currentRunId,
+    'JueZ/api',
+  );
+  assert.equal(unrelatedFailure.ok, false);
+  assert.deepEqual(unrelatedFailure.failures, [{ check: 'unlisted failing check', reason: 'failure' }]);
+
+  const legacyFailure = evaluateCompleteCheckRollup(
+    [...successfulChecks(), currentControllerMergeCheck(currentRunId)],
+    [{ id: 1, context: 'legacy external check', state: 'failure', sha: headSha }],
+    headSha,
+    currentRunId,
+    'JueZ/api',
+  );
+  assert.equal(legacyFailure.ok, false);
+  assert.deepEqual(legacyFailure.failures, [{ check: 'legacy external check', reason: 'failure' }]);
+
+  const wrongRepository = evaluateCompleteCheckRollup(
+    [
+      ...successfulChecks(),
+      currentControllerMergeCheck(currentRunId, {
+        details_url: `https://github.com/attacker/repository/actions/runs/${currentRunId}/job/5678`,
+      }),
+    ],
+    [],
+    headSha,
+    currentRunId,
+    'JueZ/api',
+  );
+  assert.equal(wrongRepository.ok, false);
+  assert.deepEqual(wrongRepository.pending, [{ check: 'merge exact PR head', reason: 'in_progress' }]);
 });
 
 test('autonomous review is bound to the exact head and rejects blocking findings', () => {
@@ -1416,6 +1501,26 @@ test('merge decision requires pull request state, checks, and review to all pass
     false,
   );
 
+  const currentRunId = 1234;
+  const aggregateCheckEvaluation = evaluateCompleteCheckRollup(
+    [...successfulChecks(), currentControllerMergeCheck(currentRunId)],
+    [],
+    headSha,
+    currentRunId,
+    'JueZ/api',
+  );
+  assert.equal(
+    mergeGateDecision({
+      pullRequest: pullRequest({ mergeable_state: 'unstable' }),
+      expectedHeadSha: headSha,
+      checkEvaluation,
+      aggregateCheckEvaluation,
+      review,
+      policy,
+    }).ok,
+    true,
+  );
+
   assert.equal(
     mergeGateDecision({
       pullRequest: pullRequest({ mergeable_state: 'blocked' }),
@@ -1443,6 +1548,22 @@ test('merge decision requires pull request state, checks, and review to all pass
       pullRequest: pullRequest(),
       expectedHeadSha: headSha,
       checkEvaluation: { ...checkEvaluation, pending: [{ check: 'lint', reason: 'missing' }], ok: false },
+      review,
+      policy,
+    }).ok,
+    false,
+  );
+
+  assert.equal(
+    mergeGateDecision({
+      pullRequest: pullRequest(),
+      expectedHeadSha: headSha,
+      checkEvaluation,
+      aggregateCheckEvaluation: {
+        ...aggregateCheckEvaluation,
+        ok: false,
+        pending: [{ check: 'unlisted pending check', reason: 'in_progress' }],
+      },
       review,
       policy,
     }).ok,

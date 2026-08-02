@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-02 — Clean-only final merge gate self-deadlocked
+
+- Impact: The first PR evaluated by the PR #318 controller passed every canonical exact-head check and autonomous review but could not merge because GitHub reported aggregate `unstable` while the controller's own `merge exact PR head` job was in progress.
+- Root cause: Requiring aggregate `clean` removed the earlier unexplained-unstable risk but did not distinguish the trusted current merge job from unrelated pending or failing checks. The controller therefore rejected its own unavoidable in-progress check.
+- Repair: Evaluate the complete latest exact-head check-run rollup and every legacy commit-status context. Permit aggregate `unstable` only when every external check/status is terminal-passing except exactly one in-progress `merge exact PR head` check bound by its GitHub Actions details URL to the current trusted workflow run. Any unrelated pending, failed, cancelled, stale, timed-out, action-required, error, or failure context remains fail closed. Re-read the required and complete rollups at the final merge boundary.
+- Status: Repair attempt 1 is carried by PR #319. Acceptance requires fresh exact-head CI, Policy, CodeQL, independent review, protected merge, and delivery evidence; the failed predecessor head and run remain immutable repair evidence.
+
 ## 2026-08-02 — Final merge gate accepted unexplained unstable states
 
 - Impact: The privileged final merge decision accepted GitHub's aggregate `unstable` state after validating only the statically configured required check-run names. An unlisted failing or pending check could therefore leave the pull request unstable without blocking the controller itself.
