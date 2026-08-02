@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "repository": "JueZ/api",
+  "purpose": "Archive the accepted always-on delivery controller repairs and prove unattended exact-head merge through production runtime acceptance.",
+  "bootstrap": {
+    "pullRequest": 319,
+    "url": "https://github.com/JueZ/api/pull/319",
+    "reviewedHeadSha": "9d130a65a3bc4eef866b6198902e9afcf425c243",
+    "mergeSha": "d24fe187ce5b3aeaf238e5b66e0339c5ccc7afbd",
+    "manualExactHeadProtectedMergeRequired": true,
+    "adminBypassUsed": false,
+    "reason": "The trusted predecessor controller rejected its own in-progress merge job before the scoped complete-rollup repair could exist on main."
+  },
+  "acceptanceCanary": {
+    "pullRequest": 321,
+    "url": "https://github.com/JueZ/api/pull/321",
+    "reviewedHeadSha": "534f70995cb8a0094633ea7370a1ab6778ac3bdc",
+    "mergeSha": "056c7b4eb1938549d7d901f27d9b47c022f8d8f9",
+    "humanMergeOrDeploymentDispatchRequired": false
+  },
+  "runs": {
+    "policy": {
+      "id": 30746082228,
+      "conclusion": "success",
+      "url": "https://github.com/JueZ/api/actions/runs/30746082228"
+    },
+    "pullRequestCi": {
+      "id": 30746082257,
+      "conclusion": "success",
+      "url": "https://github.com/JueZ/api/actions/runs/30746082257"
+    },
+    "codeql": {
+      "id": 30746082229,
+      "conclusion": "success",
+      "url": "https://github.com/JueZ/api/actions/runs/30746082229"
+    },
+    "autonomousReviewAndMerge": {
+      "id": 30746082232,
+      "conclusion": "success",
+      "url": "https://github.com/JueZ/api/actions/runs/30746082232"
+    },
+    "mainDelivery": {
+      "id": 30746175284,
+      "conclusion": "success",
+      "url": "https://github.com/JueZ/api/actions/runs/30746175284"
+    },
+    "exactMainCi": {
+      "id": 30746184730,
+      "conclusion": "success",
+      "url": "https://github.com/JueZ/api/actions/runs/30746184730"
+    },
+    "deployTest": {
+      "id": 30746252148,
+      "conclusion": "success",
+      "url": "https://github.com/JueZ/api/actions/runs/30746252148"
+    },
+    "promoteProduction": {
+      "id": 30746368440,
+      "conclusion": "success",
+      "url": "https://github.com/JueZ/api/actions/runs/30746368440"
+    }
+  },
+  "runtimeEvidence": {
+    "test": {
+      "exactGeneration": "success",
+      "publicSmoke": "success",
+      "authenticatedSmoke": "success",
+      "telemetry": "success",
+      "releaseLedger": "success",
+      "provenance": "success"
+    },
+    "production": {
+      "exactGeneration": "success",
+      "publicSmoke": "success",
+      "authenticatedSmoke": "success",
+      "telemetry": "success",
+      "releaseLedger": "success",
+      "runtimeTruth": "success"
+    }
+  },
+  "workflowStateAfterAcceptance": {
+    "codexAutoMerge": "active",
+    "codexMainDelivery": "active",
+    "deployTest": "active",
+    "promoteProduction": "active",
+    "deployProductionEnabled": true
+  }
+}
