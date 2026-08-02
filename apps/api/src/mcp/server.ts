@@ -6,6 +6,7 @@ import * as z from 'zod/v4';
 import { createHealthResponse, createHelloResponse } from '../shared/responses.js';
 import { createCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
 import { RedditThreadService } from '../shared/reddit/service.js';
+import { withRedditPrincipalConcurrency } from '../shared/reddit/concurrency.js';
 import type { RedditThreadOverviewRequest, RedditThreadRequest } from '../shared/reddit/types.js';
 import { WlhService } from '../shared/wlh/service.js';
 import { BringUpstreamError } from '../shared/bring/client.js';
@@ -58,6 +59,7 @@ export interface McpRequestOptions {
 
 const MCP_VERSION = '0.1.0';
 const jsonRpcContentType = 'application/json';
+export const MCP_REQUEST_BODY_MAX_BYTES = 256 * 1024;
 const maxMcpComments = 50;
 const maxCommentBodyChars = 800;
 const maxCategoryMatches = 10;
@@ -439,8 +441,8 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
           .number()
           .int()
           .min(0)
-          .max(500)
-          .describe('Maximum Reddit MoreChildren expansion requests. Use 0 to avoid expansion.')
+          .max(10)
+          .describe('Maximum Reddit MoreChildren expansion requests within the server-owned per-call budget.')
           .optional(),
       },
       outputSchema: redditThreadOutputSchema,
@@ -457,7 +459,7 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
       const request = toRedditThreadRequest(args);
       if (isToolErrorResult(request)) return request;
       return await withToolErrorBoundary('reddit', OPERATION_IDS.redditThread, async () => {
-        const response = await services.reddit.fetchThread(request);
+        const response = await withRedditPrincipalConcurrency(principal, () => services.reddit.fetchThread(request));
         const structuredContent = toMcpRedditThread(response);
         return textResult(structuredContent, summarizeRedditThread(structuredContent));
       });
@@ -691,11 +693,13 @@ export async function handleMcpHttpRequest(
     return { status: 204, headers: corsHeaders(request) };
   }
 
-  if (request.method === 'GET' && !request.headers.get('authorization')) {
+  const authorizationHeader = request.headers.get('authorization');
+  const bearerError = mcpBearerHeaderError(authorizationHeader);
+  if (bearerError && !isExplicitLocalMcpDevelopment()) {
     const problem = buildMcpHttpProblem(
       401,
       'unauthorized',
-      'Authentication is required to open an MCP event stream.',
+      'Authentication is required before processing an MCP request.',
       'authorization_context_mismatch',
       context.invocationId,
     );
@@ -706,15 +710,29 @@ export async function handleMcpHttpRequest(
         'Content-Type': 'application/problem+json',
         'WWW-Authenticate': buildMcpWwwAuthenticate(request, {
           error: 'invalid_token',
-          errorDescription: 'Missing bearer token.',
+          errorDescription: bearerError,
         }),
       },
       jsonBody: problem,
     };
   }
 
-  const parsedBody = request.method === 'POST' ? await safeReadJson(request) : undefined;
-  if (parsedBody === invalidJson) {
+  const requestBody = request.method === 'POST' ? await safeReadBoundedMcpBody(request) : undefined;
+  if (requestBody === bodyTooLarge) {
+    const problem = buildMcpHttpProblem(
+      413,
+      'payload_too_large',
+      `The MCP request body exceeds the ${MCP_REQUEST_BODY_MAX_BYTES}-byte limit.`,
+      'caller_contract_violation',
+      context.invocationId,
+    );
+    return {
+      status: 413,
+      headers: { ...corsHeaders(request), 'Content-Type': 'application/problem+json' },
+      jsonBody: problem,
+    };
+  }
+  if (requestBody === invalidJson || (typeof requestBody === 'string' && !isValidJson(requestBody))) {
     const problem = buildMcpHttpProblem(
       400,
       'invalid_json',
@@ -738,7 +756,7 @@ export async function handleMcpHttpRequest(
     enableJsonResponse: true,
   });
   const server = createPrivateMcpServer({
-    authorizationHeader: request.headers.get('authorization'),
+    authorizationHeader,
     context,
     request,
     services,
@@ -747,8 +765,8 @@ export async function handleMcpHttpRequest(
   try {
     await server.connect(transport);
     connected = true;
-    const webRequest = toWebRequest(request, parsedBody === undefined ? undefined : parsedBody);
-    const response = await transport.handleRequest(webRequest, parsedBody === undefined ? undefined : { parsedBody });
+    const webRequest = toWebRequest(request, requestBody === undefined ? undefined : requestBody);
+    const response = await transport.handleRequest(webRequest);
     return await toHttpResponseInit(response, request);
   } catch {
     const deterministic = buildMcpHttpProblem(
@@ -1786,25 +1804,73 @@ function summarizeWlhSearch(response: Record<string, unknown>): string {
 }
 
 const invalidJson = Symbol('invalidJson');
+const bodyTooLarge = Symbol('bodyTooLarge');
 
-async function safeReadJson(request: HttpRequest): Promise<unknown | typeof invalidJson> {
+async function safeReadBoundedMcpBody(
+  request: HttpRequest,
+): Promise<string | typeof invalidJson | typeof bodyTooLarge> {
+  const declaredLength = request.headers.get('content-length')?.trim();
+  if (declaredLength && /^\d+$/.test(declaredLength)) {
+    if (BigInt(declaredLength) > BigInt(MCP_REQUEST_BODY_MAX_BYTES)) return bodyTooLarge;
+  }
+
+  const stream = request.body;
+  if (!stream) return '';
+  const reader = stream.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let bytesRead = 0;
+  let body = '';
   try {
-    return await request.json();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+      bytesRead += chunk.byteLength;
+      if (bytesRead > MCP_REQUEST_BODY_MAX_BYTES) {
+        await reader.cancel();
+        return bodyTooLarge;
+      }
+      body += decoder.decode(chunk, { stream: true });
+    }
+    body += decoder.decode();
+    return body;
   } catch {
     return invalidJson;
+  } finally {
+    reader.releaseLock();
   }
 }
 
-function toWebRequest(request: HttpRequest, parsedBody: unknown): Request {
+function isValidJson(body: string): boolean {
+  try {
+    JSON.parse(body);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function mcpBearerHeaderError(authorizationHeader: string | null): string | undefined {
+  if (!authorizationHeader) return 'Missing bearer token.';
+  if (!/^Bearer\s+[^\s]+$/i.test(authorizationHeader.trim())) return 'Malformed bearer token.';
+  return undefined;
+}
+
+function isExplicitLocalMcpDevelopment(): boolean {
+  return process.env['DEPLOYED_ENVIRONMENT_NAME'] === 'local' && process.env['AUTH_ENABLED'] !== 'true';
+}
+
+function toWebRequest(request: HttpRequest, requestBody: string | undefined): Request {
   const headers = new Headers();
   for (const [key, value] of request.headers.entries()) {
     headers.set(key, value);
   }
-  if (parsedBody !== undefined && !headers.has('content-type')) headers.set('content-type', jsonRpcContentType);
+  headers.delete('content-length');
+  if (requestBody !== undefined && !headers.has('content-type')) headers.set('content-type', jsonRpcContentType);
   return new Request(request.url, {
     method: request.method,
     headers,
-    body: parsedBody === undefined ? undefined : JSON.stringify(parsedBody),
+    body: requestBody,
   });
 }
 

@@ -48,4 +48,5 @@ Update: PR #289 merged as `7907708d3db92a698bbfb549cb8ccfa91a1e86c8`; PR #290 me
 ## Reddit upstream limitations
 
 - Reddit may block or omit redirects for some `/s/` share URLs. The resolver uses bounded redirects and HTML canonical fallback, but upstream blocking can still prevent resolution.
-- Very large threads remain bounded by synchronous comment/expansion/time limits and may return documented partial data. A Blob-backed asynchronous export is future work only if complete huge-thread exports become necessary.
+- Very large threads return documented partial data with continuation handles. Expansion defaults to zero and is bounded per call by 10 provider requests, 20 seconds, a provider quota reserve, and one active request per principal in each Function worker.
+- The concurrency gate is not distributed across Azure scale-out. A shared quota store is future work only if telemetry shows the hard per-call limits are insufficient; a Blob-backed asynchronous export remains the preferred design if complete huge-thread exports become necessary.

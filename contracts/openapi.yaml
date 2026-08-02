@@ -1977,8 +1977,8 @@ components:
         maxMoreChildrenRequests:
           type: integer
           minimum: 0
-          maximum: 5000
-          default: 1000
+          maximum: 10
+          default: 0
       description: Payload for requesting a normalized Reddit post and comment tree snapshot.
     RedditPost:
       type: object
@@ -2212,7 +2212,7 @@ components:
         maxMoreChildrenRequests:
           type: integer
           minimum: 0
-          maximum: 5000
+          maximum: 10
           default: 0
       description: Payload for loading one bounded Reddit comment subtree or continuation block.
     RedditCommentTreeResponse:
@@ -2629,7 +2629,7 @@ components:
         maxMoreChildrenRequests:
           type: integer
           minimum: 0
-          maximum: 5000
+          maximum: 10
           default: 0
     RedditCommentSkeleton:
       type: object

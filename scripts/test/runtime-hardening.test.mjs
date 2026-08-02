@@ -126,6 +126,13 @@ test('deployed runtime policy requires expected metadata and enforces an empty d
   const incompleteEnv = { ...runtimeSettingsEnv };
   delete incompleteEnv.EXPECTED_BRING_PASSWORD_REFERENCE;
   assert.throws(() => buildExpectedRuntimeSettings(incompleteEnv), /EXPECTED_BRING_PASSWORD_REFERENCE is required/);
+
+  const missingDelegatedClientAllowlist = { ...runtimeSettingsEnv };
+  delete missingDelegatedClientAllowlist.OIDC_ALLOWED_DELEGATED_CLIENT_IDS;
+  assert.throws(
+    () => buildExpectedRuntimeSettings(missingDelegatedClientAllowlist),
+    /OIDC_ALLOWED_DELEGATED_CLIENT_IDS is required/,
+  );
 });
 
 test('telemetry KQL sanitizes smoke run IDs', () => {

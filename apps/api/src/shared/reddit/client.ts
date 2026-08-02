@@ -109,6 +109,13 @@ export class RedditFetchError extends Error {
   }
 }
 
+export class RedditRequestDeadlineError extends Error {
+  constructor() {
+    super('The Reddit request exceeded its server-owned deadline.');
+    this.name = 'RedditRequestDeadlineError';
+  }
+}
+
 export class RedditOAuthClient {
   private cachedToken: CachedToken | null = null;
 
@@ -118,7 +125,7 @@ export class RedditOAuthClient {
     private readonly now: () => number = () => Date.now(),
   ) {}
 
-  async getAccessToken(): Promise<string> {
+  async getAccessToken(deadlineMs?: number): Promise<string> {
     validateRedditConfig(this.config);
 
     if (this.cachedToken && this.cachedToken.expiresAtMs > this.now()) {
@@ -126,17 +133,28 @@ export class RedditOAuthClient {
     }
 
     const credentials = Buffer.from(`${this.config.clientId}:${this.config.secret}`, 'utf8').toString('base64');
-    const response = await this.fetchWithTimeout(TOKEN_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${credentials}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': this.config.userAgent,
+    const { response, text } = await this.fetchTextWithTimeout(
+      TOKEN_URL,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': this.config.userAgent,
+        },
+        body: 'grant_type=client_credentials',
       },
-      body: 'grant_type=client_credentials',
-    });
+      deadlineMs,
+    );
 
-    const body = (await readJson(response, { requestUrl: TOKEN_URL })) as Record<string, unknown>;
+    const body = parseJsonText<Record<string, unknown>>(text, {
+      request_url: TOKEN_URL,
+      final_url: response.url || TOKEN_URL,
+      status: response.status,
+      reason: response.statusText,
+      content_type: response.headers.get('content-type'),
+      retryable: RETRYABLE_STATUSES.has(response.status),
+    });
     if (!response.ok || typeof body[TOKEN_FIELD] !== 'string') {
       throw new RedditUpstreamError(safeRedditErrorMessage(body, 'Reddit token request failed.'), 502, response.status);
     }
@@ -254,9 +272,9 @@ export class RedditOAuthClient {
   async getJson<T>(
     path: string,
     query: Record<string, string | number | undefined> = {},
-    context: { input?: string; normalizedPostId?: string } = {},
+    context: { input?: string; normalizedPostId?: string; deadlineMs?: number } = {},
   ): Promise<RedditHttpResult<T>> {
-    const tokenValue = await this.getAccessToken();
+    const tokenValue = await this.getAccessToken(context.deadlineMs);
     const url = new URL(path, API_BASE_URL);
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined) {
@@ -266,21 +284,28 @@ export class RedditOAuthClient {
 
     let retryCount = 0;
     for (let attempt = 0; ; attempt += 1) {
-      const response = await this.fetchWithTimeout(url, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${tokenValue}`,
-          'User-Agent': this.config.userAgent,
+      const { response, text } = await this.fetchTextWithTimeout(
+        url,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${tokenValue}`,
+            'User-Agent': this.config.userAgent,
+          },
         },
-      });
+        context.deadlineMs,
+      );
       const requestUrl = url.toString();
       const finalUrl = response.url || requestUrl;
       const contentType = response.headers.get('content-type');
-      const text = await response.text();
 
       if (RETRYABLE_STATUSES.has(response.status) && attempt < 2) {
         retryCount += 1;
-        await delay(50 * 2 ** attempt);
+        const retryDelay = 50 * 2 ** attempt;
+        if (context.deadlineMs !== undefined && this.now() + retryDelay >= context.deadlineMs) {
+          throw new RedditRequestDeadlineError();
+        }
+        await delay(retryDelay);
         continue;
       }
 
@@ -312,6 +337,27 @@ export class RedditOAuthClient {
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
       return await this.fetchImpl(input, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async fetchTextWithTimeout(
+    input: string | URL,
+    init: RequestInit,
+    deadlineMs?: number,
+  ): Promise<{ response: Response; text: string }> {
+    const remainingMs = deadlineMs === undefined ? REQUEST_TIMEOUT_MS : deadlineMs - this.now();
+    if (remainingMs <= 0) throw new RedditRequestDeadlineError();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), Math.min(REQUEST_TIMEOUT_MS, remainingMs));
+    try {
+      const response = await this.fetchImpl(input, { ...init, signal: controller.signal });
+      const text = await response.text();
+      return { response, text };
+    } catch (error) {
+      if (controller.signal.aborted && deadlineMs !== undefined) throw new RedditRequestDeadlineError();
+      throw error;
     } finally {
       clearTimeout(timeout);
     }
@@ -360,18 +406,6 @@ function rateLimitFromHeaders(headers: Headers): RedditRateLimit {
     remaining: headers.get('x-ratelimit-remaining'),
     resetSeconds: headers.get('x-ratelimit-reset'),
   };
-}
-
-async function readJson(response: Response, context: { requestUrl: string }): Promise<unknown> {
-  const text = await response.text();
-  return parseJsonText(text, {
-    request_url: context.requestUrl,
-    final_url: response.url || context.requestUrl,
-    status: response.status,
-    reason: response.statusText,
-    content_type: response.headers.get('content-type'),
-    retryable: RETRYABLE_STATUSES.has(response.status),
-  });
 }
 
 function parseJsonText<T>(text: string, details: Omit<RedditFetchErrorDetails, 'response_preview'>): T {

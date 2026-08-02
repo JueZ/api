@@ -2,12 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { RedditFetchError, RedditOAuthClient, RedditUpstreamError } from '../dist/shared/reddit/client.js';
 import {
+  MAX_MORE_CHILDREN_REQUESTS_PER_CALL,
+  normalizeMaxMoreChildrenRequests,
   normalizeRedditPostInput,
   parseRedditPostInput,
   unresolvedRedditShareUrlError,
 } from '../dist/shared/reddit/input.js';
 import { attachMoreChildren, normalizeInitialThread } from '../dist/shared/reddit/normalize.js';
 import { RedditThreadService } from '../dist/shared/reddit/service.js';
+import { RedditPrincipalConcurrencyError, withRedditPrincipalConcurrency } from '../dist/shared/reddit/concurrency.js';
 import {
   redditThreadHandler,
   setRedditThreadServiceForTesting,
@@ -90,6 +93,42 @@ test('normalizeRedditPostInput accepts t3 fullnames', async () => {
   const normalized = await normalizeRedditPostInput('t3_1tflddp');
 
   assert.equal(normalized.post_id, '1tflddp');
+});
+
+test('Reddit expansion requests use a small server-owned budget', () => {
+  assert.equal(normalizeMaxMoreChildrenRequests(undefined), 0);
+  assert.equal(normalizeMaxMoreChildrenRequests(4), 4);
+  assert.equal(normalizeMaxMoreChildrenRequests(5000), MAX_MORE_CHILDREN_REQUESTS_PER_CALL);
+  assert.equal(MAX_MORE_CHILDREN_REQUESTS_PER_CALL, 10);
+});
+
+test('Reddit expansion concurrency is limited per principal and released after completion', async () => {
+  const principal = {
+    subject: 'user-subject',
+    objectId: 'user-object-id',
+    tenantId: 'tenant-id',
+    clientId: 'client-id',
+    tokenType: 'user',
+    scopes: ['reddit.read'],
+    roles: [],
+  };
+  let release;
+  const first = withRedditPrincipalConcurrency(
+    principal,
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  await Promise.resolve();
+
+  await assert.rejects(
+    withRedditPrincipalConcurrency(principal, async () => undefined),
+    RedditPrincipalConcurrencyError,
+  );
+  release();
+  await first;
+  await assert.doesNotReject(withRedditPrincipalConcurrency(principal, async () => undefined));
 });
 
 test('normalizeRedditPostInput accepts canonical comments URLs with subreddit metadata', async () => {
@@ -961,7 +1000,7 @@ test('RedditThreadService expands MoreChildren placeholders when limits allow', 
     },
   });
 
-  const response = await service.fetchThread({ post: 'abc123', maxComments: 10 });
+  const response = await service.fetchThread({ post: 'abc123', maxComments: 10, maxMoreChildrenRequests: 1 });
 
   assert.equal(response.stats.commentsReturned, 3);
   assert.equal(response.stats.truncated, false);
@@ -970,7 +1009,7 @@ test('RedditThreadService expands MoreChildren placeholders when limits allow', 
   assert.equal(calls.filter((url) => url.includes('/api/morechildren')).length, 1);
 });
 
-test('RedditThreadService default MoreChildren budget fetches beyond the old 50 request cutoff', async () => {
+test('RedditThreadService caps caller-selected expansion work and returns continuation state', async () => {
   process.env.REDDIT_CLIENT_ID = config.clientId;
   process.env.REDDIT_CLIENT_SECRET = config.secret;
   process.env.REDDIT_USER_AGENT = config.userAgent;
@@ -991,12 +1030,85 @@ test('RedditThreadService default MoreChildren budget fetches beyond the old 50 
     },
   });
 
-  const response = await service.fetchThread({ post: 'abc123' });
+  const response = await service.fetchThread({ post: 'abc123', maxMoreChildrenRequests: 5000 });
 
-  assert.equal(moreCalls, 75);
-  assert.equal(response.stats.moreChildrenRequests, 75);
-  assert.equal(response.stats.truncated, false);
-  assert.equal(response.stats.commentsReturned, 77);
+  assert.equal(moreCalls, MAX_MORE_CHILDREN_REQUESTS_PER_CALL);
+  assert.equal(response.stats.moreChildrenRequests, MAX_MORE_CHILDREN_REQUESTS_PER_CALL);
+  assert.equal(response.stats.truncated, true);
+  assert.equal(response.stats.commentsReturned, 12);
+  assert.equal(response.stats.continuationsReturned, 1);
+  assert.match(response.stats.warnings.join(' '), /maxMoreChildrenRequests limit reached/);
+});
+
+test('RedditThreadService preserves provider quota reserve before another expansion call', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  let moreCalls = 0;
+  const service = new RedditThreadService({
+    fetchImpl: async (input) => {
+      if (String(input).includes('/api/v1/access_token')) {
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      }
+      if (String(input).includes('/comments/abc123')) {
+        return jsonResponse(threadFixture(), 200, {
+          'x-ratelimit-used': '990',
+          'x-ratelimit-remaining': '10',
+          'x-ratelimit-reset': '60',
+        });
+      }
+      if (String(input).includes('/api/morechildren')) {
+        moreCalls += 1;
+        return jsonResponse(moreChildrenFixture(), 200, rateHeaders(991));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThread({ post: 'abc123', maxMoreChildrenRequests: 10 });
+
+  assert.equal(moreCalls, 0);
+  assert.equal(response.stats.truncated, true);
+  assert.equal(response.stats.continuationsReturned, 1);
+  assert.match(response.stats.warnings.join(' '), /provider rate-limit reserve reached/);
+});
+
+test('RedditThreadService aborts an in-flight expansion at its server-owned deadline and preserves continuation', async () => {
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  let moreCalls = 0;
+  const service = new RedditThreadService({
+    expansionTimeoutBudgetMs: 25,
+    fetchImpl: async (input, init) => {
+      if (String(input).includes('/api/v1/access_token')) {
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      }
+      if (String(input).includes('/comments/abc123')) {
+        return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      }
+      if (String(input).includes('/api/morechildren')) {
+        moreCalls += 1;
+        assert.ok(init?.signal);
+        return new Promise((_, reject) => {
+          init.signal.addEventListener(
+            'abort',
+            () => reject(init.signal.reason ?? new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        });
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThread({ post: 'abc123', maxMoreChildrenRequests: 10 });
+
+  assert.equal(moreCalls, 1);
+  assert.equal(response.stats.moreChildrenRequests, 0);
+  assert.equal(response.stats.truncated, true);
+  assert.equal(response.stats.continuationsReturned, 1);
+  assert.match(response.stats.warnings.join(' '), /server expansion time budget reached/);
 });
 
 test('RedditThreadService expands MoreChildren sequentially and reports truncation limits', async () => {

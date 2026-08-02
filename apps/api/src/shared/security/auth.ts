@@ -347,10 +347,6 @@ function isAllowedUser(objectId: string | undefined, subject: string, config: Au
 }
 
 function isAllowedDelegatedClient(clientId: string | undefined, config: AuthConfig): boolean {
-  if (config.allowedDelegatedClientIds.length === 0) {
-    return true;
-  }
-
   return clientId !== undefined && config.allowedDelegatedClientIds.includes(clientId);
 }
 

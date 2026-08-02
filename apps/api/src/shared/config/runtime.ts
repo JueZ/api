@@ -50,6 +50,12 @@ export function validateRuntimeSafety(env: NodeJS.ProcessEnv = process.env): str
   if (allowedObjectIds.length === 0 || allowedObjectIds.some((value) => !guidPattern.test(value))) {
     problems.push(`OIDC_ALLOWED_OBJECT_IDS must contain at least one valid user object ID in ${environment}`);
   }
+  const allowedDelegatedClientIds = parseCsv(env['OIDC_ALLOWED_DELEGATED_CLIENT_IDS']);
+  if (allowedDelegatedClientIds.length === 0 || allowedDelegatedClientIds.some((value) => !guidPattern.test(value))) {
+    problems.push(
+      `OIDC_ALLOWED_DELEGATED_CLIENT_IDS must contain at least one valid delegated OAuth client ID in ${environment}`,
+    );
+  }
   const allowedTenants = parseCsv(env['OIDC_ALLOWED_TENANTS']);
   if (allowedTenants.length === 0 || allowedTenants.some((value) => !guidPattern.test(value))) {
     problems.push(`OIDC_ALLOWED_TENANTS must contain at least one valid tenant ID in ${environment}`);

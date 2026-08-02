@@ -5,6 +5,7 @@ import { validateRuntimeSafety } from '../dist/shared/config/runtime.js';
 const userObjectId = '11111111-1111-4111-8111-111111111111';
 const tenantId = '22222222-2222-4222-8222-222222222222';
 const listUuid = '33333333-3333-4333-8333-333333333333';
+const delegatedClientId = '44444444-4444-4444-8444-444444444444';
 const canonicalPermissions = 'catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove';
 const validTestEnvironment = {
   DEPLOYED_ENVIRONMENT_NAME: 'test',
@@ -13,6 +14,7 @@ const validTestEnvironment = {
   OIDC_AUDIENCE: 'api://catalogue-test',
   OIDC_REQUIRED_SCOPES: canonicalPermissions,
   OIDC_ALLOWED_OBJECT_IDS: userObjectId,
+  OIDC_ALLOWED_DELEGATED_CLIENT_IDS: delegatedClientId,
   OIDC_ALLOWED_TENANTS: tenantId,
   API_CORS_ALLOWED_ORIGINS: 'https://web.example.test',
   MCP_RESOURCE_ORIGIN: 'https://mcp.example.test',
@@ -44,6 +46,7 @@ test('deployed runtime safety rejects incomplete auth and non-canonical origins'
     OIDC_JWKS_URI: 'http://keys.example.test/jwks',
     OIDC_REQUIRED_SCOPES: 'catalogue.read',
     OIDC_ALLOWED_OBJECT_IDS: 'not-a-uuid',
+    OIDC_ALLOWED_DELEGATED_CLIENT_IDS: '',
     OIDC_ALLOWED_TENANTS: '',
     API_CORS_ALLOWED_ORIGINS: 'https://web.example.test/',
     MCP_RESOURCE_ORIGIN: 'https://mcp.example.test/',
@@ -53,6 +56,7 @@ test('deployed runtime safety rejects incomplete auth and non-canonical origins'
   assert.ok(problems.some((problem) => problem.startsWith('OIDC_JWKS_URI')));
   assert.ok(problems.some((problem) => problem.startsWith('OIDC_REQUIRED_SCOPES')));
   assert.ok(problems.some((problem) => problem.startsWith('OIDC_ALLOWED_OBJECT_IDS')));
+  assert.ok(problems.some((problem) => problem.startsWith('OIDC_ALLOWED_DELEGATED_CLIENT_IDS')));
   assert.ok(problems.some((problem) => problem.startsWith('OIDC_ALLOWED_TENANTS')));
   assert.ok(problems.some((problem) => problem.startsWith('API_CORS_ALLOWED_ORIGINS')));
   assert.ok(problems.some((problem) => problem.startsWith('MCP_RESOURCE_ORIGIN')));

@@ -20,6 +20,7 @@ const REDDIT_WEB_HOSTNAMES = new Set([
   'np.reddit.com',
   'm.reddit.com',
 ]);
+export const MAX_MORE_CHILDREN_REQUESTS_PER_CALL = 10;
 
 export interface NormalizedRedditPost {
   post_id: string;
@@ -127,12 +128,12 @@ export function normalizeMaxComments(input: unknown): number {
 
 export function normalizeMaxMoreChildrenRequests(input: unknown): number {
   if (input === undefined || input === null) {
-    return 1000;
+    return 0;
   }
   if (typeof input !== 'number' || !Number.isInteger(input) || input < 0) {
     throw new RedditInputError('maxMoreChildrenRequests must be a non-negative integer.');
   }
-  return Math.min(input, 5000);
+  return Math.min(input, MAX_MORE_CHILDREN_REQUESTS_PER_CALL);
 }
 
 export class RedditInputError extends Error {

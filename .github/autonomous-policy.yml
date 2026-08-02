@@ -8,7 +8,7 @@ trustedWorkflowSha256:
   codeql.yml: c543422d77c3879a7f1b61e6fee0e1a036194c78a38a33f1ea16f268d4b2bc6a
   codex-automerge.yml: 48da617fc00e5b3b66a220bb6801f516e244950f1de4eaf0f229ff932a46ba45
   codex-main-delivery.yml: 3a8aa21d979847bba6c3284dff939eb56bef61d906d9e7013f744a142d878d63
-  deploy-environment.yml: eec7686ae1f6db1e894e7c6535df89befdce6c5df270540ccb26118e9d1603c6
+  deploy-environment.yml: 2fd4fa84b22d80eecf4ec7bc5af56f0c2b97d60b2effa3d96d69ba6fbbb3e9d8
   deploy-test.yml: 30249503af8c36ceb3076e38bec52fa9217ca15b349f0cee57d7ca84f271c274
   migrate-private-storage.yml: d21535733228a71a559bfe0163d34d63cdff9d8be05b5c97b3eb72a295983360
   policy-check.yml: 553f5783cfbdb4dda498809b74265a9a247e5644663b74bacd1dd66c17fe23b2

@@ -1399,8 +1399,8 @@ components:
         maxMoreChildrenRequests:
           type: integer
           minimum: 0
-          maximum: 5000
-          default: 1000
+          maximum: 10
+          default: 0
       required:
         - post
     RedditThreadResponse:
@@ -1477,7 +1477,7 @@ components:
         maxMoreChildrenRequests:
           type: integer
           minimum: 0
-          maximum: 5000
+          maximum: 10
           default: 0
       required:
         - post
@@ -1900,7 +1900,7 @@ components:
         maxMoreChildrenRequests:
           type: integer
           minimum: 0
-          maximum: 5000
+          maximum: 10
           default: 0
     RedditCommentSkeleton:
       type: object

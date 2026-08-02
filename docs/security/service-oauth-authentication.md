@@ -27,4 +27,6 @@ bring.remove
 
 Service tokens are recognized only by an app-only marker or roles-only client-credential evidence plus explicit service allowlists. Delegated tokens always remain on the user allowlist path. The code denies service tokens for destructive Bring operations even if a role is accidentally assigned.
 
+`OIDC_ALLOWED_DELEGATED_CLIENT_IDS` is mandatory and non-empty in test and production deployment and startup validation. Delegated authorization requires an exact `azp` or `appid` match; a missing configuration, empty list, or missing client claim denies the user token. App-only service-token authorization remains independent and still requires its dedicated object/client allowlists.
+
 Authenticated deployment smoke uses an already configured external test identity and short-lived tokens. This repository does not create, repair, rotate, or audit that service identity or its trust routes. Any future identity or permission maintenance is a separate privileged operator task outside the application delivery path. Runtime authorization remains fail closed on exact issuer, audience, allowlists, token type, and per-operation permissions.

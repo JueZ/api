@@ -14,6 +14,7 @@ import {
   type RepairableProblemExpected,
 } from '../shared/errors/repairableProblem.js';
 import { mapRedditError, RedditThreadService } from '../shared/reddit/service.js';
+import { withRedditPrincipalConcurrency } from '../shared/reddit/concurrency.js';
 import type { RedditCommentQueryRequest } from '../shared/reddit/types.js';
 import { authorizeRequestForOperation } from '../shared/security/auth.js';
 import { OPERATION_IDS } from '../application/operations/registry.js';
@@ -76,7 +77,9 @@ export async function redditThreadCommentsHandler(
   }
 
   try {
-    const response = await redditThreadService.fetchThreadComments(body);
+    const response = await withRedditPrincipalConcurrency(authorization.user, () =>
+      redditThreadService.fetchThreadComments(body),
+    );
     return withCors({ status: 200, jsonBody: response }, request);
   } catch (error) {
     const mapped = mapRedditError(error);

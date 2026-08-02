@@ -14,6 +14,7 @@ import {
   type RepairableProblemExpected,
 } from '../shared/errors/repairableProblem.js';
 import { mapRedditError, RedditThreadService } from '../shared/reddit/service.js';
+import { withRedditPrincipalConcurrency } from '../shared/reddit/concurrency.js';
 import type { RedditCommentTreeRequest } from '../shared/reddit/types.js';
 import { authorizeRequestForOperation } from '../shared/security/auth.js';
 import { OPERATION_IDS } from '../application/operations/registry.js';
@@ -77,7 +78,9 @@ export async function redditCommentTreeHandler(
   }
 
   try {
-    const response = await redditThreadService.fetchCommentTree(body);
+    const response = await withRedditPrincipalConcurrency(authorization.user, () =>
+      redditThreadService.fetchCommentTree(body),
+    );
     return withCors(
       {
         status: 200,

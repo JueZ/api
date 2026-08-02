@@ -1,7 +1,14 @@
 import { RedditConfigError, readRedditConfig } from './config.js';
-import { RedditFetchError, RedditOAuthClient, RedditUpstreamError, type FetchLike } from './client.js';
+import {
+  RedditFetchError,
+  RedditOAuthClient,
+  RedditRequestDeadlineError,
+  RedditUpstreamError,
+  type FetchLike,
+} from './client.js';
 import {
   isRedditShareUrl,
+  MAX_MORE_CHILDREN_REQUESTS_PER_CALL,
   normalizeMaxComments,
   normalizeMaxMoreChildrenRequests,
   normalizeRedditPostInput,
@@ -42,21 +49,26 @@ import type {
   RedditThreadRequest,
   RedditThreadResponse,
 } from './types.js';
+import { RedditPrincipalConcurrencyError } from './concurrency.js';
 
-const TIMEOUT_BUDGET_MS = 110_000;
+export const REDDIT_EXPANSION_TIMEOUT_BUDGET_MS = 20_000;
+export const REDDIT_RATE_LIMIT_RESERVE = 10;
 const MORE_CHILDREN_BATCH_SIZE = 100;
 
 export interface RedditThreadServiceOptions {
   fetchImpl?: FetchLike;
   now?: () => number;
+  expansionTimeoutBudgetMs?: number;
 }
 
 export class RedditThreadService {
   private readonly client: RedditOAuthClient;
   private readonly now: () => number;
+  private readonly expansionTimeoutBudgetMs: number;
 
   constructor(options: RedditThreadServiceOptions = {}) {
     this.now = options.now ?? (() => Date.now());
+    this.expansionTimeoutBudgetMs = options.expansionTimeoutBudgetMs ?? REDDIT_EXPANSION_TIMEOUT_BUDGET_MS;
     this.client = new RedditOAuthClient(readRedditConfig(), options.fetchImpl, this.now);
   }
 
@@ -217,6 +229,7 @@ export class RedditThreadService {
     }
 
     const startedAt = this.now();
+    const expansionDeadlineMs = startedAt + this.expansionTimeoutBudgetMs;
     let rateLimit: RedditRateLimit;
     let postTree = await this.client.getJson<unknown>(
       commentsPath(input.articleId),
@@ -257,7 +270,8 @@ export class RedditThreadService {
         sort,
         limit,
         maxMoreChildrenRequests,
-        startedAt,
+        expansionDeadlineMs,
+        rateLimit,
       );
       rateLimit = expansion.rateLimit ?? rateLimit;
       return createCommentTreeResponse(
@@ -280,13 +294,46 @@ export class RedditThreadService {
     });
     let moreChildrenRequests = 0;
     const warnings: string[] = [];
-    for (const batch of chunk(children, MORE_CHILDREN_BATCH_SIZE)) {
+    const requestedBatches = chunk(children, MORE_CHILDREN_BATCH_SIZE);
+    for (let batchIndex = 0; batchIndex < requestedBatches.length; batchIndex += 1) {
+      const batch = requestedBatches[batchIndex] ?? [];
       if (block.commentsReturned >= limit) {
         block.truncated = true;
         warnings.push('limit reached before all requested children were returned.');
+        prependUnprocessedMore(block.more, { parentId, depth }, requestedBatches, batchIndex);
         break;
       }
-      const response = await this.fetchMoreChildren(input.fullname, batch, sort, { parentId, depth, children: batch });
+      if (moreChildrenRequests >= MAX_MORE_CHILDREN_REQUESTS_PER_CALL) {
+        block.truncated = true;
+        warnings.push('server expansion request budget reached before all requested children were returned.');
+        prependUnprocessedMore(block.more, { parentId, depth }, requestedBatches, batchIndex);
+        break;
+      }
+      if (isProviderExpansionBudgetExhausted(rateLimit)) {
+        block.truncated = true;
+        warnings.push('Reddit provider rate-limit reserve reached before all requested children were returned.');
+        prependUnprocessedMore(block.more, { parentId, depth }, requestedBatches, batchIndex);
+        break;
+      }
+      if (this.now() >= expansionDeadlineMs) {
+        block.truncated = true;
+        warnings.push('server expansion time budget reached before all requested children were returned.');
+        prependUnprocessedMore(block.more, { parentId, depth }, requestedBatches, batchIndex);
+        break;
+      }
+      const response = await this.fetchMoreChildrenWithinDeadline(
+        input.fullname,
+        batch,
+        sort,
+        { parentId, depth, children: batch },
+        expansionDeadlineMs,
+      );
+      if (!response) {
+        block.truncated = true;
+        warnings.push('server expansion time budget reached before all requested children were returned.');
+        prependUnprocessedMore(block.more, { parentId, depth }, requestedBatches, batchIndex);
+        break;
+      }
       rateLimit = response.rateLimit;
       moreChildrenRequests += 1;
       attachMoreChildren(block, response.body, parentId, depth, limit);
@@ -297,7 +344,8 @@ export class RedditThreadService {
       sort,
       limit,
       maxMoreChildrenRequests,
-      startedAt,
+      expansionDeadlineMs,
+      rateLimit,
       moreChildrenRequests,
     );
     rateLimit = expansion.rateLimit ?? rateLimit;
@@ -323,6 +371,7 @@ export class RedditThreadService {
     const maxComments = normalizeMaxComments(request.maxComments);
     const maxMoreChildrenRequests = normalizeMaxMoreChildrenRequests(request.maxMoreChildrenRequests);
     const startedAt = this.now();
+    const expansionDeadlineMs = startedAt + this.expansionTimeoutBudgetMs;
 
     let initial = await this.client.getJson<unknown>(commentsPath(input.articleId), commentsQuery(sort, maxComments), {
       input: originalInput,
@@ -379,9 +428,14 @@ export class RedditThreadService {
         warnings.push('maxMoreChildrenRequests limit reached before all omitted comments were expanded.');
         break;
       }
-      if (this.now() - startedAt > TIMEOUT_BUDGET_MS) {
+      if (isProviderExpansionBudgetExhausted(rateLimit)) {
         tree.truncated = true;
-        warnings.push('timeout budget reached before all omitted comments were expanded.');
+        warnings.push('Reddit provider rate-limit reserve reached before all omitted comments were expanded.');
+        break;
+      }
+      if (this.now() >= expansionDeadlineMs) {
+        tree.truncated = true;
+        warnings.push('server expansion time budget reached before all omitted comments were expanded.');
         break;
       }
 
@@ -389,12 +443,32 @@ export class RedditThreadService {
       if (!more) {
         break;
       }
-      for (const children of chunk(more.children, MORE_CHILDREN_BATCH_SIZE)) {
-        if (moreChildrenRequests >= maxMoreChildrenRequests || tree.commentsReturned >= maxComments) {
+      const childBatches = chunk(more.children, MORE_CHILDREN_BATCH_SIZE);
+      for (let batchIndex = 0; batchIndex < childBatches.length; batchIndex += 1) {
+        const children = childBatches[batchIndex] ?? [];
+        if (
+          moreChildrenRequests >= maxMoreChildrenRequests ||
+          tree.commentsReturned >= maxComments ||
+          isProviderExpansionBudgetExhausted(rateLimit) ||
+          this.now() >= expansionDeadlineMs
+        ) {
           tree.truncated = true;
+          prependUnprocessedMore(tree.more, more, childBatches, batchIndex);
           break;
         }
-        const response = await this.fetchMoreChildren(input.fullname, children, sort, more);
+        const response = await this.fetchMoreChildrenWithinDeadline(
+          input.fullname,
+          children,
+          sort,
+          more,
+          expansionDeadlineMs,
+        );
+        if (!response) {
+          tree.truncated = true;
+          warnings.push('server expansion time budget reached before all omitted comments were expanded.');
+          prependUnprocessedMore(tree.more, more, childBatches, batchIndex);
+          break;
+        }
         rateLimit = response.rateLimit;
         moreChildrenRequests += 1;
         attachMoreChildren(tree, response.body, more.parentId, more.depth, maxComments);
@@ -419,11 +493,12 @@ export class RedditThreadService {
     sort: RedditSort,
     maxComments: number,
     maxMoreChildrenRequests: number,
-    startedAt: number,
+    expansionDeadlineMs: number,
+    initialRateLimit: RedditRateLimit,
     existingRequests = 0,
   ): Promise<{ moreChildrenRequests: number; warnings: string[]; rateLimit?: RedditRateLimit }> {
     let moreChildrenRequests = existingRequests;
-    let rateLimit: RedditRateLimit | undefined;
+    let rateLimit: RedditRateLimit | undefined = initialRateLimit;
     const warnings: string[] = [];
     while (block.more.length > 0) {
       if (block.commentsReturned >= maxComments) {
@@ -436,20 +511,39 @@ export class RedditThreadService {
         warnings.push('maxMoreChildrenRequests limit reached before all omitted comments were expanded.');
         break;
       }
-      if (this.now() - startedAt > TIMEOUT_BUDGET_MS) {
+      if (isProviderExpansionBudgetExhausted(rateLimit)) {
         block.truncated = true;
-        warnings.push('timeout budget reached before all omitted comments were expanded.');
+        warnings.push('Reddit provider rate-limit reserve reached before all omitted comments were expanded.');
+        break;
+      }
+      if (this.now() >= expansionDeadlineMs) {
+        block.truncated = true;
+        warnings.push('server expansion time budget reached before all omitted comments were expanded.');
         break;
       }
 
       const more = block.more.shift();
       if (!more) break;
-      for (const children of chunk(more.children, MORE_CHILDREN_BATCH_SIZE)) {
-        if (moreChildrenRequests >= maxMoreChildrenRequests || block.commentsReturned >= maxComments) {
+      const childBatches = chunk(more.children, MORE_CHILDREN_BATCH_SIZE);
+      for (let batchIndex = 0; batchIndex < childBatches.length; batchIndex += 1) {
+        const children = childBatches[batchIndex] ?? [];
+        if (
+          moreChildrenRequests >= maxMoreChildrenRequests ||
+          block.commentsReturned >= maxComments ||
+          isProviderExpansionBudgetExhausted(rateLimit) ||
+          this.now() >= expansionDeadlineMs
+        ) {
           block.truncated = true;
+          prependUnprocessedMore(block.more, more, childBatches, batchIndex);
           break;
         }
-        const response = await this.fetchMoreChildren(linkId, children, sort, more);
+        const response = await this.fetchMoreChildrenWithinDeadline(linkId, children, sort, more, expansionDeadlineMs);
+        if (!response) {
+          block.truncated = true;
+          warnings.push('server expansion time budget reached before all omitted comments were expanded.');
+          prependUnprocessedMore(block.more, more, childBatches, batchIndex);
+          break;
+        }
         rateLimit = response.rateLimit;
         moreChildrenRequests += 1;
         attachMoreChildren(block, response.body, more.parentId, more.depth, maxComments);
@@ -482,17 +576,59 @@ export class RedditThreadService {
     return articleIdFromInfoListing(response.body);
   }
 
-  private async fetchMoreChildren(linkId: string, children: string[], sort: string, more: MorePlaceholder) {
-    const response = await this.client.getJson<unknown>('/api/morechildren', {
-      api_type: 'json',
-      link_id: linkId,
-      children: children.join(','),
-      raw_json: 1,
-      sort,
-    });
+  private async fetchMoreChildrenWithinDeadline(
+    linkId: string,
+    children: string[],
+    sort: string,
+    more: MorePlaceholder,
+    deadlineMs: number,
+  ) {
+    try {
+      return await this.fetchMoreChildren(linkId, children, sort, more, deadlineMs);
+    } catch (error) {
+      if (error instanceof RedditRequestDeadlineError) return null;
+      throw error;
+    }
+  }
+
+  private async fetchMoreChildren(
+    linkId: string,
+    children: string[],
+    sort: string,
+    more: MorePlaceholder,
+    deadlineMs: number,
+  ) {
+    const response = await this.client.getJson<unknown>(
+      '/api/morechildren',
+      {
+        api_type: 'json',
+        link_id: linkId,
+        children: children.join(','),
+        raw_json: 1,
+        sort,
+      },
+      { deadlineMs },
+    );
     assertRedditStatus(response.status, more.parentId);
     return response;
   }
+}
+
+function isProviderExpansionBudgetExhausted(rateLimit: RedditRateLimit | undefined): boolean {
+  const remaining = rateLimit?.remaining?.trim();
+  if (!remaining) return false;
+  const parsed = Number(remaining);
+  return Number.isFinite(parsed) && parsed <= REDDIT_RATE_LIMIT_RESERVE;
+}
+
+function prependUnprocessedMore(
+  target: MorePlaceholder[],
+  source: Pick<MorePlaceholder, 'parentId' | 'depth'>,
+  batches: string[][],
+  batchIndex: number,
+): void {
+  const children = batches.slice(batchIndex).flat();
+  if (children.length > 0) target.unshift({ parentId: source.parentId, depth: source.depth, children });
 }
 
 export class RedditShareResolutionError extends RedditInputError {
@@ -521,6 +657,14 @@ export function mapRedditError(error: unknown): {
   redditFetchError?: ReturnType<RedditFetchError['toJSON']>;
   kind: MappedRedditErrorKind;
 } {
+  if (error instanceof RedditPrincipalConcurrencyError) {
+    return {
+      status: 429,
+      message: error.message,
+      code: 'REDDIT_PRINCIPAL_CONCURRENCY_LIMIT',
+      kind: 'input',
+    };
+  }
   if (error instanceof RedditInputError) {
     return { status: 400, message: error.message, code: error.code, input: error.input, kind: 'input' };
   }

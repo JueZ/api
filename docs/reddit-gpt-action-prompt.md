@@ -35,7 +35,7 @@ Default small-thread request:
 - `post`: user-provided URL or ID
 - `sort`: `confidence`
 - `maxComments`: 50-100 for GPT Actions unless the overview proves the thread is small
-- `maxMoreChildrenRequests`: 0-100 for GPT Actions unless a full small-thread response is safe
+- `maxMoreChildrenRequests`: 0-10; default to 0 and follow returned continuation handles for bounded expansion
 
 Large-thread workflow:
 1. Call `postRedditThreadOverview` with `post`, `sort: confidence`, `maxComments: 500`.

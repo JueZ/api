@@ -201,7 +201,7 @@ function redditContractSummary(operationId?: string, endpoint?: string): Diagnos
         includeDeleted: { type: 'boolean', default: false },
         maxBytes: { type: 'integer', minimum: 1000, maximum: 2000000, default: 500000 },
         maxComments: { type: 'integer', minimum: 1, maximum: 10000, default: 1000 },
-        maxMoreChildrenRequests: { type: 'integer', minimum: 0, maximum: 5000, default: 0 },
+        maxMoreChildrenRequests: { type: 'integer', minimum: 0, maximum: 10, default: 0 },
       },
       aliases: {
         url: 'post',
@@ -256,7 +256,7 @@ function redditContractSummary(operationId?: string, endpoint?: string): Diagnos
         },
         depth: { type: 'integer', minimum: 0, maximum: 10, default: 3 },
         limit: { type: 'integer', minimum: 1, maximum: 500, default: 100 },
-        maxMoreChildrenRequests: { type: 'integer', minimum: 0, maximum: 5000, default: 0 },
+        maxMoreChildrenRequests: { type: 'integer', minimum: 0, maximum: 10, default: 0 },
       },
       aliases: {
         url: 'post',
@@ -284,7 +284,7 @@ function redditContractSummary(operationId?: string, endpoint?: string): Diagnos
       },
       sort: { type: 'string', enum: ['confidence', 'top', 'new', 'controversial', 'old', 'qa'], default: 'confidence' },
       maxComments: { type: 'integer', minimum: 1, maximum: 10000, default: 10000 },
-      maxMoreChildrenRequests: { type: 'integer', minimum: 0, maximum: 5000, default: 1000 },
+      maxMoreChildrenRequests: { type: 'integer', minimum: 0, maximum: 10, default: 0 },
     },
     aliases: {
       url: 'post',
@@ -319,7 +319,7 @@ function redditSafeExamples(operationId?: string, endpoint?: string): unknown[] 
     ];
   }
   return [
-    { post: 'abc123', sort: 'confidence', maxComments: 10000, maxMoreChildrenRequests: 1000 },
+    { post: 'abc123', sort: 'confidence', maxComments: 10000, maxMoreChildrenRequests: 0 },
     { post: 't3_abc123' },
     { post: 'https://redd.it/abc123' },
     { post: 'https://www.reddit.com/r/example/comments/abc123/example_title/' },

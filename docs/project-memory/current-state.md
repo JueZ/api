@@ -1,5 +1,12 @@
 # Current state
 
+## 2026-08-02 Codex Security medium-finding repair prepared
+
+- Anonymous MCP traffic now requires a bearer header before POST body access outside explicit local development. The gateway streams at most 256 KiB, returns 413 on declared or chunked overage, and forwards bounded raw JSON without stringifying a second parsed object.
+- Reddit continuation expansion now defaults to zero, hard-caps at 10 provider calls, uses an abortable 20-second deadline that bounds retries and body reads, stops at a 10-request provider quota reserve, preserves deferred continuation handles, and permits one active expansion per authenticated principal in each Function worker.
+- Delegated user tokens now deny when the OAuth-client allowlist is empty. Deployment configuration, Bicep, startup runtime-safety validation, and runtime-settings verification require the repository's existing non-empty `OIDC_ALLOWED_DELEGATED_CLIENT_IDS`; app-only service-token authorization remains independent.
+- Focused TypeScript, auth, MCP, Reddit, runtime-policy, workflow-integrity, and Bicep validation pass locally. Exact-head CI, Policy Check, CodeQL, independent review, merge, and post-merge runtime evidence remain required before acceptance.
+
 ## 2026-08-02 Package-script CI indirection repair prepared
 
 - A local full-repository Codex Security review identified a critical supply-chain path: `package.json` could remap required lint, test, policy, and release-build npm scripts to successful no-ops while remaining outside deterministic high-risk classification. Exact-head provenance would then bind the attacker-selected revision without proving that the intended commands ran.
