@@ -40,9 +40,3 @@ Generated coverage, mutation, browser, accessibility, bundle, benchmark, contrac
 5. Smoke, telemetry, ledger, and runtime-truth evidence prove the deployed runtime behaved as claimed.
 
 No category is eligible for 10/10 unless all its required assertions pass and no active waiver replaces a failed assertion.
-
-## How future model runs resume
-
-The program is a backlog, not a request to change the whole repository at once. A future Codex run should inspect current protected `main`, project memory, open delivery work, and `quality-10-program.md`; then it should implement only the next exact incomplete, unblocked phase or recorded slice in one coherent PR. Accepted phases are not repeated.
-
-Ordinary repository use continues between phases. Feature work, maintenance, and incidents do not wait for the final 10/10 assessment. New quality checks become required CI gates only in their owning phase after they are stable and green; the Phase 0 ledger/report does not itself add those future checks to branch protection.
