@@ -1,5 +1,11 @@
 # Next steps
 
+## Quality 10 program
+
+- Parent issue [#316](https://github.com/JueZ/api/issues/316) tracks the resumable program; `docs/quality/quality-10-program.md` is authoritative.
+- Phase 0 is in progress on `codex/quality-10-phase-0`: archive a deterministic protected-main/local baseline, mandatory gates, and an empty waiver registry. After terminal PR evidence is recorded, the next implementation slice is Phase 1 fail-closed runtime environment and explicit local-development bypass security.
+- Do not report a category as 10/10 from the supplied static score or from local checks alone. The deterministic report currently fails incomplete gates by design.
+
 ## Current delivery boundary
 
 - Main CI `30710606677`, Deploy Test `30710685029`, and Promote Production `30715766542` accepted exact release `3810259823ce0694623a306eb5b390c2781d4b68`. Live production health and frontend metadata report that SHA and production run.

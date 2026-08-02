@@ -2,6 +2,7 @@ node_modules/
 dist/
 .angular/
 coverage/
+.quality-report/
 local.settings.json
 .env
 .env.*
