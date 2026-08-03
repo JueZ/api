@@ -1517,6 +1517,34 @@ index 7777777..8888888 100644
   assert.doesNotMatch(capsule.diff, /New reference/);
 });
 
+test('review capsule omits test file changes when executable high-risk paths are present', () => {
+  const sourceDiff = `diff --git a/apps/api/src/shared/bridge.ts b/apps/api/src/shared/bridge.ts
+index 1111111..2222222 100644
+--- a/apps/api/src/shared/bridge.ts
++++ b/apps/api/src/shared/bridge.ts
+@@ -1 +1 @@
+-old
++new
+diff --git a/apps/api/test/bridge.test.mjs b/apps/api/test/bridge.test.mjs
+index 3333333..4444444 100644
+--- a/apps/api/test/bridge.test.mjs
++++ b/apps/api/test/bridge.test.mjs
+@@ -1 +1 @@
+-old-test
++new-test
+`;
+  const capsule = buildReviewDiffCapsule(
+    sourceDiff,
+    { highRiskPaths: ['apps/api/src/shared/bridge.ts', 'apps/api/test/bridge.test.mjs'] },
+    ['apps/api/src/shared/bridge.ts', 'apps/api/test/bridge.test.mjs'],
+  );
+  assert.deepEqual(capsule.reviewedPaths, ['apps/api/src/shared/bridge.ts']);
+  assert.deepEqual(capsule.omittedDocumentationPaths, []);
+  assert.match(capsule.diff, /src\/shared\/bridge.ts/);
+  assert.doesNotMatch(capsule.diff, /apps\/api\/test\/bridge\.test\.mjs/);
+  assert.doesNotMatch(capsule.diff, /new-test/);
+});
+
 test('review capsule includes documentation when it is the only change and fails on missing paths', () => {
   const documentationDiff = `diff --git a/docs/security/example.md b/docs/security/example.md
 --- a/docs/security/example.md
