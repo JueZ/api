@@ -62,14 +62,16 @@ const jsonRpcContentType = 'application/json';
 export const MCP_REQUEST_BODY_MAX_BYTES = 256 * 1024;
 const maxMcpComments = 50;
 const maxCommentBodyChars = 800;
+const maxRedditTraversalDepth = 64;
+const maxRedditTraversalNodes = 10_000;
 const maxCategoryMatches = 10;
 const maxCategoryScan = 200;
 
 const serverInstructions = [
-  'This private API catalogue MCP server exposes read-only Reddit and Willhaben tools plus controlled Bring shopping-list reads and batch writes for the authenticated operator.',
+  'This private API catalogue MCP server exposes read-only Reddit, Willhaben, and Bring tools for the authenticated operator.',
   'For Reddit analysis, call reddit_get_thread_overview first; call reddit_get_thread only when comment bodies or a fuller snapshot are needed.',
   'For a specific Willhaben URL or ad ID, call wlh_get_offer directly. For broad Willhaben searches, call wlh_find_category if the category is unclear, then wlh_search, then wlh_get_offer for selected listings.',
-  'Bring adds require a unique operationId. Complete and remove must use bring_prepare_item_mutation, obtain explicit user confirmation, and only then call bring_apply_item_mutation with the returned token.',
+  'Bring mutations are intentionally unavailable over MCP; use the authenticated web explorer REST flow for operator-reviewed writes.',
   'When a tool fails, read structuredContent.repairable_problem before retrying. Follow caller_instruction and retry_policy.same_request exactly; do not invent arguments after dependency or internal failures.',
   'Do not use these tools for unrelated requests, account management, list sharing/deletion, notifications, or arbitrary upstream calls.',
 ].join('\n');
@@ -1364,12 +1366,20 @@ function toMcpRedditPost(value: unknown): Record<string, unknown> {
   });
 }
 
-function flattenRedditComments(
-  value: unknown,
-  out: Array<Record<string, unknown>> = [],
-): Array<Record<string, unknown>> {
-  for (const item of arrayValue(value)) {
-    const comment = asRecord(item);
+function flattenRedditComments(value: unknown): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  const visited = new Set<object>();
+  const stack: Array<{ value: unknown; depth: number }> = [];
+  const roots = arrayValue(value);
+  for (let index = roots.length - 1; index >= 0; index -= 1) {
+    stack.push({ value: roots[index], depth: 0 });
+  }
+  while (stack.length > 0 && out.length < maxRedditTraversalNodes) {
+    const entry = stack.pop();
+    if (!entry || entry.depth > maxRedditTraversalDepth || !entry.value || typeof entry.value !== 'object') continue;
+    if (visited.has(entry.value)) continue;
+    visited.add(entry.value);
+    const comment = asRecord(entry.value);
     const body = stringValue(comment['body']) ?? '';
     out.push(
       compactRecord({
@@ -1384,7 +1394,10 @@ function flattenRedditComments(
         truncated: body.length > maxCommentBodyChars,
       }),
     );
-    flattenRedditComments(comment['replies'], out);
+    const replies = arrayValue(comment['replies']);
+    for (let index = replies.length - 1; index >= 0; index -= 1) {
+      stack.push({ value: replies[index], depth: entry.depth + 1 });
+    }
   }
   return out;
 }

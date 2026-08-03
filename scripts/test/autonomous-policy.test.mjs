@@ -68,6 +68,10 @@ const rollbackProductionWorkflow = readFileSync(
   new URL('../../.github/workflows/rollback-production.yml', import.meta.url),
   'utf8',
 );
+const bringReadonlyCanaryWorkflow = readFileSync(
+  new URL('../../.github/workflows/bring-readonly-canary.yml', import.meta.url),
+  'utf8',
+);
 const runtimeSettingsPolicy = readFileSync(
   new URL('../validate-deployed-runtime-settings.mjs', import.meta.url),
   'utf8',
@@ -176,7 +180,7 @@ test('canonical autonomous policy is internally valid', () => {
   assert.match(codexAutomergeWorkflow, /cancel-in-progress: false/);
   assert.match(
     codexAutomergeWorkflow,
-    /group: codex-automerge-\$\{\{ github\.event\.pull_request\.number \|\| inputs\.pr_number \}\}/,
+    /group: codex-automerge-\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.client_payload\.pr_number \}\}/,
   );
   assert.match(codexAutomergeWorkflow, /Claim exact head and run deterministic classification/);
   assert.doesNotMatch(codexAutomergeWorkflow, /autonomous-merge-controller\.mjs claim/);
@@ -273,11 +277,44 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
   assert.match(mainDeliveryWorkflow, /github\.event\.workflow_run\.run_attempt == 1/);
   assert.match(mainDeliveryWorkflow, /A main-delivery run already consumed trigger/);
   assert.match(mainDeliveryWorkflow, /\.path == "\.github\/workflows\/codex-automerge\.yml"/);
-  assert.match(mainDeliveryWorkflow, /-f ci_run_id="\$CI_RUN_ID"/);
-  assert.match(mainDeliveryWorkflow, /-f ci_delivery_correlation="\$CI_DELIVERY_CORRELATION"/);
+  assert.match(mainDeliveryWorkflow, /client_payload\[ci_run_id\]=\$CI_RUN_ID/);
+  assert.match(mainDeliveryWorkflow, /client_payload\[ci_delivery_correlation\]=\$CI_DELIVERY_CORRELATION/);
   assert.match(mainDeliveryWorkflow, /Pinned Deploy Test run did not emit matching successful provenance/);
   assert.match(mainDeliveryWorkflow, /Pinned production run did not emit matching successful runtime-truth evidence/);
   assert.equal(mainDeliveryWorkflow.match(/^\s+assert_current_main$/gm)?.length, 4);
+});
+
+test('privileged manual entry points execute only default-branch repository-dispatch workflows', () => {
+  for (const workflow of [
+    deployTestWorkflow,
+    promoteProductionWorkflow,
+    rollbackProductionWorkflow,
+    prepareProductionPrivateStorageWorkflow,
+  ]) {
+    assert.match(workflow, /repository_dispatch:/);
+    assert.doesNotMatch(workflow, /workflow_dispatch:/);
+    assert.match(workflow, /controllerRef: \$\{\{ github\.sha \}\}/);
+    assert.match(workflow, /controllerWorkflowSha: \$\{\{ github\.workflow_sha \}\}/);
+  }
+  assert.match(codexAutomergeWorkflow, /repository_dispatch:[\s\S]*types: \[codex-automerge\]/);
+  assert.doesNotMatch(codexAutomergeWorkflow, /workflow_dispatch:/);
+  assert.match(mainDeliveryWorkflow, /event_type=deploy-test/);
+  assert.match(mainDeliveryWorkflow, /event_type=promote-production/);
+  assert.match(mainDeliveryWorkflow, /repository_dispatch/);
+  assert.match(deployEnvironmentWorkflow, /and \.event == "repository_dispatch"/);
+});
+
+test('credential-bearing smokes use Azure-discovered Function origins', () => {
+  assert.match(bringReadonlyCanaryWorkflow, /repository_dispatch:[\s\S]*types: \[bring-readonly-canary\]/);
+  assert.doesNotMatch(bringReadonlyCanaryWorkflow, /workflow_dispatch:/);
+  assert.match(bringReadonlyCanaryWorkflow, /az functionapp list/);
+  assert.match(
+    bringReadonlyCanaryWorkflow,
+    /BRING_CANARY_BASE_URL does not match the Azure-discovered Function origin/,
+  );
+  assert.match(bringReadonlyCanaryWorkflow, /BRING_CANARY_BASE_URL=\$discovered_base_url/);
+  assert.match(deployEnvironmentWorkflow, /effective_base_url="\$discovered_base_url"/);
+  assert.match(deployEnvironmentWorkflow, /PRODUCTION_BASE_URL does not match the Azure-discovered Function origin/);
 });
 
 test('environment deployment rechecks current main at mutation and acceptance boundaries', () => {
@@ -316,6 +353,8 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   assert.match(deployEnvironmentWorkflow, /\(\.name == \$workflow_name or \.name == \$title\)/);
   assert.doesNotMatch(deployEnvironmentWorkflow, /actions\/workflows\/ci\.yml\/runs\?branch=main/);
   assert.match(deployEnvironmentWorkflow, /effective_web_api_base_url="\$EFFECTIVE_BASE_URL"/);
+  assert.match(deployEnvironmentWorkflow, /discovered_base_url="https:\/\/\$default_host_name"/);
+  assert.match(deployEnvironmentWorkflow, /PRODUCTION_BASE_URL does not match the Azure-discovered Function origin/);
   assert.match(deployEnvironmentWorkflow, /name: Checkout current deployment controller/);
   assert.doesNotMatch(deployEnvironmentWorkflow, /uses: actions\/checkout/);
   assert.doesNotMatch(deployEnvironmentWorkflow, /git clone .*--branch main/);
@@ -385,12 +424,18 @@ test('environment deployment rechecks current main at mutation and acceptance bo
   );
   assert.ok(mainDeliveryWorkflow.includes('--name "deploy-test-provenance-$SOURCE_REF-$test_correlation"'));
   assert.ok(mainDeliveryWorkflow.includes('--name "release-ledger-prod-$SOURCE_REF-$production_correlation"'));
-  assert.match(mainDeliveryWorkflow, /-f test_delivery_correlation="\$test_correlation"/);
-  assert.match(mainDeliveryWorkflow, /-f test_run_id="\$test_run_id"/);
-  assert.match(deployTestWorkflow, /ciRunId: \$\{\{ inputs\.ci_run_id \}\}/);
-  assert.match(deployTestWorkflow, /ciDeliveryCorrelation: \$\{\{ inputs\.ci_delivery_correlation \}\}/);
-  assert.match(promoteProductionWorkflow, /ciRunId: \$\{\{ inputs\.ci_run_id \}\}/);
-  assert.match(promoteProductionWorkflow, /ciDeliveryCorrelation: \$\{\{ inputs\.ci_delivery_correlation \}\}/);
+  assert.match(mainDeliveryWorkflow, /client_payload\[test_delivery_correlation\]=\$test_correlation/);
+  assert.match(mainDeliveryWorkflow, /client_payload\[test_run_id\]=\$test_run_id/);
+  assert.match(deployTestWorkflow, /ciRunId: \$\{\{ github\.event\.client_payload\.ci_run_id \}\}/);
+  assert.match(
+    deployTestWorkflow,
+    /ciDeliveryCorrelation: \$\{\{ github\.event\.client_payload\.ci_delivery_correlation \}\}/,
+  );
+  assert.match(promoteProductionWorkflow, /ciRunId: \$\{\{ github\.event\.client_payload\.ci_run_id \}\}/);
+  assert.match(
+    promoteProductionWorkflow,
+    /ciDeliveryCorrelation: \$\{\{ github\.event\.client_payload\.ci_delivery_correlation \}\}/,
+  );
   for (const workflow of [deployTestWorkflow, promoteProductionWorkflow, rollbackProductionWorkflow]) {
     assert.match(workflow, /controllerRef: \$\{\{ github\.sha \}\}/);
     assert.match(workflow, /controllerWorkflowSha: \$\{\{ github\.workflow_sha \}\}/);
@@ -476,7 +521,7 @@ test('production private-storage preparation is isolated, exact-source, and dige
     prepareProductionPrivateStorageWorkflow,
     /migrationExpectedSha256: 4b2651b8d842854716b4fb2e20ecd9482f59f2ea6ee2352401bec5d42e8c6ed0/,
   );
-  assert.match(prepareProductionPrivateStorageWorkflow, /PREPARE_PRODUCTION_PRIVATE_STORAGE/);
+  assert.match(prepareProductionPrivateStorageWorkflow, /types: \[prepare-production-private-storage\]/);
 
   const preparationIndex = deployEnvironmentWorkflow.indexOf('  prepare-private-storage:');
   assert.ok(preparationIndex > 0);
@@ -624,15 +669,20 @@ test('package scripts, build controls, and executable code always require indepe
     'eslint.config.js',
     '.prettierignore',
     '.prettierrc.json',
+    'bicepconfig.json',
     'apps/web/src/app/app.ts',
     'scripts/check-lockfile-policy.mjs',
   ];
   const risk = classifyRisk(paths, policy);
   assert.equal(risk.highRisk, true);
   assert.deepEqual(risk.highRiskPaths, paths);
-  assert.deepEqual(risk.classes.supplyChain, paths);
+  assert.deepEqual(
+    risk.classes.supplyChain,
+    paths.filter((path) => path !== 'bicepconfig.json'),
+  );
+  assert.deepEqual(risk.classes.infrastructure, ['bicepconfig.json']);
 
-  for (const removedPattern of ['package.json', 'package-lock.json', 'apps/**', 'scripts/**']) {
+  for (const removedPattern of ['package.json', 'package-lock.json', 'bicepconfig.json', 'apps/**', 'scripts/**']) {
     const weakened = {
       ...policy,
       highRiskPaths: policy.highRiskPaths.filter((pattern) => pattern !== removedPattern),
@@ -1541,6 +1591,34 @@ index 1111111..0000000
   assert.deepEqual(capsule.reviewedPaths, ['scripts/deprecated.sh']);
   assert.match(capsule.diff, /deleted file mode 100755/);
   assert.match(capsule.diff, /-echo deprecated/);
+});
+
+test('review capsule rejects opaque binary content for reviewed executable and high-risk paths', () => {
+  const binaryDiff = `diff --git a/scripts/native-helper.bin b/scripts/native-helper.bin
+index 1111111..2222222 100644
+GIT binary patch
+literal 4
+LcmeZtF%H5o01yBG
+`;
+  assert.throws(
+    () =>
+      buildReviewDiffCapsule(binaryDiff, { highRiskPaths: ['scripts/native-helper.bin'] }, [
+        'scripts/native-helper.bin',
+      ]),
+    /opaque binary path: scripts\/native-helper\.bin/,
+  );
+
+  const binaryMarker = `diff --git a/docs/security/control.png b/docs/security/control.png
+index 1111111..2222222 100644
+Binary files a/docs/security/control.png and b/docs/security/control.png differ
+`;
+  assert.throws(
+    () =>
+      buildReviewDiffCapsule(binaryMarker, { highRiskPaths: ['docs/security/control.png'] }, [
+        'docs/security/control.png',
+      ]),
+    /opaque binary path: docs\/security\/control\.png/,
+  );
 });
 
 test('pull request state rejects forks, stale heads, and behind branches', () => {

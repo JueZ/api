@@ -137,6 +137,29 @@ test('curl generation uses bearer placeholder and never includes real tokens', (
   assert.doesNotMatch(curl, /real-token|eyJ|Bearer [A-Za-z0-9._-]{12,}/);
 });
 
+test('Bring confirmation tokens are redacted from curl commands and rendered responses', () => {
+  const operation = operationFixture({
+    id: 'bringApplyItemMutation',
+    requestFields: [fieldFixture({ name: 'confirmationToken', required: true })],
+  });
+  const curl = helpers.buildCurlCommand({
+    operation,
+    values: { confirmationToken: 'opaque-sensitive-token' },
+    apiBaseUrl: 'https://api.example.test',
+  });
+  assert.doesNotMatch(curl, /opaque-sensitive-token/);
+  assert.match(curl, /<REDACTED>/);
+
+  const sanitized = helpers.sanitizeOperationResponse('bringPrepareItemMutation', {
+    state: 'prepared',
+    confirmationToken: 'opaque-sensitive-token',
+  });
+  assert.deepEqual(sanitized, { state: 'prepared' });
+  assert.doesNotMatch(JSON.stringify(sanitized), /opaque-sensitive-token/);
+  assert.match(mainSource, /private pendingBringConfirmationToken/);
+  assert.match(mainSource, /Could not copy curl command\./);
+});
+
 test('OpenAPI contract drives the interactive API catalogue', () => {
   assert.match(mainSource, /parseOpenApiDocument/);
   assert.match(mainSource, /buildApiOperations\(openApiDocument\)/);

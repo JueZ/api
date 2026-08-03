@@ -11,10 +11,8 @@ const authEnv = {
   MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
 };
 const bringListUuid = '22222222-2222-4222-8222-222222222222';
-const bringAddOperationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const bringRemoveOperationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
-test('MCP initialize and tools/list expose protected Bring reads and controlled writes', async () => {
+test('MCP initialize and tools/list expose only read-only provider tools', async () => {
   await withEnv(authEnv, async () => {
     const initialize = await mcpRequest({
       jsonrpc: '2.0',
@@ -31,11 +29,8 @@ test('MCP initialize and tools/list expose protected Bring reads and controlled 
     assert.deepEqual(
       names,
       [
-        'bring_add_items',
-        'bring_apply_item_mutation',
         'bring_get_items',
         'bring_list_lists',
-        'bring_prepare_item_mutation',
         'health_check',
         'hello_authenticated',
         'reddit_get_thread',
@@ -49,25 +44,9 @@ test('MCP initialize and tools/list expose protected Bring reads and controlled 
     );
 
     for (const tool of tools) {
-      if (tool.name === 'bring_add_items')
-        assert.deepEqual(tool.annotations, {
-          readOnlyHint: false,
-          destructiveHint: false,
-          idempotentHint: true,
-          openWorldHint: true,
-        });
-      else if (tool.name === 'bring_prepare_item_mutation' || tool.name === 'bring_apply_item_mutation')
-        assert.deepEqual(tool.annotations, {
-          readOnlyHint: false,
-          destructiveHint: true,
-          idempotentHint: true,
-          openWorldHint: true,
-        });
-      else {
-        assert.equal(tool.annotations.readOnlyHint, true, `${tool.name} must be read-only`);
-        assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`);
-        assert.equal(tool.annotations.idempotentHint, true, `${tool.name} must be idempotent`);
-      }
+      assert.equal(tool.annotations.readOnlyHint, true, `${tool.name} must be read-only`);
+      assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`);
+      assert.equal(tool.annotations.idempotentHint, true, `${tool.name} must be idempotent`);
       assert.ok(tool.outputSchema, `${tool.name} must expose an output schema`);
       assert.equal(typeof tool._meta['openai/toolInvocation/invoking'], 'string');
       assert.equal(typeof tool._meta['openai/toolInvocation/invoked'], 'string');
@@ -114,61 +93,17 @@ test('authenticated MCP hello returns safe user shape without full claims or tok
   });
 });
 
-test('MCP Bring tools expose idempotent add and two-phase destructive mutations without echoing item names', async () => {
+test('MCP Bring exposes reads while mutation tools remain unavailable', async () => {
   const services = stubServices();
   services.bring.listLists = async () => ({
     source: 'bring',
     lists: [{ uuid: bringListUuid, name: 'Home', isDefault: false, shared: false }],
   });
-  const items = [{ name: 'Äpfel & Milch', specification: '2 Stück' }];
-
   await withEnv(authEnv, async () => {
     const lists = await mcpCall('bring_list_lists', {}, 'Bearer local-dev-token', services);
     assert.equal(lists.jsonBody.result.structuredContent.lists[0].shared, false);
     const selected = await mcpCall('bring_get_items', { listUuid: bringListUuid }, 'Bearer local-dev-token', services);
     assert.equal(selected.jsonBody.result.structuredContent.uuid, bringListUuid);
-
-    const added = await mcpCall(
-      'bring_add_items',
-      {
-        operationId: bringAddOperationId,
-        listUuid: bringListUuid,
-        items,
-      },
-      'Bearer local-dev-token',
-      services,
-    );
-    assert.equal(added.jsonBody.result.structuredContent.operation, 'add');
-    assert.equal(added.jsonBody.result.structuredContent.operationId, bringAddOperationId);
-
-    const prepared = await mcpCall(
-      'bring_prepare_item_mutation',
-      {
-        operationId: bringRemoveOperationId,
-        listUuid: bringListUuid,
-        operation: 'remove',
-        items,
-      },
-      'Bearer local-dev-token',
-      services,
-    );
-    assert.equal(prepared.jsonBody.result.structuredContent.state, 'prepared');
-    assert.equal(prepared.jsonBody.result.structuredContent.confirmationToken, 'remove.safe-token');
-    assert.doesNotMatch(JSON.stringify(prepared.jsonBody), /Äpfel|Milch|Stück/);
-
-    const applied = await mcpCall(
-      'bring_apply_item_mutation',
-      {
-        operationId: bringRemoveOperationId,
-        listUuid: bringListUuid,
-        confirmationToken: 'remove.safe-token',
-      },
-      'Bearer local-dev-token',
-      services,
-    );
-    assert.equal(applied.jsonBody.result.structuredContent.operation, 'remove');
-    assert.equal(applied.jsonBody.result.structuredContent.state, 'succeeded');
-    assert.doesNotMatch(JSON.stringify(applied.jsonBody), /Äpfel|Milch|Stück/);
   });
 });
 
@@ -249,6 +184,52 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
     ['topCategories'],
     ['children', '10'],
   ]);
+});
+
+test('MCP Reddit shaping handles a 5,000-level reply chain without recursive stack growth', async () => {
+  const services = stubServices();
+  const root = {
+    id: 'deep-0',
+    parentId: 't3_deep',
+    author: 'fixture',
+    body: 'bounded',
+    score: 0,
+    depth: 0,
+    createdUtc: 0,
+    replies: [],
+  };
+  let cursor = root;
+  for (let depth = 1; depth < 5_000; depth += 1) {
+    const reply = {
+      id: `deep-${depth}`,
+      parentId: `t1_deep-${depth - 1}`,
+      author: 'fixture',
+      body: 'bounded',
+      score: 0,
+      depth,
+      createdUtc: depth,
+      replies: [],
+    };
+    cursor.replies.push(reply);
+    cursor = reply;
+  }
+  services.reddit.fetchThread = async () => ({
+    source: 'reddit',
+    fetchedAt: '2026-08-03T00:00:00.000Z',
+    input: 'deep',
+    post: { id: 'deep', title: 'Deep fixture' },
+    comments: [root],
+    commentContinuations: [],
+    stats: { commentsReturned: 5_000, truncated: false, warnings: [] },
+  });
+
+  await withEnv(authEnv, async () => {
+    const response = await mcpCall('reddit_get_thread', { postId: 'deep' }, 'Bearer local-dev-token', services);
+    assert.equal(response.status, 200);
+    assert.equal(response.jsonBody.result.structuredContent.comments.length, 50);
+    assert.equal(response.jsonBody.result.structuredContent.comments.at(-1).depth, 49);
+    assert.equal(response.jsonBody.result.structuredContent.stats.modelTruncated, true);
+  });
 });
 
 test('MCP wlh_search exposes only effective filters and reports how each one is applied', async () => {
@@ -459,28 +440,19 @@ test('external service exceptions become safe MCP tool errors without sensitive 
   });
 });
 
-test('MCP Bring errors preserve safe classifications and upstream status without response content', async () => {
+test('MCP Bring read errors preserve safe classifications and upstream status without response content', async () => {
   const services = stubServices();
-  services.bring.addItems = async () => {
+  services.bring.getList = async () => {
     throw new BringUpstreamError('Bring dependency request failed.', 502, 'upstream', {
-      operation: 'add_items',
-      method: 'PUT',
-      path: 'v2/bringlists/{uuid}/items',
+      operation: 'get_items',
+      method: 'GET',
+      path: 'v2/bringlists/{uuid}',
       upstreamStatus: 400,
       responseExcerpt: 'password=SHOULD_NOT_LEAK token=SHOULD_NOT_LEAK',
     });
   };
   await withEnv(authEnv, async () => {
-    const response = await mcpCall(
-      'bring_add_items',
-      {
-        operationId: bringAddOperationId,
-        listUuid: bringListUuid,
-        items: [{ name: 'Milk' }],
-      },
-      'Bearer local-dev-token',
-      services,
-    );
+    const response = await mcpCall('bring_get_items', { listUuid: bringListUuid }, 'Bearer local-dev-token', services);
     assertToolError(response, 'bring_upstream_error', 'bring');
     assert.equal(response.jsonBody.result.structuredContent.upstreamStatus, 400);
     assert.doesNotMatch(JSON.stringify(response.jsonBody), /SHOULD_NOT_LEAK|responseExcerpt|password|token/i);

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   architectureFindings,
+  bicepSecurityConfigFindings,
   bundledMcpFindings,
   importsFrom,
   sourceArchitectureFindings,
@@ -43,6 +44,31 @@ test('authorization architecture rejects provider and transport dependencies', (
 
 test('MCP stays bundled behind one server and one Function route', () => {
   assert.deepEqual(bundledMcpFindings(), []);
+});
+
+test('MCP architecture parser recognizes aliased constructors and static quoted routes', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'mcp-architecture-'));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(
+    join(root, 'mcp-server.ts'),
+    `import { McpServer as BundledServer } from '@modelcontextprotocol/sdk/server/mcp.js'; new BundledServer({});`,
+  );
+  await writeFile(join(root, 'route.ts'), `app.http('mcp', { methods: ['POST'], 'route': 'mcp', handler });`);
+  const findings = bundledMcpFindings(root);
+  assert.ok(findings.some((finding) => finding.includes('found 1 constructors')));
+  assert.ok(findings.some((finding) => finding.includes('found 1')));
+});
+
+test('Bicep security analyzer rules remain fail closed', async (context) => {
+  assert.deepEqual(bicepSecurityConfigFindings(), []);
+  const directory = await mkdtemp(join(tmpdir(), 'bicep-security-policy-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const configPath = join(directory, 'bicepconfig.json');
+  await writeFile(
+    configPath,
+    JSON.stringify({ analyzers: { core: { enabled: true, rules: { 'secure-parameter-default': { level: 'off' } } } } }),
+  );
+  assert.ok(bicepSecurityConfigFindings(configPath).some((finding) => finding.includes('must remain at error')));
 });
 
 test('only the trusted autonomous controller can write GitHub check runs', async () => {
@@ -160,6 +186,16 @@ test('Azure Functions loads the fail-closed composition root before registering 
 
 test('repository agent skills have valid frontmatter and unique names', () => {
   assert.deepEqual(validateAgentSkills(), []);
+  const githubSkill = readFileSync(new URL('../../.agents/skills/github-cli-devops/SKILL.md', import.meta.url), 'utf8');
+  assert.doesNotMatch(githubSkill, /gh pr merge/);
+  assert.match(githubSkill, /trusted `Codex Auto-Merge` controller/);
+});
+
+test('GPT Action OAuth setup defaults to and reconciles the read-only scope set', () => {
+  const source = readFileSync(new URL('../configure-entra-gpt-action-oauth.sh', import.meta.url), 'utf8');
+  assert.match(source, /API_SCOPE_VALUES="\$\{API_SCOPE_VALUES:-catalogue\.read,reddit\.read,wlh\.read,bring\.read\}"/);
+  assert.match(source, /resourceAccess: \[\$scopes\[\] \| \{id: \., type: "Scope"\}\]/);
+  assert.doesNotMatch(source.match(/API_SCOPE_VALUES=.*$/m)?.[0] ?? '', /bring\.(?:write|complete|remove)/);
 });
 
 test('dependency policy rejects lifecycle scripts and non-registry dependencies', () => {

@@ -44,10 +44,9 @@ gh pr view <number> --repo JueZ/api
 gh pr view <number> --repo JueZ/api --json url,state,isDraft,mergeStateStatus,autoMergeRequest,headRefName,headRefOid,baseRefName,labels,mergeCommit
 gh pr checks <number> --repo JueZ/api --watch
 gh pr diff <number> --repo JueZ/api
-gh pr merge <number> --repo JueZ/api --auto --squash --delete-branch
 ```
 
-Only use auto-merge when CI and Policy Check are expected to pass.
+Never enable GitHub-native auto-merge directly. Eligible PRs are merged only by the trusted `Codex Auto-Merge` controller after its final exact-head, complete-check-rollup, policy, and independent-review gates. Use `gh` to monitor that controller and the PR state, not to issue a merge command.
 
 Do not bypass branch protection.
 

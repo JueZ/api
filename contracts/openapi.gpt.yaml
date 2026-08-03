@@ -2,8 +2,8 @@ openapi: 3.1.0
 info:
   title: JueZ API Catalogue GPT Action
   version: 0.1.0
-  description: Minimal GPT Actions contract for the JueZ API Catalogue. Health is public; Hello and Reddit thread actions
-    require Microsoft Entra OAuth.
+  description: Read-only GPT Actions contract for the JueZ API Catalogue. Health is public; protected catalogue,
+    Reddit, Willhaben, and Bring reads require Microsoft Entra OAuth. Bring writes are intentionally excluded.
   license:
     name: Proprietary
     identifier: LicenseRef-Proprietary
@@ -936,138 +936,6 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
-    post:
-      operationId: bringAddItems
-      summary: Idempotently add a batch of Bring! items
-      description: Adds 1-50 items to an explicitly allowlisted own list. Generate a new UUID for `operationId`; retry an identical request with the same UUID.
-      tags: [Bring]
-      security:
-        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.write]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/BringAddRequest" }
-      responses:
-        "200":
-          description: Batch accepted by Bring!.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/BringMutationResponse" }
-        "400":
-          description: Invalid batch or UUID.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
-        "401":
-          description: Missing or invalid API OAuth bearer token.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
-        "403":
-          description: Authenticated caller is not authorized for Bring operations.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
-        "409":
-          description: Idempotency conflict, stale list version, or ambiguous prior outcome.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
-        "502":
-          description: Bring authentication, dependency, or undocumented response-shape failure.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
-  /api/bring/lists/{listUuid}/mutations/prepare:
-    parameters:
-      - $ref: "#/components/parameters/BringListUuid"
-    post:
-      operationId: bringPrepareItemMutation
-      summary: Prepare a destructive Bring! item mutation
-      description: Validates a complete or remove request without changing Bring! and returns a five-minute confirmation token.
-      tags: [Bring]
-      security:
-        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.complete]
-        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.remove]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/BringPrepareMutationRequest" }
-      responses:
-        "200":
-          description: Mutation prepared; no upstream write has occurred.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/BringPreparedMutationResponse" }
-        "400":
-          description: Invalid batch or UUID.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
-        "401":
-          description: Missing or invalid API OAuth bearer token.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
-        "403":
-          description: Authenticated caller is not authorized for Bring operations.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
-        "409":
-          description: Idempotency conflict or stale list version.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
-  /api/bring/lists/{listUuid}/mutations/apply:
-    parameters:
-      - $ref: "#/components/parameters/BringListUuid"
-    post:
-      operationId: bringApplyItemMutation
-      summary: Apply a confirmed destructive Bring! item mutation
-      description: Applies a prepared complete or remove operation using its identity- and payload-bound confirmation token.
-      tags: [Bring]
-      security:
-        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.complete]
-        - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.remove]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/BringApplyMutationRequest" }
-      responses:
-        "200":
-          description: Batch removal accepted by Bring!.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/BringMutationResponse" }
-        "400":
-          description: Invalid batch or UUID.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
-        "401":
-          description: Missing or invalid API OAuth bearer token.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
-        "403":
-          description: Authenticated caller is not authorized for Bring operations.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
-        "409":
-          description: Expired confirmation, idempotency conflict, or ambiguous prior outcome.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
-        "502":
-          description: Bring authentication, dependency, or undocumented response-shape failure.
-          content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/RepairableProblem" }
 components:
   securitySchemes:
     entraOAuth2:
@@ -1082,9 +950,6 @@ components:
             api://97df847a-3e44-4aa7-82ea-557f3dfe0203/reddit.read: Read normalized Reddit content.
             api://97df847a-3e44-4aa7-82ea-557f3dfe0203/wlh.read: Read normalized willhaben content.
             api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.read: Read explicitly allowlisted Bring! lists.
-            api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.write: Add items to explicitly writable Bring! lists.
-            api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.complete: Prepare and apply item completion.
-            api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.remove: Prepare and apply item removal.
   parameters:
     BringListUuid:
       name: listUuid
@@ -1101,35 +966,6 @@ components:
         name: { type: string, minLength: 1, maxLength: 200 }
         specification: { type: string, maxLength: 500 }
         uuid: { type: string, format: uuid }
-    BringMutationItems:
-      type: array
-      minItems: 1
-      maxItems: 50
-      items: { $ref: "#/components/schemas/BringItemInput" }
-    BringAddRequest:
-      type: object
-      additionalProperties: false
-      required: [operationId, items]
-      properties:
-        operationId: { type: string, format: uuid }
-        expectedListVersion: { type: string, pattern: "^[0-9a-f]{64}$" }
-        items: { $ref: "#/components/schemas/BringMutationItems" }
-    BringPrepareMutationRequest:
-      type: object
-      additionalProperties: false
-      required: [operationId, operation, items]
-      properties:
-        operationId: { type: string, format: uuid }
-        expectedListVersion: { type: string, pattern: "^[0-9a-f]{64}$" }
-        operation: { type: string, enum: [complete, remove] }
-        items: { $ref: "#/components/schemas/BringMutationItems" }
-    BringApplyMutationRequest:
-      type: object
-      additionalProperties: false
-      required: [operationId, confirmationToken]
-      properties:
-        operationId: { type: string, format: uuid }
-        confirmationToken: { type: string, minLength: 1, maxLength: 4096 }
     BringListSummary:
       type: object
       additionalProperties: false
@@ -1167,32 +1003,6 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/BringItem" }
-    BringPreparedMutationResponse:
-      type: object
-      additionalProperties: false
-      required: [source, state, operationId, operation, listPseudonym, itemCount, expiresAt, confirmationToken, replayed]
-      properties:
-        source: { type: string, const: bring }
-        state: { type: string, const: prepared }
-        operationId: { type: string, format: uuid }
-        operation: { type: string, enum: [complete, remove] }
-        listPseudonym: { type: string }
-        itemCount: { type: integer, minimum: 1, maximum: 50 }
-        expiresAt: { type: string, format: date-time }
-        confirmationToken: { type: string }
-        replayed: { type: boolean }
-    BringMutationResponse:
-      type: object
-      additionalProperties: false
-      required: [source, listUuid, operation, operationId, itemCount, state, replayed]
-      properties:
-        source: { type: string, const: bring }
-        listUuid: { type: string, format: uuid }
-        operation: { type: string, enum: [add, complete, remove] }
-        operationId: { type: string, format: uuid }
-        itemCount: { type: integer, minimum: 1, maximum: 50 }
-        state: { type: string, const: succeeded }
-        replayed: { type: boolean }
     WlhCategory:
       type: object
       additionalProperties: false

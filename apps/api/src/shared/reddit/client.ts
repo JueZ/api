@@ -1,6 +1,7 @@
 import { isSupportedRedditHost } from './input.js';
 import { validateRedditConfig, type RedditConfig } from './config.js';
 import type { RedditRateLimit } from './types.js';
+import { BodyTooLargeError, readResponseTextWithLimit } from '../http/boundedBody.js';
 
 export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
@@ -52,6 +53,7 @@ const TOKEN_EXPIRY_SKEW_MS = 60_000;
 const MAX_REDIRECTS = 5;
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_REDIRECT_BODY_BYTES = 256 * 1024;
+export const REDDIT_JSON_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
 const REDIRECT_BODY_CONTENT_TYPES = ['text/html', 'text/plain'];
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
@@ -353,7 +355,15 @@ export class RedditOAuthClient {
     const timeout = setTimeout(() => controller.abort(), Math.min(REQUEST_TIMEOUT_MS, remainingMs));
     try {
       const response = await this.fetchImpl(input, { ...init, signal: controller.signal });
-      const text = await response.text();
+      let text: string;
+      try {
+        text = await readResponseTextWithLimit(response, REDDIT_JSON_RESPONSE_MAX_BYTES);
+      } catch (error) {
+        if (error instanceof BodyTooLargeError) {
+          throw new RedditUpstreamError('Reddit response exceeded the safe size limit.', 502, response.status);
+        }
+        throw error;
+      }
       return { response, text };
     } catch (error) {
       if (controller.signal.aborted && deadlineMs !== undefined) throw new RedditRequestDeadlineError();

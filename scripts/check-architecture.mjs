@@ -2,6 +2,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoot = resolve(repositoryRoot, 'apps/api/src');
@@ -19,6 +20,7 @@ export function architectureFindings(root = sourceRoot) {
     findings.push(...sourceArchitectureFindings(file, source, root));
   }
   findings.push(...bundledMcpFindings(root));
+  findings.push(...bicepSecurityConfigFindings());
   return findings;
 }
 
@@ -58,8 +60,20 @@ export function sourceArchitectureFindings(file, source, root = sourceRoot) {
 
 export function bundledMcpFindings(root = sourceRoot) {
   const files = walk(root).filter((entry) => entry.endsWith('.ts'));
-  const serverConstructors = files.filter((file) => /\bnew\s+McpServer\s*\(/.test(readFileSync(file, 'utf8')));
-  const mcpRoutes = files.filter((file) => /\broute\s*:\s*['"]mcp['"]/.test(readFileSync(file, 'utf8')));
+  const serverConstructors = [];
+  const mcpRoutes = [];
+  for (const file of files) {
+    const sourceFile = parseTypeScript(readFileSync(file, 'utf8'), file);
+    const mcpServerNames = importedMcpServerNames(sourceFile);
+    function visit(node) {
+      if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && mcpServerNames.has(node.expression.text)) {
+        serverConstructors.push(file);
+      }
+      if (isMcpHttpRoute(node)) mcpRoutes.push(file);
+      ts.forEachChild(node, visit);
+    }
+    visit(sourceFile);
+  }
   const findings = [];
   const expectedServer = resolve(root, 'mcp/server.ts');
   const expectedRoute = resolve(root, 'functions/mcp.ts');
@@ -77,7 +91,78 @@ export function bundledMcpFindings(root = sourceRoot) {
 }
 
 export function importsFrom(source) {
-  return [...source.matchAll(/\b(?:from|import)\s*(?:\(\s*)?['"]([^'"]+)['"]/g)].map((match) => match[1]);
+  const sourceFile = parseTypeScript(source);
+  const imports = [];
+  function visit(node) {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      imports.push(node.moduleSpecifier.text);
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length === 1 &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      imports.push(node.arguments[0].text);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return imports;
+}
+
+export function bicepSecurityConfigFindings(configPath = resolve(repositoryRoot, 'bicepconfig.json')) {
+  const findings = [];
+  let config;
+  try {
+    config = JSON.parse(readFileSync(configPath, 'utf8'));
+  } catch {
+    return [`${displayPath(configPath)}: Bicep analyzer configuration must be valid JSON`];
+  }
+  if (config?.analyzers?.core?.enabled !== true) {
+    findings.push(`${displayPath(configPath)}: Bicep core analyzer must remain enabled`);
+  }
+  for (const rule of [
+    'outputs-should-not-contain-secrets',
+    'secure-parameter-default',
+    'use-secure-value-for-secure-inputs',
+  ]) {
+    if (config?.analyzers?.core?.rules?.[rule]?.level !== 'error') {
+      findings.push(`${displayPath(configPath)}: Bicep analyzer rule ${rule} must remain at error`);
+    }
+  }
+  return findings;
+}
+
+function parseTypeScript(source, file = '<inline>') {
+  return ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+}
+
+function importedMcpServerNames(sourceFile) {
+  const names = new Set();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (!statement.moduleSpecifier.text.includes('@modelcontextprotocol/sdk/server/mcp')) continue;
+    for (const element of statement.importClause?.namedBindings?.elements ?? []) {
+      if ((element.propertyName ?? element.name).text === 'McpServer') names.add(element.name.text);
+    }
+  }
+  return names;
+}
+
+function isMcpHttpRoute(node) {
+  if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return false;
+  if (!ts.isIdentifier(node.expression.expression) || node.expression.expression.text !== 'app') return false;
+  if (node.expression.name.text !== 'http') return false;
+  const options = node.arguments[1];
+  if (!options || !ts.isObjectLiteralExpression(options)) return false;
+  return options.properties.some(
+    (property) =>
+      ts.isPropertyAssignment(property) &&
+      ((ts.isIdentifier(property.name) && property.name.text === 'route') ||
+        (ts.isStringLiteral(property.name) && property.name.text === 'route')) &&
+      (ts.isStringLiteral(property.initializer) || ts.isNoSubstitutionTemplateLiteral(property.initializer)) &&
+      property.initializer.text === 'mcp',
+  );
 }
 
 function layerOf(file, root) {

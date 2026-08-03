@@ -13,7 +13,7 @@ API_APP_ID="${API_APP_ID:-}"
 GPT_ACTION_REDIRECT_URI="${GPT_ACTION_REDIRECT_URI:-}"
 GPT_ACTION_ADDITIONAL_REDIRECT_URIS="${GPT_ACTION_ADDITIONAL_REDIRECT_URIS:-}"
 GPT_ACTION_APP_DISPLAY_NAME="${GPT_ACTION_APP_DISPLAY_NAME:-JueZ API Catalogue ChatGPT Action}"
-API_SCOPE_VALUES="${API_SCOPE_VALUES:-catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove}"
+API_SCOPE_VALUES="${API_SCOPE_VALUES:-catalogue.read,reddit.read,wlh.read,bring.read}"
 SET_GITHUB_VARIABLES="${SET_GITHUB_VARIABLES:-false}"
 SET_AZURE_APP_SETTINGS="${SET_AZURE_APP_SETTINGS:-false}"
 CREATE_CLIENT_SECRET="${CREATE_CLIENT_SECRET:-false}"
@@ -168,19 +168,16 @@ existing_scope_ids_json="$(jq -c --arg api "$API_APP_ID" '
     | .id]
 ' <<<"$current_app")"
 missing_scope_ids_json="$(jq -nc --argjson requested "$scope_ids_json" --argjson existing "$existing_scope_ids_json" '$requested - $existing')"
-if [ "$(jq -r 'length' <<<"$missing_scope_ids_json")" -gt 0 ]; then
-  echo "Adding missing granular delegated API permissions to GPT Action app."
+unexpected_scope_ids_json="$(jq -nc --argjson requested "$scope_ids_json" --argjson existing "$existing_scope_ids_json" '$existing - $requested')"
+if [ "$(jq -r 'length' <<<"$missing_scope_ids_json")" -gt 0 ] || [ "$(jq -r 'length' <<<"$unexpected_scope_ids_json")" -gt 0 ]; then
+  echo "Reconciling GPT Action delegated API permissions to the exact requested read-only set."
   updated_required_resource_access="$(jq -c --arg api "$API_APP_ID" --argjson scopes "$scope_ids_json" '
     .requiredResourceAccess = (
       (.requiredResourceAccess // [] | map(select(.resourceAppId != $api))) +
       [
         {
           resourceAppId: $api,
-          resourceAccess: (
-            ((.requiredResourceAccess // [] | map(select(.resourceAppId == $api)) | .[0].resourceAccess) // []) +
-            [$scopes[] | {id: ., type: "Scope"}]
-            | unique_by(.id, .type)
-          )
+          resourceAccess: [$scopes[] | {id: ., type: "Scope"}]
         }
       ]
     ) | .requiredResourceAccess' <<<"$current_app")"

@@ -17,6 +17,7 @@ const REQUIRED_EXECUTABLE_HIGH_RISK_PATTERNS = Object.freeze([
   'eslint.config.js',
   '.prettierignore',
   '.prettierrc.json',
+  'bicepconfig.json',
   'apps/**',
   'scripts/**',
 ]);

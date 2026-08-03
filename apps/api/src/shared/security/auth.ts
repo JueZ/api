@@ -84,6 +84,15 @@ export async function authorizeRequest(
   return authorizeBearerToken(request.headers.get('authorization'), context, config, verifier, policy);
 }
 
+export async function authenticateRequest(
+  request: HttpRequest,
+  context: InvocationContext,
+  config: AuthConfig = readAuthConfig(),
+  verifier: JwtVerifier = verifyJwtWithJose,
+): Promise<AuthorizationResult> {
+  return authenticateBearerToken(request.headers.get('authorization'), context, config, verifier);
+}
+
 export async function authorizeRequestForOperation(
   request: HttpRequest,
   context: InvocationContext,
@@ -104,6 +113,24 @@ export async function authorizeRequestForOperation(
   return result.ok ? result : repairableAuthorizationFailure(result, operationId, context);
 }
 
+export function authorizeAuthenticatedPrincipalForOperation(
+  principal: AuthenticatedPrincipal,
+  context: InvocationContext,
+  operationId: string,
+): AuthorizationResult {
+  const operation = getOperationDefinition(operationId);
+  if (!operation.requiredPermission) {
+    throw new Error(`Operation ${operationId} does not require authorization.`);
+  }
+  const result = authorizePrincipal(principal, {
+    permission: operation.requiredPermission,
+    allowedTokenTypes: operation.allowedTokenTypes,
+    environment: getDeployedEnvironmentName(),
+    allowedEnvironments: operation.allowedEnvironments,
+  });
+  return result.ok ? result : repairableAuthorizationFailure(result, operationId, context);
+}
+
 export async function authorizeBearerToken(
   authorizationHeader: string | null | undefined,
   context: InvocationContext,
@@ -111,21 +138,31 @@ export async function authorizeBearerToken(
   verifier: JwtVerifier = verifyJwtWithJose,
   policy: OperationAuthorizationPolicy = defaultAuthorizationPolicy,
 ): Promise<AuthorizationResult> {
+  const authentication = await authenticateBearerToken(authorizationHeader, context, config, verifier);
+  return authentication.ok ? authorizePrincipal(authentication.user, policy) : authentication;
+}
+
+export async function authenticateBearerToken(
+  authorizationHeader: string | null | undefined,
+  context: InvocationContext,
+  config: AuthConfig = readAuthConfig(),
+  verifier: JwtVerifier = verifyJwtWithJose,
+): Promise<AuthorizationResult> {
   if (!config.enabled) {
     const environment = getDeployedEnvironmentName();
     if (environment !== 'local') {
       logAuthFailure(context, 'missing_config', config.debug);
       return unauthorized('Authentication is not configured.');
     }
-    return authorizePrincipal(
-      {
+    return {
+      ok: true,
+      user: {
         subject: 'local-dev-placeholder',
         tokenType: 'user',
         scopes: [...PERMISSIONS],
         roles: [],
       },
-      policy,
-    );
+    };
   }
 
   const configError = validateConfig(config);
@@ -172,8 +209,9 @@ export async function authorizeBearerToken(
       return forbidden('Service client is not allowed.');
     }
 
-    return authorizePrincipal(
-      {
+    return {
+      ok: true,
+      user: {
         subject,
         objectId,
         tenantId,
@@ -182,8 +220,7 @@ export async function authorizeBearerToken(
         scopes: tokenAccess.scopes,
         roles: normalizeServiceRoles(tokenAccess.roles),
       },
-      policy,
-    );
+    };
   }
 
   if (!isAllowedUser(objectId, subject, config)) {
@@ -194,8 +231,9 @@ export async function authorizeBearerToken(
     return forbidden('Delegated OAuth client is not allowed.');
   }
 
-  return authorizePrincipal(
-    {
+  return {
+    ok: true,
+    user: {
       subject,
       objectId,
       tenantId,
@@ -204,8 +242,7 @@ export async function authorizeBearerToken(
       scopes: tokenAccess.scopes,
       roles: tokenAccess.roles,
     },
-    policy,
-  );
+  };
 }
 
 export async function verifyJwtWithJose(token: string, config: AuthConfig): Promise<JWTPayload> {

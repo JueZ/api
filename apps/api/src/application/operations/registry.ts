@@ -118,7 +118,7 @@ const definitions = [
     confirmation: 'not-applicable',
     audit: mutationAudit,
     rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/items' },
-    mcp: { toolName: 'bring_add_items' },
+    gptActions: false,
   }),
   define({
     id: OPERATION_IDS.bringPrepareComplete,
@@ -133,7 +133,7 @@ const definitions = [
     confirmation: 'required',
     audit: mutationAudit,
     rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/mutations/prepare' },
-    mcp: { toolName: 'bring_prepare_item_mutation' },
+    gptActions: false,
   }),
   define({
     id: OPERATION_IDS.bringPrepareRemove,
@@ -148,7 +148,7 @@ const definitions = [
     confirmation: 'required',
     audit: mutationAudit,
     rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/mutations/prepare' },
-    mcp: { toolName: 'bring_prepare_item_mutation' },
+    gptActions: false,
   }),
   define({
     id: OPERATION_IDS.bringApplyComplete,
@@ -163,7 +163,7 @@ const definitions = [
     confirmation: 'required',
     audit: mutationAudit,
     rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/mutations/apply' },
-    mcp: { toolName: 'bring_apply_item_mutation' },
+    gptActions: false,
   }),
   define({
     id: OPERATION_IDS.bringApplyRemove,
@@ -178,7 +178,7 @@ const definitions = [
     confirmation: 'required',
     audit: mutationAudit,
     rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/mutations/apply' },
-    mcp: { toolName: 'bring_apply_item_mutation' },
+    gptActions: false,
   }),
 ] as const satisfies readonly OperationDefinition[];
 

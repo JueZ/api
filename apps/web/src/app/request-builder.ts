@@ -84,3 +84,14 @@ export function parseJsonOrText(responseText: string): unknown {
 export function formatBody(body: unknown, pretty = false): string {
   return typeof body === 'string' ? body : JSON.stringify(body, null, pretty ? 2 : undefined);
 }
+
+export function sanitizeOperationResponse(operationId: string, responseBody: unknown): unknown {
+  if (operationId !== 'bringPrepareItemMutation' || !isJsonObject(responseBody)) return responseBody;
+  const safeBody = { ...responseBody };
+  delete safeBody['confirmationToken'];
+  return safeBody;
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}

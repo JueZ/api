@@ -17,6 +17,7 @@ export function renderOperationCatalogue(operations = listOperationDefinitions()
       operation.allowedEnvironments.join(', '),
       operation.idempotency,
       operation.confirmation,
+      operation.gptActions === false ? 'no' : operation.rest ? 'yes' : 'n/a',
       rest,
       mcp,
     ];
@@ -26,8 +27,8 @@ export function renderOperationCatalogue(operations = listOperationDefinitions()
     '',
     '> Generated from `apps/api/src/application/operations/registry.ts`. Run `npm run docs:check-operations` to detect drift.',
     '',
-    '| Operation | Provider | Effect | Permission | Tokens | Environments | Idempotency | Confirmation | REST | MCP |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| Operation | Provider | Effect | Permission | Tokens | Environments | Idempotency | Confirmation | GPT Actions | REST | MCP |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...rows.map((row) => `| ${row.map(escapeCell).join(' | ')} |`),
     '',
   ].join('\n');

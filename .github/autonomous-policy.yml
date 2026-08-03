@@ -3,19 +3,19 @@ version: 1
 # Exact content allowlist for the trusted workflow set. Any workflow byte change
 # requires an independently reviewed update to this canonical manifest.
 trustedWorkflowSha256:
-  bring-readonly-canary.yml: ee34e51a9bf0c875b0f58cde2d389b76f7f673f0525fe7b6677bb388987e4ccf
+  bring-readonly-canary.yml: 9cd2cd547a3b36b1c1de1769730883e613dc370493d978c356d37d90f1e08898
   ci.yml: 389e2cde48c13a49b7e81090894728f5fbac21e2b2c75ca7b363e3244e3faa45
   codeql.yml: c543422d77c3879a7f1b61e6fee0e1a036194c78a38a33f1ea16f268d4b2bc6a
-  codex-automerge.yml: e84787cc753dd0cf6d8a8f5dd4c5d8ebf73a7f5d9ca3b7073268084cdc92ff3e
-  codex-main-delivery.yml: 3a8aa21d979847bba6c3284dff939eb56bef61d906d9e7013f744a142d878d63
-  deploy-environment.yml: f57a04f092d1c434c7cd608da34f8d7ab56cf33cfb5b485b73d78ff0b1285232
-  deploy-test.yml: 30249503af8c36ceb3076e38bec52fa9217ca15b349f0cee57d7ca84f271c274
+  codex-automerge.yml: 76b217b5dfa539616ee3844c1776e05e7886f1bb6a0e47c04bf4e0a950a52380
+  codex-main-delivery.yml: 6d9510c8ca610bad996c1310d4a31fc7abb77738402fe57fb510e01b1f4c6b03
+  deploy-environment.yml: cd36744ebf07c466d407ca4ecd83751e2f6445263a7bab90145c69326d844be9
+  deploy-test.yml: be874930e0d375765afe67d50429744f5f629d129b944cae601e915ea16c7275
   migrate-private-storage.yml: c5e8ba9e1379179ec4f1f3a6abcfaa7eb712b468e3f43e9c4606157a7ba8d31b
   policy-check.yml: 553f5783cfbdb4dda498809b74265a9a247e5644663b74bacd1dd66c17fe23b2
-  prepare-production-private-storage.yml: 8abf389aca33ee3fd3d4f07546b5d8a7ec37369d099fe7266b8f566c5c3292c7
-  promote-production.yml: 6d0b51132e4768307cc80a3e20a8596fd0b3cd19f7f058a0944366fcde5bff25
+  prepare-production-private-storage.yml: 62b7d4a413ea2ed57f5ebeb63b54adfb46e42abcf825e94be3f2f049f501277e
+  promote-production.yml: eb87a6f7fd479226a68e0edd7f9867ce9b6c3bac853ffae0ed687734e0944387
   repair-triage.yml: c1384abfdf12c6b8f171e50534ee6c13bc98e321e0e31e91ab69c3dcf7e1c6d3
-  rollback-production.yml: 73af772e392a2e242434c70d2c8e4c60461e8cfa6f5b04a29d6591dfe13e11ea
+  rollback-production.yml: 2aae30732058ba956f52a0fc5151e5ee236856464bb961dac576c9a033e49635
   verify-azure-oidc.yml: 8f98932d92d84740df6573397fa2ad29678fd09f1c3fe44fd8a9910bfee424d7
 
 # This file is the canonical repository policy consumed by CI, the autonomous
@@ -78,6 +78,7 @@ highRiskPaths:
   - eslint.config.js
   - .prettierignore
   - .prettierrc.json
+  - bicepconfig.json
   - apps/**
   - scripts/**
   - .github/workflows/**
@@ -130,6 +131,7 @@ riskClasses:
     - .github/actions/**
     - scripts/autonomous-merge-controller.mjs
   infrastructure:
+    - bicepconfig.json
     - infra/**
   authentication:
     - apps/api/src/shared/security/**

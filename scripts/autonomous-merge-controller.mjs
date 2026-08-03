@@ -569,6 +569,11 @@ export function buildReviewDiffCapsule(sourceDiff, risk, changedPaths) {
     if (!reviewedPathSet.has(matchingPath) || foundPaths.has(matchingPath)) {
       throw new Error(`High-risk review diff contains a duplicate path: ${matchingPath}.`);
     }
+    if (/^(?:GIT binary patch|Binary files .+ differ)$/m.test(section)) {
+      throw new Error(
+        `High-risk review cannot claim complete source coverage for opaque binary path: ${matchingPath}.`,
+      );
+    }
     foundPaths.add(matchingPath);
     selectedSections.push(section);
   }

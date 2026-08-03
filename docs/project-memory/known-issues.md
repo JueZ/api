@@ -1,5 +1,11 @@
 # Known issues and unresolved risks
 
+## Codex Security 0.1.3 can require bundled finalization for local worktree scans
+
+- The 2026-08-03 complete ChatGPT-authenticated model run finished analysis and wrote complete findings/coverage, then the CLI wrapper returned `scan.target.kind: must match the workbench target` while sealing a `git_worktree` target.
+- The package's bundled `finalize_scan_contract.py` sealed the unchanged private result directory and produced manifest hashes, Markdown, and SARIF without a second model call. Coverage records all 239 files, no deferred surfaces, and no open questions.
+- Until the CLI wrapper is fixed upstream, preserve the raw private results, use the bundled finalizer only after verifying complete coverage, and never describe an unsealed partial directory as a successful scan.
+
 ## Test and production are accepted on the same immutable release
 
 - Main CI `30744552173`, Deploy Test `30744611475`, and Promote Production `30744732911` accepted exact commit `e8e1070b4a4f2e67b9d60b97a3586bf16b3bfeea` after exact-generation, runtime, authenticated-smoke, telemetry, ledger, and provenance gates passed.

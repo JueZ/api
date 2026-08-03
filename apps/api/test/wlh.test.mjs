@@ -6,6 +6,8 @@ import { wlhSearchHandler, setWlhSearchServiceForTesting } from '../dist/functio
 import { handler as wlhCategoriesHandler, setWlhCategoryServiceForTesting } from '../dist/functions/wlhCategories.js';
 import { handler as wlhOfferHandler, setWlhOfferServiceForTesting } from '../dist/functions/wlhOffer.js';
 import { WlhService, searchUrlForCategory, wlhPathFromStoredUrl } from '../dist/shared/wlh/service.js';
+import { WlhClient, WlhFetchError } from '../dist/shared/wlh/client.js';
+import { WlhInputError, normalizeSearchRequest } from '../dist/shared/wlh/input.js';
 
 const cfg = {
   baseUrl: 'https://example.test',
@@ -44,6 +46,36 @@ test('stored category url origin is discarded', () => {
   assert.equal(
     searchUrlForCategory('https://evil.example/a/b?x=1', cfg.baseUrl).toString(),
     'https://example.test/a/b',
+  );
+});
+
+test('WLH input bounds and deduplicates finite filter arrays', () => {
+  assert.throws(() => normalizeSearchRequest({ categoryId: '10', delivery: ['pickup', 'pickup'] }), WlhInputError);
+  assert.throws(
+    () => normalizeSearchRequest({ categoryId: '10', requiredTerms: Array.from({ length: 21 }, () => 'bike') }),
+    WlhInputError,
+  );
+  assert.throws(() => normalizeSearchRequest({ categoryId: '10', requiredTerms: ['bike', ' BIKE '] }), WlhInputError);
+  assert.deepEqual(normalizeSearchRequest({ categoryId: ' 10 ', requiredTerms: [' bike '] }).requiredTerms, ['bike']);
+});
+
+test('WLH client enforces provider timeout and response byte limits', async () => {
+  const timedOut = new WlhClient(cfg, async (_input, init) => {
+    assert.ok(init.signal);
+    throw new DOMException('aborted', 'AbortError');
+  });
+  await assert.rejects(
+    timedOut.fetchNextData('/search'),
+    (error) => error instanceof WlhFetchError && error.kind === 'timeout' && error.status === 504,
+  );
+
+  const oversized = new WlhClient(
+    cfg,
+    async () => new Response('small', { headers: { 'content-length': String(4 * 1024 * 1024 + 1) } }),
+  );
+  await assert.rejects(
+    oversized.fetchNextData('/search'),
+    (error) => error instanceof WlhFetchError && error.kind === 'body_too_large',
   );
 });
 
@@ -341,6 +373,23 @@ test('invalid JSON on WLH search returns RepairableProblem', async () => {
   });
 });
 
+test('WLH search rejects oversized request bodies before service access', async () => {
+  await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
+    let called = false;
+    setWlhSearchServiceForTesting({
+      search: async () => {
+        called = true;
+        throw new Error('oversized body must not reach WLH service');
+      },
+    });
+    const request = requestWithJson({ categoryId: '10' });
+    request.headers.set('content-length', String(65 * 1024));
+    const response = await wlhSearchHandler(request, contextStub());
+    assertRepairableProblem(response, 413, 'postWlhSearch', 'caller_contract_violation');
+    assert.equal(called, false);
+  });
+});
+
 test('invalid search body returns RepairableProblem', async () => {
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
     const s = new WlhService({
@@ -453,25 +502,35 @@ async function wlhOfferHandlerRequest(method, url, params, context = {}) {
 }
 
 function requestWithJson(body, authorization = undefined) {
+  const text = JSON.stringify(body);
   return {
     method: 'POST',
     url: 'https://api.test/api/wlh/search',
     params: {},
     headers: new Headers(authorization === undefined ? {} : authorization === null ? {} : { authorization }),
-    json: async () => body,
+    body: bodyFromText(text),
   };
 }
 
 function requestThatThrowsJson(authorization = undefined) {
+  const text = '{invalid';
   return {
     method: 'POST',
     url: 'https://api.test/api/wlh/search',
     params: {},
     headers: new Headers(authorization === undefined ? {} : authorization === null ? {} : { authorization }),
-    json: async () => {
-      throw new Error('invalid json');
-    },
+    body: bodyFromText(text),
   };
+}
+
+function bodyFromText(text) {
+  const bytes = new TextEncoder().encode(text);
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
 }
 
 function contextStub(overrides = {}) {

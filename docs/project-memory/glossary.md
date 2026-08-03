@@ -3,7 +3,7 @@
 - GitHub Actions OIDC identity: The Azure federated identity used by GitHub Actions to deploy without a long-lived Azure client secret.
 - Codex direct Azure identity: The separate Azure identity used by Codex for direct diagnostics and safe operational work from the Codex environment.
 - `Deploy Test`: GitHub Actions workflow that deploys merged commits to the test environment and runs smoke tests.
-- `Promote Production`: GitHub Actions workflow that promotes a commit to production after test smoke tests pass or by manual dispatch.
+- `Promote Production`: GitHub Actions workflow that promotes a commit to production after accepted test evidence through a typed default-branch repository dispatch.
 - `rg-api-test`: Test Azure resource group for this project.
 - `rg-api-prod`: Production Azure resource group for this project.
 - Function App: Azure Functions hosting resource for the TypeScript API backend.

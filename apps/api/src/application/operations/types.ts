@@ -27,4 +27,5 @@ export interface OperationDefinition<Input = unknown, Output = unknown> {
   audit: OperationAuditPolicy;
   rest?: { method: 'GET' | 'POST'; path: string };
   mcp?: { toolName: string };
+  gptActions?: boolean;
 }

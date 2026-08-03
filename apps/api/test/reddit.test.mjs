@@ -8,8 +8,12 @@ import {
   parseRedditPostInput,
   unresolvedRedditShareUrlError,
 } from '../dist/shared/reddit/input.js';
-import { attachMoreChildren, normalizeInitialThread } from '../dist/shared/reddit/normalize.js';
-import { RedditThreadService } from '../dist/shared/reddit/service.js';
+import {
+  attachMoreChildren,
+  MAX_REDDIT_COMMENT_DEPTH,
+  normalizeInitialThread,
+} from '../dist/shared/reddit/normalize.js';
+import { pageRows, RedditThreadService } from '../dist/shared/reddit/service.js';
 import { RedditPrincipalConcurrencyError, withRedditPrincipalConcurrency } from '../dist/shared/reddit/concurrency.js';
 import {
   redditThreadHandler,
@@ -38,6 +42,7 @@ import {
 } from '../dist/functions/redditCommentsBatch.js';
 import { buildFallbackRepairableProblem, validateRepairableProblem } from '../dist/shared/errors/repairableProblem.js';
 import { buildDiagnosticCapsule, buildRedditDiagnosticCapsule } from '../dist/shared/errors/diagnosticCapsule.js';
+import { extractRedditCanonicalUrlFromHtml } from '../dist/shared/reddit/htmlCanonical.js';
 import {
   buildDeterministicRepairableProblem,
   resolveRepairableProblem,
@@ -213,6 +218,25 @@ test('normalizeInitialThread preserves nested replies and more placeholders', ()
   assert.deepEqual(tree.more, [{ parentId: 't1_c1', depth: 1, children: ['c3'] }]);
 });
 
+test('Reddit normalization defers 5,000-level reply chains without recursive stack growth', () => {
+  const tree = normalizeInitialThread('deep', deepThreadFixture(5_000), { maxComments: 10_000 });
+  assert.equal(tree.commentsReturned, MAX_REDDIT_COMMENT_DEPTH + 1);
+  assert.equal(tree.truncated, true);
+  assert.ok(tree.warnings.some((warning) => warning.includes('were deferred')));
+  assert.equal(tree.more.length, 1);
+  assert.equal(tree.more[0].depth, MAX_REDDIT_COMMENT_DEPTH + 1);
+  assert.equal(tree.more[0].children.length, 1);
+
+  let cursor = tree.comments[0];
+  for (let depth = 0; depth < MAX_REDDIT_COMMENT_DEPTH; depth += 1) {
+    assert.equal(cursor.depth, depth);
+    assert.equal(cursor.replies.length, 1);
+    cursor = cursor.replies[0];
+  }
+  assert.equal(cursor.depth, MAX_REDDIT_COMMENT_DEPTH);
+  assert.equal(cursor.replies.length, 0);
+});
+
 test('attachMoreChildren appends expanded comments to the matching parent', () => {
   const tree = normalizeInitialThread('abc123', threadFixture(), { maxComments: 10 });
   const more = tree.more.shift();
@@ -345,6 +369,13 @@ test('RedditThreadService resolves 200 HTML canonical link for exact AskReddit s
 
   assert.equal(response.post.id, '1tgoo04');
   assertShareHtmlResolvedWithoutFallbacks(calls);
+});
+
+test('Reddit JSON-LD traversal visits nested URL objects once within a depth budget', () => {
+  let nested = { url: 'https://www.reddit.com/r/OpenAI/comments/abc123/example/' };
+  for (let depth = 0; depth < 40; depth += 1) nested = { mainEntityOfPage: nested };
+  const html = `<script type="application/ld+json">${JSON.stringify(nested)}</script>`;
+  assert.equal(extractRedditCanonicalUrlFromHtml(html), 'https://www.reddit.com/r/OpenAI/comments/abc123/example/');
 });
 
 test('RedditThreadService resolves 200 HTML og:url metadata for exact AskReddit share URL', async () => {
@@ -631,6 +662,21 @@ test('RedditOAuthClient raises RedditFetchError with content type and preview fo
   );
 });
 
+test('RedditOAuthClient rejects oversized JSON responses before parsing', async () => {
+  const client = new RedditOAuthClient(
+    config,
+    async () =>
+      new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json', 'content-length': String(4 * 1024 * 1024 + 1) },
+      }),
+  );
+  await assert.rejects(
+    client.getAccessToken(),
+    (error) => error instanceof RedditUpstreamError && error.status === 502,
+  );
+});
+
 test('RedditOAuthClient retries retryable upstream responses and marks final invalid JSON 429 retryable', async () => {
   let commentFetches = 0;
   const client = new RedditOAuthClient(config, async (input) => {
@@ -911,6 +957,40 @@ test('RedditThreadService pages comment skeletons with filters and byte controls
   assert.equal(secondPage.comments[0].body, 'reply comment');
 });
 
+test('Reddit pagination accounts for UTF-8 bytes incrementally at exact boundaries', () => {
+  const rows = [
+    {
+      id: 'ä',
+      fullname: 't1_ä',
+      parentId: 't3_post',
+      depth: 0,
+      score: 1,
+      replyCount: 0,
+      bodyLength: 1,
+      bodyPreview: '€',
+      createdUtc: 1,
+      isDeleted: false,
+    },
+    {
+      id: 'b',
+      fullname: 't1_b',
+      parentId: 't3_post',
+      depth: 0,
+      score: 1,
+      replyCount: 0,
+      bodyLength: 1,
+      bodyPreview: 'b',
+      createdUtc: 1,
+      isDeleted: false,
+    },
+  ];
+  const exactFirstBytes = Buffer.byteLength(JSON.stringify([rows[0]]), 'utf8');
+  const page = pageRows(rows, 0, 10, exactFirstBytes);
+  assert.deepEqual(page.rows, [rows[0]]);
+  assert.equal(page.truncatedBy, 'maxBytes');
+  assert.equal(page.nextOffset, 1);
+});
+
 test('RedditThreadService fetches full comments by ID with field projection', async () => {
   process.env.REDDIT_CLIENT_ID = config.clientId;
   process.env.REDDIT_CLIENT_SECRET = config.secret;
@@ -976,6 +1056,43 @@ test('queryable Reddit handlers delegate and expose endpoint-specific operation 
     const problem = await redditThreadCommentsHandler(requestWithJson({ post: 'abc123' }), contextStub());
     assert.equal(problem.status, 502);
     assert.equal(problem.jsonBody.operation_id, 'postRedditThreadComments');
+  });
+});
+
+test('all protected Reddit POST handlers reject declared oversized bodies before service access', async () => {
+  await withEnv({ AUTH_ENABLED: 'false', REPAIRABLE_ERRORS_LLM_ENABLED: 'false' }, async () => {
+    let calls = 0;
+    const fail = async () => {
+      calls += 1;
+      throw new Error('oversized body must not reach Reddit service');
+    };
+    setRedditThreadServiceForTesting({ fetchThread: fail });
+    setRedditCommentTreeServiceForTesting({ fetchCommentTree: fail });
+    setRedditThreadOverviewServiceForTesting({ fetchThreadOverview: fail });
+    setRedditThreadCommentsServiceForTesting({ fetchThreadComments: fail });
+    setRedditCommentsBatchServiceForTesting({ fetchCommentsBatch: fail });
+
+    for (const handler of [
+      redditThreadHandler,
+      redditCommentTreeHandler,
+      redditThreadOverviewHandler,
+      redditThreadCommentsHandler,
+      redditCommentsBatchHandler,
+    ]) {
+      const response = await handler(requestWithDeclaredLength('{}', 65 * 1024), contextStub());
+      assert.equal(response.status, 413);
+      assert.equal(response.jsonBody.classification, 'caller_contract_violation');
+    }
+    const streamed = await redditThreadHandler(
+      {
+        method: 'POST',
+        headers: new Headers(),
+        body: bodyFromText('x'.repeat(65 * 1024)),
+      },
+      contextStub(),
+    );
+    assert.equal(streamed.status, 413);
+    assert.equal(calls, 0);
   });
 });
 
@@ -1699,21 +1816,42 @@ async function withEnv(values, fn) {
 }
 
 function requestThatThrowsJson(authorization = null) {
+  const text = '{invalid';
   return {
     method: 'POST',
-    headers: { get: (name) => (name.toLowerCase() === 'authorization' ? authorization : null) },
-    json: async () => {
-      throw new Error('invalid json');
-    },
+    headers: new Headers(authorization ? { authorization } : {}),
+    body: bodyFromText(text),
   };
 }
 
 function requestWithJson(body, authorization = null) {
+  const text = JSON.stringify(body);
   return {
     method: 'POST',
-    headers: { get: (name) => (name.toLowerCase() === 'authorization' ? authorization : null) },
-    json: async () => body,
+    headers: new Headers(authorization ? { authorization } : {}),
+    body: bodyFromText(text),
   };
+}
+
+function requestWithDeclaredLength(text, contentLength, authorization = null) {
+  return {
+    method: 'POST',
+    headers: new Headers({
+      ...(authorization ? { authorization } : {}),
+      'content-length': String(contentLength),
+    }),
+    body: bodyFromText(text),
+  };
+}
+
+function bodyFromText(text) {
+  const bytes = new TextEncoder().encode(text);
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
 }
 
 function contextStub() {
@@ -1800,6 +1938,62 @@ function rateHeaders(used) {
     'x-ratelimit-remaining': String(1000 - used),
     'x-ratelimit-reset': '60',
   };
+}
+
+function deepThreadFixture(depth) {
+  let replies = '';
+  for (let index = depth - 1; index >= 0; index -= 1) {
+    const id = `deep_${index}`;
+    replies = {
+      kind: 'Listing',
+      data: {
+        children: [
+          {
+            kind: 't1',
+            data: {
+              id,
+              name: `t1_${id}`,
+              parent_id: index === 0 ? 't3_deep' : `t1_deep_${index - 1}`,
+              author: 'fixture',
+              body: 'bounded',
+              score: 0,
+              created_utc: index,
+              replies,
+            },
+          },
+        ],
+      },
+    };
+  }
+  return [
+    {
+      kind: 'Listing',
+      data: {
+        children: [
+          {
+            kind: 't3',
+            data: {
+              id: 'deep',
+              name: 't3_deep',
+              subreddit: 'test',
+              title: 'Deep fixture',
+              author: 'fixture',
+              selftext: '',
+              url: 'https://example.test/deep',
+              permalink: '/r/test/comments/deep/',
+              score: 0,
+              num_comments: depth,
+              created_utc: 0,
+              over_18: false,
+              locked: false,
+              archived: false,
+            },
+          },
+        ],
+      },
+    },
+    replies,
+  ];
 }
 
 function threadFixture() {

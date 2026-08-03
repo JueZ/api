@@ -159,6 +159,9 @@ export class BringService {
     const id = await this.resolveListUuid(listUuid);
     await this.assertWritableList(id);
 
+    if (operation !== 'add' && !expectedListVersion) {
+      throw new BringInputError('expectedListVersion is required for destructive mutations.', 'expectedListVersion');
+    }
     if (expectedListVersion) {
       if (!/^[0-9a-f]{64}$/.test(expectedListVersion)) {
         throw new BringInputError('expectedListVersion must be a lowercase SHA-256 digest.', 'expectedListVersion');
@@ -191,7 +194,8 @@ export class BringService {
     const lists = await this.listLists();
     const selected = lists.lists.find((list) => list.uuid === listUuid);
     if (!selected) throw new BringPolicyError('Bring list is not readable by this environment.');
-    const shared = selected.shared || (await this.isSharedList(listUuid));
+    const currentMembershipIsShared = await this.isSharedList(listUuid);
+    const shared = selected.shared || currentMembershipIsShared;
     if (shared && !this.config.writableSharedListUuids.includes(listUuid)) {
       throw new BringPolicyError('Shared Bring list is not in the explicit shared-write allowlist.');
     }

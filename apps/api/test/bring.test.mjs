@@ -25,6 +25,7 @@ const sharedListUuid = '22222222-2222-4222-8222-222222222222';
 const unlistedListUuid = '33333333-3333-4333-8333-333333333333';
 const operationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const secondOperationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const expectedListVersion = '0'.repeat(64);
 const hmacKey = 'bring-test-hmac-key-that-is-at-least-32-bytes';
 const encryptionKey = Buffer.alloc(32, 7).toString('base64');
 const cfg = {
@@ -179,6 +180,17 @@ test('plain-text login errors and malformed successful JSON are sanitized', asyn
   await assert.rejects(
     malformed.login(),
     (error) => error instanceof BringUpstreamError && error.kind === 'version_skew',
+  );
+});
+
+test('Bring rejects oversized provider responses without buffering them', async () => {
+  const client = new BringClient(
+    cfg,
+    async () => new Response('small', { status: 200, headers: { 'content-length': String(1024 * 1024 + 1) } }),
+  );
+  await assert.rejects(
+    client.login(),
+    (error) => error instanceof BringUpstreamError && error.kind === 'upstream' && error.status === 502,
   );
 });
 
@@ -338,6 +350,24 @@ test('list reads are allowlisted and shared writes require a second exact-list a
   assert.equal(calls.length, 1);
 });
 
+test('shared-list summaries never bypass current Bring membership verification', async () => {
+  const service = new BringService({
+    config: {
+      ...cfg,
+      readableListUuids: [sharedListUuid],
+      writableListUuids: [sharedListUuid],
+      writableSharedListUuids: [sharedListUuid],
+    },
+    sessionStore: null,
+    fetchImpl: bringFixtureFetch({
+      calls: [],
+      lists: [{ listUuid: sharedListUuid, name: 'Former family list', isShared: true }],
+      membersByList: { [sharedListUuid]: [{ publicUuid: 'someone-else' }] },
+    }),
+  });
+  await assert.rejects(service.addItems(sharedListUuid, [{ name: 'Milk' }]), BringPolicyError);
+});
+
 test('list versions are stable and batch mutations preserve the observed Bring wire protocol', async () => {
   const calls = [];
   const service = new BringService({
@@ -365,8 +395,9 @@ test('list versions are stable and batch mutations preserve the observed Bring w
     { name: 'Äpfel & Milch', specification: '1 Liter' },
   ];
   await service.addItems(listUuid, items, first.version);
-  await service.completeItems(listUuid, items);
-  await service.removeItems(listUuid, items);
+  await assert.rejects(service.completeItems(listUuid, items), BringInputError);
+  await service.completeItems(listUuid, items, first.version);
+  await service.removeItems(listUuid, items, first.version);
   assert.deepEqual(
     calls.map((payload) => payload.changes[0].operation),
     ['TO_PURCHASE', 'TO_RECENTLY', 'REMOVE'],
@@ -711,10 +742,15 @@ test('destructive mutations require a fresh principal-bound confirmation and exe
   const command = {
     operationId: secondOperationId,
     listUuid,
+    expectedListVersion,
     operation: 'remove',
     items: [{ name: 'Private item name' }],
   };
 
+  await assert.rejects(
+    coordinator.prepare(principal, { ...command, expectedListVersion: undefined }, 'trace-prepare-missing-version'),
+    BringInputError,
+  );
   const prepared = await coordinator.prepare(principal, command, 'trace-prepare-1');
   const refreshed = await coordinator.prepare(principal, command, 'trace-prepare-2');
   assert.equal(prepared.state, 'prepared');
@@ -789,6 +825,7 @@ test('concurrent confirmation apply uses optimistic concurrency and calls the pr
     {
       operationId: secondOperationId,
       listUuid,
+      expectedListVersion,
       operation: 'complete',
       items: [{ name: 'Milk' }],
     },
@@ -824,6 +861,7 @@ test('partial provider success with an ambiguous timeout is recorded and never r
     {
       operationId: secondOperationId,
       listUuid,
+      expectedListVersion,
       operation: 'complete',
       items: [{ name: 'Milk' }],
     },
@@ -928,6 +966,20 @@ test('HTTP handler uses the breaking add/prepare/apply contract through one appl
         `https://api.test/api/bring/lists/${listUuid}/mutations/prepare`,
         {
           operationId: secondOperationId,
+          expectedListVersion,
+          operation: 'remove',
+          items: [{ name: 'Milk' }],
+        },
+        { listUuid },
+      ),
+      context({ functionName: 'bringPrepareMutation' }),
+    );
+    const missingVersion = await handler(
+      request(
+        'POST',
+        `https://api.test/api/bring/lists/${listUuid}/mutations/prepare`,
+        {
+          operationId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
           operation: 'remove',
           items: [{ name: 'Milk' }],
         },
@@ -953,6 +1005,7 @@ test('HTTP handler uses the breaking add/prepare/apply contract through one appl
     );
     assert.equal(add.status, 200);
     assert.equal(prepare.status, 200);
+    assert.equal(missingVersion.status, 400);
     assert.equal(apply.status, 200);
     assert.equal(missingList.status, 400);
   });
@@ -963,8 +1016,53 @@ test('HTTP handler uses the breaking add/prepare/apply contract through one appl
   );
   assert.equal(calls[0][1].operationId, operationId);
   assert.equal(calls[1][1].operation, 'remove');
+  assert.equal(calls[1][1].expectedListVersion, expectedListVersion);
   assert.equal(calls[2][1].listUuid, listUuid);
   assert.equal(calls[2][1].confirmationToken, 'safe-token');
+});
+
+test('Bring mutation handlers authenticate before reading request bodies and cap authenticated payloads', async () => {
+  const handler = createBringHandler({
+    getApplication: () => {
+      throw new Error('application must not be resolved before authentication');
+    },
+  });
+  let bodyRead = false;
+  const unauthenticatedRequest = {
+    method: 'POST',
+    url: `https://api.test/api/bring/lists/${listUuid}/items`,
+    params: { listUuid },
+    headers: new Headers(),
+    get body() {
+      bodyRead = true;
+      throw new Error('body must not be read');
+    },
+  };
+  await withEnv({ AUTH_ENABLED: 'true' }, async () => {
+    const response = await handler(unauthenticatedRequest, context({ functionName: 'bringItems' }));
+    assert.equal(response.status, 401);
+  });
+  assert.equal(bodyRead, false);
+
+  const localHandler = createBringHandler({
+    getApplication: () => ({
+      addItems: async () => {
+        throw new Error('oversized body must not reach the application');
+      },
+    }),
+  });
+  await withEnv({ AUTH_ENABLED: 'false', DEPLOYED_ENVIRONMENT_NAME: 'local' }, async () => {
+    const response = await localHandler(
+      request(
+        'POST',
+        `https://api.test/api/bring/lists/${listUuid}/items`,
+        { operationId, items: [{ name: 'x'.repeat(70 * 1024) }] },
+        { listUuid },
+      ),
+      context({ functionName: 'bringItems' }),
+    );
+    assert.equal(response.status, 413);
+  });
 });
 
 function mutationHarness({
@@ -1027,11 +1125,20 @@ function mutationResult(command, operation) {
 }
 
 function request(method, url, body, params = {}) {
+  const serializedBody = body === undefined ? '' : JSON.stringify(body);
   return {
     method,
     url,
     params,
-    headers: new Headers(),
+    headers: new Headers(serializedBody ? { 'content-length': String(Buffer.byteLength(serializedBody)) } : {}),
+    body: serializedBody
+      ? new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(serializedBody));
+            controller.close();
+          },
+        })
+      : null,
     json: async () => body,
   };
 }
