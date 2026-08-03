@@ -192,8 +192,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/check-openapi-route-drift.mjs
           ./node_modules/.bin/tsc -p apps/api/tsconfig.json
+          node scripts/check-openapi-route-drift.mjs
           node scripts/check-operation-contract-drift.mjs
 
   bicep-validation:
