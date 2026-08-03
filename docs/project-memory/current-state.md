@@ -1,12 +1,11 @@
 # Current state
 
-## 2026-08-03 Bundled Actions accepted; Angular 22 migration prepared
+## 2026-08-03 Bundled Actions and Dependabot maintenance prepared
 
-- PR #327 bundled Azure Login, Azure CLI, Trivy, GitHub Script, and Upload Artifact updates with their complete trusted-workflow SHA-256 manifest changes. Exact-head CI `30824105408`, Policy `30824105866`, CodeQL `30824105836`, and the independent high-risk review in controller `30824104755` passed before squash merge `96a2b35ada754967315aedacbc2806fb4df060de`.
-- Main Delivery `30824370791` accepted that exact merge through exact-main CI `30824390202`, Deploy Test `30824899815`, and Promote Production `30825190377`. Both public and authenticated production smokes, telemetry correlation, release-ledger publication, and exact-generation checks passed. The superseded split action PRs #252-#256 are closed.
-- Dependabot now groups Angular packages and GitHub Actions so coordinated updates arrive together. Node type-definition major updates are ignored while the repository executes Node.js 22, and the configured `dependencies`, `npm`, and `github-actions` labels exist.
-- The coordinated Angular migration updates framework packages to 22.0.8, CLI/build to 22.0.9, TypeScript to 6.0.3, and Node declarations to the current Node 22 line. The declared runtime floor is Node 22.22.3, matching Angular 22's engine requirement; obsolete `baseUrl` configuration is removed instead of suppressing the TypeScript 6 deprecation.
-- Angular's generated opt-outs for strict template checking and new extended diagnostics were intentionally not retained. The Angular 22 development build passes with the stricter defaults. Exact-head CI, Policy Check, merge, and the normal test/production delivery gates remain required before this migration is accepted.
+- Five stale split Dependabot workflow PRs were replaced by one coherent maintenance change. Azure Login, Azure CLI, Trivy, GitHub Script, and Upload Artifact remain pinned to full upstream SHAs; annotated-tag object pins are normalized to the exact tagged commits, and the two intended major action upgrades apply consistently to every repository usage.
+- The complete trusted-workflow SHA-256 manifest is updated for every changed workflow, preserving the fail-closed workflow-integrity policy instead of bypassing it.
+- Dependabot now groups Angular packages and GitHub Actions so coordinated updates arrive together. Node type-definition major updates are ignored while the repository executes Node.js 22, and the configured `dependencies`, `npm`, and `github-actions` labels now exist.
+- Exact-head CI, Policy Check, CodeQL, independent high-risk review, merge, and the normal test/production delivery gates remain required before this maintenance is accepted.
 
 ## 2026-08-02 Codex Security medium-finding repair prepared
 

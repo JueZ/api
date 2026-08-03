@@ -36,10 +36,10 @@
   },
   "packageManager": "npm@10.9.8",
   "dependencies": {
-    "@angular/common": "22.0.8",
-    "@angular/compiler": "22.0.8",
-    "@angular/core": "22.0.8",
-    "@angular/platform-browser": "22.0.8",
+    "@angular/common": "21.2.18",
+    "@angular/compiler": "21.2.18",
+    "@angular/core": "21.2.18",
+    "@angular/platform-browser": "21.2.18",
     "@azure/functions": "4.14.0",
     "@azure/identity": "^4.13.1",
     "@azure/msal-browser": "^5.10.1",
@@ -54,16 +54,16 @@
     "zone.js": "0.15.1"
   },
   "devDependencies": {
-    "@angular/build": "22.0.9",
+    "@angular/build": "21.2.19",
     "@angular/cli": "22.0.9",
-    "@angular/compiler-cli": "22.0.8",
+    "@angular/compiler-cli": "21.2.18",
     "@eslint/js": "10.0.1",
     "@redocly/cli": "2.40.0",
-    "@types/node": "22.20.1",
+    "@types/node": "24.10.1",
     "eslint": "10.8.0",
     "globals": "17.8.0",
     "prettier": "3.9.6",
-    "typescript": "6.0.3",
+    "typescript": "5.9.3",
     "typescript-eslint": "8.65.0"
   },
   "engines": {
