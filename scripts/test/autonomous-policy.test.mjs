@@ -922,11 +922,7 @@ test('high-risk autonomous review uses one cost-bounded generation and records s
   assert.equal(requests[0].model, 'gpt-5.6-sol');
   assert.deepEqual(requests[0].reasoning, { effort: 'medium' });
   assert.equal(requests[0].text.verbosity, 'low');
-<<<<<<< HEAD
   assert.equal(requests[0].max_output_tokens, 3_000);
-=======
-  assert.equal(requests[0].max_output_tokens, 3_000);
->>>>>>> 7b721ea (test(policy): align review tests with updated output cap)
   assert.match(requests[0].input[0].content, /reserve at least 512 output tokens/);
   assert.doesNotMatch(JSON.stringify(requests[0].input), /Review this change\./);
   const reviewPayload = JSON.parse(requests[0].input[1].content);
@@ -1470,11 +1466,7 @@ test('review budget uses the exact count and caps counting and generation to one
   assert.equal(budget.inputTokenCountRequestLimit, 1);
   assert.equal(budget.modelGenerationRequestLimit, 1);
   assert.equal(budget.totalOpenAIRequestLimit, 2);
-<<<<<<< HEAD
   assert.equal(budget.maximumOutputTokens, 3_000);
-=======
-  assert.equal(budget.maximumOutputTokens, 3_000);
->>>>>>> 7b721ea (test(policy): align review tests with updated output cap)
   assert.ok(budget.estimatedMaximumCostUsd < 0.31);
   const completeDiffBudget = calculateReviewBudget(
     { input: [{ role: 'user', content: 'complete diff' }], text: { verbosity: 'low' } },
