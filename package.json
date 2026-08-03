@@ -55,7 +55,7 @@
   },
   "devDependencies": {
     "@angular/build": "21.2.19",
-    "@angular/cli": "21.2.19",
+    "@angular/cli": "22.0.9",
     "@angular/compiler-cli": "21.2.18",
     "@eslint/js": "10.0.1",
     "@redocly/cli": "2.40.0",
@@ -67,7 +67,7 @@
     "typescript-eslint": "8.65.0"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.22.3"
   },
   "overrides": {
     "hono": "4.12.32",
