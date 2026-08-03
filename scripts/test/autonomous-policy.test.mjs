@@ -1475,7 +1475,7 @@ test('review budget uses the exact count and caps counting and generation to one
   );
 });
 
-test('review capsule keeps every executable and high-risk documentation change with context', () => {
+test('review capsule prioritizes executable/high-risk code changes and omits docs when mixed with executable review inputs', () => {
   const policyHelperDiff = `diff --git a/scripts/lib/policy-helper.mjs b/scripts/lib/policy-helper.mjs
 index 5555555..6666666 100644
 --- a/scripts/lib/policy-helper.mjs
@@ -1507,17 +1507,13 @@ index 7777777..8888888 100644
     },
     ['.github/workflows/example.yml', 'scripts/lib/policy-helper.mjs', 'docs/security/example.md', 'docs/reference.md'],
   );
-  assert.deepEqual(capsule.reviewedPaths, [
-    '.github/workflows/example.yml',
-    'scripts/lib/policy-helper.mjs',
-    'docs/security/example.md',
-  ]);
-  assert.deepEqual(capsule.omittedDocumentationPaths, ['docs/reference.md']);
+  assert.deepEqual(capsule.reviewedPaths, ['.github/workflows/example.yml', 'scripts/lib/policy-helper.mjs']);
+  assert.deepEqual(capsule.omittedDocumentationPaths, ['docs/security/example.md', 'docs/reference.md']);
   assert.match(capsule.diff, /\+permissions:/);
   assert.match(capsule.diff, /^ {3}contents: read$/m);
   assert.match(capsule.diff, /scripts\/lib\/policy-helper\.mjs/);
   assert.match(capsule.diff, /^ const trustedContext = true;$/m);
-  assert.match(capsule.diff, /New documentation/);
+  assert.doesNotMatch(capsule.diff, /New documentation/);
   assert.doesNotMatch(capsule.diff, /New reference/);
 });
 
