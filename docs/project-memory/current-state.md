@@ -7,6 +7,7 @@
 - Provider and request bodies now use streamed byte budgets; WLH also has a fixed timeout and bounded/deduplicated search filters. Bring authenticates before reading mutation bodies, rechecks current membership for every allowed write, and the Reddit JSON-LD traversal is iterative, single-visit, and node/depth bounded.
 - The bundled MCP gateway retains Reddit, Willhaben, and Bring reads but no longer exposes Bring mutations in the same model-visible session. Bring writes remain available through the authenticated REST/web flow, where confirmation tokens stay in private in-memory state and are removed from rendered results and generated curl commands.
 - Credential-bearing production and Bring-canary smokes are bound to Azure-discovered Function origins. Codex environment maintenance no longer prints existing remote URLs. Existing CodeQL, Trivy, Gitleaks, audit, test, policy, deployment, branch-protection, and production controls were not removed or weakened.
+- Validation also exposed the Angular 21.2.18 cache-key advisory. The framework packages and lockfile are pinned consistently to patched 21.2.19, and the dependency-audit rerun reports zero vulnerabilities.
 
 ## 2026-08-03 Bundled Actions and Dependabot maintenance prepared
 
