@@ -5,6 +5,7 @@
 - The operator explicitly authorized removing both the repository-configured review-input byte ceiling and the per-exact-head dollar ceiling from the custom GitHub Actions autonomous reviewer. The separate exact input-token count request and its fail-closed pre-generation path are removed with those gates.
 - This reviewer is separate from the removed Codex Security CLI workflow. It remains the repository's independent structured AI review gate for high-risk pull requests and does not introduce a human approval requirement.
 - Complete-diff selection and authoritative changed-path validation remain required. The permanent exact-head claim, at most one model generation, 3,500-token output cap, no SDK retries, `store=false`, free exact-head gates, critical/high rejection behavior, merge protection, and deployment gates are unchanged. Returned usage/cost metadata is audit-only and cannot reject a review.
+- PR CI then exposed newly published high-severity Angular advisories against the existing 21.2.18 runtime/compiler set. The scoped repair updates the coherent Angular runtime and compiler packages to 21.2.19, matching the existing CLI/build patch level; local npm audit reports zero vulnerabilities. This is a security patch within Angular 21, not the blocked Angular 22 major upgrade.
 - Local validation and the exact-head PR gates remain required before this policy change is accepted or deployed.
 
 ## 2026-08-03 Bundled Actions and Dependabot maintenance prepared
