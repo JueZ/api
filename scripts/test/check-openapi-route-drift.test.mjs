@@ -70,6 +70,99 @@ test('registry-protected routes fail when their handler authorization is removed
   assert.ok(issues.some((issue) => issue.includes('has no recognized operation authorization call')));
 });
 
+test('authorization evidence is scoped to each registered handler and its called helpers', () => {
+  const routes = extractRoutesFromSource(
+    `
+      import { app } from '@azure/functions';
+      import { authorizeRequestForOperation } from '../shared/security/auth.js';
+      import { OPERATION_IDS } from '../application/operations/registry.js';
+
+      async function authorizeProtected(request, context) {
+        return authorizeRequestForOperation(request, context, OPERATION_IDS.hello);
+      }
+      async function protectedHandler(request, context) {
+        return authorizeProtected(request, context);
+      }
+      async function unprotectedHandler() {
+        return { status: 200 };
+      }
+
+      app.http('protectedRoute', {
+        methods: ['GET'],
+        route: 'api/protected',
+        handler: protectedHandler,
+      });
+      app.http('unprotectedRoute', {
+        methods: ['GET'],
+        route: 'api/unprotected',
+        handler: unprotectedHandler,
+      });
+    `,
+    'mixed.ts',
+  );
+
+  assert.deepEqual(
+    routes.map(({ path, protected: isProtected, referencedOperationIds }) => ({
+      path,
+      protected: isProtected,
+      referencedOperationIds,
+    })),
+    [
+      { path: '/api/protected', protected: true, referencedOperationIds: ['local.hello'] },
+      { path: '/api/unprotected', protected: false, referencedOperationIds: [] },
+    ],
+  );
+
+  const issues = findImplementationAuthorizationIssues(routes, [
+    {
+      id: 'local.hello',
+      requiredPermission: 'hello.read',
+      rest: { method: 'GET', path: '/api/unprotected' },
+    },
+  ]);
+  assert.deepEqual(issues, [
+    'mixed.ts: protected registry route GET /api/unprotected has no recognized operation authorization call.',
+  ]);
+});
+
+test('unused authorization inside a handler factory cannot protect its returned handler', () => {
+  const routes = extractRoutesFromSource(
+    `
+      import { app } from '@azure/functions';
+      import { authorizeRequestForOperation } from '../shared/security/auth.js';
+      import { OPERATION_IDS } from '../application/operations/registry.js';
+
+      function createHandler() {
+        async function protectedButUnused(request, context) {
+          return authorizeRequestForOperation(request, context, OPERATION_IDS.hello);
+        }
+        return async function actualHandler() {
+          return { status: 200 };
+        };
+      }
+
+      const handler = createHandler();
+      app.http('factoryRoute', {
+        methods: ['GET'],
+        route: 'api/factory',
+        handler,
+      });
+    `,
+    'factory.ts',
+  );
+
+  assert.deepEqual(routes, [
+    {
+      functionName: 'factoryRoute',
+      filePath: 'factory.ts',
+      method: 'get',
+      path: '/api/factory',
+      protected: false,
+      referencedOperationIds: [],
+    },
+  ]);
+});
+
 test('GPT Actions route allowlist rejects registry-excluded write routes', () => {
   const issues = findUnexpectedGptRoutes([{ method: 'get', path: '/api/bring/lists', filePath: 'bring.ts' }], {
     paths: {

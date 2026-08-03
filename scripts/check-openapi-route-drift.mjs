@@ -58,10 +58,92 @@ function normalizeRoute(route) {
   return `/${trimmed}`.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
 }
 
-function authorizationFacts(sourceFile) {
+function localBindings(sourceFile) {
+  const bindings = new Map();
+  for (const statement of sourceFile.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name) {
+      bindings.set(statement.name.text, statement);
+      continue;
+    }
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name) && declaration.initializer) {
+          bindings.set(declaration.name.text, declaration.initializer);
+        }
+      }
+    }
+  }
+  return bindings;
+}
+
+function handlerInitializer(optionsArg, filePath, functionName) {
+  const handlerProperty = optionsArg.properties.find(
+    (property) =>
+      (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) &&
+      propertyNameText(property.name) === 'handler',
+  );
+  if (!handlerProperty) {
+    throw new Error(`${filePath}: app.http('${functionName}') is missing a static handler property.`);
+  }
+  return ts.isPropertyAssignment(handlerProperty) ? handlerProperty.initializer : handlerProperty.name;
+}
+
+function isFunctionImplementation(node) {
+  return ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node);
+}
+
+function factoryReturnExpressions(factory) {
+  if (ts.isArrowFunction(factory) && !ts.isBlock(factory.body)) return [factory.body];
+  if (!factory.body) return [];
+  const expressions = [];
+  function visit(node) {
+    if (node !== factory.body && isFunctionImplementation(node)) return;
+    if (ts.isReturnStatement(node) && node.expression) {
+      expressions.push(node.expression);
+      return;
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(factory.body);
+  return expressions;
+}
+
+function resolveHandlerImplementations(handler, bindings) {
+  const implementations = new Set();
+  const visited = new Set();
+
+  function resolve(node) {
+    if (!node || visited.has(node)) return;
+    visited.add(node);
+    if (ts.isIdentifier(node)) {
+      resolve(bindings.get(node.text));
+      return;
+    }
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      const factory = bindings.get(node.expression.text);
+      if (!factory || !isFunctionImplementation(factory)) return;
+      for (const returned of factoryReturnExpressions(factory)) resolve(returned);
+      return;
+    }
+    if (isFunctionImplementation(node)) implementations.add(node);
+  }
+
+  resolve(handler);
+  return [...implementations];
+}
+
+function authorizationFacts(handler, bindings) {
   let hasAuthorizationCall = false;
   const referencedOperationIds = new Set();
+  const visitedFunctions = new Set();
+
+  function visitCalledBinding(name) {
+    const binding = bindings.get(name);
+    if (binding && isFunctionImplementation(binding)) visitFunction(binding);
+  }
+
   function visit(node) {
+    if (isFunctionImplementation(node)) return;
     if (
       ts.isCallExpression(node) &&
       ((ts.isIdentifier(node.expression) && authorizationFunctionNames.has(node.expression.text)) ||
@@ -77,9 +159,21 @@ function authorizationFacts(sourceFile) {
       const operationId = OPERATION_IDS[node.name.text];
       if (operationId) referencedOperationIds.add(operationId);
     }
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      visitCalledBinding(node.expression.text);
+    }
     ts.forEachChild(node, visit);
   }
-  visit(sourceFile);
+
+  function visitFunction(functionNode) {
+    if (visitedFunctions.has(functionNode) || !functionNode.body) return;
+    visitedFunctions.add(functionNode);
+    visit(functionNode.body);
+  }
+
+  for (const implementation of resolveHandlerImplementations(handler, bindings)) {
+    visitFunction(implementation);
+  }
   return { hasAuthorizationCall, referencedOperationIds: [...referencedOperationIds].sort() };
 }
 
@@ -94,7 +188,7 @@ function isIntentionalNonOpenApiRoute(route) {
 
 export function extractRoutesFromSource(sourceText, filePath = '<inline>') {
   const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const facts = authorizationFacts(sourceFile);
+  const bindings = localBindings(sourceFile);
   const routes = [];
 
   function visit(node) {
@@ -113,6 +207,7 @@ export function extractRoutesFromSource(sourceText, filePath = '<inline>') {
       if (!routeValue) {
         throw new Error(`${filePath}: app.http('${nameArg.text}') route must be a string literal.`);
       }
+      const facts = authorizationFacts(handlerInitializer(optionsArg, filePath, nameArg.text), bindings);
 
       const methods = stringArrayInitializer(methodsProperty.initializer)
         .map((method) => method.toLowerCase())
