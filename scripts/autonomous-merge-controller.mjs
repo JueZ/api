@@ -541,7 +541,7 @@ export function buildReviewDiffCapsule(sourceDiff, risk, changedPaths) {
   if (unlistedHighRiskPaths.length > 0) {
     throw new Error(`High-risk review classifier returned unlisted paths: ${unlistedHighRiskPaths.join(', ')}.`);
   }
-  const executablePaths = uniqueChangedPaths.filter((path) => !path.startsWith('docs/'));
+  const executablePaths = uniqueChangedPaths.filter((path) => !path.startsWith('docs/') && !isTestPath(path));
   const reviewedPaths = executablePaths.length > 0 ? executablePaths : uniqueChangedPaths;
   const reviewedPathSet = new Set(reviewedPaths);
   const sections = String(sourceDiff)
@@ -589,6 +589,10 @@ export function buildReviewDiffCapsule(sourceDiff, risk, changedPaths) {
     reviewedPaths,
     omittedDocumentationPaths: uniqueChangedPaths.filter((path) => path.startsWith('docs/') && !foundPaths.has(path)),
   };
+}
+
+function isTestPath(path) {
+  return /\.(?:test|spec)\.(?:mjs|ts|js|tsx|jsx)$/.test(path) || /(^|\/)__tests__\/|(^|\/)test\//.test(path);
 }
 
 export async function runRequiredCheckPreflight(options, policy, github) {
