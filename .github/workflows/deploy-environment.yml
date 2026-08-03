@@ -1601,7 +1601,7 @@ jobs:
           echo "RELEASE_LEDGER_PATH=$RELEASE_LEDGER_PATH" >> "$GITHUB_ENV"
       - name: Upload release ledger
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: release-ledger-${{ inputs.environmentName }}-${{ inputs.sourceRef || github.sha }}-${{ inputs.deliveryCorrelation }}
           path: ${{ runner.temp }}/smoke/release-ledger-${{ inputs.environmentName }}.json
@@ -1609,7 +1609,7 @@ jobs:
           retention-days: 90
       - name: Preserve exact accepted production release bundle
         if: ${{ inputs.environmentName == 'prod' && !inputs.allowRollback && success() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: production-release-${{ inputs.sourceRef || github.sha }}-${{ inputs.deliveryCorrelation }}
           path: ${{ runner.temp }}/release
@@ -1666,7 +1666,7 @@ jobs:
             }' > .github/deploy-test-provenance.json
       - name: Upload test deployment provenance
         if: ${{ inputs.environmentName == 'test' && success() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: deploy-test-provenance-${{ inputs.sourceRef || github.sha }}-${{ inputs.deliveryCorrelation }}
           path: .github/deploy-test-provenance.json
@@ -2240,7 +2240,7 @@ jobs:
               verifiedAt: $verifiedAt
             }' > "$RUNNER_TEMP/production-private-storage-evidence.json"
       - name: Upload production private-storage evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: production-private-storage-${{ inputs.sourceRef }}-${{ inputs.deliveryCorrelation }}
           path: ${{ runner.temp }}/production-private-storage-evidence.json
