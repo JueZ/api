@@ -95,6 +95,58 @@ test('authorization evidence is canonical, handler-scoped, helper-aware, and sha
   ]);
 });
 
+test('uses the operation id actually passed to authorization helpers', () => {
+  const routes = extractRoutesFromSource(
+    `
+      import { app } from '@azure/functions';
+      import { authorizeRequestForOperation } from '../shared/security/auth.js';
+      import { OPERATION_IDS as IDS } from '../application/operations/registry.js';
+
+      async function dualRouteHandler(request, context) {
+        await authorizeRequestForOperation(request, context, IDS.hello);
+        if (IDS.health) {
+          return { status: 200 };
+        }
+      }
+
+      async function aliasedRouteHandler(request, context) {
+        const requestedOperation = IDS.health;
+        return authorizeRequestForOperation(request, context, requestedOperation);
+      }
+
+      app.http('dualRoute', {
+        methods: ['GET'],
+        route: 'api/dual-route',
+        handler: dualRouteHandler,
+      });
+      app.http('aliasedRoute', {
+        methods: ['GET'],
+        route: 'api/aliased-route',
+        handler: aliasedRouteHandler,
+      });
+    `,
+    'bindings.ts',
+  );
+
+  const dualRoute = routes.find((route) => route.path === '/api/dual-route');
+  const aliasedRoute = routes.find((route) => route.path === '/api/aliased-route');
+  assert.ok(dualRoute);
+  assert.ok(aliasedRoute);
+  assert.deepEqual(dualRoute.authorizedOperationIds, ['local.hello']);
+  assert.deepEqual([...dualRoute.referencedOperationIds].sort(), ['local.health', 'local.hello']);
+  assert.deepEqual(aliasedRoute.authorizedOperationIds, ['local.health']);
+
+  const issues = findImplementationAuthorizationIssues(routes, [
+    { id: 'local.hello', requiredPermission: 'hello.read', rest: { method: 'GET', path: '/api/dual-route' } },
+    { id: 'local.health', requiredPermission: 'health.read', rest: { method: 'GET', path: '/api/dual-route' } },
+    { id: 'local.health', requiredPermission: 'health.read', rest: { method: 'GET', path: '/api/aliased-route' } },
+  ]);
+
+  assert.deepEqual(issues, [
+    "bindings.ts: protected registry route GET /api/dual-route does not reference canonical operation 'local.health'.",
+  ]);
+});
+
 test('GPT Actions exposure requires explicit routes and scopes', () => {
   assert.deepEqual(
     findGptExposureDecisionIssues([

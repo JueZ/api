@@ -186,17 +186,132 @@ function locallyDeclaredNames(functionNode) {
   return names;
 }
 
+function localValueBindings(functionNode) {
+  const values = new Map();
+  for (const parameter of functionNode.parameters) {
+    if (ts.isIdentifier(parameter.name)) {
+      values.set(parameter.name.text, undefined);
+    }
+  }
+
+  function visit(node) {
+    if (isFunctionImplementation(node)) return;
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      values.set(node.name.text, node.initializer);
+    }
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      values.set(node.name.text, node);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  if (functionNode.body) visit(functionNode.body);
+  return values;
+}
+
+function collectOperationIdsFromExpression(
+  node,
+  operationRegistryImports,
+  shadowedNames,
+  localValues,
+  visited = new Set(),
+) {
+  if (!node) return [];
+  const operationIds = [];
+
+  if (ts.isParenthesizedExpression(node)) {
+    return collectOperationIdsFromExpression(
+      node.expression,
+      operationRegistryImports,
+      shadowedNames,
+      localValues,
+      visited,
+    );
+  }
+
+  if (ts.isConditionalExpression(node)) {
+    operationIds.push(
+      ...collectOperationIdsFromExpression(
+        node.whenTrue,
+        operationRegistryImports,
+        shadowedNames,
+        localValues,
+        visited,
+      ),
+    );
+    operationIds.push(
+      ...collectOperationIdsFromExpression(
+        node.whenFalse,
+        operationRegistryImports,
+        shadowedNames,
+        localValues,
+        visited,
+      ),
+    );
+    return [...new Set(operationIds)].sort();
+  }
+
+  if (ts.isPropertyAccessExpression(node)) {
+    const object = node.expression;
+    if (ts.isIdentifier(object) && !shadowedNames.has(object.text)) {
+      const objectName = object.text;
+      if (operationRegistryImports.has(objectName)) {
+        const operationId = OPERATION_IDS[node.name.text];
+        if (operationId) operationIds.push(operationId);
+      } else {
+        const value = localValues.get(objectName);
+        if (value) {
+          if (
+            ts.isObjectLiteralExpression(value) &&
+            ts.isIdentifier(node.name) &&
+            operationRegistryImports.has(node.name.text)
+          ) {
+            return [];
+          }
+          return collectOperationIdsFromExpression(
+            value,
+            operationRegistryImports,
+            shadowedNames,
+            localValues,
+            visited,
+          );
+        }
+      }
+    }
+    return operationIds;
+  }
+
+  if (ts.isIdentifier(node)) {
+    const value = localValues.get(node.text);
+    if (!value || visited.has(node.text)) return [];
+    visited.add(node.text);
+    const resolved = collectOperationIdsFromExpression(
+      value,
+      operationRegistryImports,
+      shadowedNames,
+      localValues,
+      visited,
+    );
+    visited.delete(node.text);
+    return resolved;
+  }
+
+  return operationIds;
+}
+
 function authorizationFacts(handler, bindings, authorizationImports, operationRegistryImports) {
   let hasAuthorizationCall = false;
   const referencedOperationIds = new Set();
+  const authorizedOperationIds = new Set();
   const visitedFunctions = new Set();
 
-  function visitCalledBinding(name) {
+  function visitCalledBinding(name, shadowedNames) {
+    if (shadowedNames.has(name)) return;
     const binding = bindings.get(name);
     if (binding && isFunctionImplementation(binding)) visitFunction(binding);
   }
 
-  function visit(node, shadowedNames) {
+  function visit(node, shadowedNames, localValues) {
     if (isFunctionImplementation(node)) return;
     if (
       ts.isCallExpression(node) &&
@@ -205,6 +320,13 @@ function authorizationFacts(handler, bindings, authorizationImports, operationRe
       !shadowedNames.has(node.expression.text)
     ) {
       hasAuthorizationCall = true;
+      const operationIds = collectOperationIdsFromExpression(
+        node.arguments[2],
+        operationRegistryImports,
+        shadowedNames,
+        localValues,
+      );
+      for (const operationId of operationIds) authorizedOperationIds.add(operationId);
     }
     if (
       ts.isPropertyAccessExpression(node) &&
@@ -216,21 +338,27 @@ function authorizationFacts(handler, bindings, authorizationImports, operationRe
       if (operationId) referencedOperationIds.add(operationId);
     }
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
-      visitCalledBinding(node.expression.text);
+      visitCalledBinding(node.expression.text, shadowedNames);
     }
-    ts.forEachChild(node, (child) => visit(child, shadowedNames));
+    ts.forEachChild(node, (child) => visit(child, shadowedNames, localValues));
   }
 
   function visitFunction(functionNode) {
     if (visitedFunctions.has(functionNode) || !functionNode.body) return;
     visitedFunctions.add(functionNode);
-    visit(functionNode.body, locallyDeclaredNames(functionNode));
+    const shadowedNames = locallyDeclaredNames(functionNode);
+    const localValues = localValueBindings(functionNode);
+    visit(functionNode.body, shadowedNames, localValues);
   }
 
   for (const implementation of resolveHandlerImplementations(handler, bindings)) {
     visitFunction(implementation);
   }
-  return { hasAuthorizationCall, referencedOperationIds: [...referencedOperationIds].sort() };
+  return {
+    hasAuthorizationCall,
+    referencedOperationIds: [...referencedOperationIds].sort(),
+    authorizedOperationIds: [...authorizedOperationIds].sort(),
+  };
 }
 
 function isIntentionalNonOpenApiRoute(route) {
@@ -290,6 +418,7 @@ export function extractRoutesFromSource(sourceText, filePath = '<inline>') {
           path: normalizeRoute(routeValue),
           protected: facts.hasAuthorizationCall,
           referencedOperationIds: facts.referencedOperationIds,
+          authorizedOperationIds: facts.authorizedOperationIds,
         });
       }
     }
@@ -464,9 +593,11 @@ export function findImplementationAuthorizationIssues(implementationRoutes, oper
       );
       continue;
     }
-    const referenced = new Set(route.referencedOperationIds ?? []);
+    const authorizedOperationIds = new Set(
+      route.authorizedOperationIds === undefined ? (route.referencedOperationIds ?? []) : route.authorizedOperationIds,
+    );
     for (const definition of protectedDefinitions) {
-      if (!referenced.has(definition.id)) {
+      if (!authorizedOperationIds.has(definition.id)) {
         issues.push(
           `${route.filePath}: protected registry route ${describeRoute(route)} does not reference canonical operation '${definition.id}'.`,
         );
