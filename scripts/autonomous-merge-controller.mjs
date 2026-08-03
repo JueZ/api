@@ -12,7 +12,6 @@ import {
   loadAutonomousPolicy,
 } from './lib/autonomous-policy.mjs';
 
-const MAX_SOURCE_DIFF_BYTES = 1_500_000;
 const REVIEW_CLAIM_VERSION = 'v4';
 const CONTROLLER_WORKFLOW = 'codex-automerge.yml';
 const CONTROLLER_CHECK_WRITER_JOBS = new Set(['resolve', 'autonomous-review', 'publish-review-check']);
@@ -286,19 +285,9 @@ export async function runReview(options, policy, github, openAIClient) {
   const sourceDiff = await github.getPullRequestDiff(options.prNumber);
   assertExpectedHead(await github.getPullRequest(options.prNumber), options.headSha);
   const sourceDiffBytes = Buffer.byteLength(sourceDiff);
-  if (sourceDiffBytes > MAX_SOURCE_DIFF_BYTES) {
-    throw new Error(
-      `High-risk pull request source diff is ${sourceDiffBytes} bytes; maximum source size is ${MAX_SOURCE_DIFF_BYTES}.`,
-    );
-  }
   const changedPaths = files.map((file) => file.filename);
   const reviewDiff = buildReviewDiffCapsule(sourceDiff, risk, changedPaths);
   const reviewDiffBytes = Buffer.byteLength(reviewDiff.diff);
-  if (reviewDiffBytes > policy.autonomousReview.maxDiffBytes) {
-    throw new Error(
-      `High-risk executable review capsule is ${reviewDiffBytes} bytes; maximum autonomous review size is ${policy.autonomousReview.maxDiffBytes}.`,
-    );
-  }
 
   const client = openAIClient ?? new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 120_000 });
   const request = {
@@ -362,76 +351,6 @@ export async function runReview(options, policy, github, openAIClient) {
   if (reviewClaim.status !== 'new') {
     throw new Error(`Autonomous review claim is unavailable (${reviewClaim.reason ?? reviewClaim.status}).`);
   }
-  await assertFreeExactHeadChecks(options, policy, github, 'paid-call boundary', {
-    allowBlockedBeforeOwnReview: true,
-  });
-  await assertReviewClaimOwnership(options, github, reviewClaim, 'paid-call boundary');
-
-  let inputTokenCount;
-  let tokenCountFailure;
-  try {
-    const tokenCount = await client.responses.inputTokens.count({
-      model: request.model,
-      reasoning: request.reasoning,
-      text: request.text,
-      input: request.input,
-    });
-    inputTokenCount = safeNonNegativeInteger(tokenCount?.input_tokens);
-    if (inputTokenCount === undefined || inputTokenCount < 1) throw new Error('invalid_input_token_count');
-  } catch (error) {
-    tokenCountFailure = summarizeModelFailure(error, 'input_token_count_unavailable', 1);
-  }
-  if (tokenCountFailure || inputTokenCount === undefined) {
-    const review = {
-      decision: 'reject',
-      reviewedHeadSha: options.headSha,
-      summary: 'Independent review could not obtain an exact input-token count, so no model generation was attempted.',
-      findings: [
-        {
-          severity: 'high',
-          title: 'Autonomous review token count unavailable',
-          evidence: `The OpenAI input-token count request ended with ${tokenCountFailure?.kind ?? 'an invalid count'}.`,
-          remediation: 'Repair the token-count path on a new commit; do not merge without a cost-bounded review.',
-        },
-      ],
-      risk,
-      modelInvoked: false,
-      tokenCountInvoked: true,
-      model: policy.autonomousReview.model,
-      modelFailure: tokenCountFailure,
-      reviewClaim,
-    };
-    await publishReview(review, options);
-    throw new Error('Autonomous review unavailable: input_token_count_unavailable.');
-  }
-
-  const reviewBudget = calculateReviewBudget(request, policy, inputTokenCount);
-  if (reviewBudget.estimatedMaximumCostUsd > policy.autonomousReview.maxEstimatedCostUsd) {
-    const review = {
-      decision: 'reject',
-      reviewedHeadSha: options.headSha,
-      summary:
-        'Independent review was blocked before model generation because its exact-input cost ceiling was exceeded.',
-      findings: [
-        {
-          severity: 'high',
-          title: 'Autonomous review cost ceiling exceeded',
-          evidence: `The exact-input maximum estimate was $${reviewBudget.estimatedMaximumCostUsd.toFixed(6)}, above the configured $${policy.autonomousReview.maxEstimatedCostUsd.toFixed(2)} ceiling.`,
-          remediation:
-            'Split unrelated work or reduce the complete review payload without omitting executable changes, then retry on a new head.',
-        },
-      ],
-      risk,
-      modelInvoked: false,
-      tokenCountInvoked: true,
-      model: policy.autonomousReview.model,
-      reviewBudget: { ...reviewBudget, status: 'blocked_before_generation' },
-      reviewClaim,
-    };
-    await publishReview(review, options);
-    throw new Error('Autonomous review blocked before model generation: cost_ceiling_exceeded.');
-  }
-
   await assertFreeExactHeadChecks(options, policy, github, 'generation boundary', {
     allowBlockedBeforeOwnReview: true,
   });
@@ -489,11 +408,9 @@ export async function runReview(options, policy, github, openAIClient) {
       ],
       risk,
       modelInvoked: true,
-      tokenCountInvoked: true,
       model: policy.autonomousReview.model,
       responseId: modelFailure?.responseId,
       modelFailure,
-      reviewBudget: { ...reviewBudget, status: 'consumed' },
       modelUsage: summarizeModelUsage(response, policy),
       reviewClaim,
     };
@@ -505,10 +422,8 @@ export async function runReview(options, policy, github, openAIClient) {
     ...parsed,
     risk,
     modelInvoked: true,
-    tokenCountInvoked: true,
     model: policy.autonomousReview.model,
     responseId: response.id,
-    reviewBudget: { ...reviewBudget, status: 'consumed' },
     modelUsage: summarizeModelUsage(response, policy),
     reviewClaim,
   };
@@ -1207,33 +1122,6 @@ async function publishConsumedReviewClaim(options, policy, claim, github) {
   return claim;
 }
 
-export function calculateReviewBudget(request, policy, exactInputTokens) {
-  const pricing = AUTONOMOUS_REVIEW_MODEL_PRICING[policy.autonomousReview.model];
-  if (!pricing) throw new Error(`No approved pricing is configured for ${policy.autonomousReview.model}.`);
-  if (!Number.isSafeInteger(exactInputTokens) || exactInputTokens < 1) {
-    throw new Error('An exact positive input-token count is required for autonomous review budgeting.');
-  }
-  const serializedInputBytes = Buffer.byteLength(JSON.stringify({ input: request.input, text: request.text }));
-  const maximumOutputTokens = policy.autonomousReview.maxOutputTokens;
-  const estimatedMaximumCostUsd = ceilUsd(
-    (exactInputTokens * pricing.inputUsdPerMillionTokens + maximumOutputTokens * pricing.outputUsdPerMillionTokens) /
-      1_000_000,
-  );
-  return {
-    model: policy.autonomousReview.model,
-    serializedInputBytes,
-    exactInputTokens,
-    maximumOutputTokens,
-    inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
-    outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
-    estimatedMaximumCostUsd,
-    configuredCostCeilingUsd: policy.autonomousReview.maxEstimatedCostUsd,
-    inputTokenCountRequestLimit: 1,
-    modelGenerationRequestLimit: 1,
-    totalOpenAIRequestLimit: 2,
-  };
-}
-
 function summarizeModelUsage(response, policy) {
   const usage = response?.usage;
   if (!usage || typeof usage !== 'object') return undefined;
@@ -1266,10 +1154,6 @@ function safeNonNegativeInteger(value) {
 
 function roundUsd(value) {
   return Number(value.toFixed(6));
-}
-
-function ceilUsd(value) {
-  return Math.ceil(value * 1_000_000) / 1_000_000;
 }
 
 function summarizeModelFailure(value, kind, attempts) {

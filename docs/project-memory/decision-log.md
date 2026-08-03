@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-08-03 — Remove autonomous-review payload and per-head spend ceilings
+
+- Decision: Under the operator's explicit authorization, remove the custom GitHub Actions review capsule byte ceiling, source-diff byte ceiling, exact input-token preflight request, and `$0.31` per-exact-head generation ceiling. Retain complete contextual review input, authoritative changed-path validation, one permanent exact-head claim, at most one generation, a 3,500-token output cap, no SDK retries, `store=false`, and critical/high rejection.
+- Rationale: Coordinated dependency upgrades can produce large complete lockfile diffs that passed deterministic gates but were rejected before the independent review. The operator prefers complete autonomous review without repository-level byte or spend rejection; actual returned usage remains sanitized audit metadata only.
+- Scope: This changes the custom GitHub Actions autonomous reviewer, not the removed Codex Security CLI scanner. It adds no human review gate and does not weaken CI, Policy Check, CodeQL, exact-head merge protection, authentication, deployment, smoke, telemetry, or runtime-truth gates.
+- Status: Prepared locally; exact-head CI, Policy Check, CodeQL, independent review, merge, and post-merge delivery evidence remain pending.
+
 ## 2026-08-02 — Remove standing Azure setup secrets and provider content from telemetry
 
 - Decision: Authenticate the local Codex Azure CLI setup with the Azure compute host's system-assigned managed identity by default, with an optional non-secret client ID for a user-assigned identity. Discard legacy Azure service-principal variables before starting any child process and prohibit service-principal password arguments in regression coverage.
@@ -86,7 +93,7 @@
 - Decision: Remove the standalone review-claim command and create the permanent marker inside `runReview` after free gates and cost checks pass. Require one serialized controller run per PR and exactly one workflow invocation of the review command.
 - Decision: Bind the marker to repository, PR, exact head, controller workflow filename, and workflow run ID. Re-read it after creation and again immediately before the OpenAI call, requiring the created check-run ID, `github-actions` App, canonical external identity/details URL, and completed-neutral state.
 - Decision: Require the live API path to execute inside the exact `Codex Auto-Merge` GitHub Actions run. Exact-name allowlist all workflow secrets and reject dynamic/bracket expressions, inherited secret sets, alternate token-minting actions/shell paths, non-built-in GitHub-auth values, and non-controller raw check-run access.
-- Superseded detail: The initial repair selected exact zero-context changes only for classifier-matched executable/governance paths. Review `30692285462` proved that selection incomplete; the newer decision above requires every non-documentation changed path with context and exact token budgeting.
+- Superseded detail: The initial repair selected exact zero-context changes only for classifier-matched executable/governance paths. Review `30692285462` proved that selection incomplete; later decisions retain every non-documentation changed path with context while the 2026-08-03 decision removes exact-token budgeting as a generation gate.
 - Rationale: PR #289 review run `30689779148` correctly identified that separate claim/review operations and a name-focused credential heuristic did not prove durable ownership at the paid boundary.
 - Status: Accepted through PR #289 review/merge `30694244308` and Deploy Test `30695340416`. Production is not authorized.
 

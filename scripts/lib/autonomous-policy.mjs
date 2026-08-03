@@ -86,26 +86,11 @@ export function validateAutonomousPolicy(policy) {
     errors.push('autonomousReview.reasoningEffort must be medium');
   }
   if (
-    !Number.isInteger(policy.autonomousReview?.maxDiffBytes) ||
-    policy.autonomousReview.maxDiffBytes < 1 ||
-    policy.autonomousReview.maxDiffBytes > 200_000
-  ) {
-    errors.push('autonomousReview.maxDiffBytes must be an integer from 1 to 200000');
-  }
-  if (
     !Number.isInteger(policy.autonomousReview?.maxOutputTokens) ||
     policy.autonomousReview.maxOutputTokens < 200 ||
     policy.autonomousReview.maxOutputTokens > 3_500
   ) {
     errors.push('autonomousReview.maxOutputTokens must be an integer from 200 to 3500');
-  }
-  if (
-    typeof policy.autonomousReview?.maxEstimatedCostUsd !== 'number' ||
-    !Number.isFinite(policy.autonomousReview.maxEstimatedCostUsd) ||
-    policy.autonomousReview.maxEstimatedCostUsd <= 0 ||
-    policy.autonomousReview.maxEstimatedCostUsd > 0.31
-  ) {
-    errors.push('autonomousReview.maxEstimatedCostUsd must be greater than 0 and no more than 0.31');
   }
   if (policy.autonomousReview?.requiredForHighRisk !== true) {
     errors.push('autonomousReview.requiredForHighRisk must be true');

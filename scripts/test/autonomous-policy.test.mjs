@@ -13,7 +13,6 @@ import {
 } from '../lib/autonomous-policy.mjs';
 import {
   buildReviewDiffCapsule,
-  calculateReviewBudget,
   claimAutonomousReview,
   evaluateCompleteCheckRollup,
   evaluatePullRequestState,
@@ -146,30 +145,15 @@ function withFreeChecks(github) {
   };
 }
 
-function withInputTokenCounter(client, { inputTokens = 1_000, requests = [] } = {}) {
-  return {
-    ...client,
-    responses: {
-      ...client.responses,
-      inputTokens: {
-        async count(request) {
-          requests.push(request);
-          return { object: 'response.input_tokens', input_tokens: inputTokens };
-        },
-      },
-    },
-  };
-}
-
 test('canonical autonomous policy is internally valid', () => {
   assert.deepEqual(validateAutonomousPolicy(policy), []);
   assert.equal(policy.merge.allowAdminBypass, false);
   assert.equal(policy.autonomousReview.humanApprovalRequired, false);
   assert.equal(policy.autonomousReview.model, 'gpt-5.6-sol');
   assert.equal(policy.autonomousReview.reasoningEffort, 'medium');
-  assert.equal(policy.autonomousReview.maxDiffBytes, 200_000);
+  assert.equal(Object.hasOwn(policy.autonomousReview, 'maxDiffBytes'), false);
   assert.equal(policy.autonomousReview.maxOutputTokens, 3_500);
-  assert.equal(policy.autonomousReview.maxEstimatedCostUsd, 0.31);
+  assert.equal(Object.hasOwn(policy.autonomousReview, 'maxEstimatedCostUsd'), false);
   assert.match(codexAutomergeWorkflow, /Wait for free deterministic exact-head checks/);
   assert.match(codexAutomergeWorkflow, /AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'/);
   assert.match(codexAutomergeWorkflow, /ready_for_review, labeled, unlabeled/);
@@ -189,14 +173,9 @@ test('canonical autonomous policy is internally valid', () => {
     autonomousControllerSource.indexOf('const reviewClaim = await claimAutonomousReview') <
       autonomousControllerSource.indexOf('response = await client.responses.create'),
   );
-  assert.ok(
-    autonomousControllerSource.indexOf(
-      "assertReviewClaimOwnership(options, github, reviewClaim, 'paid-call boundary')",
-    ) < autonomousControllerSource.indexOf('response = await client.responses.create'),
-  );
-  assert.ok(
-    autonomousControllerSource.indexOf('await client.responses.inputTokens.count') <
-      autonomousControllerSource.indexOf('response = await client.responses.create'),
+  assert.doesNotMatch(
+    autonomousControllerSource,
+    /responses\.inputTokens\.count|maxEstimatedCostUsd|maxDiffBytes|MAX_SOURCE_DIFF_BYTES/,
   );
   assert.ok(
     autonomousControllerSource.indexOf(
@@ -795,7 +774,7 @@ test('autonomous review rechecks the mutable pull-request head after loading fil
   );
 });
 
-test('high-risk autonomous review uses one cost-bounded generation and records sanitized usage', async (context) => {
+test('high-risk autonomous review uses one generation and records sanitized usage', async (context) => {
   const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-bounded-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   const requests = [];
@@ -815,35 +794,31 @@ test('high-risk autonomous review uses one cost-bounded generation and records s
       return highRiskDiff;
     },
   });
-  const tokenCountRequests = [];
-  const client = withInputTokenCounter(
-    {
-      responses: {
-        async create(request, options) {
-          requests.push(request);
-          requestOptions.push(options);
-          return {
-            id: 'resp_complete',
-            status: 'completed',
-            usage: {
-              input_tokens: 750,
-              input_tokens_details: { cached_tokens: 100 },
-              output_tokens: 250,
-              output_tokens_details: { reasoning_tokens: 100 },
-              total_tokens: 1000,
-            },
-            output_text: JSON.stringify({
-              decision: 'approve',
-              reviewedHeadSha: headSha,
-              summary: 'No blocking findings.',
-              findings: [],
-            }),
-          };
-        },
+  const client = {
+    responses: {
+      async create(request, options) {
+        requests.push(request);
+        requestOptions.push(options);
+        return {
+          id: 'resp_complete',
+          status: 'completed',
+          usage: {
+            input_tokens: 750,
+            input_tokens_details: { cached_tokens: 100 },
+            output_tokens: 250,
+            output_tokens_details: { reasoning_tokens: 100 },
+            total_tokens: 1000,
+          },
+          output_text: JSON.stringify({
+            decision: 'approve',
+            reviewedHeadSha: headSha,
+            summary: 'No blocking findings.',
+            findings: [],
+          }),
+        };
       },
     },
-    { inputTokens: 1_250, requests: tokenCountRequests },
-  );
+  };
 
   const review = await runReview(
     {
@@ -862,13 +837,6 @@ test('high-risk autonomous review uses one cost-bounded generation and records s
   assert.equal(review.responseId, 'resp_complete');
   assert.deepEqual(review.reviewClaim, { status: 'new', checkRunId: 777, runId: 12345 });
   assert.equal(requests.length, 1);
-  assert.equal(tokenCountRequests.length, 1);
-  assert.deepEqual(tokenCountRequests[0], {
-    model: 'gpt-5.6-sol',
-    reasoning: { effort: 'medium' },
-    text: requests[0].text,
-    input: requests[0].input,
-  });
   assert.equal(requests[0].model, 'gpt-5.6-sol');
   assert.deepEqual(requests[0].reasoning, { effort: 'medium' });
   assert.equal(requests[0].text.verbosity, 'low');
@@ -888,11 +856,8 @@ test('high-risk autonomous review uses one cost-bounded generation and records s
   assert.equal(requestOptions[0].headers['Idempotency-Key'], expectedIdempotencyKey);
   assert.equal(expectedIdempotencyKey, reviewRequestIdempotencyKey('JueZ/api', 1, headSha));
   assert.notEqual(expectedIdempotencyKey, reviewRequestIdempotencyKey('JueZ/api', 2, headSha));
-  assert.equal(review.reviewBudget.exactInputTokens, 1_250);
-  assert.equal(review.reviewBudget.inputTokenCountRequestLimit, 1);
-  assert.equal(review.reviewBudget.modelGenerationRequestLimit, 1);
-  assert.equal(review.reviewBudget.totalOpenAIRequestLimit, 2);
-  assert.ok(review.reviewBudget.estimatedMaximumCostUsd <= policy.autonomousReview.maxEstimatedCostUsd);
+  assert.equal(review.reviewBudget, undefined);
+  assert.equal(review.tokenCountInvoked, undefined);
   assert.deepEqual(review.modelUsage, {
     inputTokens: 750,
     cachedInputTokens: 100,
@@ -924,7 +889,7 @@ test('high-risk autonomous review does not retry or accept an incomplete respons
       return highRiskDiff;
     },
   });
-  const client = withInputTokenCounter({
+  const client = {
     responses: {
       async create(request) {
         requests.push(request);
@@ -936,7 +901,7 @@ test('high-risk autonomous review does not retry or accept an incomplete respons
         };
       },
     },
-  });
+  };
 
   await assert.rejects(
     runReview(
@@ -972,7 +937,7 @@ test('high-risk autonomous review fails closed after one structurally invalid de
       return highRiskDiff;
     },
   });
-  const client = withInputTokenCounter({
+  const client = {
     responses: {
       async create() {
         attempts += 1;
@@ -988,7 +953,7 @@ test('high-risk autonomous review fails closed after one structurally invalid de
         };
       },
     },
-  });
+  };
 
   await assert.rejects(
     runReview(
@@ -1024,7 +989,7 @@ test('persistent empty model output fails closed with sanitized review evidence'
       return highRiskDiff;
     },
   });
-  const client = withInputTokenCounter({
+  const client = {
     responses: {
       async create() {
         return {
@@ -1035,7 +1000,7 @@ test('persistent empty model output fails closed with sanitized review evidence'
         };
       },
     },
-  });
+  };
 
   await assert.rejects(
     runReview(
@@ -1062,104 +1027,7 @@ test('persistent empty model output fails closed with sanitized review evidence'
   assert.equal(review.findings[0].severity, 'high');
 });
 
-test('autonomous review cost ceiling blocks after exact counting and before model generation', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-cost-'));
-  context.after(() => rm(directory, { recursive: true, force: true }));
-  const reviewFile = join(directory, 'review.json');
-  let attempts = 0;
-  const github = withFreeChecks({
-    async getPullRequest() {
-      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
-    },
-    async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
-    },
-    async getPullRequestDiff() {
-      return highRiskDiff;
-    },
-  });
-  const tokenCountRequests = [];
-  const client = withInputTokenCounter(
-    {
-      responses: {
-        async create() {
-          attempts += 1;
-        },
-      },
-    },
-    { requests: tokenCountRequests },
-  );
-  const strictCostPolicy = {
-    ...policy,
-    autonomousReview: { ...policy.autonomousReview, maxEstimatedCostUsd: 0.000001 },
-  };
-
-  await assert.rejects(
-    runReview(
-      { repository: 'JueZ/api', prNumber: 1, headSha, runId: 12345, reviewFile },
-      strictCostPolicy,
-      github,
-      client,
-    ),
-    /cost_ceiling_exceeded/,
-  );
-
-  const review = JSON.parse(await readFile(reviewFile, 'utf8'));
-  assert.equal(attempts, 0);
-  assert.equal(tokenCountRequests.length, 1);
-  assert.equal(review.modelInvoked, false);
-  assert.equal(review.tokenCountInvoked, true);
-  assert.equal(review.reviewBudget.status, 'blocked_before_generation');
-  assert.equal(review.reviewClaim.status, 'new');
-});
-
-test('autonomous review fails closed without generation when exact token counting is unavailable', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-token-count-'));
-  context.after(() => rm(directory, { recursive: true, force: true }));
-  const reviewFile = join(directory, 'review.json');
-  let generationAttempts = 0;
-  let tokenCountAttempts = 0;
-  const github = withFreeChecks({
-    async getPullRequest() {
-      return { ...pullRequest(), title: 'High-risk change' };
-    },
-    async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified' }];
-    },
-    async getPullRequestDiff() {
-      return highRiskDiff;
-    },
-  });
-  const client = {
-    responses: {
-      inputTokens: {
-        async count() {
-          tokenCountAttempts += 1;
-          throw new Error('untrusted provider detail');
-        },
-      },
-      async create() {
-        generationAttempts += 1;
-      },
-    },
-  };
-
-  await assert.rejects(
-    runReview({ repository: 'JueZ/api', prNumber: 1, headSha, runId: 12345, reviewFile }, policy, github, client),
-    /input_token_count_unavailable/,
-  );
-
-  const review = JSON.parse(await readFile(reviewFile, 'utf8'));
-  assert.equal(tokenCountAttempts, 1);
-  assert.equal(generationAttempts, 0);
-  assert.equal(review.modelInvoked, false);
-  assert.equal(review.tokenCountInvoked, true);
-  assert.equal(review.modelFailure.kind, 'input_token_count_unavailable');
-  assert.doesNotMatch(JSON.stringify(review), /untrusted provider detail/);
-  assert.equal(review.reviewClaim.status, 'new');
-});
-
-test('paid review revalidates every free check after token counting and immediately before generation', async (context) => {
+test('paid review revalidates every free check immediately before generation', async (context) => {
   const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-boundary-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   let attempts = 0;
@@ -1178,7 +1046,7 @@ test('paid review revalidates every free check after token counting and immediat
     async getCheckRuns() {
       checkReads += 1;
       const freeChecks = successfulFreeChecks().map((check) =>
-        checkReads >= 5 && check.name === 'lint' ? { ...check, conclusion: 'failure' } : check,
+        checkReads >= 3 && check.name === 'lint' ? { ...check, conclusion: 'failure' } : check,
       );
       return [...freeChecks, ...(marker ? [marker] : [])];
     },
@@ -1196,17 +1064,13 @@ test('paid review revalidates every free check after token counting and immediat
       return marker;
     },
   };
-  const tokenCountRequests = [];
-  const client = withInputTokenCounter(
-    {
-      responses: {
-        async create() {
-          attempts += 1;
-        },
+  const client = {
+    responses: {
+      async create() {
+        attempts += 1;
       },
     },
-    { requests: tokenCountRequests },
-  );
+  };
 
   await assert.rejects(
     runReview(
@@ -1224,7 +1088,6 @@ test('paid review revalidates every free check after token counting and immediat
     /generation boundary: lint: failure/,
   );
   assert.equal(attempts, 0);
-  assert.equal(tokenCountRequests.length, 1);
 });
 
 test('paid review cannot invoke the API unless its exact run owns one canonical claim', async (context) => {
@@ -1404,30 +1267,6 @@ test('review claims enforce trusted GitHub Actions identity by default', async (
     if (originalGitHubActions === undefined) delete process.env.GITHUB_ACTIONS;
     else process.env.GITHUB_ACTIONS = originalGitHubActions;
   }
-});
-
-test('review budget uses the exact count and caps counting and generation to one request each', () => {
-  const budget = calculateReviewBudget(
-    { input: [{ role: 'user', content: 'small diff' }], text: { verbosity: 'low' } },
-    policy,
-    1_234,
-  );
-  assert.equal(budget.exactInputTokens, 1_234);
-  assert.equal(budget.inputTokenCountRequestLimit, 1);
-  assert.equal(budget.modelGenerationRequestLimit, 1);
-  assert.equal(budget.totalOpenAIRequestLimit, 2);
-  assert.equal(budget.maximumOutputTokens, 3500);
-  assert.ok(budget.estimatedMaximumCostUsd < 0.31);
-  const completeDiffBudget = calculateReviewBudget(
-    { input: [{ role: 'user', content: 'complete diff' }], text: { verbosity: 'low' } },
-    policy,
-    32_304,
-  );
-  assert.equal(completeDiffBudget.estimatedMaximumCostUsd, 0.26652);
-  assert.throws(
-    () => calculateReviewBudget({ input: [], text: {} }, policy),
-    /exact positive input-token count is required/,
-  );
 });
 
 test('review capsule keeps every executable and high-risk documentation change with context', () => {
