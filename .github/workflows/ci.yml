@@ -27,9 +27,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -44,8 +44,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: install
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -65,8 +65,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: install
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -86,8 +86,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: install
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -107,8 +107,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: install
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -128,8 +128,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: install
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -148,8 +148,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: install
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -167,8 +167,8 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -201,9 +201,9 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
       - name: Setup Azure CLI
-        uses: azure/CLI@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # tag=v2
+        uses: azure/CLI@9eb25b8360668fb0ecbafa808d40e2197b2f5f52 # tag=v3.0.0
         with:
           inlineScript: az version
       - name: Validate Bicep files
@@ -226,9 +226,9 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
       - name: Setup Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # tag=v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # tag=v7.0.0
         with:
           go-version: 'stable'
           cache: false
@@ -252,8 +252,8 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -278,7 +278,7 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
       - name: Scan workspace with Trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # tag=v0.36.0
         with:
@@ -293,11 +293,11 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           fetch-depth: 0
       - name: Scan for secrets with Gitleaks
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # tag=v2
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # tag=v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -306,8 +306,8 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -344,8 +344,8 @@ jobs:
       - secret-scan
       - dependency-audit
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -383,12 +383,12 @@ jobs:
       id-token: write
     steps:
       - name: Download immutable release bundle
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # tag=v8.0.1
         with:
           name: release-${{ github.sha }}
           path: ${{ runner.temp }}/release
       - name: Attest release artifacts on main
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # tag=v2
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # tag=v4.1.1
         with:
           subject-path: |
             ${{ runner.temp }}/release/functionapp.zip
