@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   architectureFindings,
   bicepSecurityConfigFindings,
@@ -194,8 +196,41 @@ test('repository agent skills have valid frontmatter and unique names', () => {
 test('GPT Action OAuth setup defaults to and reconciles the read-only scope set', () => {
   const source = readFileSync(new URL('../configure-entra-gpt-action-oauth.sh', import.meta.url), 'utf8');
   assert.match(source, /API_SCOPE_VALUES="\$\{API_SCOPE_VALUES:-catalogue\.read,reddit\.read,wlh\.read,bring\.read\}"/);
+  assert.match(
+    source,
+    /GPT_ACTION_ALLOWED_SCOPE_VALUES_JSON='\["catalogue\.read","reddit\.read","wlh\.read","bring\.read"\]'/,
+  );
   assert.match(source, /resourceAccess: \[\$scopes\[\] \| \{id: \., type: "Scope"\}\]/);
   assert.doesNotMatch(source.match(/API_SCOPE_VALUES=.*$/m)?.[0] ?? '', /bring\.(?:write|complete|remove)/);
+});
+
+test('GPT Action OAuth setup rejects non-read scopes before invoking Azure CLI', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'gpt-action-scope-policy-'));
+  try {
+    const fakeAz = join(directory, 'az');
+    await writeFile(fakeAz, '#!/usr/bin/env bash\necho AZ_SHOULD_NOT_RUN >&2\nexit 99\n');
+    await chmod(fakeAz, 0o755);
+    const result = spawnSync(
+      'bash',
+      [fileURLToPath(new URL('../configure-entra-gpt-action-oauth.sh', import.meta.url))],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${directory}:${process.env.PATH ?? ''}`,
+          API_APP_ID: '00000000-0000-0000-0000-000000000000',
+          GPT_ACTION_REDIRECT_URI: 'https://chatgpt.com/aip/g-test/oauth/callback',
+          API_SCOPE_VALUES: 'catalogue.read,bring.write',
+        },
+      },
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /not approved for the read-only GPT Action client/);
+    assert.doesNotMatch(result.stderr, /AZ_SHOULD_NOT_RUN/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('dependency policy rejects lifecycle scripts and non-registry dependencies', () => {

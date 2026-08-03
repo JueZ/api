@@ -17,7 +17,7 @@ export function renderOperationCatalogue(operations = listOperationDefinitions()
       operation.allowedEnvironments.join(', '),
       operation.idempotency,
       operation.confirmation,
-      operation.gptActions === false ? 'no' : operation.rest ? 'yes' : 'n/a',
+      operation.rest ? (operation.gptActions ? 'yes' : 'no') : 'n/a',
       rest,
       mcp,
     ];

@@ -5,8 +5,23 @@ import {
   permissionDrift,
   registeredMcpToolsFromSource,
   registryRoutePermissions,
+  registryRoutes,
   routeDrift,
 } from '../check-operation-contract-drift.mjs';
+
+test('GPT route selection admits only explicit approvals', () => {
+  assert.deepEqual(
+    registryRoutes(
+      [
+        { rest: { method: 'GET', path: '/approved' }, gptActions: true },
+        { rest: { method: 'GET', path: '/denied' }, gptActions: false },
+        { rest: { method: 'GET', path: '/missing' } },
+      ],
+      true,
+    ),
+    new Set(['GET /approved']),
+  );
+});
 
 test('operation contract drift reports both missing directions', () => {
   assert.deepEqual(routeDrift(new Set(['GET /one', 'POST /two']), new Set(['GET /one', 'GET /three'])), {

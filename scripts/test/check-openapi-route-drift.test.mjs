@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   extractRoutesFromSource,
   findDuplicateOperationIds,
+  findGptExposureDecisionIssues,
   findGptWlhThinSchemaIssues,
   findGptScopeIssues,
   findMissingCanonicalRoutes,
@@ -18,10 +19,10 @@ import {
 test('extracts app.http routes and documentable methods from Azure Functions source', () => {
   const source = `
     import { app } from '@azure/functions';
-    import { authorizeRequestForOperation } from '../shared/security/auth.js';
-    import { OPERATION_IDS } from '../application/operations/registry.js';
+    import { authorizeRequestForOperation as enforceOperation } from '../shared/security/auth.js';
+    import { OPERATION_IDS as CANONICAL_OPERATION_IDS } from '../application/operations/registry.js';
     async function handler(request, context) {
-      await authorizeRequestForOperation(request, context, OPERATION_IDS.hello);
+      await enforceOperation(request, context, CANONICAL_OPERATION_IDS.hello);
     }
     app.http('sampleRoute', {
       methods: ['GET', 'OPTIONS', 'POST'],
@@ -163,6 +164,70 @@ test('unused authorization inside a handler factory cannot protect its returned 
   ]);
 });
 
+test('local or property-access authorization lookalikes cannot satisfy route protection', () => {
+  const routes = extractRoutesFromSource(
+    `
+      import { app } from '@azure/functions';
+      const OPERATION_IDS = { hello: 'local.hello' };
+      const fake = { authorizeRequestForOperation: async () => ({ ok: true }) };
+      async function authorizeRequestForOperation() {
+        return { ok: true };
+      }
+      async function handler(request, context) {
+        await authorizeRequestForOperation(request, context, OPERATION_IDS.hello);
+        await fake.authorizeRequestForOperation(request, context, OPERATION_IDS.hello);
+        return { status: 200 };
+      }
+      app.http('lookalikeRoute', {
+        methods: ['GET'],
+        route: 'api/lookalike',
+        handler,
+      });
+    `,
+    'lookalike.ts',
+  );
+
+  assert.equal(routes[0].protected, false);
+  assert.deepEqual(routes[0].referencedOperationIds, []);
+});
+
+test('a handler-local binding cannot shadow a canonical authorization import', () => {
+  const routes = extractRoutesFromSource(
+    `
+      import { app } from '@azure/functions';
+      import { authorizeRequestForOperation } from '../shared/security/auth.js';
+      import { OPERATION_IDS } from '../application/operations/registry.js';
+      async function handler(authorizeRequestForOperation, request, context) {
+        await authorizeRequestForOperation(request, context, OPERATION_IDS.hello);
+        return { status: 200 };
+      }
+      app.http('shadowedRoute', {
+        methods: ['GET'],
+        route: 'api/shadowed',
+        handler,
+      });
+    `,
+    'shadowed.ts',
+  );
+
+  assert.equal(routes[0].protected, false);
+  assert.deepEqual(routes[0].referencedOperationIds, ['local.hello']);
+});
+
+test('GPT Actions exposure requires an explicit registry decision', () => {
+  assert.deepEqual(
+    findGptExposureDecisionIssues([
+      { id: 'missing.decision', rest: { method: 'GET', path: '/api/missing' } },
+      { id: 'approved.route', rest: { method: 'GET', path: '/api/approved' }, gptActions: true },
+      { id: 'invalid.non-rest', gptActions: true },
+    ]),
+    [
+      'missing.decision: operation registry is missing an explicit GPT Actions exposure decision.',
+      'invalid.non-rest: operation registry enables GPT Actions without a REST route.',
+    ],
+  );
+});
+
 test('GPT Actions route allowlist rejects registry-excluded write routes', () => {
   const issues = findUnexpectedGptRoutes([{ method: 'get', path: '/api/bring/lists', filePath: 'bring.ts' }], {
     paths: {
@@ -196,6 +261,7 @@ test('GPT Actions OAuth scope allowlist rejects mutation permissions', () => {
         id: 'bring.get-items',
         requiredPermission: 'bring.read',
         rest: { method: 'GET', path: '/api/bring/lists/{listUuid}/items' },
+        gptActions: true,
       },
       {
         id: 'bring.add-items',

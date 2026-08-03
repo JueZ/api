@@ -47,37 +47,47 @@ const definitions = [
     audit: { ...readAudit, enabled: false },
     rest: { method: 'GET', path: '/health' },
     mcp: { toolName: 'health_check' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.hello, 'local', 'catalogue.read', {
     rest: { method: 'GET', path: '/api/hello' },
     mcp: { toolName: 'hello_authenticated' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.redditThread, 'reddit', 'reddit.read', {
     rest: { method: 'POST', path: '/api/reddit/thread' },
     mcp: { toolName: 'reddit_get_thread' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.redditThreadOverview, 'reddit', 'reddit.read', {
     rest: { method: 'POST', path: '/api/reddit/thread/overview' },
     mcp: { toolName: 'reddit_get_thread_overview' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.redditThreadComments, 'reddit', 'reddit.read', {
     rest: { method: 'POST', path: '/api/reddit/thread/comments' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.redditCommentTree, 'reddit', 'reddit.read', {
     rest: { method: 'POST', path: '/api/reddit/comment-tree' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.redditCommentsBatch, 'reddit', 'reddit.read', {
     rest: { method: 'POST', path: '/api/reddit/comments/batch' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.wlhCategories, 'wlh', 'wlh.read', {
     rest: { method: 'GET', path: '/api/wlh/categories/top' },
     mcp: { toolName: 'wlh_categories_top' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.wlhCategory, 'wlh', 'wlh.read', {
     rest: { method: 'GET', path: '/api/wlh/categories/{categoryId}' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.wlhFindCategory, 'wlh', 'wlh.read', {
     mcp: { toolName: 'wlh_find_category' },
+    gptActions: false,
   }),
   defineRead(OPERATION_IDS.wlhCategoryChildren, 'wlh', 'wlh.read', {
     rest: {
@@ -85,25 +95,31 @@ const definitions = [
       path: '/api/wlh/categories/{categoryId}/children',
     },
     mcp: { toolName: 'wlh_category_children' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.wlhSearch, 'wlh', 'wlh.read', {
     rest: { method: 'POST', path: '/api/wlh/search' },
     mcp: { toolName: 'wlh_search' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.wlhOffer, 'wlh', 'wlh.read', {
     rest: { method: 'GET', path: '/api/wlh/offers/{adId}' },
     mcp: { toolName: 'wlh_get_offer' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.wlhOfferImages, 'wlh', 'wlh.read', {
     rest: { method: 'GET', path: '/api/wlh/offers/{adId}/images' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.bringListLists, 'bring', 'bring.read', {
     rest: { method: 'GET', path: '/api/bring/lists' },
     mcp: { toolName: 'bring_list_lists' },
+    gptActions: true,
   }),
   defineRead(OPERATION_IDS.bringGetItems, 'bring', 'bring.read', {
     rest: { method: 'GET', path: '/api/bring/lists/{listUuid}/items' },
     mcp: { toolName: 'bring_get_items' },
+    gptActions: true,
   }),
   define({
     id: OPERATION_IDS.bringAddItems,
@@ -202,7 +218,7 @@ function defineRead(
   id: string,
   provider: 'local' | 'reddit' | 'wlh' | 'bring',
   requiredPermission: 'catalogue.read' | 'reddit.read' | 'wlh.read' | 'bring.read',
-  transports: Pick<OperationDefinition, 'rest' | 'mcp'>,
+  transports: Pick<OperationDefinition, 'rest' | 'mcp' | 'gptActions'>,
 ): OperationDefinition {
   return define({
     id,

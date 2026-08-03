@@ -16,6 +16,9 @@ const AUTH_RESPONSE_STATUSES = ['401', '403'];
 const STALE_SPLIT_CONTRACT_PATTERNS = [/(?:contracts\/)?openapi\.gpt\.(?:wlh|reddit)\.ya?ml/i];
 const STALE_SPLIT_OPERATION_IDS = new Set(['health', 'hello', 'redditThread', 'getWlhTopCategories', 'searchWlh']);
 const INTENTIONAL_NON_OPENAPI_ROUTES = new Set(['/mcp', '/.well-known/oauth-protected-resource']);
+const CANONICAL_AUTH_MODULE = '../shared/security/auth.js';
+const CANONICAL_OPERATION_REGISTRY_MODULE = '../application/operations/registry.js';
+const AUTHORIZATION_EXPORTS = new Set(['authorizeRequestForOperation', 'authorizeAuthenticatedPrincipalForOperation']);
 
 function isStringLiteralLike(node) {
   return ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node);
@@ -71,6 +74,27 @@ function localBindings(sourceFile) {
           bindings.set(declaration.name.text, declaration.initializer);
         }
       }
+    }
+  }
+  return bindings;
+}
+
+function namedImportBindings(sourceFile, moduleName, approvedExports) {
+  const bindings = new Map();
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !isStringLiteralLike(statement.moduleSpecifier) ||
+      statement.moduleSpecifier.text !== moduleName ||
+      !statement.importClause?.namedBindings ||
+      !ts.isNamedImports(statement.importClause.namedBindings)
+    ) {
+      continue;
+    }
+    for (const specifier of statement.importClause.namedBindings.elements) {
+      if (specifier.isTypeOnly) continue;
+      const importedName = specifier.propertyName?.text ?? specifier.name.text;
+      if (approvedExports.has(importedName)) bindings.set(specifier.name.text, importedName);
     }
   }
   return bindings;
@@ -132,7 +156,37 @@ function resolveHandlerImplementations(handler, bindings) {
   return [...implementations];
 }
 
-function authorizationFacts(handler, bindings) {
+function collectBindingNames(bindingName, names) {
+  if (ts.isIdentifier(bindingName)) {
+    names.add(bindingName.text);
+    return;
+  }
+  for (const element of bindingName.elements) {
+    if (ts.isOmittedExpression(element)) continue;
+    collectBindingNames(element.name, names);
+  }
+}
+
+function locallyDeclaredNames(functionNode) {
+  const names = new Set();
+  for (const parameter of functionNode.parameters) collectBindingNames(parameter.name, names);
+  function visit(node) {
+    if (isFunctionImplementation(node)) {
+      if (ts.isFunctionDeclaration(node) && node.name) names.add(node.name.text);
+      return;
+    }
+    if (ts.isVariableDeclaration(node)) collectBindingNames(node.name, names);
+    if (ts.isClassDeclaration(node) && node.name) names.add(node.name.text);
+    if (ts.isCatchClause(node) && node.variableDeclaration) {
+      collectBindingNames(node.variableDeclaration.name, names);
+    }
+    ts.forEachChild(node, visit);
+  }
+  if (functionNode.body) visit(functionNode.body);
+  return names;
+}
+
+function authorizationFacts(handler, bindings, authorizationImports, operationRegistryImports) {
   let hasAuthorizationCall = false;
   const referencedOperationIds = new Set();
   const visitedFunctions = new Set();
@@ -142,19 +196,21 @@ function authorizationFacts(handler, bindings) {
     if (binding && isFunctionImplementation(binding)) visitFunction(binding);
   }
 
-  function visit(node) {
+  function visit(node, shadowedNames) {
     if (isFunctionImplementation(node)) return;
     if (
       ts.isCallExpression(node) &&
-      ((ts.isIdentifier(node.expression) && authorizationFunctionNames.has(node.expression.text)) ||
-        (ts.isPropertyAccessExpression(node.expression) && authorizationFunctionNames.has(node.expression.name.text)))
+      ts.isIdentifier(node.expression) &&
+      authorizationImports.has(node.expression.text) &&
+      !shadowedNames.has(node.expression.text)
     ) {
       hasAuthorizationCall = true;
     }
     if (
       ts.isPropertyAccessExpression(node) &&
       ts.isIdentifier(node.expression) &&
-      node.expression.text === 'OPERATION_IDS'
+      operationRegistryImports.has(node.expression.text) &&
+      !shadowedNames.has(node.expression.text)
     ) {
       const operationId = OPERATION_IDS[node.name.text];
       if (operationId) referencedOperationIds.add(operationId);
@@ -162,13 +218,13 @@ function authorizationFacts(handler, bindings) {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
       visitCalledBinding(node.expression.text);
     }
-    ts.forEachChild(node, visit);
+    ts.forEachChild(node, (child) => visit(child, shadowedNames));
   }
 
   function visitFunction(functionNode) {
     if (visitedFunctions.has(functionNode) || !functionNode.body) return;
     visitedFunctions.add(functionNode);
-    visit(functionNode.body);
+    visit(functionNode.body, locallyDeclaredNames(functionNode));
   }
 
   for (const implementation of resolveHandlerImplementations(handler, bindings)) {
@@ -177,11 +233,6 @@ function authorizationFacts(handler, bindings) {
   return { hasAuthorizationCall, referencedOperationIds: [...referencedOperationIds].sort() };
 }
 
-const authorizationFunctionNames = new Set([
-  'authorizeRequestForOperation',
-  'authorizeAuthenticatedPrincipalForOperation',
-]);
-
 function isIntentionalNonOpenApiRoute(route) {
   return INTENTIONAL_NON_OPENAPI_ROUTES.has(route.path);
 }
@@ -189,6 +240,16 @@ function isIntentionalNonOpenApiRoute(route) {
 export function extractRoutesFromSource(sourceText, filePath = '<inline>') {
   const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const bindings = localBindings(sourceFile);
+  const authorizationImports = namedImportBindings(sourceFile, CANONICAL_AUTH_MODULE, AUTHORIZATION_EXPORTS);
+  const operationRegistryImports = namedImportBindings(
+    sourceFile,
+    CANONICAL_OPERATION_REGISTRY_MODULE,
+    new Set(['OPERATION_IDS']),
+  );
+  for (const localName of bindings.keys()) {
+    authorizationImports.delete(localName);
+    operationRegistryImports.delete(localName);
+  }
   const routes = [];
 
   function visit(node) {
@@ -207,7 +268,12 @@ export function extractRoutesFromSource(sourceText, filePath = '<inline>') {
       if (!routeValue) {
         throw new Error(`${filePath}: app.http('${nameArg.text}') route must be a string literal.`);
       }
-      const facts = authorizationFacts(handlerInitializer(optionsArg, filePath, nameArg.text), bindings);
+      const facts = authorizationFacts(
+        handlerInitializer(optionsArg, filePath, nameArg.text),
+        bindings,
+        authorizationImports,
+        operationRegistryImports,
+      );
 
       const methods = stringArrayInitializer(methodsProperty.initializer)
         .map((method) => method.toLowerCase())
@@ -417,10 +483,22 @@ export function findUnexpectedGptRoutes(gptIntendedRoutes, gptContract) {
     .map((entry) => `GPT Actions OpenAPI exposes non-approved route ${entry.method.toUpperCase()} ${entry.path}.`);
 }
 
+export function findGptExposureDecisionIssues(operations = listOperationDefinitions()) {
+  const issues = [];
+  for (const operation of operations) {
+    if (typeof operation.gptActions !== 'boolean') {
+      issues.push(`${operation.id}: operation registry is missing an explicit GPT Actions exposure decision.`);
+    } else if (operation.gptActions && !operation.rest) {
+      issues.push(`${operation.id}: operation registry enables GPT Actions without a REST route.`);
+    }
+  }
+  return issues;
+}
+
 export function findGptScopeIssues(gptContract, operations = listOperationDefinitions()) {
   const expected = new Set(
     operations
-      .filter((operation) => operation.rest && operation.gptActions !== false && operation.requiredPermission)
+      .filter((operation) => operation.rest && operation.gptActions === true && operation.requiredPermission)
       .map((operation) => operation.requiredPermission),
   );
   const configured = new Set(
@@ -525,13 +603,14 @@ export function checkOpenApiRouteDrift({
   const operations = listOperationDefinitions();
   const gptRouteKeys = new Set(
     operations
-      .filter((operation) => operation.rest && operation.gptActions !== false)
+      .filter((operation) => operation.rest && operation.gptActions === true)
       .map((operation) => `${operation.rest.method.toLowerCase()} ${operation.rest.path}`),
   );
   const gptIntendedRoutes = routes.filter((route) => gptRouteKeys.has(`${route.method} ${route.path}`));
 
   const issues = [
     ...findUnexpectedSplitContractFiles(baseDir),
+    ...findGptExposureDecisionIssues(operations),
     ...findMissingCanonicalRoutes(routes, canonical),
     ...findImplementationAuthorizationIssues(routes, operations),
     ...findProtectedRouteAuthIssues(

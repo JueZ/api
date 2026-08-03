@@ -10,7 +10,7 @@ const methods = new Set(['get', 'post', 'put', 'patch', 'delete']);
 export function registryRoutes(operations = listOperationDefinitions(), forGptActions = false) {
   return new Set(
     operations
-      .filter((operation) => operation.rest && (!forGptActions || operation.gptActions !== false))
+      .filter((operation) => operation.rest && (!forGptActions || operation.gptActions === true))
       .map((operation) => `${operation.rest.method} ${operation.rest.path}`),
   );
 }
@@ -18,7 +18,7 @@ export function registryRoutes(operations = listOperationDefinitions(), forGptAc
 export function registryRoutePermissions(operations = listOperationDefinitions(), forGptActions = false) {
   const result = new Map();
   for (const operation of operations.filter(
-    (candidate) => candidate.rest && (!forGptActions || candidate.gptActions !== false),
+    (candidate) => candidate.rest && (!forGptActions || candidate.gptActions === true),
   )) {
     const route = `${operation.rest.method} ${operation.rest.path}`;
     const permissions = result.get(route) ?? new Set();

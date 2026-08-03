@@ -14,6 +14,7 @@ GPT_ACTION_REDIRECT_URI="${GPT_ACTION_REDIRECT_URI:-}"
 GPT_ACTION_ADDITIONAL_REDIRECT_URIS="${GPT_ACTION_ADDITIONAL_REDIRECT_URIS:-}"
 GPT_ACTION_APP_DISPLAY_NAME="${GPT_ACTION_APP_DISPLAY_NAME:-JueZ API Catalogue ChatGPT Action}"
 API_SCOPE_VALUES="${API_SCOPE_VALUES:-catalogue.read,reddit.read,wlh.read,bring.read}"
+GPT_ACTION_ALLOWED_SCOPE_VALUES_JSON='["catalogue.read","reddit.read","wlh.read","bring.read"]'
 SET_GITHUB_VARIABLES="${SET_GITHUB_VARIABLES:-false}"
 SET_AZURE_APP_SETTINGS="${SET_AZURE_APP_SETTINGS:-false}"
 CREATE_CLIENT_SECRET="${CREATE_CLIENT_SECRET:-false}"
@@ -44,6 +45,24 @@ csv_join_unique() {
 
 require_cmd az
 require_cmd jq
+
+requested_scope_values_json="$(tr ',' '\n' <<<"$API_SCOPE_VALUES" | jq -R 'gsub("^[[:space:]]+|[[:space:]]+$"; "") | select(length > 0)' | jq -s -c 'unique')"
+if [ "$(jq -r 'length' <<<"$requested_scope_values_json")" -eq 0 ]; then
+  echo "API_SCOPE_VALUES must contain at least one approved read-only GPT Action scope." >&2
+  exit 1
+fi
+unsupported_scope_values_json="$(jq -nc \
+  --argjson requested "$requested_scope_values_json" \
+  --argjson allowed "$GPT_ACTION_ALLOWED_SCOPE_VALUES_JSON" \
+  '$requested - $allowed')"
+if [ "$(jq -r 'length' <<<"$unsupported_scope_values_json")" -gt 0 ]; then
+  cat >&2 <<MSG
+API_SCOPE_VALUES contains scope values that are not approved for the read-only GPT Action client:
+$(jq -r '.[] | "  - " + .' <<<"$unsupported_scope_values_json")
+Allowed values are catalogue.read, reddit.read, wlh.read, and bring.read. Only subsets of this fixed set are permitted.
+MSG
+  exit 1
+fi
 
 if [ -z "$API_APP_ID" ]; then
   echo "API_APP_ID is required. Set it to the API app client ID from WEB_AUTH_API_SCOPE or OIDC_AUDIENCE." >&2
@@ -89,7 +108,6 @@ api_json="$(az ad app show --id "$API_APP_ID" -o json)"
 api_object_id="$(jq -r '.id' <<<"$api_json")"
 api_display_name="$(jq -r '.displayName' <<<"$api_json")"
 api_identifier_uri="$(jq -r --arg fallback "api://$API_APP_ID" '(.identifierUris // []) | if length > 0 then .[0] else $fallback end' <<<"$api_json")"
-requested_scope_values_json="$(tr ',' '\n' <<<"$API_SCOPE_VALUES" | jq -R 'gsub("^[[:space:]]+|[[:space:]]+$"; "") | select(length > 0)' | jq -s -c 'unique')"
 scope_entries_json="$(jq -c --argjson requested "$requested_scope_values_json" '
   [.api.oauth2PermissionScopes[]?
     | .value as $value
