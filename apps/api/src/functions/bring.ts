@@ -64,7 +64,8 @@ export function createBringHandler(
     try {
       route = routeInfo(request, context);
       if (route.kind === 'list' || route.kind === 'get') {
-        const auth = await authorizeRequestForOperation(request, context, route.authOperationId);
+        const authOperationId = route.kind === 'list' ? OPERATION_IDS.bringListLists : OPERATION_IDS.bringGetItems;
+        const auth = await authorizeRequestForOperation(request, context, authOperationId);
         if (!auth.ok) return withCors(auth.response, cors);
         const application = getApplication(context);
         const body = route.kind === 'list' ? await application.listLists() : await application.getList(route.listUuid);
@@ -72,7 +73,7 @@ export function createBringHandler(
       }
 
       if (route.kind === 'add') {
-        const auth = await authorizeRequestForOperation(request, context, route.authOperationId);
+        const auth = await authorizeRequestForOperation(request, context, OPERATION_IDS.bringAddItems);
         if (!auth.ok) return withCors(auth.response, cors);
         rawBody = await readJsonObject(request);
         const command = parseAddCommand(rawBody, route.listUuid);
@@ -87,9 +88,9 @@ export function createBringHandler(
 
       if (route.kind === 'prepare') {
         const command = parsePrepareCommand(rawBody, route.listUuid);
-        const authOperationId =
+        const prepareAuthOperationId =
           command.operation === 'complete' ? OPERATION_IDS.bringPrepareComplete : OPERATION_IDS.bringPrepareRemove;
-        const auth = authorizeAuthenticatedPrincipalForOperation(authentication.user, context, authOperationId);
+        const auth = authorizeAuthenticatedPrincipalForOperation(authentication.user, context, prepareAuthOperationId);
         if (!auth.ok) return withCors(auth.response, cors);
         const application = getApplication(context);
         const result = await application.prepareMutation(auth.user, command, traceId ?? context.invocationId);
@@ -102,9 +103,9 @@ export function createBringHandler(
       if (!operation) {
         throw new BringInputError('confirmationToken is malformed or unsupported.', 'confirmationToken');
       }
-      const authOperationId =
+      const applyAuthOperationId =
         operation === 'complete' ? OPERATION_IDS.bringApplyComplete : OPERATION_IDS.bringApplyRemove;
-      const auth = authorizeAuthenticatedPrincipalForOperation(authentication.user, context, authOperationId);
+      const auth = authorizeAuthenticatedPrincipalForOperation(authentication.user, context, applyAuthOperationId);
       if (!auth.ok) return withCors(auth.response, cors);
       const result = await application.applyMutation(auth.user, command, traceId ?? context.invocationId);
       return { status: 200, headers: cors, jsonBody: result };
