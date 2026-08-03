@@ -697,7 +697,7 @@ jobs:
             : "${REPAIRABLE_ERRORS_LLM_MODEL:?REPAIRABLE_ERRORS_LLM_MODEL repository variable is required when Repairable Error LLM diagnostics are enabled}"
           fi
       - name: Azure OIDC login
-        uses: azure/login@2dd0bbf4064d5a1812889dc200bb8eed2597f82a # tag=v3
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # tag=v3
         with:
           client-id: ${{ env.AZURE_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
@@ -1601,7 +1601,7 @@ jobs:
           echo "RELEASE_LEDGER_PATH=$RELEASE_LEDGER_PATH" >> "$GITHUB_ENV"
       - name: Upload release ledger
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: release-ledger-${{ inputs.environmentName }}-${{ inputs.sourceRef || github.sha }}-${{ inputs.deliveryCorrelation }}
           path: ${{ runner.temp }}/smoke/release-ledger-${{ inputs.environmentName }}.json
@@ -1609,7 +1609,7 @@ jobs:
           retention-days: 90
       - name: Preserve exact accepted production release bundle
         if: ${{ inputs.environmentName == 'prod' && !inputs.allowRollback && success() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: production-release-${{ inputs.sourceRef || github.sha }}-${{ inputs.deliveryCorrelation }}
           path: ${{ runner.temp }}/release
@@ -1666,7 +1666,7 @@ jobs:
             }' > .github/deploy-test-provenance.json
       - name: Upload test deployment provenance
         if: ${{ inputs.environmentName == 'test' && success() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: deploy-test-provenance-${{ inputs.sourceRef || github.sha }}-${{ inputs.deliveryCorrelation }}
           path: .github/deploy-test-provenance.json
@@ -1690,7 +1690,7 @@ jobs:
           echo "::notice title=Production values resolved::Smoke tests passed for $EFFECTIVE_BASE_URL using Function App $EFFECTIVE_FUNCTIONAPP_NAME and static storage account $EFFECTIVE_STATIC_STORAGE_ACCOUNT."
       - name: Create production issue on failed deploy or smoke
         if: ${{ failure() && inputs.environmentName == 'prod' }}
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # tag=v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # tag=v9.0.0
         with:
           script: |
             const title = `Production deployment failed for ${context.sha.substring(0, 7)}`;
@@ -1954,7 +1954,7 @@ jobs:
             exit 1
           fi
       - name: Azure OIDC login
-        uses: azure/login@2dd0bbf4064d5a1812889dc200bb8eed2597f82a # tag=v3
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # tag=v3
         with:
           client-id: ${{ env.AZURE_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
@@ -2240,7 +2240,7 @@ jobs:
               verifiedAt: $verifiedAt
             }' > "$RUNNER_TEMP/production-private-storage-evidence.json"
       - name: Upload production private-storage evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: production-private-storage-${{ inputs.sourceRef }}-${{ inputs.deliveryCorrelation }}
           path: ${{ runner.temp }}/production-private-storage-evidence.json
@@ -2248,7 +2248,7 @@ jobs:
           retention-days: 90
       - name: Create production preparation issue on failure
         if: ${{ failure() }}
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # tag=v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # tag=v9.0.0
         with:
           script: |
             const title = `Production private-storage preparation failed for ${context.sha.substring(0, 7)}`;

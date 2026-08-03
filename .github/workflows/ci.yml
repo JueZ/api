@@ -203,7 +203,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
       - name: Setup Azure CLI
-        uses: azure/CLI@d4515bc8e518874d3c814bf5c307a1cb08ec9b35 # tag=v2
+        uses: azure/CLI@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # tag=v2
         with:
           inlineScript: az version
       - name: Validate Bicep files
@@ -280,7 +280,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
       - name: Scan workspace with Trivy
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # tag=v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # tag=v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -364,7 +364,7 @@ jobs:
           bash scripts/build-release-artifacts.sh "$RUNNER_TEMP/release"
           node scripts/verify-release-artifacts.mjs "$RUNNER_TEMP/release" "$GITHUB_SHA"
       - name: Upload immutable release bundle
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # tag=v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: release-${{ github.sha }}
           path: ${{ runner.temp }}/release

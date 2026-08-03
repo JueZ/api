@@ -1,5 +1,12 @@
 # Current state
 
+## 2026-08-03 Bundled Actions and Dependabot maintenance prepared
+
+- Five stale split Dependabot workflow PRs were replaced by one coherent maintenance change. Azure Login, Azure CLI, Trivy, GitHub Script, and Upload Artifact remain pinned to full upstream SHAs; annotated-tag object pins are normalized to the exact tagged commits, and the two intended major action upgrades apply consistently to every repository usage.
+- The complete trusted-workflow SHA-256 manifest is updated for every changed workflow, preserving the fail-closed workflow-integrity policy instead of bypassing it.
+- Dependabot now groups Angular packages and GitHub Actions so coordinated updates arrive together. Node type-definition major updates are ignored while the repository executes Node.js 22, and the configured `dependencies`, `npm`, and `github-actions` labels now exist.
+- Exact-head CI, Policy Check, CodeQL, independent high-risk review, merge, and the normal test/production delivery gates remain required before this maintenance is accepted.
+
 ## 2026-08-02 Codex Security medium-finding repair prepared
 
 - Anonymous MCP traffic now requires a bearer header before POST body access outside explicit local development. The gateway streams at most 256 KiB, returns 413 on declared or chunked overage, and forwards bounded raw JSON without stringifying a second parsed object.
