@@ -435,7 +435,7 @@ test('runtime truth validates exact deployment workflow run metadata', () => {
     repository: { full_name: 'JueZ/api' },
     path: '.github/workflows/promote-production.yml',
     name: `Promote Production ${sha} ${ledger.deliveryCorrelation}`,
-    event: 'workflow_dispatch',
+    event: 'repository_dispatch',
     run_attempt: 1,
     conclusion: 'success',
     head_branch: 'main',

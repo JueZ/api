@@ -1,5 +1,13 @@
 # Current state
 
+## 2026-08-03 Full-repository Codex Security finding repair prepared
+
+- The complete local Codex Security rescan of main commit `988e548fa0b3da2459f274b83677ff534c6ff67d` reported 32 findings: five high, 23 medium, and four low. The earlier six findings were absent. The prepared repair addresses every new finding; remote acceptance and deployment evidence are still pending.
+- Privileged test, promotion, rollback, private-storage preparation, and manual auto-merge entry points now use typed `repository_dispatch` events so GitHub loads controller code only from the default branch. Exact-main SHA, first-attempt run, CI/provenance, current-main, concurrency, environment, Azure OIDC, and production-latch checks remain in place.
+- Provider and request bodies now use streamed byte budgets; WLH also has a fixed timeout and bounded/deduplicated search filters. Bring authenticates before reading mutation bodies, rechecks current membership for every allowed write, and the Reddit JSON-LD traversal is iterative, single-visit, and node/depth bounded.
+- The bundled MCP gateway retains Reddit, Willhaben, and Bring reads but no longer exposes Bring mutations in the same model-visible session. Bring writes remain available through the authenticated REST/web flow, where confirmation tokens stay in private in-memory state and are removed from rendered results and generated curl commands.
+- Credential-bearing production and Bring-canary smokes are bound to Azure-discovered Function origins. Codex environment maintenance no longer prints existing remote URLs. Existing CodeQL, Trivy, Gitleaks, audit, test, policy, deployment, branch-protection, and production controls were not removed or weakened.
+
 ## 2026-08-03 Bundled Actions and Dependabot maintenance prepared
 
 - Five stale split Dependabot workflow PRs were replaced by one coherent maintenance change. Azure Login, Azure CLI, Trivy, GitHub Script, and Upload Artifact remain pinned to full upstream SHAs; annotated-tag object pins are normalized to the exact tagged commits, and the two intended major action upgrades apply consistently to every repository usage.

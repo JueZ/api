@@ -8,7 +8,7 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
   pull-requests: read
 
 concurrency:
@@ -68,6 +68,7 @@ jobs:
             local started_at="$3"
             local expected_head="$4"
             local expected_workflow_name="$5"
+            local expected_event="${6:-workflow_dispatch}"
             local expected_path=".github/workflows/$workflow_file"
             local runs_json=""
             local matches_json=""
@@ -84,7 +85,7 @@ jobs:
                 --repo "$REPOSITORY" \
                 --workflow "$workflow_file" \
                 --branch main \
-                --event workflow_dispatch \
+                --event "$expected_event" \
                 --limit 50 \
                 --json databaseId,status,conclusion,createdAt,displayTitle,headSha,url)"
               matches_json="$(jq -c \
@@ -124,8 +125,9 @@ jobs:
                 --arg path "$expected_path" \
                 --arg repository "$REPOSITORY" \
                 --arg workflow_name "$expected_workflow_name" \
+                --arg expected_event "$expected_event" \
                 '(.id | tostring) == $run_id
-                  and .event == "workflow_dispatch"
+                  and .event == $expected_event
                   and .head_sha == $head
                   and .display_title == $title
                   and .path == $path
@@ -336,16 +338,17 @@ jobs:
           test_correlation="$(openssl rand -hex 24)"
           test_title="Deploy Test $SOURCE_REF $test_correlation"
           test_started_at="$(date -u +%s)"
-          gh workflow run deploy-test.yml \
-            --repo "$REPOSITORY" \
-            --ref main \
-            -f commit_sha="$SOURCE_REF" \
-            -f deploy_frontend=true \
-            -f deploy_functions=true \
-            -f delivery_correlation="$test_correlation" \
-            -f ci_run_id="$CI_RUN_ID" \
-            -f ci_delivery_correlation="$CI_DELIVERY_CORRELATION"
-          wait_for_dispatch deploy-test.yml "$test_title" "$test_started_at" "$SOURCE_REF" "Deploy Test"
+          gh api --method POST "repos/$REPOSITORY/dispatches" \
+            -f event_type=deploy-test \
+            -f "client_payload[commit_sha]=$SOURCE_REF" \
+            -f 'client_payload[deploy_frontend]=true' \
+            -f 'client_payload[deploy_functions]=true' \
+            -f 'client_payload[reddit_share_url_smoke]=false' \
+            -f "client_payload[delivery_correlation]=$test_correlation" \
+            -f "client_payload[ci_run_id]=$CI_RUN_ID" \
+            -f "client_payload[ci_delivery_correlation]=$CI_DELIVERY_CORRELATION"
+          wait_for_dispatch \
+            deploy-test.yml "$test_title" "$test_started_at" "$SOURCE_REF" "Deploy Test" repository_dispatch
           test_url="$(cat "$RUNNER_TEMP/deploy-test.yml.url")"
           test_run_id="$(cat "$RUNNER_TEMP/deploy-test.yml.id")"
           test_provenance_dir="$RUNNER_TEMP/test-provenance-$test_correlation"
@@ -370,7 +373,7 @@ jobs:
               and .workflow == "Deploy Test"
               and .deployFrontend == "true"
               and .deployFunctions == "true"
-              and .eventName == "workflow_dispatch"
+              and .eventName == "repository_dispatch"
               and .authenticatedSmokeStatus == "passed"
               and .telemetryStatus == "passed"' \
             "$test_provenance_dir/deploy-test-provenance.json" >/dev/null; then
@@ -384,16 +387,17 @@ jobs:
           production_correlation="$(openssl rand -hex 24)"
           production_title="Promote Production $SOURCE_REF $production_correlation"
           production_started_at="$(date -u +%s)"
-          gh workflow run promote-production.yml \
-            --repo "$REPOSITORY" \
-            --ref main \
-            -f commit_sha="$SOURCE_REF" \
-            -f delivery_correlation="$production_correlation" \
-            -f test_delivery_correlation="$test_correlation" \
-            -f test_run_id="$test_run_id" \
-            -f ci_run_id="$CI_RUN_ID" \
-            -f ci_delivery_correlation="$CI_DELIVERY_CORRELATION"
-          wait_for_dispatch promote-production.yml "$production_title" "$production_started_at" "$SOURCE_REF" "Promote Production"
+          gh api --method POST "repos/$REPOSITORY/dispatches" \
+            -f event_type=promote-production \
+            -f "client_payload[commit_sha]=$SOURCE_REF" \
+            -f "client_payload[delivery_correlation]=$production_correlation" \
+            -f "client_payload[test_delivery_correlation]=$test_correlation" \
+            -f "client_payload[test_run_id]=$test_run_id" \
+            -f "client_payload[ci_run_id]=$CI_RUN_ID" \
+            -f "client_payload[ci_delivery_correlation]=$CI_DELIVERY_CORRELATION"
+          wait_for_dispatch \
+            promote-production.yml "$production_title" "$production_started_at" "$SOURCE_REF" \
+            "Promote Production" repository_dispatch
           assert_current_main
           production_url="$(cat "$RUNNER_TEMP/promote-production.yml.url")"
           production_run_id="$(cat "$RUNNER_TEMP/promote-production.yml.id")"

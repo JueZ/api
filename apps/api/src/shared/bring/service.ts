@@ -191,7 +191,8 @@ export class BringService {
     const lists = await this.listLists();
     const selected = lists.lists.find((list) => list.uuid === listUuid);
     if (!selected) throw new BringPolicyError('Bring list is not readable by this environment.');
-    const shared = selected.shared || (await this.isSharedList(listUuid));
+    const currentMembershipIsShared = await this.isSharedList(listUuid);
+    const shared = selected.shared || currentMembershipIsShared;
     if (shared && !this.config.writableSharedListUuids.includes(listUuid)) {
       throw new BringPolicyError('Shared Bring list is not in the explicit shared-write allowlist.');
     }

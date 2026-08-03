@@ -1,7 +1,10 @@
 import type { BringConfig, BringItemInput, BringMutationOperation, BringSession } from './types.js';
+import { BodyTooLargeError, readResponseTextWithLimit } from '../http/boundedBody.js';
 
 export type BringFetch = typeof fetch;
 export type BringErrorKind = 'authentication' | 'rate_limit' | 'timeout' | 'upstream' | 'version_skew' | 'not_found';
+
+export const BRING_RESPONSE_MAX_BYTES = 1024 * 1024;
 
 interface BringErrorDiagnostics {
   operation: string;
@@ -154,11 +157,24 @@ export class BringClient {
       throw new BringUpstreamError('Bring request failed.', 502, 'upstream', baseDiagnostics);
     }
 
-    const text = await response.text();
     const responseDiagnostics = {
       ...baseDiagnostics,
       upstreamStatus: response.status,
     };
+    let text: string;
+    try {
+      text = await readResponseTextWithLimit(response, BRING_RESPONSE_MAX_BYTES);
+    } catch (error) {
+      if (error instanceof BodyTooLargeError) {
+        throw new BringUpstreamError(
+          'Bring response exceeded the safe size limit.',
+          502,
+          'upstream',
+          responseDiagnostics,
+        );
+      }
+      throw new BringUpstreamError('Bring response could not be read.', 502, 'upstream', responseDiagnostics);
+    }
     let data: unknown = null;
     if (text) {
       try {

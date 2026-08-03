@@ -1,5 +1,15 @@
 # Decision log
 
+## 2026-08-03 — Close the full rescan through default-branch dispatch and bounded trust boundaries
+
+- Decision: Replace branch-selectable privileged `workflow_dispatch` entry points with typed `repository_dispatch` events for test deployment, production promotion, rollback, private-storage preparation, and manual auto-merge. Retain exact current-main, first-attempt, artifact/provenance, environment, OIDC, and production-latch validation in each default-branch receiver.
+- Decision: Apply shared streamed byte budgets to provider and Bring mutation request bodies; add a fixed WLH timeout and finite filter normalization; make Reddit JSON-LD traversal iterative/single-visit; and always verify current Bring membership before mutation.
+- Decision: Keep Bring writes on the authenticated REST/web path and expose only Bring reads through the bundled MCP server. Treat opaque confirmation tokens as sensitive transient state: never render them, place them in ordinary form state, or serialize them into curl/clipboard failure output.
+- Decision: Mint and send service bearer tokens only to Azure-discovered Function default origins. Configured production/canary URLs are assertions that must exactly match discovery, not alternate credential destinations. Never print an existing Git remote URL.
+- Rationale: The 2026-08-03 complete Codex Security rescan found five branch-selected privileged-controller paths plus shared availability and credential-exposure weaknesses. These changes close the root trust-boundary causes without suppressing findings or weakening deterministic checks.
+- Residual boundary: Repository writers can request a typed dispatch, but cannot select its workflow revision; every payload still must satisfy the receiver's exact immutable evidence gates. Provider response budgets may need telemetry-based tuning. The MCP capability reduction requires clients to use REST/web for Bring writes. Remote CI, independent review, test deployment, production promotion, and runtime evidence remain pending.
+
+
 ## 2026-08-02 — Remove standing Azure setup secrets and provider content from telemetry
 
 - Decision: Authenticate the local Codex Azure CLI setup with the Azure compute host's system-assigned managed identity by default, with an optional non-secret client ID for a user-assigned identity. Discard legacy Azure service-principal variables before starting any child process and prohibit service-principal password arguments in regression coverage.

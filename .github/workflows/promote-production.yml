@@ -1,33 +1,9 @@
 name: Promote Production
-run-name: Promote Production ${{ inputs.commit_sha || github.sha }} ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
+run-name: Promote Production ${{ github.event.client_payload.commit_sha || github.sha }} ${{ github.event.client_payload.delivery_correlation }}
 
 on:
-  workflow_dispatch:
-    inputs:
-      commit_sha:
-        description: Immutable 40-character commit SHA from main to promote. Defaults to the selected ref SHA.
-        required: false
-        type: string
-      delivery_correlation:
-        description: Unique delivery-controller correlation value.
-        required: false
-        type: string
-      test_delivery_correlation:
-        description: Exact correlation from the successful Deploy Test run being promoted.
-        required: true
-        type: string
-      test_run_id:
-        description: Exact successful Deploy Test workflow run being promoted.
-        required: true
-        type: string
-      ci_run_id:
-        description: Exact successful first-attempt main CI run that produced the release bundle.
-        required: true
-        type: string
-      ci_delivery_correlation:
-        description: Exact correlation in the selected main CI run title.
-        required: true
-        type: string
+  repository_dispatch:
+    types: [promote-production]
 
 permissions:
   contents: read
@@ -58,12 +34,12 @@ jobs:
       githubEnvironment: production
       deployFrontend: true
       deployFunctions: true
-      sourceRef: ${{ inputs.commit_sha || github.sha }}
+      sourceRef: ${{ github.event.client_payload.commit_sha || github.sha }}
       controllerRef: ${{ github.sha }}
       controllerWorkflowSha: ${{ github.workflow_sha }}
       updateProductionVariables: true
-      deliveryCorrelation: ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
-      testDeliveryCorrelation: ${{ inputs.test_delivery_correlation }}
-      testDeliveryRunId: ${{ inputs.test_run_id }}
-      ciRunId: ${{ inputs.ci_run_id }}
-      ciDeliveryCorrelation: ${{ inputs.ci_delivery_correlation }}
+      deliveryCorrelation: ${{ github.event.client_payload.delivery_correlation }}
+      testDeliveryCorrelation: ${{ github.event.client_payload.test_delivery_correlation }}
+      testDeliveryRunId: ${{ github.event.client_payload.test_run_id }}
+      ciRunId: ${{ github.event.client_payload.ci_run_id }}
+      ciDeliveryCorrelation: ${{ github.event.client_payload.ci_delivery_correlation }}

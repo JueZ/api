@@ -12,6 +12,7 @@ import {
   buildRequestUrl,
   formatBody,
   parseJsonOrText,
+  sanitizeOperationResponse,
 } from './app/request-builder';
 import { readRuntimeConfig } from './app/runtime-config';
 
@@ -217,45 +218,47 @@ interface PendingBringConfirmation {
               </label>
             }
             @for (field of operation.requestFields; track field.name) {
-              <label class="field">
-                <span
-                  >{{ field.name }}
-                  @if (field.required) {
-                    <em>(required)</em>
-                  }
-                </span>
-                @if (field.enumValues.length) {
-                  <select
-                    [value]="inputValue(operation.id, field.name)"
-                    (change)="setInputValue(operation.id, field.name, $any($event.target).value)"
-                  >
-                    @for (value of field.enumValues; track value) {
-                      <option [value]="value">{{ value }}</option>
+              @if (!isSensitiveRequestField(operation, field)) {
+                <label class="field">
+                  <span
+                    >{{ field.name }}
+                    @if (field.required) {
+                      <em>(required)</em>
                     }
-                  </select>
-                } @else if (field.inputType === 'checkbox') {
-                  <input
-                    type="checkbox"
-                    [checked]="inputValue(operation.id, field.name) === 'true'"
-                    (change)="setInputValue(operation.id, field.name, $any($event.target).checked ? 'true' : 'false')"
-                  />
-                } @else if (field.inputType === 'textarea') {
-                  <textarea
-                    rows="8"
-                    [value]="inputValue(operation.id, field.name)"
-                    (input)="setInputValue(operation.id, field.name, $any($event.target).value)"
-                  ></textarea>
-                } @else {
-                  <input
-                    [type]="field.inputType"
-                    [min]="field.inputType === 'number' ? minimumFor(field) : null"
-                    [max]="field.inputType === 'number' ? maximumFor(field) : null"
-                    [value]="inputValue(operation.id, field.name)"
-                    (input)="setInputValue(operation.id, field.name, $any($event.target).value)"
-                  />
-                }
-                <small>{{ field.description }}</small>
-              </label>
+                  </span>
+                  @if (field.enumValues.length) {
+                    <select
+                      [value]="inputValue(operation.id, field.name)"
+                      (change)="setInputValue(operation.id, field.name, $any($event.target).value)"
+                    >
+                      @for (value of field.enumValues; track value) {
+                        <option [value]="value">{{ value }}</option>
+                      }
+                    </select>
+                  } @else if (field.inputType === 'checkbox') {
+                    <input
+                      type="checkbox"
+                      [checked]="inputValue(operation.id, field.name) === 'true'"
+                      (change)="setInputValue(operation.id, field.name, $any($event.target).checked ? 'true' : 'false')"
+                    />
+                  } @else if (field.inputType === 'textarea') {
+                    <textarea
+                      rows="8"
+                      [value]="inputValue(operation.id, field.name)"
+                      (input)="setInputValue(operation.id, field.name, $any($event.target).value)"
+                    ></textarea>
+                  } @else {
+                    <input
+                      [type]="field.inputType"
+                      [min]="field.inputType === 'number' ? minimumFor(field) : null"
+                      [max]="field.inputType === 'number' ? maximumFor(field) : null"
+                      [value]="inputValue(operation.id, field.name)"
+                      (input)="setInputValue(operation.id, field.name, $any($event.target).value)"
+                    />
+                  }
+                  <small>{{ field.description }}</small>
+                </label>
+              }
             }
             <div class="button-row">
               <button
@@ -409,6 +412,7 @@ export class AppComponent {
   protected readonly operationProblems = signal<Record<string, SafeProblemView | null>>({});
   protected readonly copyStatuses = signal<Record<string, string>>({});
   protected readonly pendingBringConfirmation = signal<PendingBringConfirmation | null>(null);
+  private pendingBringConfirmationToken: string | null = null;
   protected readonly canUseAuth = computed(() => Boolean(msalClient && config.authApiScope));
   protected readonly isSignedIn = computed(() => this.activeAccount() !== null);
   protected readonly statusMessage = computed(() => {
@@ -473,6 +477,8 @@ export class AppComponent {
     this.operationResults.set({});
     this.operationErrors.set({});
     this.operationProblems.set({});
+    this.pendingBringConfirmation.set(null);
+    this.pendingBringConfirmationToken = null;
   }
 
   inputValue(operationId: string, fieldName: string): string {
@@ -519,6 +525,10 @@ export class AppComponent {
     return match ? Number(match[1]) : null;
   }
 
+  isSensitiveRequestField(operation: ApiOperationDoc, field: SchemaFieldDoc): boolean {
+    return operation.id === 'bringApplyItemMutation' && field.name === 'confirmationToken';
+  }
+
   operationScopeMessage(operation: ApiOperationDoc): string {
     const scopes = operation.requiredScopes.length
       ? operation.requiredScopes.join(' or ')
@@ -562,7 +572,11 @@ export class AppComponent {
         });
       }
 
-      const values = this.formValues()[operation.id] ?? {};
+      const values = { ...(this.formValues()[operation.id] ?? {}) };
+      if (operation.id === 'bringApplyItemMutation') {
+        if (!this.pendingBringConfirmationToken) throw new Error('Prepare the Bring mutation before applying it.');
+        values['confirmationToken'] = this.pendingBringConfirmationToken;
+      }
       const headers = buildRequestHeaders(operation, accessToken);
       const init: RequestInit = { method: operation.method.toUpperCase(), headers };
       const requestUrl = buildRequestUrl(operation, values, config.apiBaseUrl);
@@ -573,7 +587,6 @@ export class AppComponent {
       const response = await fetch(requestUrl, init);
       const responseText = await response.text();
       const responseBody = parseJsonOrText(responseText);
-      const formattedBody = formatBody(responseBody, true);
 
       if (!response.ok) {
         const problem = formatProblemResponse(responseBody, response.status);
@@ -583,13 +596,13 @@ export class AppComponent {
 
       this.operationResults.update((current) => ({
         ...current,
-        [operation.id]: formattedBody,
+        [operation.id]: formatBody(sanitizeOperationResponse(operation.id, responseBody), true),
       }));
       if (operation.id === 'bringPrepareItemMutation') {
         this.captureBringConfirmation(responseBody);
       } else if (operation.id === 'bringApplyItemMutation') {
         this.pendingBringConfirmation.set(null);
-        this.setInputValue('bringApplyItemMutation', 'confirmationToken', '');
+        this.pendingBringConfirmationToken = null;
       }
     } catch (error) {
       this.operationErrors.update((current) => ({
@@ -628,9 +641,9 @@ export class AppComponent {
         ...(current['bringApplyItemMutation'] ?? {}),
         listUuid,
         operationId,
-        confirmationToken,
       },
     }));
+    this.pendingBringConfirmationToken = confirmationToken;
     this.pendingBringConfirmation.set({
       operation,
       operationId,
@@ -651,7 +664,7 @@ export class AppComponent {
       await navigator.clipboard.writeText(curl);
       this.copyStatuses.update((current) => ({ ...current, [operation.id]: 'Copied redacted curl command.' }));
     } catch {
-      this.copyStatuses.update((current) => ({ ...current, [operation.id]: curl }));
+      this.copyStatuses.update((current) => ({ ...current, [operation.id]: 'Could not copy curl command.' }));
     }
   }
 

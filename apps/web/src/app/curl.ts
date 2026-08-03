@@ -2,6 +2,7 @@ import type { ApiOperationDoc } from './openapi';
 import { buildRequestBody, buildRequestHeaders, buildRequestUrl, type OperationFormValues } from './request-builder';
 
 export const ACCESS_TOKEN_PLACEHOLDER = '<ACCESS_TOKEN>';
+export const SENSITIVE_VALUE_PLACEHOLDER = '<REDACTED>';
 
 export function buildCurlCommand(args: {
   operation: ApiOperationDoc;
@@ -18,10 +19,21 @@ export function buildCurlCommand(args: {
   }
 
   if (operation.requestFields.length) {
-    parts.push('--data', shellQuote(JSON.stringify(buildRequestBody(operation, values))));
+    parts.push('--data', shellQuote(JSON.stringify(redactRequestBody(buildRequestBody(operation, values)))));
   }
 
   return parts.join(' \\\n  ');
+}
+
+function redactRequestBody(body: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(body).map(([name, value]) => [
+      name,
+      /(?:confirmation|access|refresh|identity|api)[_-]?token|password|secret/i.test(name)
+        ? SENSITIVE_VALUE_PLACEHOLDER
+        : value,
+    ]),
+  );
 }
 
 function redactHeaderValue(name: string, value: string): string {

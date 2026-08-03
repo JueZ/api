@@ -83,18 +83,35 @@ function* jsonLdUrlCandidates(scriptBody: string): Iterable<string> {
 }
 
 function* walkJsonLd(value: unknown): Iterable<string> {
-  if (!value || typeof value !== 'object') return;
-  if (Array.isArray(value)) {
-    for (const item of value) yield* walkJsonLd(item);
-    return;
+  const maxNodes = 10_000;
+  const maxDepth = 64;
+  const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  const visited = new WeakSet<object>();
+  let visitedNodes = 0;
+
+  while (stack.length > 0 && visitedNodes < maxNodes) {
+    const entry = stack.pop();
+    if (!entry || !entry.value || typeof entry.value !== 'object' || entry.depth > maxDepth) continue;
+    if (visited.has(entry.value)) continue;
+    visited.add(entry.value);
+    visitedNodes += 1;
+
+    if (Array.isArray(entry.value)) {
+      for (let index = entry.value.length - 1; index >= 0; index -= 1) {
+        stack.push({ value: entry.value[index], depth: entry.depth + 1 });
+      }
+      continue;
+    }
+
+    const nestedValues = Object.values(entry.value as Record<string, unknown>);
+    for (const key of ['url', '@id', 'mainEntityOfPage']) {
+      const candidate = (entry.value as Record<string, unknown>)[key];
+      if (typeof candidate === 'string') yield candidate;
+    }
+    for (let index = nestedValues.length - 1; index >= 0; index -= 1) {
+      stack.push({ value: nestedValues[index], depth: entry.depth + 1 });
+    }
   }
-  const record = value as Record<string, unknown>;
-  for (const key of ['url', '@id', 'mainEntityOfPage']) {
-    const candidate = record[key];
-    if (typeof candidate === 'string') yield candidate;
-    else yield* walkJsonLd(candidate);
-  }
-  for (const nested of Object.values(record)) yield* walkJsonLd(nested);
 }
 
 function* embeddedUrlCandidates(html: string): Iterable<string> {

@@ -182,6 +182,17 @@ test('plain-text login errors and malformed successful JSON are sanitized', asyn
   );
 });
 
+test('Bring rejects oversized provider responses without buffering them', async () => {
+  const client = new BringClient(
+    cfg,
+    async () => new Response('small', { status: 200, headers: { 'content-length': String(1024 * 1024 + 1) } }),
+  );
+  await assert.rejects(
+    client.login(),
+    (error) => error instanceof BringUpstreamError && error.kind === 'upstream' && error.status === 502,
+  );
+});
+
 test('concurrent calls share one login and in-memory session', async () => {
   let logins = 0;
   const service = new BringService({
@@ -336,6 +347,24 @@ test('list reads are allowlisted and shared writes require a second exact-list a
   });
   await sharedWriteService.addItems(sharedListUuid, [{ name: 'Milk' }]);
   assert.equal(calls.length, 1);
+});
+
+test('shared-list summaries never bypass current Bring membership verification', async () => {
+  const service = new BringService({
+    config: {
+      ...cfg,
+      readableListUuids: [sharedListUuid],
+      writableListUuids: [sharedListUuid],
+      writableSharedListUuids: [sharedListUuid],
+    },
+    sessionStore: null,
+    fetchImpl: bringFixtureFetch({
+      calls: [],
+      lists: [{ listUuid: sharedListUuid, name: 'Former family list', isShared: true }],
+      membersByList: { [sharedListUuid]: [{ publicUuid: 'someone-else' }] },
+    }),
+  });
+  await assert.rejects(service.addItems(sharedListUuid, [{ name: 'Milk' }]), BringPolicyError);
 });
 
 test('list versions are stable and batch mutations preserve the observed Bring wire protocol', async () => {
@@ -967,6 +996,50 @@ test('HTTP handler uses the breaking add/prepare/apply contract through one appl
   assert.equal(calls[2][1].confirmationToken, 'safe-token');
 });
 
+test('Bring mutation handlers authenticate before reading request bodies and cap authenticated payloads', async () => {
+  const handler = createBringHandler({
+    getApplication: () => {
+      throw new Error('application must not be resolved before authentication');
+    },
+  });
+  let bodyRead = false;
+  const unauthenticatedRequest = {
+    method: 'POST',
+    url: `https://api.test/api/bring/lists/${listUuid}/items`,
+    params: { listUuid },
+    headers: new Headers(),
+    get body() {
+      bodyRead = true;
+      throw new Error('body must not be read');
+    },
+  };
+  await withEnv({ AUTH_ENABLED: 'true' }, async () => {
+    const response = await handler(unauthenticatedRequest, context({ functionName: 'bringItems' }));
+    assert.equal(response.status, 401);
+  });
+  assert.equal(bodyRead, false);
+
+  const localHandler = createBringHandler({
+    getApplication: () => ({
+      addItems: async () => {
+        throw new Error('oversized body must not reach the application');
+      },
+    }),
+  });
+  await withEnv({ AUTH_ENABLED: 'false', DEPLOYED_ENVIRONMENT_NAME: 'local' }, async () => {
+    const response = await localHandler(
+      request(
+        'POST',
+        `https://api.test/api/bring/lists/${listUuid}/items`,
+        { operationId, items: [{ name: 'x'.repeat(70 * 1024) }] },
+        { listUuid },
+      ),
+      context({ functionName: 'bringItems' }),
+    );
+    assert.equal(response.status, 413);
+  });
+});
+
 function mutationHarness({
   mutateItems,
   store = new InMemoryBringMutationStore(),
@@ -1027,11 +1100,20 @@ function mutationResult(command, operation) {
 }
 
 function request(method, url, body, params = {}) {
+  const serializedBody = body === undefined ? '' : JSON.stringify(body);
   return {
     method,
     url,
     params,
-    headers: new Headers(),
+    headers: new Headers(serializedBody ? { 'content-length': String(Buffer.byteLength(serializedBody)) } : {}),
+    body: serializedBody
+      ? new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(serializedBody));
+            controller.close();
+          },
+        })
+      : null,
     json: async () => body,
   };
 }

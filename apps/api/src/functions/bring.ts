@@ -8,7 +8,12 @@ import type {
 import { OPERATION_IDS } from '../application/operations/registry.js';
 import { getTraceIdFromRequestOrContext } from '../shared/errors/diagnosticCapsule.js';
 import { createCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
-import { authorizeRequestForOperation } from '../shared/security/auth.js';
+import { BodyTooLargeError, readRequestTextWithLimit } from '../shared/http/boundedBody.js';
+import {
+  authenticateRequest,
+  authorizeAuthenticatedPrincipalForOperation,
+  authorizeRequestForOperation,
+} from '../shared/security/auth.js';
 import {
   BRING_OPERATION_IDS,
   bringProblemResponse,
@@ -34,6 +39,8 @@ const corsOptions = {
   methods: ['GET', 'POST', 'OPTIONS'],
 } satisfies CorsOptions;
 
+export const BRING_REQUEST_BODY_MAX_BYTES = 64 * 1024;
+
 export function createBringHandler(
   dependencies: BringHandlerDependencies = {},
 ): (request: HttpRequest, context: InvocationContext) => Promise<HttpResponseInit> {
@@ -56,41 +63,48 @@ export function createBringHandler(
     let rawBody: Record<string, unknown> | undefined;
     try {
       route = routeInfo(request, context);
-      const application = getApplication(context);
       if (route.kind === 'list' || route.kind === 'get') {
         const auth = await authorizeRequestForOperation(request, context, route.authOperationId);
         if (!auth.ok) return withCors(auth.response, cors);
+        const application = getApplication(context);
         const body = route.kind === 'list' ? await application.listLists() : await application.getList(route.listUuid);
         return { status: 200, headers: cors, jsonBody: body };
       }
 
-      rawBody = await readJsonObject(request);
       if (route.kind === 'add') {
         const auth = await authorizeRequestForOperation(request, context, route.authOperationId);
         if (!auth.ok) return withCors(auth.response, cors);
+        rawBody = await readJsonObject(request);
         const command = parseAddCommand(rawBody, route.listUuid);
+        const application = getApplication(context);
         const result = await application.addItems(auth.user, command, traceId ?? context.invocationId);
         return { status: 200, headers: cors, jsonBody: result };
       }
+
+      const authentication = await authenticateRequest(request, context);
+      if (!authentication.ok) return withCors(authentication.response, cors);
+      rawBody = await readJsonObject(request);
 
       if (route.kind === 'prepare') {
         const command = parsePrepareCommand(rawBody, route.listUuid);
         const authOperationId =
           command.operation === 'complete' ? OPERATION_IDS.bringPrepareComplete : OPERATION_IDS.bringPrepareRemove;
-        const auth = await authorizeRequestForOperation(request, context, authOperationId);
+        const auth = authorizeAuthenticatedPrincipalForOperation(authentication.user, context, authOperationId);
         if (!auth.ok) return withCors(auth.response, cors);
+        const application = getApplication(context);
         const result = await application.prepareMutation(auth.user, command, traceId ?? context.invocationId);
         return { status: 200, headers: cors, jsonBody: result };
       }
 
       const command = parseApplyCommand(rawBody, route.listUuid);
+      const application = getApplication(context);
       const operation = application.getConfirmationOperation(command.confirmationToken);
       if (!operation) {
         throw new BringInputError('confirmationToken is malformed or unsupported.', 'confirmationToken');
       }
       const authOperationId =
         operation === 'complete' ? OPERATION_IDS.bringApplyComplete : OPERATION_IDS.bringApplyRemove;
-      const auth = await authorizeRequestForOperation(request, context, authOperationId);
+      const auth = authorizeAuthenticatedPrincipalForOperation(authentication.user, context, authOperationId);
       if (!auth.ok) return withCors(auth.response, cors);
       const result = await application.applyMutation(auth.user, command, traceId ?? context.invocationId);
       return { status: 200, headers: cors, jsonBody: result };
@@ -161,8 +175,10 @@ function routeInfo(request: HttpRequest, context: InvocationContext): BringRoute
 async function readJsonObject(request: HttpRequest): Promise<Record<string, unknown>> {
   let value: unknown;
   try {
-    value = await request.json();
-  } catch {
+    const text = await readRequestTextWithLimit(request, BRING_REQUEST_BODY_MAX_BYTES);
+    value = JSON.parse(text) as unknown;
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) throw error;
     throw new BringInputError('Request body must be valid JSON.', 'body');
   }
   if (!isRecord(value)) {
@@ -202,10 +218,14 @@ function parsePrepareCommand(body: Record<string, unknown>, listUuid: string): P
 
 function parseApplyCommand(body: Record<string, unknown>, listUuid: string): ApplyMutationCommand {
   assertOnlyKeys(body, ['operationId', 'confirmationToken']);
+  const confirmationToken = requiredString(body, 'confirmationToken');
+  if (confirmationToken.length > 4096) {
+    throw new BringInputError('confirmationToken exceeds the maximum length.', 'confirmationToken');
+  }
   return {
     operationId: requiredString(body, 'operationId'),
     listUuid,
-    confirmationToken: requiredString(body, 'confirmationToken'),
+    confirmationToken,
   };
 }
 

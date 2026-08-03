@@ -38,6 +38,7 @@ import {
 } from '../dist/functions/redditCommentsBatch.js';
 import { buildFallbackRepairableProblem, validateRepairableProblem } from '../dist/shared/errors/repairableProblem.js';
 import { buildDiagnosticCapsule, buildRedditDiagnosticCapsule } from '../dist/shared/errors/diagnosticCapsule.js';
+import { extractRedditCanonicalUrlFromHtml } from '../dist/shared/reddit/htmlCanonical.js';
 import {
   buildDeterministicRepairableProblem,
   resolveRepairableProblem,
@@ -347,6 +348,13 @@ test('RedditThreadService resolves 200 HTML canonical link for exact AskReddit s
   assertShareHtmlResolvedWithoutFallbacks(calls);
 });
 
+test('Reddit JSON-LD traversal visits nested URL objects once within a depth budget', () => {
+  let nested = { url: 'https://www.reddit.com/r/OpenAI/comments/abc123/example/' };
+  for (let depth = 0; depth < 40; depth += 1) nested = { mainEntityOfPage: nested };
+  const html = `<script type="application/ld+json">${JSON.stringify(nested)}</script>`;
+  assert.equal(extractRedditCanonicalUrlFromHtml(html), 'https://www.reddit.com/r/OpenAI/comments/abc123/example/');
+});
+
 test('RedditThreadService resolves 200 HTML og:url metadata for exact AskReddit share URL', async () => {
   const html =
     '<html><head><meta property="og:url" content="https://www.reddit.com/r/AskReddit/comments/1tgoo04/ai_takes_half_the_jobs_all_those_people_pay/"></head></html>';
@@ -628,6 +636,21 @@ test('RedditOAuthClient raises RedditFetchError with content type and preview fo
       assert.match(error.message, /Expected Reddit JSON but received text\/html/);
       return true;
     },
+  );
+});
+
+test('RedditOAuthClient rejects oversized JSON responses before parsing', async () => {
+  const client = new RedditOAuthClient(
+    config,
+    async () =>
+      new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json', 'content-length': String(4 * 1024 * 1024 + 1) },
+      }),
+  );
+  await assert.rejects(
+    client.getAccessToken(),
+    (error) => error instanceof RedditUpstreamError && error.status === 502,
   );
 });
 
