@@ -15,6 +15,10 @@ export async function readRequestTextWithLimit(request: RequestLike, maxBytes: n
   return readStreamTextWithLimit(request.body, maxBytes);
 }
 
+export async function readRequestJsonWithLimit(request: RequestLike, maxBytes: number): Promise<unknown> {
+  return JSON.parse(await readRequestTextWithLimit(request, maxBytes)) as unknown;
+}
+
 interface RequestLike {
   headers: Headers;
   body: ReadableStream<Uint8Array> | null;

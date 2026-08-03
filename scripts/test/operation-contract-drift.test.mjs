@@ -24,8 +24,16 @@ test('MCP registration parser finds tools in a bundled server or registration he
         {},
         handler,
       );
+      (server['registerTool'])('wlh_search', {}, handler);
     `),
-    new Set(['health_check', 'bring_add_items']),
+    new Set(['health_check', 'bring_add_items', 'wlh_search']),
+  );
+});
+
+test('MCP registration parser rejects computed tool names', () => {
+  assert.throws(
+    () => registeredMcpToolsFromSource(`server.registerTool(toolName, {}, handler);`, 'dynamic.ts'),
+    /registerTool names must be static string literals/,
   );
 });
 

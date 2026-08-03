@@ -1300,7 +1300,7 @@ components:
     BringPrepareMutationRequest:
       type: object
       additionalProperties: false
-      required: [operationId, operation, items]
+      required: [operationId, expectedListVersion, operation, items]
       properties:
         operationId:
           type: string
@@ -1309,6 +1309,7 @@ components:
         expectedListVersion:
           type: string
           pattern: "^[0-9a-f]{64}$"
+          description: Required SHA-256 version returned by the most recent list read.
         operation: { type: string, enum: [complete, remove] }
         items: { $ref: "#/components/schemas/BringMutationItems" }
     BringApplyMutationRequest:

@@ -56,6 +56,7 @@ const ALL_OPERATION_IDS = Object.values(WLH_OPERATION_IDS);
 
 export type WlhFailureKind =
   | 'invalid_json'
+  | 'body_too_large'
   | 'input_validation'
   | 'category_not_found'
   | 'upstream_rate_limited'
@@ -216,6 +217,7 @@ function classifyWlhError(error: unknown): Omit<WlhProblemInput, 'operationId' |
 
 function statusForFailure(kind: WlhFailureKind, status?: number): number {
   if (status) return status;
+  if (kind === 'body_too_large') return 413;
   if (kind === 'invalid_json' || kind === 'input_validation') return 400;
   if (kind === 'category_not_found') return 404;
   if (kind === 'upstream_rate_limited') return 429;
@@ -224,7 +226,12 @@ function statusForFailure(kind: WlhFailureKind, status?: number): number {
 }
 
 function classificationForFailure(kind: WlhFailureKind): RepairableErrorClassification {
-  if (kind === 'invalid_json' || kind === 'input_validation' || kind === 'category_not_found')
+  if (
+    kind === 'invalid_json' ||
+    kind === 'body_too_large' ||
+    kind === 'input_validation' ||
+    kind === 'category_not_found'
+  )
     return 'caller_contract_violation';
   if (kind === 'upstream_rate_limited') return 'capacity_or_timeout';
   if (kind === 'upstream_parse_failure') return 'version_skew';
@@ -234,7 +241,12 @@ function classificationForFailure(kind: WlhFailureKind): RepairableErrorClassifi
 }
 
 function retryPolicyForFailure(kind: WlhFailureKind): RetryPolicy {
-  if (kind === 'invalid_json' || kind === 'input_validation' || kind === 'category_not_found') {
+  if (
+    kind === 'invalid_json' ||
+    kind === 'body_too_large' ||
+    kind === 'input_validation' ||
+    kind === 'category_not_found'
+  ) {
     return { can_retry: true, same_request: false, idempotency_required: false };
   }
   if (kind === 'upstream_rate_limited') {
@@ -247,11 +259,13 @@ function retryPolicyForFailure(kind: WlhFailureKind): RetryPolicy {
 }
 
 function repairableForFailure(kind: WlhFailureKind): boolean {
-  return kind === 'invalid_json' || kind === 'input_validation' || kind === 'category_not_found';
+  return (
+    kind === 'invalid_json' || kind === 'body_too_large' || kind === 'input_validation' || kind === 'category_not_found'
+  );
 }
 
 function confidenceForFailure(kind: WlhFailureKind): number {
-  if (kind === 'invalid_json' || kind === 'input_validation') return 0.9;
+  if (kind === 'invalid_json' || kind === 'body_too_large' || kind === 'input_validation') return 0.9;
   if (kind === 'category_not_found' || kind === 'upstream_rate_limited') return 0.84;
   if (kind === 'upstream_parse_failure') return 0.78;
   if (kind === 'internal_failure') return 0.5;
@@ -259,7 +273,8 @@ function confidenceForFailure(kind: WlhFailureKind): number {
 }
 
 function titleForFailure(kind: WlhFailureKind): string {
-  if (kind === 'invalid_json' || kind === 'input_validation') return 'WLH request contract violation';
+  if (kind === 'invalid_json' || kind === 'body_too_large' || kind === 'input_validation')
+    return 'WLH request contract violation';
   if (kind === 'category_not_found') return 'WLH category was not found';
   if (kind === 'upstream_rate_limited') return 'WLH rate limit reached';
   if (kind === 'upstream_parse_failure') return 'WLH upstream layout changed';
@@ -269,6 +284,7 @@ function titleForFailure(kind: WlhFailureKind): string {
 
 function detailForFailure(kind: WlhFailureKind, message?: string): string {
   if (kind === 'invalid_json') return 'The WLH request body must be valid JSON.';
+  if (kind === 'body_too_large') return 'The WLH request body exceeds the 64 KiB limit.';
   if (kind === 'input_validation') return message ?? 'The WLH request did not match the endpoint contract.';
   if (kind === 'category_not_found')
     return 'The requested WLH categoryId does not exist in the current category index.';
@@ -281,6 +297,7 @@ function detailForFailure(kind: WlhFailureKind, message?: string): string {
 
 function callerInstructionForFailure(kind: WlhFailureKind, field?: string): string {
   if (kind === 'invalid_json') return 'Send a syntactically valid JSON request body and retry.';
+  if (kind === 'body_too_large') return 'Reduce the request body to at most 64 KiB and retry.';
   if (kind === 'input_validation')
     return `Correct the ${field ?? 'WLH request'} field according to the documented schema and retry.`;
   if (kind === 'category_not_found')
@@ -317,6 +334,13 @@ function invalidFieldsForFailure(kind: WlhFailureKind, field?: string): InvalidF
 }
 
 function repairPlanForFailure(kind: WlhFailureKind, field?: string): RepairPlanStep[] | undefined {
+  if (kind === 'body_too_large')
+    return [
+      {
+        action: 'retry_with_modified_request',
+        reason: 'The body must be no larger than 64 KiB before the WLH search contract can be validated.',
+      },
+    ];
   if (kind === 'invalid_json')
     return [
       {

@@ -7,7 +7,10 @@ import {
   extractRoutesFromSource,
   findDuplicateOperationIds,
   findGptWlhThinSchemaIssues,
+  findGptScopeIssues,
   findMissingCanonicalRoutes,
+  findImplementationAuthorizationIssues,
+  findUnexpectedGptRoutes,
   findStaleSplitContractReferences,
   findUnexpectedSplitContractFiles,
 } from '../check-openapi-route-drift.mjs';
@@ -15,8 +18,11 @@ import {
 test('extracts app.http routes and documentable methods from Azure Functions source', () => {
   const source = `
     import { app } from '@azure/functions';
-    import { authorizeRequest } from '../shared/security/auth.js';
-    async function handler(request, context) { await authorizeRequest(request, context); }
+    import { authorizeRequestForOperation } from '../shared/security/auth.js';
+    import { OPERATION_IDS } from '../application/operations/registry.js';
+    async function handler(request, context) {
+      await authorizeRequestForOperation(request, context, OPERATION_IDS.hello);
+    }
     app.http('sampleRoute', {
       methods: ['GET', 'OPTIONS', 'POST'],
       authLevel: 'anonymous',
@@ -32,6 +38,7 @@ test('extracts app.http routes and documentable methods from Azure Functions sou
       method: 'get',
       path: '/api/sample/{id}',
       protected: true,
+      referencedOperationIds: ['local.hello'],
     },
     {
       functionName: 'sampleRoute',
@@ -39,8 +46,73 @@ test('extracts app.http routes and documentable methods from Azure Functions sou
       method: 'post',
       path: '/api/sample/{id}',
       protected: true,
+      referencedOperationIds: ['local.hello'],
     },
   ]);
+});
+
+test('registry-protected routes fail when their handler authorization is removed', () => {
+  const routes = extractRoutesFromSource(
+    `app.http('sampleRoute', {
+      methods: ['POST'],
+      route: 'api/sample',
+      handler: async () => ({ status: 200 }),
+    });`,
+    'sample.ts',
+  );
+  const issues = findImplementationAuthorizationIssues(routes, [
+    {
+      id: 'sample.read',
+      requiredPermission: 'catalogue.read',
+      rest: { method: 'POST', path: '/api/sample' },
+    },
+  ]);
+  assert.ok(issues.some((issue) => issue.includes('has no recognized operation authorization call')));
+});
+
+test('GPT Actions route allowlist rejects registry-excluded write routes', () => {
+  const issues = findUnexpectedGptRoutes([{ method: 'get', path: '/api/bring/lists', filePath: 'bring.ts' }], {
+    paths: {
+      '/api/bring/lists': { get: { operationId: 'bringListLists' } },
+      '/api/bring/lists/{listUuid}/items': { post: { operationId: 'bringAddItems' } },
+    },
+  });
+  assert.deepEqual(issues, ['GPT Actions OpenAPI exposes non-approved route POST /api/bring/lists/{listUuid}/items.']);
+});
+
+test('GPT Actions OAuth scope allowlist rejects mutation permissions', () => {
+  const issues = findGptScopeIssues(
+    {
+      components: {
+        securitySchemes: {
+          entraOAuth2: {
+            flows: {
+              authorizationCode: {
+                scopes: {
+                  'api://example/bring.read': 'read',
+                  'api://example/bring.write': 'write',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    [
+      {
+        id: 'bring.get-items',
+        requiredPermission: 'bring.read',
+        rest: { method: 'GET', path: '/api/bring/lists/{listUuid}/items' },
+      },
+      {
+        id: 'bring.add-items',
+        requiredPermission: 'bring.write',
+        rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/items' },
+        gptActions: false,
+      },
+    ],
+  );
+  assert.deepEqual(issues, ["GPT Actions OAuth exposes non-approved scope 'bring.write'."]);
 });
 
 test('excludes intentional non-OpenAPI protocol and metadata routes', () => {

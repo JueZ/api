@@ -26,7 +26,7 @@
     "ops:write-release-ledger": "node scripts/write-release-ledger.mjs",
     "ops:mint-smoke-token": "node scripts/mint-smoke-token.mjs",
     "ops:resolve-reddit-share": "npm run build:api --silent && node scripts/resolve-reddit-share-url.mjs",
-    "ops:check-openapi-drift": "node scripts/check-openapi-route-drift.mjs",
+    "ops:check-openapi-drift": "npm run build:api --silent && node scripts/check-openapi-route-drift.mjs",
     "ops:check-operation-drift": "npm run build:api --silent && node scripts/check-operation-contract-drift.mjs",
     "ops:check-architecture": "node scripts/check-architecture.mjs",
     "ops:validate-agent-skills": "node scripts/validate-agent-skills.mjs",

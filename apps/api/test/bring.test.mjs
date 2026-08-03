@@ -25,6 +25,7 @@ const sharedListUuid = '22222222-2222-4222-8222-222222222222';
 const unlistedListUuid = '33333333-3333-4333-8333-333333333333';
 const operationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const secondOperationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const expectedListVersion = '0'.repeat(64);
 const hmacKey = 'bring-test-hmac-key-that-is-at-least-32-bytes';
 const encryptionKey = Buffer.alloc(32, 7).toString('base64');
 const cfg = {
@@ -394,8 +395,9 @@ test('list versions are stable and batch mutations preserve the observed Bring w
     { name: 'Äpfel & Milch', specification: '1 Liter' },
   ];
   await service.addItems(listUuid, items, first.version);
-  await service.completeItems(listUuid, items);
-  await service.removeItems(listUuid, items);
+  await assert.rejects(service.completeItems(listUuid, items), BringInputError);
+  await service.completeItems(listUuid, items, first.version);
+  await service.removeItems(listUuid, items, first.version);
   assert.deepEqual(
     calls.map((payload) => payload.changes[0].operation),
     ['TO_PURCHASE', 'TO_RECENTLY', 'REMOVE'],
@@ -740,10 +742,15 @@ test('destructive mutations require a fresh principal-bound confirmation and exe
   const command = {
     operationId: secondOperationId,
     listUuid,
+    expectedListVersion,
     operation: 'remove',
     items: [{ name: 'Private item name' }],
   };
 
+  await assert.rejects(
+    coordinator.prepare(principal, { ...command, expectedListVersion: undefined }, 'trace-prepare-missing-version'),
+    BringInputError,
+  );
   const prepared = await coordinator.prepare(principal, command, 'trace-prepare-1');
   const refreshed = await coordinator.prepare(principal, command, 'trace-prepare-2');
   assert.equal(prepared.state, 'prepared');
@@ -818,6 +825,7 @@ test('concurrent confirmation apply uses optimistic concurrency and calls the pr
     {
       operationId: secondOperationId,
       listUuid,
+      expectedListVersion,
       operation: 'complete',
       items: [{ name: 'Milk' }],
     },
@@ -853,6 +861,7 @@ test('partial provider success with an ambiguous timeout is recorded and never r
     {
       operationId: secondOperationId,
       listUuid,
+      expectedListVersion,
       operation: 'complete',
       items: [{ name: 'Milk' }],
     },
@@ -957,6 +966,20 @@ test('HTTP handler uses the breaking add/prepare/apply contract through one appl
         `https://api.test/api/bring/lists/${listUuid}/mutations/prepare`,
         {
           operationId: secondOperationId,
+          expectedListVersion,
+          operation: 'remove',
+          items: [{ name: 'Milk' }],
+        },
+        { listUuid },
+      ),
+      context({ functionName: 'bringPrepareMutation' }),
+    );
+    const missingVersion = await handler(
+      request(
+        'POST',
+        `https://api.test/api/bring/lists/${listUuid}/mutations/prepare`,
+        {
+          operationId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
           operation: 'remove',
           items: [{ name: 'Milk' }],
         },
@@ -982,6 +1005,7 @@ test('HTTP handler uses the breaking add/prepare/apply contract through one appl
     );
     assert.equal(add.status, 200);
     assert.equal(prepare.status, 200);
+    assert.equal(missingVersion.status, 400);
     assert.equal(apply.status, 200);
     assert.equal(missingList.status, 400);
   });
@@ -992,6 +1016,7 @@ test('HTTP handler uses the breaking add/prepare/apply contract through one appl
   );
   assert.equal(calls[0][1].operationId, operationId);
   assert.equal(calls[1][1].operation, 'remove');
+  assert.equal(calls[1][1].expectedListVersion, expectedListVersion);
   assert.equal(calls[2][1].listUuid, listUuid);
   assert.equal(calls[2][1].confirmationToken, 'safe-token');
 });

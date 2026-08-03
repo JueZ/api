@@ -62,6 +62,8 @@ const jsonRpcContentType = 'application/json';
 export const MCP_REQUEST_BODY_MAX_BYTES = 256 * 1024;
 const maxMcpComments = 50;
 const maxCommentBodyChars = 800;
+const maxRedditTraversalDepth = 64;
+const maxRedditTraversalNodes = 10_000;
 const maxCategoryMatches = 10;
 const maxCategoryScan = 200;
 
@@ -1364,12 +1366,20 @@ function toMcpRedditPost(value: unknown): Record<string, unknown> {
   });
 }
 
-function flattenRedditComments(
-  value: unknown,
-  out: Array<Record<string, unknown>> = [],
-): Array<Record<string, unknown>> {
-  for (const item of arrayValue(value)) {
-    const comment = asRecord(item);
+function flattenRedditComments(value: unknown): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  const visited = new Set<object>();
+  const stack: Array<{ value: unknown; depth: number }> = [];
+  const roots = arrayValue(value);
+  for (let index = roots.length - 1; index >= 0; index -= 1) {
+    stack.push({ value: roots[index], depth: 0 });
+  }
+  while (stack.length > 0 && out.length < maxRedditTraversalNodes) {
+    const entry = stack.pop();
+    if (!entry || entry.depth > maxRedditTraversalDepth || !entry.value || typeof entry.value !== 'object') continue;
+    if (visited.has(entry.value)) continue;
+    visited.add(entry.value);
+    const comment = asRecord(entry.value);
     const body = stringValue(comment['body']) ?? '';
     out.push(
       compactRecord({
@@ -1384,7 +1394,10 @@ function flattenRedditComments(
         truncated: body.length > maxCommentBodyChars,
       }),
     );
-    flattenRedditComments(comment['replies'], out);
+    const replies = arrayValue(comment['replies']);
+    for (let index = replies.length - 1; index >= 0; index -= 1) {
+      stack.push({ value: replies[index], depth: entry.depth + 1 });
+    }
   }
   return out;
 }

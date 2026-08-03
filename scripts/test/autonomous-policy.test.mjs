@@ -669,15 +669,20 @@ test('package scripts, build controls, and executable code always require indepe
     'eslint.config.js',
     '.prettierignore',
     '.prettierrc.json',
+    'bicepconfig.json',
     'apps/web/src/app/app.ts',
     'scripts/check-lockfile-policy.mjs',
   ];
   const risk = classifyRisk(paths, policy);
   assert.equal(risk.highRisk, true);
   assert.deepEqual(risk.highRiskPaths, paths);
-  assert.deepEqual(risk.classes.supplyChain, paths);
+  assert.deepEqual(
+    risk.classes.supplyChain,
+    paths.filter((path) => path !== 'bicepconfig.json'),
+  );
+  assert.deepEqual(risk.classes.infrastructure, ['bicepconfig.json']);
 
-  for (const removedPattern of ['package.json', 'package-lock.json', 'apps/**', 'scripts/**']) {
+  for (const removedPattern of ['package.json', 'package-lock.json', 'bicepconfig.json', 'apps/**', 'scripts/**']) {
     const weakened = {
       ...policy,
       highRiskPaths: policy.highRiskPaths.filter((pattern) => pattern !== removedPattern),
@@ -1586,6 +1591,34 @@ index 1111111..0000000
   assert.deepEqual(capsule.reviewedPaths, ['scripts/deprecated.sh']);
   assert.match(capsule.diff, /deleted file mode 100755/);
   assert.match(capsule.diff, /-echo deprecated/);
+});
+
+test('review capsule rejects opaque binary content for reviewed executable and high-risk paths', () => {
+  const binaryDiff = `diff --git a/scripts/native-helper.bin b/scripts/native-helper.bin
+index 1111111..2222222 100644
+GIT binary patch
+literal 4
+LcmeZtF%H5o01yBG
+`;
+  assert.throws(
+    () =>
+      buildReviewDiffCapsule(binaryDiff, { highRiskPaths: ['scripts/native-helper.bin'] }, [
+        'scripts/native-helper.bin',
+      ]),
+    /opaque binary path: scripts\/native-helper\.bin/,
+  );
+
+  const binaryMarker = `diff --git a/docs/security/control.png b/docs/security/control.png
+index 1111111..2222222 100644
+Binary files a/docs/security/control.png and b/docs/security/control.png differ
+`;
+  assert.throws(
+    () =>
+      buildReviewDiffCapsule(binaryMarker, { highRiskPaths: ['docs/security/control.png'] }, [
+        'docs/security/control.png',
+      ]),
+    /opaque binary path: docs\/security\/control\.png/,
+  );
 });
 
 test('pull request state rejects forks, stale heads, and behind branches', () => {

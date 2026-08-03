@@ -4,7 +4,7 @@ version: 1
 # requires an independently reviewed update to this canonical manifest.
 trustedWorkflowSha256:
   bring-readonly-canary.yml: 9cd2cd547a3b36b1c1de1769730883e613dc370493d978c356d37d90f1e08898
-  ci.yml: 389e2cde48c13a49b7e81090894728f5fbac21e2b2c75ca7b363e3244e3faa45
+  ci.yml: 4e02a507a893e914a7e41f455c2c5d7d33939ff5921f3bc479c089c52467a3cc
   codeql.yml: c543422d77c3879a7f1b61e6fee0e1a036194c78a38a33f1ea16f268d4b2bc6a
   codex-automerge.yml: 76b217b5dfa539616ee3844c1776e05e7886f1bb6a0e47c04bf4e0a950a52380
   codex-main-delivery.yml: 6d9510c8ca610bad996c1310d4a31fc7abb77738402fe57fb510e01b1f4c6b03
@@ -78,6 +78,7 @@ highRiskPaths:
   - eslint.config.js
   - .prettierignore
   - .prettierrc.json
+  - bicepconfig.json
   - apps/**
   - scripts/**
   - .github/workflows/**
@@ -130,6 +131,7 @@ riskClasses:
     - .github/actions/**
     - scripts/autonomous-merge-controller.mjs
   infrastructure:
+    - bicepconfig.json
     - infra/**
   authentication:
     - apps/api/src/shared/security/**

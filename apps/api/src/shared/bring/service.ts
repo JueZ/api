@@ -159,6 +159,9 @@ export class BringService {
     const id = await this.resolveListUuid(listUuid);
     await this.assertWritableList(id);
 
+    if (operation !== 'add' && !expectedListVersion) {
+      throw new BringInputError('expectedListVersion is required for destructive mutations.', 'expectedListVersion');
+    }
     if (expectedListVersion) {
       if (!/^[0-9a-f]{64}$/.test(expectedListVersion)) {
         throw new BringInputError('expectedListVersion must be a lowercase SHA-256 digest.', 'expectedListVersion');

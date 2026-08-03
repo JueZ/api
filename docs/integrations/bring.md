@@ -29,15 +29,15 @@ Complete and remove use two phases:
 
 ```text
 POST /api/bring/lists/{listUuid}/mutations/prepare
-{ operationId, expectedListVersion?, operation, items }
+{ operationId, expectedListVersion, operation, items }
 
 POST /api/bring/lists/{listUuid}/mutations/apply
 { operationId, confirmationToken }
 ```
 
-Prepare validates policy, input, current list membership, sharing status, and optional optimistic concurrency without calling the mutation endpoint. It returns an HMAC list pseudonym, item count, expiry, and a five-minute token bound to the principal, operation ID, list, operation, and encrypted payload. Apply verifies that binding before one upstream call.
+Prepare requires the SHA-256 list version from the latest read, then validates policy, input, current list membership, sharing status, and optimistic concurrency without calling the mutation endpoint. It returns an HMAC list pseudonym, item count, expiry, and a five-minute token bound to the principal, operation ID, list, operation, version, and encrypted payload. Apply verifies that binding and rechecks the current list version before one upstream call.
 
-MCP exposes only `bring_list_lists` and `bring_get_items`. Mutations stay on the authenticated REST/web-explorer path so provider-controlled Reddit, Willhaben, or Bring content cannot ask the same model session to replay a write or confirmation token. The explorer keeps a prepared confirmation token only in private in-memory state, redacts it from rendered results and generated curl commands, and clears it after use or sign-out.
+MCP and GPT Actions expose only `bring_list_lists` and `bring_get_items`. Mutations stay on the authenticated REST/web-explorer path so provider-controlled Reddit, Willhaben, or Bring content cannot ask the same model session to perform or replay a write or confirmation token. The explorer keeps a prepared confirmation token only in private in-memory state, redacts it from rendered results and generated curl commands, and clears it after use or sign-out.
 
 ## Storage, encryption, and audit
 

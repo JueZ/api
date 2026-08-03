@@ -374,7 +374,19 @@ export function buildFallbackRepairableProblem(args: {
   let invalid_fields: InvalidField[] | undefined;
   let correct_request_example: unknown;
 
-  if (status === 400) {
+  if (status === 413) {
+    classification = 'caller_contract_violation';
+    repairable = true;
+    retryPolicy = { can_retry: true, same_request: false, idempotency_required: false };
+    title = 'Request body too large';
+    callerInstruction = 'Reduce the JSON request body to the documented byte limit and retry.';
+    repair_plan = [
+      {
+        action: 'retry_with_modified_request',
+        reason: 'The request body exceeded the endpoint byte limit before JSON parsing.',
+      },
+    ];
+  } else if (status === 400) {
     classification = 'caller_contract_violation';
     repairable = true;
     retryPolicy = { can_retry: true, same_request: false, idempotency_required: false };
@@ -467,7 +479,7 @@ export function buildFallbackRepairableProblem(args: {
     ...(args.trace_id ? { trace_id: args.trace_id } : {}),
     classification,
     repairable,
-    confidence: isShareUrl || status === 400 ? 0.82 : 0.68,
+    confidence: isShareUrl || status === 400 || status === 413 ? 0.82 : 0.68,
     retry_policy: retryPolicy,
     ...(invalid_fields ? { invalid_fields } : {}),
     ...(repair_plan ? { repair_plan } : {}),

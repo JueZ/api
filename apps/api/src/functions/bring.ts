@@ -209,9 +209,7 @@ function parsePrepareCommand(body: Record<string, unknown>, listUuid: string): P
     operationId: requiredString(body, 'operationId'),
     listUuid,
     operation,
-    ...(optionalString(body, 'expectedListVersion')
-      ? { expectedListVersion: optionalString(body, 'expectedListVersion') }
-      : {}),
+    expectedListVersion: requiredString(body, 'expectedListVersion'),
     items: requiredArray(body, 'items'),
   } as PrepareMutationCommand;
 }

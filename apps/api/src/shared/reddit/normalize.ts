@@ -51,6 +51,8 @@ interface NormalizeOptions {
   maxComments: number;
 }
 
+export const MAX_REDDIT_COMMENT_DEPTH = 64;
+
 export function normalizeInitialThread(
   input: string,
   listings: unknown,
@@ -64,7 +66,8 @@ export function normalizeInitialThread(
 
   const state = createNormalizeState(options.maxComments);
   const post = normalizePost(postThing.data as Record<string, unknown>);
-  const comments = normalizeCommentChildren(commentListing.data?.children ?? [], 0, state);
+  const comments: RedditCommentDto[] = [];
+  normalizeCommentThings(commentListing.data?.children ?? [], 0, state, comments);
 
   return {
     post,
@@ -94,27 +97,7 @@ export function attachMoreChildren(
     warnings: tree.warnings,
   };
 
-  for (const thing of listing) {
-    if (state.commentsReturned >= state.maxComments) {
-      markTruncated(state, 'maxComments limit reached while expanding omitted comments.');
-      break;
-    }
-
-    if (thing.kind === 't1' && thing.data && typeof thing.data === 'object') {
-      const comment = normalizeComment(thing.data as Record<string, unknown>, depth, state);
-      if (!comment) {
-        continue;
-      }
-      const parent = tree.commentByFullname.get(comment.parentId) ?? tree.commentByFullname.get(parentId);
-      if (parent) {
-        parent.replies.push(comment);
-      } else {
-        tree.comments.push(comment);
-      }
-    } else if (thing.kind === 'more') {
-      collectMore(thing.data, parentId, depth, state);
-    }
-  }
+  normalizeCommentThings(listing, depth, state, tree.comments, parentId, true);
 
   tree.commentsReturned = state.commentsReturned;
   tree.truncated = state.truncated;
@@ -186,22 +169,7 @@ export function normalizeCommentBlockFromThings(
 ): NormalizedCommentBlock {
   const state = createNormalizeState(options.maxComments);
   const comments: RedditCommentDto[] = [];
-  for (const thing of assertMoreChildrenListing(things)) {
-    if (state.commentsReturned >= state.maxComments) {
-      markTruncated(state, 'maxComments limit reached while parsing comment block.');
-      break;
-    }
-    if (thing.kind === 't1' && thing.data && typeof thing.data === 'object') {
-      const comment = normalizeComment(thing.data as Record<string, unknown>, depth, state);
-      if (comment) {
-        const parent = state.commentByFullname.get(comment.parentId) ?? state.commentByFullname.get(parentId);
-        if (parent) parent.replies.push(comment);
-        else comments.push(comment);
-      }
-    } else if (thing.kind === 'more') {
-      collectMore(thing.data, parentId, depth, state);
-    }
-  }
+  normalizeCommentThings(assertMoreChildrenListing(things), depth, state, comments, parentId, true);
   return {
     comments,
     commentByFullname: state.commentByFullname,
@@ -280,27 +248,80 @@ function normalizePost(data: Record<string, unknown>): RedditPostDto {
   };
 }
 
-function normalizeCommentChildren(things: RedditThing[], depth: number, state: NormalizeState): RedditCommentDto[] {
-  const comments: RedditCommentDto[] = [];
-  for (const thing of things) {
+function normalizeCommentThings(
+  things: RedditThing[],
+  depth: number,
+  state: NormalizeState,
+  rootTarget: RedditCommentDto[],
+  fallbackParentId = '',
+  attachRootByParent = false,
+): void {
+  const stack: Array<{
+    thing: RedditThing;
+    depth: number;
+    target: RedditCommentDto[];
+    fallbackParentId: string;
+    attachByParent: boolean;
+  }> = [];
+  pushThings(stack, things, depth, rootTarget, fallbackParentId, attachRootByParent);
+
+  while (stack.length > 0) {
     if (state.commentsReturned >= state.maxComments) {
       markTruncated(state, 'maxComments limit reached while parsing comments.');
       break;
     }
-
-    if (thing.kind === 't1' && thing.data && typeof thing.data === 'object') {
-      const comment = normalizeComment(thing.data as Record<string, unknown>, depth, state);
-      if (comment) {
-        comments.push(comment);
-      }
-    } else if (thing.kind === 'more') {
-      collectMore(thing.data, '', depth, state);
+    const entry = stack.pop();
+    if (!entry) break;
+    const { thing } = entry;
+    if (thing.kind === 'more') {
+      collectMore(thing.data, entry.fallbackParentId, entry.depth, state);
+      continue;
     }
+    if (thing.kind !== 't1' || !thing.data || typeof thing.data !== 'object') continue;
+    if (entry.depth > MAX_REDDIT_COMMENT_DEPTH) {
+      collectDeferredThings([thing], entry.fallbackParentId, entry.depth, state);
+      continue;
+    }
+
+    const comment = normalizeCommentRecord(thing.data as Record<string, unknown>, entry.depth, state);
+    if (!comment) continue;
+    const parent = entry.attachByParent
+      ? (state.commentByFullname.get(comment.parentId) ?? state.commentByFullname.get(entry.fallbackParentId))
+      : undefined;
+    (parent?.replies ?? entry.target).push(comment);
+
+    const replies = (thing.data as Record<string, unknown>)['replies'];
+    if (!replies || typeof replies !== 'object') continue;
+    const childThings = (replies as RedditListing).data?.children ?? [];
+    if (entry.depth >= MAX_REDDIT_COMMENT_DEPTH) {
+      collectDeferredThings(childThings, comment.fullname, entry.depth + 1, state);
+      continue;
+    }
+    pushThings(stack, childThings, entry.depth + 1, comment.replies, comment.fullname, false);
   }
-  return comments;
 }
 
-function normalizeComment(
+function pushThings(
+  stack: Array<{
+    thing: RedditThing;
+    depth: number;
+    target: RedditCommentDto[];
+    fallbackParentId: string;
+    attachByParent: boolean;
+  }>,
+  things: RedditThing[],
+  depth: number,
+  target: RedditCommentDto[],
+  fallbackParentId: string,
+  attachByParent: boolean,
+): void {
+  for (let index = things.length - 1; index >= 0; index -= 1) {
+    const thing = things[index];
+    if (thing) stack.push({ thing, depth, target, fallbackParentId, attachByParent });
+  }
+}
+
+function normalizeCommentRecord(
   data: Record<string, unknown>,
   depth: number,
   state: NormalizeState,
@@ -308,6 +329,10 @@ function normalizeComment(
   const id = stringValue(data['id']);
   const fullname = stringValue(data['name']) || (id ? `t1_${id}` : '');
   if (!id || !fullname) {
+    return null;
+  }
+  if (state.commentByFullname.has(fullname)) {
+    markTruncated(state, 'Duplicate or cyclic Reddit comment reference was omitted.');
     return null;
   }
 
@@ -324,14 +349,27 @@ function normalizeComment(
     replies: [],
   };
   state.commentByFullname.set(fullname, comment);
-
-  const replies = data['replies'];
-  if (replies && typeof replies === 'object') {
-    const listing = replies as RedditListing;
-    comment.replies = normalizeCommentChildren(listing.data?.children ?? [], depth + 1, state);
-  }
-
   return comment;
+}
+
+function collectDeferredThings(things: RedditThing[], parentId: string, depth: number, state: NormalizeState): void {
+  const children: string[] = [];
+  for (const thing of things) {
+    if (thing.kind === 't1' && thing.data && typeof thing.data === 'object') {
+      const data = thing.data as Record<string, unknown>;
+      const id = stringValue(data['id']) || stringValue(data['name']).replace(/^t1_/, '');
+      if (id) children.push(id);
+    } else if (thing.kind === 'more' && thing.data && typeof thing.data === 'object') {
+      const more = thing.data as Record<string, unknown>;
+      if (Array.isArray(more['children'])) {
+        children.push(...more['children'].filter((child): child is string => typeof child === 'string'));
+      }
+    }
+  }
+  if (children.length > 0) {
+    state.more.push({ parentId, depth, children: [...new Set(children)] });
+  }
+  markTruncated(state, `Reddit replies deeper than ${MAX_REDDIT_COMMENT_DEPTH} levels were deferred.`);
 }
 
 function collectMore(data: unknown, fallbackParentId: string, fallbackDepth: number, state: NormalizeState): void {

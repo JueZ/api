@@ -3,6 +3,7 @@ import { getTraceIdFromRequestOrContext } from '../shared/errors/diagnosticCapsu
 import { authorizeRequestForOperation } from '../shared/security/auth.js';
 import { OPERATION_IDS } from '../application/operations/registry.js';
 import { createCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
+import { BodyTooLargeError, readRequestJsonWithLimit } from '../shared/http/boundedBody.js';
 import {
   buildWlhProblem,
   resolveWlhProblemForError,
@@ -20,6 +21,7 @@ function currentService(): WlhService {
 }
 
 const corsOptions = { methods: ['POST', 'OPTIONS'] } satisfies CorsOptions;
+const REQUEST_BODY_MAX_BYTES = 64 * 1024;
 
 export async function wlhSearchHandler(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (request.method === 'OPTIONS') return { status: 204, headers: corsHeaders(request) };
@@ -28,10 +30,14 @@ export async function wlhSearchHandler(request: HttpRequest, context: Invocation
   const traceId = getTraceIdFromRequestOrContext(request, context);
   let body;
   try {
-    body = await request.json();
-  } catch {
+    body = await readRequestJsonWithLimit(request, REQUEST_BODY_MAX_BYTES);
+  } catch (error) {
     return wlhProblemResponse(
-      buildWlhProblem({ operationId: WLH_OPERATION_IDS.postWlhSearch, failureKind: 'invalid_json', traceId }),
+      buildWlhProblem({
+        operationId: WLH_OPERATION_IDS.postWlhSearch,
+        failureKind: error instanceof BodyTooLargeError ? 'body_too_large' : 'invalid_json',
+        traceId,
+      }),
       corsHeaders(request),
     );
   }

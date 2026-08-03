@@ -29,7 +29,7 @@ export interface AddItemsCommand {
 export interface PrepareMutationCommand {
   operationId: string;
   listUuid: string;
-  expectedListVersion?: string;
+  expectedListVersion: string;
   operation: BringDestructiveOperation;
   items: BringItemInput[];
 }
@@ -523,9 +523,7 @@ function normalizePrepareCommand(command: PrepareMutationCommand): PrepareMutati
     operationId: normalizeOperationId(command.operationId),
     listUuid: normalizeListUuid(command.listUuid),
     operation: command.operation,
-    ...(normalizeExpectedVersion(command.expectedListVersion)
-      ? { expectedListVersion: command.expectedListVersion }
-      : {}),
+    expectedListVersion: normalizeRequiredExpectedVersion(command.expectedListVersion),
     items: validateItems(command.items),
   };
 }
@@ -550,6 +548,14 @@ function normalizeExpectedVersion(value: string | undefined): string | undefined
     throw new BringInputError('expectedListVersion must be a lowercase SHA-256 digest.', 'expectedListVersion');
   }
   return value;
+}
+
+function normalizeRequiredExpectedVersion(value: string | undefined): string {
+  const normalized = normalizeExpectedVersion(value);
+  if (!normalized) {
+    throw new BringInputError('expectedListVersion is required for destructive mutations.', 'expectedListVersion');
+  }
+  return normalized;
 }
 
 function toPayload(command: AddItemsCommand | PrepareMutationCommand): BringMutationPayload {

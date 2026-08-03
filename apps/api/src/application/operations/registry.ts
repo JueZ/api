@@ -118,6 +118,7 @@ const definitions = [
     confirmation: 'not-applicable',
     audit: mutationAudit,
     rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/items' },
+    gptActions: false,
   }),
   define({
     id: OPERATION_IDS.bringPrepareComplete,
@@ -132,6 +133,7 @@ const definitions = [
     confirmation: 'required',
     audit: mutationAudit,
     rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/mutations/prepare' },
+    gptActions: false,
   }),
   define({
     id: OPERATION_IDS.bringPrepareRemove,
@@ -146,6 +148,7 @@ const definitions = [
     confirmation: 'required',
     audit: mutationAudit,
     rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/mutations/prepare' },
+    gptActions: false,
   }),
   define({
     id: OPERATION_IDS.bringApplyComplete,
@@ -160,6 +163,7 @@ const definitions = [
     confirmation: 'required',
     audit: mutationAudit,
     rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/mutations/apply' },
+    gptActions: false,
   }),
   define({
     id: OPERATION_IDS.bringApplyRemove,
@@ -174,6 +178,7 @@ const definitions = [
     confirmation: 'required',
     audit: mutationAudit,
     rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/mutations/apply' },
+    gptActions: false,
   }),
 ] as const satisfies readonly OperationDefinition[];
 

@@ -4,6 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import ts from 'typescript';
 import YAML from 'yaml';
+import { listOperationDefinitions, OPERATION_IDS } from '../apps/api/dist/application/operations/registry.js';
 
 const DEFAULT_FUNCTIONS_GLOB_DIR = 'apps/api/src/functions';
 const CANONICAL_CONTRACT = 'contracts/openapi.yaml';
@@ -57,9 +58,35 @@ function normalizeRoute(route) {
   return `/${trimmed}`.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
 }
 
-function detectProtectedSource(sourceText) {
-  return /\bauthorizeRequest\s*\(/.test(sourceText);
+function authorizationFacts(sourceFile) {
+  let hasAuthorizationCall = false;
+  const referencedOperationIds = new Set();
+  function visit(node) {
+    if (
+      ts.isCallExpression(node) &&
+      ((ts.isIdentifier(node.expression) && authorizationFunctionNames.has(node.expression.text)) ||
+        (ts.isPropertyAccessExpression(node.expression) && authorizationFunctionNames.has(node.expression.name.text)))
+    ) {
+      hasAuthorizationCall = true;
+    }
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === 'OPERATION_IDS'
+    ) {
+      const operationId = OPERATION_IDS[node.name.text];
+      if (operationId) referencedOperationIds.add(operationId);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return { hasAuthorizationCall, referencedOperationIds: [...referencedOperationIds].sort() };
 }
+
+const authorizationFunctionNames = new Set([
+  'authorizeRequestForOperation',
+  'authorizeAuthenticatedPrincipalForOperation',
+]);
 
 function isIntentionalNonOpenApiRoute(route) {
   return INTENTIONAL_NON_OPENAPI_ROUTES.has(route.path);
@@ -67,7 +94,7 @@ function isIntentionalNonOpenApiRoute(route) {
 
 export function extractRoutesFromSource(sourceText, filePath = '<inline>') {
   const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const protectedSource = detectProtectedSource(sourceText);
+  const facts = authorizationFacts(sourceFile);
   const routes = [];
 
   function visit(node) {
@@ -100,7 +127,8 @@ export function extractRoutesFromSource(sourceText, filePath = '<inline>') {
           filePath,
           method,
           path: normalizeRoute(routeValue),
-          protected: protectedSource,
+          protected: facts.hasAuthorizationCall,
+          referencedOperationIds: facts.referencedOperationIds,
         });
       }
     }
@@ -255,6 +283,68 @@ export function findProtectedRouteAuthIssues(implementationRoutes, contracts) {
   return issues;
 }
 
+export function findImplementationAuthorizationIssues(implementationRoutes, operations = listOperationDefinitions()) {
+  const issues = [];
+  const definitionsByRoute = new Map();
+  for (const operation of operations) {
+    if (!operation.rest) continue;
+    const key = `${operation.rest.method.toLowerCase()} ${operation.rest.path}`;
+    const definitions = definitionsByRoute.get(key) ?? [];
+    definitions.push(operation);
+    definitionsByRoute.set(key, definitions);
+  }
+  for (const route of implementationRoutes) {
+    const definitions = definitionsByRoute.get(`${route.method} ${route.path}`) ?? [];
+    const protectedDefinitions = definitions.filter((definition) => definition.requiredPermission);
+    if (protectedDefinitions.length === 0) continue;
+    if (!route.protected) {
+      issues.push(
+        `${route.filePath}: protected registry route ${describeRoute(route)} has no recognized operation authorization call.`,
+      );
+      continue;
+    }
+    const referenced = new Set(route.referencedOperationIds ?? []);
+    for (const definition of protectedDefinitions) {
+      if (!referenced.has(definition.id)) {
+        issues.push(
+          `${route.filePath}: protected registry route ${describeRoute(route)} does not reference canonical operation '${definition.id}'.`,
+        );
+      }
+    }
+  }
+  return issues;
+}
+
+export function findUnexpectedGptRoutes(gptIntendedRoutes, gptContract) {
+  const intended = new Set(gptIntendedRoutes.map((route) => `${route.method} ${route.path}`));
+  return operationEntries(gptContract)
+    .filter((entry) => !intended.has(`${entry.method} ${entry.path}`))
+    .map((entry) => `GPT Actions OpenAPI exposes non-approved route ${entry.method.toUpperCase()} ${entry.path}.`);
+}
+
+export function findGptScopeIssues(gptContract, operations = listOperationDefinitions()) {
+  const expected = new Set(
+    operations
+      .filter((operation) => operation.rest && operation.gptActions !== false && operation.requiredPermission)
+      .map((operation) => operation.requiredPermission),
+  );
+  const configured = new Set(
+    Object.keys(gptContract.components?.securitySchemes?.entraOAuth2?.flows?.authorizationCode?.scopes ?? {}).map(
+      (scope) => scope.slice(scope.lastIndexOf('/') + 1),
+    ),
+  );
+  return [
+    ...[...expected]
+      .filter((scope) => !configured.has(scope))
+      .sort()
+      .map((scope) => `GPT Actions OAuth is missing registry-approved scope '${scope}'.`),
+    ...[...configured]
+      .filter((scope) => !expected.has(scope))
+      .sort()
+      .map((scope) => `GPT Actions OAuth exposes non-approved scope '${scope}'.`),
+  ];
+}
+
 export function findUnstableSharedOperationIds(canonicalContract, gptContract) {
   const issues = [];
   for (const canonicalEntry of operationEntries(canonicalContract)) {
@@ -337,15 +427,35 @@ export function checkOpenApiRouteDrift({
   const canonical = canonicalContract ?? parseOpenApiFile(CANONICAL_CONTRACT);
   const gpt = gptContract ?? parseOpenApiFile(GPT_CONTRACT);
   const rawGpt = gptRawText || (fs.existsSync(GPT_CONTRACT) ? fs.readFileSync(GPT_CONTRACT, 'utf8') : '');
+  const operations = listOperationDefinitions();
+  const gptRouteKeys = new Set(
+    operations
+      .filter((operation) => operation.rest && operation.gptActions !== false)
+      .map((operation) => `${operation.rest.method.toLowerCase()} ${operation.rest.path}`),
+  );
+  const gptIntendedRoutes = routes.filter((route) => gptRouteKeys.has(`${route.method} ${route.path}`));
 
   const issues = [
     ...findUnexpectedSplitContractFiles(baseDir),
     ...findMissingCanonicalRoutes(routes, canonical),
-    ...findProtectedRouteAuthIssues(routes, [
-      { name: 'canonical OpenAPI', contract: canonical },
-      { name: 'GPT Actions OpenAPI', contract: gpt },
-    ]),
-    ...findMissingGptRoutes(routes, gpt),
+    ...findImplementationAuthorizationIssues(routes, operations),
+    ...findProtectedRouteAuthIssues(
+      routes.filter((route) =>
+        operations.some(
+          (operation) =>
+            operation.rest?.method.toLowerCase() === route.method &&
+            operation.rest.path === route.path &&
+            operation.requiredPermission,
+        ),
+      ),
+      [
+        { name: 'canonical OpenAPI', contract: canonical },
+        { name: 'GPT Actions OpenAPI', contract: gpt },
+      ],
+    ),
+    ...findMissingGptRoutes(gptIntendedRoutes, gpt),
+    ...findUnexpectedGptRoutes(gptIntendedRoutes, gpt),
+    ...findGptScopeIssues(gpt, operations),
     ...findDuplicateOperationIds(canonical, 'canonical OpenAPI'),
     ...findDuplicateOperationIds(gpt, 'GPT Actions OpenAPI'),
     ...findUnstableSharedOperationIds(canonical, gpt),

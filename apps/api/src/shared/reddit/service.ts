@@ -25,6 +25,7 @@ import {
   createCommentTreeResponse,
   createThreadResponse,
   focusedCommentsQuery,
+  MAX_REDDIT_COMMENT_DEPTH,
   normalizeCommentBlockFromThings,
   normalizeFocusedCommentBlock,
   normalizeInitialThread,
@@ -54,6 +55,7 @@ import { RedditPrincipalConcurrencyError } from './concurrency.js';
 export const REDDIT_EXPANSION_TIMEOUT_BUDGET_MS = 20_000;
 export const REDDIT_RATE_LIMIT_RESERVE = 10;
 const MORE_CHILDREN_BATCH_SIZE = 100;
+const MAX_REDDIT_FLATTENED_COMMENTS = 10_000;
 
 export interface RedditThreadServiceOptions {
   fetchImpl?: FetchLike;
@@ -753,7 +755,17 @@ function flattenComments(
   options: { includeBody: boolean; bodyPreviewChars: number },
 ): RedditCommentSkeletonDto[] {
   const rows: RedditCommentSkeletonDto[] = [];
-  const visit = (comment: RedditCommentDto): void => {
+  const visited = new Set<RedditCommentDto>();
+  const stack: Array<{ comment: RedditCommentDto; depth: number }> = [];
+  for (let index = comments.length - 1; index >= 0; index -= 1) {
+    const comment = comments[index];
+    if (comment) stack.push({ comment, depth: 0 });
+  }
+  while (stack.length > 0 && rows.length < MAX_REDDIT_FLATTENED_COMMENTS) {
+    const entry = stack.pop();
+    if (!entry || entry.depth > MAX_REDDIT_COMMENT_DEPTH || visited.has(entry.comment)) continue;
+    const { comment } = entry;
+    visited.add(comment);
     const isDeleted = comment.author === '[deleted]' || comment.body === '[deleted]' || comment.body === '[removed]';
     const row: RedditCommentSkeletonDto = {
       id: comment.id,
@@ -769,9 +781,11 @@ function flattenComments(
       ...(options.includeBody ? { body: comment.body } : {}),
     };
     rows.push(row);
-    for (const reply of comment.replies) visit(reply);
-  };
-  for (const comment of comments) visit(comment);
+    for (let index = comment.replies.length - 1; index >= 0; index -= 1) {
+      const reply = comment.replies[index];
+      if (reply) stack.push({ comment: reply, depth: entry.depth + 1 });
+    }
+  }
   return rows;
 }
 
@@ -795,7 +809,7 @@ function applyCommentFilters(
   });
 }
 
-function pageRows(
+export function pageRows(
   rows: RedditCommentSkeletonDto[],
   offset: number,
   limit: number,
@@ -804,9 +818,12 @@ function pageRows(
   const page: RedditCommentSkeletonDto[] = [];
   let index = offset;
   let truncatedBy: 'limit' | 'maxBytes' | 'cursor' | null = null;
+  let encodedBytes = 2;
   while (index < rows.length && page.length < limit) {
     const candidate = rows[index];
-    if (JSON.stringify([...page, candidate]).length > maxBytes) {
+    const candidateBytes = Buffer.byteLength(JSON.stringify(candidate), 'utf8');
+    const nextBytes = encodedBytes + (page.length > 0 ? 1 : 0) + candidateBytes;
+    if (nextBytes > maxBytes) {
       truncatedBy = 'maxBytes';
       if (page.length === 0) {
         page.push(candidate);
@@ -815,6 +832,7 @@ function pageRows(
       break;
     }
     page.push(candidate);
+    encodedBytes = nextBytes;
     index += 1;
   }
   if (!truncatedBy && page.length >= limit && index < rows.length) truncatedBy = 'limit';

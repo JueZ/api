@@ -186,6 +186,52 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
   ]);
 });
 
+test('MCP Reddit shaping handles a 5,000-level reply chain without recursive stack growth', async () => {
+  const services = stubServices();
+  const root = {
+    id: 'deep-0',
+    parentId: 't3_deep',
+    author: 'fixture',
+    body: 'bounded',
+    score: 0,
+    depth: 0,
+    createdUtc: 0,
+    replies: [],
+  };
+  let cursor = root;
+  for (let depth = 1; depth < 5_000; depth += 1) {
+    const reply = {
+      id: `deep-${depth}`,
+      parentId: `t1_deep-${depth - 1}`,
+      author: 'fixture',
+      body: 'bounded',
+      score: 0,
+      depth,
+      createdUtc: depth,
+      replies: [],
+    };
+    cursor.replies.push(reply);
+    cursor = reply;
+  }
+  services.reddit.fetchThread = async () => ({
+    source: 'reddit',
+    fetchedAt: '2026-08-03T00:00:00.000Z',
+    input: 'deep',
+    post: { id: 'deep', title: 'Deep fixture' },
+    comments: [root],
+    commentContinuations: [],
+    stats: { commentsReturned: 5_000, truncated: false, warnings: [] },
+  });
+
+  await withEnv(authEnv, async () => {
+    const response = await mcpCall('reddit_get_thread', { postId: 'deep' }, 'Bearer local-dev-token', services);
+    assert.equal(response.status, 200);
+    assert.equal(response.jsonBody.result.structuredContent.comments.length, 50);
+    assert.equal(response.jsonBody.result.structuredContent.comments.at(-1).depth, 49);
+    assert.equal(response.jsonBody.result.structuredContent.stats.modelTruncated, true);
+  });
+});
+
 test('MCP wlh_search exposes only effective filters and reports how each one is applied', async () => {
   const calls = [];
   const services = stubServices(calls);

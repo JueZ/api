@@ -373,6 +373,23 @@ test('invalid JSON on WLH search returns RepairableProblem', async () => {
   });
 });
 
+test('WLH search rejects oversized request bodies before service access', async () => {
+  await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
+    let called = false;
+    setWlhSearchServiceForTesting({
+      search: async () => {
+        called = true;
+        throw new Error('oversized body must not reach WLH service');
+      },
+    });
+    const request = requestWithJson({ categoryId: '10' });
+    request.headers.set('content-length', String(65 * 1024));
+    const response = await wlhSearchHandler(request, contextStub());
+    assertRepairableProblem(response, 413, 'postWlhSearch', 'caller_contract_violation');
+    assert.equal(called, false);
+  });
+});
+
 test('invalid search body returns RepairableProblem', async () => {
   await withWlhEnv({ AUTH_ENABLED: 'false' }, async () => {
     const s = new WlhService({
@@ -485,25 +502,35 @@ async function wlhOfferHandlerRequest(method, url, params, context = {}) {
 }
 
 function requestWithJson(body, authorization = undefined) {
+  const text = JSON.stringify(body);
   return {
     method: 'POST',
     url: 'https://api.test/api/wlh/search',
     params: {},
     headers: new Headers(authorization === undefined ? {} : authorization === null ? {} : { authorization }),
-    json: async () => body,
+    body: bodyFromText(text),
   };
 }
 
 function requestThatThrowsJson(authorization = undefined) {
+  const text = '{invalid';
   return {
     method: 'POST',
     url: 'https://api.test/api/wlh/search',
     params: {},
     headers: new Headers(authorization === undefined ? {} : authorization === null ? {} : { authorization }),
-    json: async () => {
-      throw new Error('invalid json');
-    },
+    body: bodyFromText(text),
   };
+}
+
+function bodyFromText(text) {
+  const bytes = new TextEncoder().encode(text);
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
 }
 
 function contextStub(overrides = {}) {

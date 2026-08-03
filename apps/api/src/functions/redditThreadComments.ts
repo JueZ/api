@@ -19,6 +19,7 @@ import type { RedditCommentQueryRequest } from '../shared/reddit/types.js';
 import { authorizeRequestForOperation } from '../shared/security/auth.js';
 import { OPERATION_IDS } from '../application/operations/registry.js';
 import { createCorsHeaders, withCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
+import { BodyTooLargeError, readRequestJsonWithLimit } from '../shared/http/boundedBody.js';
 
 const OPERATION_ID = 'postRedditThreadComments';
 const ENDPOINT = '/api/reddit/thread/comments';
@@ -44,6 +45,7 @@ const ALLOWED_REQUEST_FIELDS = [
   'thread_url',
 ];
 const ALLOWED_OPERATION_IDS = [OPERATION_ID];
+const REQUEST_BODY_MAX_BYTES = 64 * 1024;
 
 let redditThreadService = new RedditThreadService();
 let repairableErrorAnalyzer = analyzeRepairableErrorWithLlm;
@@ -62,16 +64,19 @@ export async function redditThreadCommentsHandler(
   const traceId = getTraceIdFromRequestOrContext(request, context);
   let body: RedditCommentQueryRequest;
   try {
-    body = (await request.json()) as RedditCommentQueryRequest;
-  } catch {
+    body = (await readRequestJsonWithLimit(request, REQUEST_BODY_MAX_BYTES)) as RedditCommentQueryRequest;
+  } catch (error) {
+    const tooLarge = error instanceof BodyTooLargeError;
     const problem = await problemForRedditError({
       request,
       context,
       traceId,
       diagnosticId: createDiagnosticId(),
-      status: 400,
-      failureStage: 'json_parse',
-      safeError: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' },
+      status: tooLarge ? 413 : 400,
+      failureStage: tooLarge ? 'input_validation' : 'json_parse',
+      safeError: tooLarge
+        ? { code: 'REQUEST_BODY_TOO_LARGE', message: 'Request body exceeds the allowed size.' }
+        : { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' },
     });
     return problemResponse(problem, request);
   }
