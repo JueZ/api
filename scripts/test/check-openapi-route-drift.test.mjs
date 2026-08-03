@@ -24,197 +24,78 @@ test('extracts app.http routes and documentable methods from Azure Functions sou
     async function handler(request, context) {
       await enforceOperation(request, context, CANONICAL_OPERATION_IDS.hello);
     }
-    app.http('sampleRoute', {
-      methods: ['GET', 'OPTIONS', 'POST'],
-      authLevel: 'anonymous',
-      route: 'api/sample/{id}',
-      handler,
-    });
+    app.http('sampleRoute', { methods: ['GET', 'OPTIONS', 'POST'], route: 'api/sample/{id}', handler });
   `;
 
-  assert.deepEqual(extractRoutesFromSource(source, 'sample.ts'), [
-    {
-      functionName: 'sampleRoute',
-      filePath: 'sample.ts',
-      method: 'get',
-      path: '/api/sample/{id}',
-      protected: true,
-      referencedOperationIds: ['local.hello'],
-    },
-    {
-      functionName: 'sampleRoute',
-      filePath: 'sample.ts',
-      method: 'post',
-      path: '/api/sample/{id}',
-      protected: true,
-      referencedOperationIds: ['local.hello'],
-    },
-  ]);
-});
-
-test('registry-protected routes fail when their handler authorization is removed', () => {
-  const routes = extractRoutesFromSource(
-    `app.http('sampleRoute', {
-      methods: ['POST'],
-      route: 'api/sample',
-      handler: async () => ({ status: 200 }),
-    });`,
-    'sample.ts',
+  const facts = extractRoutesFromSource(source, 'sample.ts').map(
+    ({ method, path, protected: isProtected, referencedOperationIds }) => [
+      method,
+      path,
+      isProtected,
+      referencedOperationIds,
+    ],
   );
-  const issues = findImplementationAuthorizationIssues(routes, [
-    {
-      id: 'sample.read',
-      requiredPermission: 'catalogue.read',
-      rest: { method: 'POST', path: '/api/sample' },
-    },
+  assert.deepEqual(facts, [
+    ['get', '/api/sample/{id}', true, ['local.hello']],
+    ['post', '/api/sample/{id}', true, ['local.hello']],
   ]);
-  assert.ok(issues.some((issue) => issue.includes('has no recognized operation authorization call')));
 });
 
-test('authorization evidence is scoped to each registered handler and its called helpers', () => {
+test('authorization evidence is canonical, handler-scoped, helper-aware, and shadow-safe', () => {
   const routes = extractRoutesFromSource(
     `
       import { app } from '@azure/functions';
-      import { authorizeRequestForOperation } from '../shared/security/auth.js';
-      import { OPERATION_IDS } from '../application/operations/registry.js';
-
-      async function authorizeProtected(request, context) {
-        return authorizeRequestForOperation(request, context, OPERATION_IDS.hello);
+      import { authorizeRequestForOperation as enforce } from '../shared/security/auth.js';
+      import { OPERATION_IDS as IDS } from '../application/operations/registry.js';
+      const FAKE_IDS = { hello: 'local.hello' };
+      const fake = { authorizeRequestForOperation: async () => ({ ok: true }) };
+      async function authorizeRequestForOperation() { return { ok: true }; }
+      async function protect(request, context) { return enforce(request, context, IDS.hello); }
+      async function protectedHandler(request, context) { return protect(request, context); }
+      async function plainHandler() { return { status: 200 }; }
+      async function lookalikeHandler(request, context) {
+        await authorizeRequestForOperation(request, context, FAKE_IDS.hello);
+        return fake.authorizeRequestForOperation(request, context, FAKE_IDS.hello);
       }
-      async function protectedHandler(request, context) {
-        return authorizeProtected(request, context);
+      async function shadowedHandler(enforce, request, context) { return enforce(request, context, IDS.hello); }
+      function createHandler() {
+        async function unused(request, context) { return enforce(request, context, IDS.hello); }
+        return plainHandler;
       }
-      async function unprotectedHandler() {
-        return { status: 200 };
-      }
-
-      app.http('protectedRoute', {
-        methods: ['GET'],
-        route: 'api/protected',
-        handler: protectedHandler,
-      });
-      app.http('unprotectedRoute', {
-        methods: ['GET'],
-        route: 'api/unprotected',
-        handler: unprotectedHandler,
-      });
+      const factoryHandler = createHandler();
+      app.http('protectedRoute', { methods: ['GET'], route: 'api/protected', handler: protectedHandler });
+      app.http('plainRoute', { methods: ['GET'], route: 'api/plain', handler: plainHandler });
+      app.http('lookalikeRoute', { methods: ['GET'], route: 'api/lookalike', handler: lookalikeHandler });
+      app.http('shadowedRoute', { methods: ['GET'], route: 'api/shadowed', handler: shadowedHandler });
+      app.http('factoryRoute', { methods: ['GET'], route: 'api/factory', handler: factoryHandler });
     `,
     'mixed.ts',
   );
 
   assert.deepEqual(
-    routes.map(({ path, protected: isProtected, referencedOperationIds }) => ({
+    routes.map(({ path, protected: isProtected, referencedOperationIds }) => [
       path,
-      protected: isProtected,
+      isProtected,
       referencedOperationIds,
-    })),
+    ]),
     [
-      { path: '/api/protected', protected: true, referencedOperationIds: ['local.hello'] },
-      { path: '/api/unprotected', protected: false, referencedOperationIds: [] },
+      ['/api/protected', true, ['local.hello']],
+      ['/api/plain', false, []],
+      ['/api/lookalike', false, []],
+      ['/api/shadowed', false, ['local.hello']],
+      ['/api/factory', false, []],
     ],
   );
 
   const issues = findImplementationAuthorizationIssues(routes, [
-    {
-      id: 'local.hello',
-      requiredPermission: 'hello.read',
-      rest: { method: 'GET', path: '/api/unprotected' },
-    },
+    { id: 'local.hello', requiredPermission: 'hello.read', rest: { method: 'GET', path: '/api/plain' } },
   ]);
   assert.deepEqual(issues, [
-    'mixed.ts: protected registry route GET /api/unprotected has no recognized operation authorization call.',
+    'mixed.ts: protected registry route GET /api/plain has no recognized operation authorization call.',
   ]);
 });
 
-test('unused authorization inside a handler factory cannot protect its returned handler', () => {
-  const routes = extractRoutesFromSource(
-    `
-      import { app } from '@azure/functions';
-      import { authorizeRequestForOperation } from '../shared/security/auth.js';
-      import { OPERATION_IDS } from '../application/operations/registry.js';
-
-      function createHandler() {
-        async function protectedButUnused(request, context) {
-          return authorizeRequestForOperation(request, context, OPERATION_IDS.hello);
-        }
-        return async function actualHandler() {
-          return { status: 200 };
-        };
-      }
-
-      const handler = createHandler();
-      app.http('factoryRoute', {
-        methods: ['GET'],
-        route: 'api/factory',
-        handler,
-      });
-    `,
-    'factory.ts',
-  );
-
-  assert.deepEqual(routes, [
-    {
-      functionName: 'factoryRoute',
-      filePath: 'factory.ts',
-      method: 'get',
-      path: '/api/factory',
-      protected: false,
-      referencedOperationIds: [],
-    },
-  ]);
-});
-
-test('local or property-access authorization lookalikes cannot satisfy route protection', () => {
-  const routes = extractRoutesFromSource(
-    `
-      import { app } from '@azure/functions';
-      const OPERATION_IDS = { hello: 'local.hello' };
-      const fake = { authorizeRequestForOperation: async () => ({ ok: true }) };
-      async function authorizeRequestForOperation() {
-        return { ok: true };
-      }
-      async function handler(request, context) {
-        await authorizeRequestForOperation(request, context, OPERATION_IDS.hello);
-        await fake.authorizeRequestForOperation(request, context, OPERATION_IDS.hello);
-        return { status: 200 };
-      }
-      app.http('lookalikeRoute', {
-        methods: ['GET'],
-        route: 'api/lookalike',
-        handler,
-      });
-    `,
-    'lookalike.ts',
-  );
-
-  assert.equal(routes[0].protected, false);
-  assert.deepEqual(routes[0].referencedOperationIds, []);
-});
-
-test('a handler-local binding cannot shadow a canonical authorization import', () => {
-  const routes = extractRoutesFromSource(
-    `
-      import { app } from '@azure/functions';
-      import { authorizeRequestForOperation } from '../shared/security/auth.js';
-      import { OPERATION_IDS } from '../application/operations/registry.js';
-      async function handler(authorizeRequestForOperation, request, context) {
-        await authorizeRequestForOperation(request, context, OPERATION_IDS.hello);
-        return { status: 200 };
-      }
-      app.http('shadowedRoute', {
-        methods: ['GET'],
-        route: 'api/shadowed',
-        handler,
-      });
-    `,
-    'shadowed.ts',
-  );
-
-  assert.equal(routes[0].protected, false);
-  assert.deepEqual(routes[0].referencedOperationIds, ['local.hello']);
-});
-
-test('GPT Actions exposure requires an explicit registry decision', () => {
+test('GPT Actions exposure requires explicit routes and scopes', () => {
   assert.deepEqual(
     findGptExposureDecisionIssues([
       { id: 'missing.decision', rest: { method: 'GET', path: '/api/missing' } },
@@ -226,52 +107,43 @@ test('GPT Actions exposure requires an explicit registry decision', () => {
       'invalid.non-rest: operation registry enables GPT Actions without a REST route.',
     ],
   );
-});
-
-test('GPT Actions route allowlist rejects registry-excluded write routes', () => {
-  const issues = findUnexpectedGptRoutes([{ method: 'get', path: '/api/bring/lists', filePath: 'bring.ts' }], {
-    paths: {
-      '/api/bring/lists': { get: { operationId: 'bringListLists' } },
-      '/api/bring/lists/{listUuid}/items': { post: { operationId: 'bringAddItems' } },
-    },
-  });
-  assert.deepEqual(issues, ['GPT Actions OpenAPI exposes non-approved route POST /api/bring/lists/{listUuid}/items.']);
-});
-
-test('GPT Actions OAuth scope allowlist rejects mutation permissions', () => {
-  const issues = findGptScopeIssues(
-    {
-      components: {
-        securitySchemes: {
-          entraOAuth2: {
-            flows: {
-              authorizationCode: {
-                scopes: {
-                  'api://example/bring.read': 'read',
-                  'api://example/bring.write': 'write',
-                },
-              },
+  assert.deepEqual(
+    findUnexpectedGptRoutes([{ method: 'get', path: '/api/bring/lists' }], {
+      paths: {
+        '/api/bring/lists': { get: {} },
+        '/api/bring/lists/{listUuid}/items': { post: {} },
+      },
+    }),
+    ['GPT Actions OpenAPI exposes non-approved route POST /api/bring/lists/{listUuid}/items.'],
+  );
+  assert.deepEqual(
+    findGptScopeIssues(
+      {
+        components: {
+          securitySchemes: {
+            entraOAuth2: {
+              flows: { authorizationCode: { scopes: { 'x/bring.read': '', 'x/bring.write': '' } } },
             },
           },
         },
       },
-    },
-    [
-      {
-        id: 'bring.get-items',
-        requiredPermission: 'bring.read',
-        rest: { method: 'GET', path: '/api/bring/lists/{listUuid}/items' },
-        gptActions: true,
-      },
-      {
-        id: 'bring.add-items',
-        requiredPermission: 'bring.write',
-        rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/items' },
-        gptActions: false,
-      },
-    ],
+      [
+        {
+          id: 'bring.get-items',
+          requiredPermission: 'bring.read',
+          rest: { method: 'GET', path: '/api/bring/lists/{listUuid}/items' },
+          gptActions: true,
+        },
+        {
+          id: 'bring.add-items',
+          requiredPermission: 'bring.write',
+          rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/items' },
+          gptActions: false,
+        },
+      ],
+    ),
+    ["GPT Actions OAuth exposes non-approved scope 'bring.write'."],
   );
-  assert.deepEqual(issues, ["GPT Actions OAuth exposes non-approved scope 'bring.write'."]);
 });
 
 test('excludes intentional non-OpenAPI protocol and metadata routes', () => {
