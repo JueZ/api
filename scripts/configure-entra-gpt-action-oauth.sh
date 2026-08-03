@@ -202,6 +202,57 @@ if [ "$(jq -r 'length' <<<"$missing_scope_ids_json")" -gt 0 ] || [ "$(jq -r 'len
   az ad app update --id "$gpt_app_id" --required-resource-accesses "$updated_required_resource_access" >/dev/null
 fi
 
+api_service_principal_id="$(az ad sp show --id "$API_APP_ID" --query id -o tsv)"
+gpt_service_principal_id="$(az ad sp show --id "$gpt_app_id" --query id -o tsv)"
+if [ -z "$api_service_principal_id" ] || [ -z "$gpt_service_principal_id" ]; then
+  echo "Failed to resolve Entra service principals for grant cleanup." >&2
+  exit 1
+fi
+
+permission_grants_json="$(az ad app permission list-grants --id "$gpt_app_id" -o json)"
+stale_permission_grants="$(jq -c --arg apiSpId "$api_service_principal_id" --arg apiAppId "$API_APP_ID" --argjson requestedScopeValues "$requested_scope_values_json" '
+  [
+    .[]
+    | select((.resourceId // "" == $apiSpId) or (.resourceAppId // "" == $apiSpId) or (.resourceAppId // "" == $apiAppId))
+    | select(((.scope // "") | split(" ") | map(select(length > 0)) | unique - $requestedScopeValues | length) > 0)
+  ]
+' <<<"$permission_grants_json")"
+
+if [ "$(jq -r 'length' <<<"$stale_permission_grants")" -gt 0 ]; then
+  echo "Revoking stale delegated OAuth grants that include non-approved scopes."
+  stale_grant_count=0
+  while IFS= read -r grant_json; do
+    grant_id="$(jq -r '.id // ""' <<<"$grant_json")"
+    if [ -z "$grant_id" ]; then
+      echo "Encountered a grant without an id; refusing to continue." >&2
+      exit 1
+    fi
+
+    grant_scope="$(jq -r '.scope // ""' <<<"$grant_json")"
+    if ! az rest --method DELETE \
+      --uri "https://graph.microsoft.com/v1.0/oauth2PermissionGrants/$grant_id" \
+      >/dev/null; then
+      echo "Failed to delete stale OAuth grant $grant_id with scope: $grant_scope" >&2
+      exit 1
+    fi
+    stale_grant_count=$((stale_grant_count + 1))
+  done <<<"$(jq -c '.[]' <<<"$stale_permission_grants")"
+
+  echo "Deleted $stale_grant_count stale OAuth grant(s) for the GPT Action app." 
+  permission_grants_json="$(az ad app permission list-grants --id "$gpt_app_id" -o json)"
+  remaining_stale_permission_grants="$(jq -c --arg apiSpId "$api_service_principal_id" --arg apiAppId "$API_APP_ID" --argjson requestedScopeValues "$requested_scope_values_json" '
+    [
+      .[]
+      | select((.resourceId // "" == $apiSpId) or (.resourceAppId // "" == $apiSpId) or (.resourceAppId // "" == $apiAppId))
+      | select(((.scope // "") | split(" ") | map(select(length > 0)) | unique - $requestedScopeValues | length) > 0)
+    ]
+  ' <<<"$permission_grants_json")"
+  if [ "$(jq -r 'length' <<<"$remaining_stale_permission_grants")" -gt 0 ]; then
+    echo "Failed to fully revoke stale GPT Action OAuth grants after cleanup." >&2
+    exit 1
+  fi
+fi
+
 consent_status="not-attempted"
 admin_consent_out=""
 admin_consent_err=""
