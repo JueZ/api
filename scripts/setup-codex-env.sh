@@ -41,7 +41,7 @@ configure_git_remote() {
   fi
 
   if git -C "${worktree}" remote get-url origin >/dev/null 2>&1; then
-    echo "Git remote 'origin' is already configured for $(git -C "${worktree}" remote get-url origin)."
+    echo "Git remote 'origin' is already configured."
     return 0
   fi
 

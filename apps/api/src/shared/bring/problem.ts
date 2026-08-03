@@ -13,6 +13,7 @@ import {
 import { buildDiagnosticCapsule } from '../errors/diagnosticCapsule.js';
 import { resolveRepairableProblem } from '../errors/repairableErrorService.js';
 import { BringUpstreamError } from './client.js';
+import { BodyTooLargeError } from '../http/boundedBody.js';
 import { BringConfigError } from './config.js';
 import {
   BringDisabledError,
@@ -40,7 +41,12 @@ export function bringProblem(error: unknown, operationId: BringOperationId, trac
   let canRetry = false;
   let sameRequest = false;
 
-  if (error instanceof BringInputError) {
+  if (error instanceof BodyTooLargeError) {
+    status = 413;
+    classification = 'caller_contract_violation';
+    title = 'Bring request body is too large';
+    detail = 'The request body exceeds the allowed size.';
+  } else if (error instanceof BringInputError) {
     status = 400;
     classification = 'caller_contract_violation';
     title = 'Invalid Bring request';
@@ -207,6 +213,7 @@ function bringEndpoint(operationId: BringOperationId): string {
 }
 
 function bringSafeCode(error: unknown): string {
+  if (error instanceof BodyTooLargeError) return 'BRING_BODY_TOO_LARGE';
   if (error instanceof BringInputError) return 'BRING_INPUT_ERROR';
   if (error instanceof BringNotFoundError) return 'BRING_NOT_FOUND';
   if (error instanceof BringPolicyError) return 'BRING_POLICY_DENIED';

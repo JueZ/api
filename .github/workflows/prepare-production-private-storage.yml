@@ -2,12 +2,8 @@ name: Prepare Production Private Storage
 run-name: Prepare Production Private Storage ${{ github.sha }} ${{ format('prepare-{0}-{1}', github.run_id, github.run_attempt) }}
 
 on:
-  workflow_dispatch:
-    inputs:
-      confirmation:
-        description: Enter PREPARE_PRODUCTION_PRIVATE_STORAGE to authorize only this bounded storage preparation.
-        required: true
-        type: string
+  repository_dispatch:
+    types: [prepare-production-private-storage]
 
 permissions:
   contents: read
@@ -51,4 +47,4 @@ jobs:
       migrationSourceStorageAccount: stapicatalogueprodbfjsts
       migrationTargetStorageAccount: stapicatalogueprodpbfjst
       migrationExpectedSha256: 4b2651b8d842854716b4fb2e20ecd9482f59f2ea6ee2352401bec5d42e8c6ed0
-      migrationConfirmation: ${{ inputs.confirmation }}
+      migrationConfirmation: ${{ github.event.client_payload.confirmation }}

@@ -7,6 +7,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const setupScript = fileURLToPath(new URL('../setup-codex-env.sh', import.meta.url));
+const maintainScript = fileURLToPath(new URL('../maintain-codex-env.sh', import.meta.url));
 
 test('Codex Azure setup has no service-principal secret argument path', async () => {
   const source = await readFile(setupScript, 'utf8');
@@ -33,6 +34,14 @@ test('Codex Azure setup selects system or user-assigned managed identity without
     ]);
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('Codex environment scripts never print an existing Git remote URL', async () => {
+  for (const path of [setupScript, maintainScript]) {
+    const source = await readFile(path, 'utf8');
+    assert.doesNotMatch(source, /echo[^\n]*remote get-url origin/);
+    assert.match(source, /Git remote 'origin' is already configured\./);
   }
 });
 

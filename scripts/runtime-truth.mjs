@@ -57,7 +57,7 @@ export function validateWorkflowRunMetadata(run = {}, options = {}) {
   if (run.name !== identity.name && run.name !== expectedTitle) {
     errors.push(`workflow run name must be ${identity.name} or ${expectedTitle}`);
   }
-  if (run.event !== 'workflow_dispatch') errors.push('workflow event must be workflow_dispatch');
+  if (run.event !== 'repository_dispatch') errors.push('workflow event must be repository_dispatch');
   if (run.run_attempt !== 1) errors.push('deployment evidence reruns are prohibited; dispatch a new workflow run');
   if (run.conclusion !== 'success') errors.push('workflow conclusion must be success');
   if (run.head_branch !== 'main') errors.push('workflow head branch must be main');

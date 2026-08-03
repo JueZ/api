@@ -3,7 +3,8 @@ name: Bring Read-Only Canary
 on:
   schedule:
     - cron: '43 4 * * *'
-  workflow_dispatch:
+  repository_dispatch:
+    types: [bring-readonly-canary]
 
 permissions:
   contents: read
@@ -29,20 +30,52 @@ jobs:
       BRING_CANARY_SERVICE_AUTH_SCOPE: ${{ vars.BRING_CANARY_SERVICE_AUTH_SCOPE }}
       BRING_CANARY_BASE_URL: ${{ vars.BRING_CANARY_BASE_URL }}
       BRING_CANARY_LIST_UUID: ${{ vars.BRING_CANARY_LIST_UUID }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: rg-api-test
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
         with:
           node-version: '22'
+      - name: Azure OIDC login
+        uses: azure/login@2dd0bbf4064d5a1812889dc200bb8eed2597f82a # tag=v3
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Bind canary to the deployed test Function origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t function_hosts < <(az functionapp list \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query '[].defaultHostName' \
+            -o tsv)
+          if [ "${#function_hosts[@]}" -ne 1 ] || [ -z "${function_hosts[0]}" ]; then
+            echo "Expected exactly one deployed Function App in $AZURE_RESOURCE_GROUP." >&2
+            exit 1
+          fi
+          discovered_base_url="https://${function_hosts[0]}"
+          configured_base_url="${BRING_CANARY_BASE_URL%/}"
+          if [ -n "$configured_base_url" ] && [ "$configured_base_url" != "$discovered_base_url" ]; then
+            echo "BRING_CANARY_BASE_URL does not match the Azure-discovered Function origin." >&2
+            exit 1
+          fi
+          echo "BRING_CANARY_BASE_URL=$discovered_base_url" >> "$GITHUB_ENV"
       - name: Mint short-lived read-only service token
         run: node scripts/mint-smoke-token.mjs
       - name: Validate sanitized read contract
         shell: bash
         run: |
           set -euo pipefail
-          : "${BRING_CANARY_BASE_URL:?BRING_CANARY_BASE_URL is required}"
+          : "${BRING_CANARY_BASE_URL:?Azure-discovered BRING_CANARY_BASE_URL is required}"
           : "${BRING_CANARY_LIST_UUID:?BRING_CANARY_LIST_UUID is required}"
           if ! [[ "$BRING_CANARY_BASE_URL" =~ ^https://[^/]+$ ]]; then
             echo "BRING_CANARY_BASE_URL must be a canonical HTTPS origin." >&2

@@ -1,40 +1,9 @@
 name: Deploy Test
-run-name: Deploy Test ${{ inputs.commit_sha || github.sha }} ${{ inputs.delivery_correlation || format('manual-{0}-{1}', github.run_id, github.run_attempt) }}
+run-name: Deploy Test ${{ github.event.client_payload.commit_sha || github.sha }} ${{ github.event.client_payload.delivery_correlation }}
 
 on:
-  workflow_dispatch:
-    inputs:
-      commit_sha:
-        description: Commit SHA on main to deploy to test. Defaults to the selected ref SHA.
-        required: false
-        type: string
-      deploy_frontend:
-        description: Deploy Angular static files.
-        required: false
-        default: true
-        type: boolean
-      deploy_functions:
-        description: Deploy Azure Functions package.
-        required: false
-        default: true
-        type: boolean
-      reddit_share_url_smoke:
-        description: Run optional authenticated Reddit /s/ share URL smoke after deployment.
-        required: false
-        default: false
-        type: boolean
-      delivery_correlation:
-        description: Unique delivery-controller correlation value.
-        required: true
-        type: string
-      ci_run_id:
-        description: Exact successful first-attempt main CI run that produced the release bundle.
-        required: true
-        type: string
-      ci_delivery_correlation:
-        description: Exact correlation in the selected main CI run title.
-        required: true
-        type: string
+  repository_dispatch:
+    types: [deploy-test]
 
 permissions:
   contents: read
@@ -63,12 +32,12 @@ jobs:
       environmentName: test
       azureResourceGroup: rg-api-test
       githubEnvironment: test
-      deployFrontend: ${{ inputs.deploy_frontend }}
-      deployFunctions: ${{ inputs.deploy_functions }}
-      sourceRef: ${{ inputs.commit_sha || github.sha }}
+      deployFrontend: ${{ github.event.client_payload.deploy_frontend == 'true' }}
+      deployFunctions: ${{ github.event.client_payload.deploy_functions == 'true' }}
+      sourceRef: ${{ github.event.client_payload.commit_sha || github.sha }}
       controllerRef: ${{ github.sha }}
       controllerWorkflowSha: ${{ github.workflow_sha }}
-      redditShareUrlSmokeEnabled: ${{ inputs.reddit_share_url_smoke }}
-      deliveryCorrelation: ${{ inputs.delivery_correlation }}
-      ciRunId: ${{ inputs.ci_run_id }}
-      ciDeliveryCorrelation: ${{ inputs.ci_delivery_correlation }}
+      redditShareUrlSmokeEnabled: ${{ github.event.client_payload.reddit_share_url_smoke == 'true' }}
+      deliveryCorrelation: ${{ github.event.client_payload.delivery_correlation }}
+      ciRunId: ${{ github.event.client_payload.ci_run_id }}
+      ciDeliveryCorrelation: ${{ github.event.client_payload.ci_delivery_correlation }}

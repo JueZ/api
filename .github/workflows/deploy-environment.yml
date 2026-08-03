@@ -249,7 +249,7 @@ jobs:
           inputs.allowRollback &&
           github.workflow_ref == format('{0}/.github/workflows/rollback-production.yml@refs/heads/main', github.repository) &&
           github.ref == 'refs/heads/main' &&
-          github.event_name == 'workflow_dispatch'
+          github.event_name == 'repository_dispatch'
         }}
       APPLICATIONINSIGHTS_NAME: ${{ vars.APPLICATIONINSIGHTS_NAME }}
       TEST_SERVICE_AUTH_CLIENT_ID: ${{ vars.TEST_SERVICE_AUTH_CLIENT_ID }}
@@ -367,7 +367,7 @@ jobs:
               and .repository.full_name == $repository
               and .head_sha == $controller_ref
               and .head_branch == "main"
-              and .event == "workflow_dispatch"
+              and .event == "repository_dispatch"
               and .path == $path
               and (.name == $workflow_name or .name == $title)
               and .display_title == $title
@@ -474,7 +474,7 @@ jobs:
                   and .repository.full_name == $repository
                   and .path == ".github/workflows/promote-production.yml"
                   and (.name == $workflow_name or .name == $title)
-                  and .event == "workflow_dispatch"
+                  and (.event == "repository_dispatch" or .event == "workflow_dispatch")
                   and .conclusion == "success"
                   and .head_branch == "main"
                   and .head_sha == $source_ref
@@ -535,7 +535,7 @@ jobs:
                   and .repository.full_name == $repository
                   and .path == ".github/workflows/deploy-test.yml"
                   and (.name == $workflow_name or .name == $title)
-                  and .event == "workflow_dispatch"
+                  and .event == "repository_dispatch"
                   and .conclusion == "success"
                   and .head_branch == "main"
                   and .head_sha == $source_ref
@@ -570,7 +570,7 @@ jobs:
                   and .runAttempt == "1"
                   and .deployFrontend == "true"
                   and .deployFunctions == "true"
-                  and .eventName == "workflow_dispatch"
+                  and .eventName == "repository_dispatch"
                   and (.artifacts.functionappSha256 | test("^[0-9a-f]{64}$"))
                   and (.artifacts.sourceFrontendSha256 | test("^[0-9a-f]{64}$"))
                   and (.artifacts.frontendSha256 | test("^[0-9a-f]{64}$"))
@@ -954,7 +954,7 @@ jobs:
               echo "Configured production static account does not match the uniquely tagged deployed resource." >&2
               exit 1
             fi
-            effective_base_url="${PRODUCTION_BASE_URL:-}"
+            effective_base_url=""
             : "${effective_functionapp_name:?AZURE_FUNCTIONAPP_NAME is required for package-only rollback}"
             az functionapp show \
               --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -964,7 +964,7 @@ jobs:
           elif [ "$ENVIRONMENT_NAME" = "prod" ]; then
             effective_functionapp_name="${effective_functionapp_name:-${AZURE_FUNCTIONAPP_NAME:-}}"
             effective_static_storage="${effective_static_storage:-${AZURE_STATIC_WEB_STORAGE_ACCOUNT:-}}"
-            effective_base_url="${PRODUCTION_BASE_URL:-}"
+            effective_base_url=""
           else
             effective_base_url=""
           fi
@@ -994,15 +994,21 @@ jobs:
             effective_frontend_url="${effective_frontend_url%/}"
           fi
 
-          if [ -z "$effective_base_url" ]; then
-            default_host_name=$(az functionapp show \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$effective_functionapp_name" \
-              --query defaultHostName \
-              -o tsv)
-            : "${default_host_name:?Unable to discover Function App default hostname}"
-            effective_base_url="https://$default_host_name"
+          default_host_name=$(az functionapp show \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$effective_functionapp_name" \
+            --query defaultHostName \
+            -o tsv)
+          : "${default_host_name:?Unable to discover Function App default hostname}"
+          discovered_base_url="https://$default_host_name"
+          configured_production_base_url="${PRODUCTION_BASE_URL%/}"
+          if [ "$ENVIRONMENT_NAME" = "prod" ] &&
+             [ -n "$configured_production_base_url" ] &&
+             [ "$configured_production_base_url" != "$discovered_base_url" ]; then
+            echo "PRODUCTION_BASE_URL does not match the Azure-discovered Function origin." >&2
+            exit 1
           fi
+          effective_base_url="$discovered_base_url"
 
           {
             echo "EFFECTIVE_FUNCTIONAPP_NAME=$effective_functionapp_name"
@@ -1855,7 +1861,7 @@ jobs:
               and .repository.full_name == $repository
               and .head_sha == $controller_ref
               and .head_branch == "main"
-              and .event == "workflow_dispatch"
+              and .event == "repository_dispatch"
               and .path == ".github/workflows/prepare-production-private-storage.yml"
               and (.name == "Prepare Production Private Storage" or .name == $title)
               and .display_title == $title
@@ -1906,7 +1912,7 @@ jobs:
               and .repository.full_name == $repository
               and .path == ".github/workflows/deploy-test.yml"
               and (.name == "Deploy Test" or .name == $title)
-              and .event == "workflow_dispatch"
+              and .event == "repository_dispatch"
               and .conclusion == "success"
               and .head_branch == "main"
               and .head_sha == $source_ref
@@ -1942,7 +1948,7 @@ jobs:
               and .runAttempt == "1"
               and .deployFrontend == "true"
               and .deployFunctions == "true"
-              and .eventName == "workflow_dispatch"
+              and .eventName == "repository_dispatch"
               and (.artifacts.functionappSha256 | test("^[0-9a-f]{64}$"))
               and (.artifacts.sourceFrontendSha256 | test("^[0-9a-f]{64}$"))
               and (.artifacts.frontendSha256 | test("^[0-9a-f]{64}$"))
