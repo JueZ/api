@@ -172,7 +172,7 @@ test('canonical autonomous policy is internally valid', () => {
   assert.equal(policy.autonomousReview.model, 'gpt-5.6-sol');
   assert.equal(policy.autonomousReview.reasoningEffort, 'medium');
   assert.equal(policy.autonomousReview.maxDiffBytes, 200_000);
-  assert.equal(policy.autonomousReview.maxOutputTokens, 3_000);
+  assert.equal(policy.autonomousReview.maxOutputTokens, 2_900);
   assert.equal(policy.autonomousReview.maxEstimatedCostUsd, 0.31);
   assert.match(codexAutomergeWorkflow, /Wait for free deterministic exact-head checks/);
   assert.match(codexAutomergeWorkflow, /AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'/);
@@ -917,7 +917,7 @@ test('high-risk autonomous review uses one cost-bounded generation and records s
   assert.equal(requests[0].model, 'gpt-5.6-sol');
   assert.deepEqual(requests[0].reasoning, { effort: 'medium' });
   assert.equal(requests[0].text.verbosity, 'low');
-  assert.equal(requests[0].max_output_tokens, 3000);
+  assert.equal(requests[0].max_output_tokens, 2_900);
   assert.match(requests[0].input[0].content, /reserve at least 512 output tokens/);
   assert.doesNotMatch(JSON.stringify(requests[0].input), /Review this change\./);
   const reviewPayload = JSON.parse(requests[0].input[1].content);
@@ -1461,21 +1461,21 @@ test('review budget uses the exact count and caps counting and generation to one
   assert.equal(budget.inputTokenCountRequestLimit, 1);
   assert.equal(budget.modelGenerationRequestLimit, 1);
   assert.equal(budget.totalOpenAIRequestLimit, 2);
-  assert.equal(budget.maximumOutputTokens, 3000);
+  assert.equal(budget.maximumOutputTokens, 2_900);
   assert.ok(budget.estimatedMaximumCostUsd < 0.31);
   const completeDiffBudget = calculateReviewBudget(
     { input: [{ role: 'user', content: 'complete diff' }], text: { verbosity: 'low' } },
     policy,
     32_304,
   );
-  assert.equal(completeDiffBudget.estimatedMaximumCostUsd, 0.251521);
+  assert.equal(completeDiffBudget.estimatedMaximumCostUsd, 0.24852);
   assert.throws(
     () => calculateReviewBudget({ input: [], text: {} }, policy),
     /exact positive input-token count is required/,
   );
 });
 
-test('review capsule keeps every executable and high-risk documentation change with context', () => {
+test('review capsule includes all high-risk changed paths including documentation', () => {
   const policyHelperDiff = `diff --git a/scripts/lib/policy-helper.mjs b/scripts/lib/policy-helper.mjs
 index 5555555..6666666 100644
 --- a/scripts/lib/policy-helper.mjs
@@ -1511,14 +1511,43 @@ index 7777777..8888888 100644
     '.github/workflows/example.yml',
     'scripts/lib/policy-helper.mjs',
     'docs/security/example.md',
+    'docs/reference.md',
   ]);
-  assert.deepEqual(capsule.omittedDocumentationPaths, ['docs/reference.md']);
+  assert.deepEqual(capsule.omittedDocumentationPaths, []);
   assert.match(capsule.diff, /\+permissions:/);
   assert.match(capsule.diff, /^ {3}contents: read$/m);
   assert.match(capsule.diff, /scripts\/lib\/policy-helper\.mjs/);
   assert.match(capsule.diff, /^ const trustedContext = true;$/m);
   assert.match(capsule.diff, /New documentation/);
-  assert.doesNotMatch(capsule.diff, /New reference/);
+  assert.match(capsule.diff, /New reference/);
+});
+
+test('review capsule keeps test file changes when executable high-risk paths are present', () => {
+  const sourceDiff = `diff --git a/apps/api/src/shared/bridge.ts b/apps/api/src/shared/bridge.ts
+index 1111111..2222222 100644
+--- a/apps/api/src/shared/bridge.ts
++++ b/apps/api/src/shared/bridge.ts
+@@ -1 +1 @@
+-old
++new
+diff --git a/apps/api/test/bridge.test.mjs b/apps/api/test/bridge.test.mjs
+index 3333333..4444444 100644
+--- a/apps/api/test/bridge.test.mjs
++++ b/apps/api/test/bridge.test.mjs
+@@ -1 +1 @@
+-old-test
++new-test
+`;
+  const capsule = buildReviewDiffCapsule(
+    sourceDiff,
+    { highRiskPaths: ['apps/api/src/shared/bridge.ts', 'apps/api/test/bridge.test.mjs'] },
+    ['apps/api/src/shared/bridge.ts', 'apps/api/test/bridge.test.mjs'],
+  );
+  assert.deepEqual(capsule.reviewedPaths, ['apps/api/src/shared/bridge.ts', 'apps/api/test/bridge.test.mjs']);
+  assert.deepEqual(capsule.omittedDocumentationPaths, []);
+  assert.match(capsule.diff, /src\/shared\/bridge.ts/);
+  assert.match(capsule.diff, /apps\/api\/test\/bridge\.test\.mjs/);
+  assert.match(capsule.diff, /new-test/);
 });
 
 test('review capsule includes documentation when it is the only change and fails on missing paths', () => {

@@ -541,12 +541,7 @@ export function buildReviewDiffCapsule(sourceDiff, risk, changedPaths) {
   if (unlistedHighRiskPaths.length > 0) {
     throw new Error(`High-risk review classifier returned unlisted paths: ${unlistedHighRiskPaths.join(', ')}.`);
   }
-  const executablePaths = uniqueChangedPaths.filter((path) => !path.startsWith('docs/'));
-  const highRiskPathSet = new Set(highRiskPaths);
-  const reviewedPaths =
-    executablePaths.length > 0
-      ? uniqueChangedPaths.filter((path) => !path.startsWith('docs/') || highRiskPathSet.has(path))
-      : uniqueChangedPaths;
+  const reviewedPaths = uniqueChangedPaths;
   const reviewedPathSet = new Set(reviewedPaths);
   const sections = String(sourceDiff)
     .split(/(?=^diff --git )/m)
