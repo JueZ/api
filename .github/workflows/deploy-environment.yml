@@ -1690,7 +1690,7 @@ jobs:
           echo "::notice title=Production values resolved::Smoke tests passed for $EFFECTIVE_BASE_URL using Function App $EFFECTIVE_FUNCTIONAPP_NAME and static storage account $EFFECTIVE_STATIC_STORAGE_ACCOUNT."
       - name: Create production issue on failed deploy or smoke
         if: ${{ failure() && inputs.environmentName == 'prod' }}
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # tag=v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # tag=v9.0.0
         with:
           script: |
             const title = `Production deployment failed for ${context.sha.substring(0, 7)}`;
@@ -2248,7 +2248,7 @@ jobs:
           retention-days: 90
       - name: Create production preparation issue on failure
         if: ${{ failure() }}
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # tag=v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # tag=v9.0.0
         with:
           script: |
             const title = `Production private-storage preparation failed for ${context.sha.substring(0, 7)}`;
