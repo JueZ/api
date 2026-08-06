@@ -19,6 +19,8 @@ const baseEnv = {
   MCP_RESOURCE_ORIGIN: 'https://mcp.example.test',
   MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
 };
+const bringListUuid = '22222222-2222-4222-8222-222222222222';
+const bringAddOperationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 test('authorizeBearerToken reuses existing JWT validation without an Azure HttpRequest', async () => {
   const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
@@ -202,6 +204,48 @@ test('AUTH_ENABLED=true plus a valid signed JWT can call a protected data tool v
   }
 });
 
+test('delegated bring.write can add through MCP while bring.read remains insufficient', async () => {
+  const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
+  try {
+    const readToken = await signToken(privateKey, kid, issuer, {
+      sub: 'allowed-subject',
+      oid: 'allowed-oid',
+      scp: 'bring.read',
+    });
+    const writeToken = await signToken(privateKey, kid, issuer, {
+      sub: 'allowed-subject',
+      oid: 'allowed-oid',
+      scp: 'bring.write',
+    });
+    const calls = [];
+    const services = stubServices(calls);
+    const args = {
+      operationId: bringAddOperationId,
+      listUuid: bringListUuid,
+      expectedListVersion: '0'.repeat(64),
+      items: [{ name: 'Milk' }],
+    };
+    await withEnv(
+      { ...baseEnv, DEPLOYED_ENVIRONMENT_NAME: 'prod', OIDC_ISSUER: issuer, OIDC_JWKS_URI: jwksUri },
+      async () => {
+        const denied = await mcpCall('bring_add_items', args, `Bearer ${readToken}`, services);
+        assertInsufficientScope(denied, 'Required permission is missing: bring.write.', readToken, 'bring.write');
+
+        const added = await mcpCall('bring_add_items', args, `Bearer ${writeToken}`, services);
+        assert.equal(added.status, 200);
+        assert.equal(added.jsonBody.result.structuredContent.operation, 'add');
+        assert.equal(added.jsonBody.result.structuredContent.operationId, bringAddOperationId);
+        assert.equal(added.jsonBody.result.structuredContent.itemCount, 1);
+        assert.deepEqual(calls, [['addItems', bringListUuid, bringAddOperationId, 1]]);
+        assert.doesNotMatch(JSON.stringify(added.jsonBody), tokenRegex(writeToken));
+        assert.doesNotMatch(JSON.stringify(added.jsonBody), /Milk/);
+      },
+    );
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test('MCP advertises the exact missing operation scope', async () => {
   const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
   try {
@@ -359,6 +403,22 @@ function stubServices(calls = []) {
       offer: async (adId) => ({ source: 'wlh', id: adId }),
       topCategories: async () => [],
       children: async () => [],
+    },
+    bring: {
+      listLists: async () => ({ source: 'bring', lists: [] }),
+      getList: async (listUuid) => ({ uuid: listUuid, version: '0'.repeat(64), items: [] }),
+      addItems: async (_principal, command) => {
+        calls.push(['addItems', command.listUuid, command.operationId, command.items.length]);
+        return {
+          source: 'bring',
+          listUuid: command.listUuid,
+          operation: 'add',
+          operationId: command.operationId,
+          itemCount: command.items.length,
+          state: 'succeeded',
+          replayed: false,
+        };
+      },
     },
   };
 }

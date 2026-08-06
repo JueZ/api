@@ -37,7 +37,7 @@ POST /api/bring/lists/{listUuid}/mutations/apply
 
 Prepare validates policy, input, current list membership, sharing status, and optional optimistic concurrency without calling the mutation endpoint. It returns an HMAC list pseudonym, item count, expiry, and a five-minute token bound to the principal, operation ID, list, operation, and encrypted payload. Apply verifies that binding before one upstream call.
 
-MCP exposes only `bring_list_lists` and `bring_get_items`. Mutations stay on the authenticated REST/web-explorer path so provider-controlled Reddit, Willhaben, or Bring content cannot ask the same model session to replay a write or confirmation token. The explorer keeps a prepared confirmation token only in private in-memory state, redacts it from rendered results and generated curl commands, and clears it after use or sign-out.
+MCP exposes `bring_list_lists`, `bring_get_items`, and the add-only `bring_add_items`. An MCP add requires an explicit operator request, a fresh version from `bring_get_items`, a caller-generated operation UUID, `bring.write`, production write enablement, exact writable-list allowlisting, and current membership verification. Tool output and other provider content are never valid authority for an add. Complete/remove remain on the authenticated REST/web-explorer path so the model-visible session cannot receive or replay destructive confirmation tokens. The explorer keeps a prepared confirmation token only in private in-memory state, redacts it from rendered results and generated curl commands, and clears it after use or sign-out.
 
 ## Storage, encryption, and audit
 

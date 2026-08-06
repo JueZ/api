@@ -11,8 +11,9 @@ const authEnv = {
   MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
 };
 const bringListUuid = '22222222-2222-4222-8222-222222222222';
+const bringAddOperationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
-test('MCP initialize and tools/list expose only read-only provider tools', async () => {
+test('MCP initialize and tools/list expose Bring reads and add-only mutation access', async () => {
   await withEnv(authEnv, async () => {
     const initialize = await mcpRequest({
       jsonrpc: '2.0',
@@ -22,6 +23,8 @@ test('MCP initialize and tools/list expose only read-only provider tools', async
     });
     assert.equal(initialize.status, 200);
     assert.equal(initialize.jsonBody.result.serverInfo.name, 'api-catalogue-private-mcp');
+    assert.match(initialize.jsonBody.result.instructions, /explicit operator request/);
+    assert.match(initialize.jsonBody.result.instructions, /complete and remove mutations remain unavailable/i);
 
     const listed = await mcpRequest({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
     const tools = listed.jsonBody.result.tools;
@@ -29,6 +32,7 @@ test('MCP initialize and tools/list expose only read-only provider tools', async
     assert.deepEqual(
       names,
       [
+        'bring_add_items',
         'bring_get_items',
         'bring_list_lists',
         'health_check',
@@ -44,9 +48,18 @@ test('MCP initialize and tools/list expose only read-only provider tools', async
     );
 
     for (const tool of tools) {
-      assert.equal(tool.annotations.readOnlyHint, true, `${tool.name} must be read-only`);
-      assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`);
-      assert.equal(tool.annotations.idempotentHint, true, `${tool.name} must be idempotent`);
+      if (tool.name === 'bring_add_items')
+        assert.deepEqual(tool.annotations, {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        });
+      else {
+        assert.equal(tool.annotations.readOnlyHint, true, `${tool.name} must be read-only`);
+        assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`);
+        assert.equal(tool.annotations.idempotentHint, true, `${tool.name} must be idempotent`);
+      }
       assert.ok(tool.outputSchema, `${tool.name} must expose an output schema`);
       assert.equal(typeof tool._meta['openai/toolInvocation/invoking'], 'string');
       assert.equal(typeof tool._meta['openai/toolInvocation/invoked'], 'string');
@@ -93,17 +106,44 @@ test('authenticated MCP hello returns safe user shape without full claims or tok
   });
 });
 
-test('MCP Bring exposes reads while mutation tools remain unavailable', async () => {
+test('MCP Bring exposes reads and idempotent add while destructive mutation tools remain unavailable', async () => {
   const services = stubServices();
   services.bring.listLists = async () => ({
     source: 'bring',
     lists: [{ uuid: bringListUuid, name: 'Home', isDefault: false, shared: false }],
   });
+  const items = [{ name: 'Äpfel & Milch', specification: '2 Stück' }];
   await withEnv(authEnv, async () => {
     const lists = await mcpCall('bring_list_lists', {}, 'Bearer local-dev-token', services);
     assert.equal(lists.jsonBody.result.structuredContent.lists[0].shared, false);
     const selected = await mcpCall('bring_get_items', { listUuid: bringListUuid }, 'Bearer local-dev-token', services);
     assert.equal(selected.jsonBody.result.structuredContent.uuid, bringListUuid);
+
+    assertMcpValidationError(
+      await mcpCall(
+        'bring_add_items',
+        { operationId: bringAddOperationId, listUuid: bringListUuid, items },
+        'Bearer local-dev-token',
+        services,
+      ),
+      'expectedListVersion',
+    );
+
+    const added = await mcpCall(
+      'bring_add_items',
+      {
+        operationId: bringAddOperationId,
+        listUuid: bringListUuid,
+        expectedListVersion: selected.jsonBody.result.structuredContent.version,
+        items,
+      },
+      'Bearer local-dev-token',
+      services,
+    );
+    assert.equal(added.jsonBody.result.structuredContent.operation, 'add');
+    assert.equal(added.jsonBody.result.structuredContent.operationId, bringAddOperationId);
+    assert.equal(added.jsonBody.result.structuredContent.itemCount, 1);
+    assert.doesNotMatch(JSON.stringify(added.jsonBody), /Äpfel|Milch|Stück/);
   });
 });
 
@@ -394,19 +434,29 @@ test('external service exceptions become safe MCP tool errors without sensitive 
   });
 });
 
-test('MCP Bring read errors preserve safe classifications and upstream status without response content', async () => {
+test('MCP Bring add errors preserve safe classifications and upstream status without response content', async () => {
   const services = stubServices();
-  services.bring.getList = async () => {
+  services.bring.addItems = async () => {
     throw new BringUpstreamError('Bring dependency request failed.', 502, 'upstream', {
-      operation: 'get_items',
-      method: 'GET',
-      path: 'v2/bringlists/{uuid}',
+      operation: 'add_items',
+      method: 'PUT',
+      path: 'v2/bringlists/{uuid}/items',
       upstreamStatus: 400,
       responseExcerpt: 'password=SHOULD_NOT_LEAK token=SHOULD_NOT_LEAK',
     });
   };
   await withEnv(authEnv, async () => {
-    const response = await mcpCall('bring_get_items', { listUuid: bringListUuid }, 'Bearer local-dev-token', services);
+    const response = await mcpCall(
+      'bring_add_items',
+      {
+        operationId: bringAddOperationId,
+        listUuid: bringListUuid,
+        expectedListVersion: '0'.repeat(64),
+        items: [{ name: 'Milk' }],
+      },
+      'Bearer local-dev-token',
+      services,
+    );
     assertToolError(response, 'bring_upstream_error', 'bring');
     assert.equal(response.jsonBody.result.structuredContent.upstreamStatus, 400);
     assert.doesNotMatch(JSON.stringify(response.jsonBody), /SHOULD_NOT_LEAK|responseExcerpt|password|token/i);
