@@ -1,11 +1,12 @@
 # Decision log
 
-## 2026-08-06 — Keep Azure IMDS outside host HTTP proxies
+## 2026-08-06 — Support explicit Azure authentication modes for Codex hosts
 
-- Decision: Preserve the Codex host's existing proxy exclusions and append the Azure IMDS address `169.254.169.254` exactly once to both `NO_PROXY` and `no_proxy` before `az login --identity`.
-- Rationale: The WSL host could reach IMDS directly and received valid JSON, but Azure CLI's Python HTTP stack honored uppercase `HTTP_PROXY`; without an explicit bypass it received an empty/non-JSON proxy response and failed during Managed Identity token parsing.
-- Security boundary: Authentication remains Managed Identity-only with least-privilege Azure RBAC. The bypass is process-local, targets only the Azure link-local metadata address, preserves all existing proxy rules, and does not reintroduce a client secret or service-principal password argument.
-- Status: The local Managed Identity login succeeded with the bypass. Remote PR gates and merge evidence remain pending.
+- Decision: Keep `managed-identity` as the default Azure login mode for Azure-hosted Codex environments, including an IMDS proxy bypass and removal of stale service-principal variables. Restore a separately selected `service-principal` mode for Codex Cloud, which has no attached project Managed Identity but requires direct Azure CLI access.
+- Rationale: The August 2 Managed Identity-only hardening made the Codex Cloud setup fail before its external service-principal fallback. Codex Cloud currently has no usable workload-identity token source, so the existing time-limited service principal is the only practical way to retain direct `az` functionality there.
+- Credential boundary: Codex Cloud must set `CODEX_AZURE_AUTH_MODE=service-principal`, keep the secret only in its secret manager, provide the exact future expiry through `CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON`, and rotate it before expiry. Martin is the rotation owner. RBAC is limited to `rg-api-test` and `rg-api-prod`; Owner and unrelated subscription-wide grants remain prohibited.
+- Residual risk: Azure CLI receives the client secret as a process argument during login. Shell tracing, secret output, repository storage, PR/log disclosure, and implicit secret fallback remain prohibited. Managed Identity remains preferred wherever available.
+- Status: Local mocked coverage validates both modes, expiry rejection, secret non-output, Managed Identity secret isolation, and IMDS bypass. Codex Cloud runtime verification plus remote PR gates and merge evidence remain pending.
 
 ## 2026-08-03 — Close the full rescan through default-branch dispatch and bounded trust boundaries
 

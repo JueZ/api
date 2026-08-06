@@ -22,12 +22,28 @@ This skill is for:
 
 ## Expected Codex environment variables
 
-The canonical Codex direct Azure setup variables are:
+The canonical shared Codex direct Azure setup variables are:
 
 ```text
 AZURE_SUBSCRIPTION_ID
 AZURE_RESOURCE_GROUP
+```
+
+Azure-hosted Codex environments use:
+
+```text
+CODEX_AZURE_AUTH_MODE=managed-identity (optional because this is the default)
 CODEX_AZURE_MANAGED_IDENTITY_CLIENT_ID (optional, for a user-assigned identity)
+```
+
+Codex Cloud, which has no attached project Managed Identity but requires direct Azure CLI access, uses the documented exception:
+
+```text
+CODEX_AZURE_AUTH_MODE=service-principal
+CODEX_AZURE_CLIENT_ID
+CODEX_AZURE_CLIENT_SECRET
+CODEX_AZURE_TENANT_ID
+CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON (YYYY-MM-DD)
 ```
 
 Known project resource groups:
@@ -37,7 +53,7 @@ rg-api-test
 rg-api-prod
 ```
 
-Codex hosts authenticate with their Azure managed identity. Do not add a standing Azure client secret to the setup environment or pass one through Azure CLI arguments.
+Prefer Managed Identity wherever the host supports it. The Codex Cloud service principal is allowed only through the explicit `service-principal` setup mode because that host has no attached identity or usable workload-identity token source and the operator requires direct `az` functionality. Keep the secret only in the Codex Cloud secret manager, never print it, rotate it before `CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON`, and keep RBAC limited to `rg-api-test` and `rg-api-prod` without Owner or unrelated subscription-wide grants. Martin is the rotation owner. Do not add any second or implicit service-principal path.
 
 Do not print any secret values.
 

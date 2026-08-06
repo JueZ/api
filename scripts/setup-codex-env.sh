@@ -17,15 +17,37 @@ reject_shell_tracing() {
 
 reject_shell_tracing
 
-# Legacy service-principal setup variables must not be inherited by any child
-# process. Azure authentication below uses the host's managed identity.
-unset CODEX_AZURE_CLIENT_ID CODEX_AZURE_CLIENT_SECRET CODEX_AZURE_TENANT_ID
-
 require_env() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
     echo "Missing required environment variable: ${name}" >&2
     exit 1
+  fi
+}
+
+validate_service_principal_expiry() {
+  require_env CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON
+
+  if [[ ! "${CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON must use YYYY-MM-DD format." >&2
+    exit 1
+  fi
+
+  local expiry_epoch
+  if ! expiry_epoch="$(date -u -d "${CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON}T23:59:59Z" +%s 2>/dev/null)"; then
+    echo "CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON is not a valid calendar date." >&2
+    exit 1
+  fi
+
+  local now_epoch
+  now_epoch="$(date -u +%s)"
+  if (( expiry_epoch <= now_epoch )); then
+    echo "The configured Codex Azure client secret is expired." >&2
+    exit 1
+  fi
+
+  if (( expiry_epoch - now_epoch < 2592000 )); then
+    echo "Warning: the configured Codex Azure client secret expires within 30 days." >&2
   fi
 }
 
@@ -129,18 +151,47 @@ GITHUB_CLI_SOURCES
 login_azure() {
   reject_shell_tracing
   require_env AZURE_SUBSCRIPTION_ID
-  configure_azure_imds_proxy_bypass
 
-  if [[ -n "${CODEX_AZURE_MANAGED_IDENTITY_CLIENT_ID:-}" ]]; then
-    echo "Logging into Azure CLI with the configured user-assigned managed identity."
-    az login \
-      --identity \
-      --client-id "${CODEX_AZURE_MANAGED_IDENTITY_CLIENT_ID}" \
-      --output none
-  else
-    echo "Logging into Azure CLI with the host system-assigned managed identity."
-    az login --identity --output none
-  fi
+  case "${CODEX_AZURE_AUTH_MODE:-managed-identity}" in
+    service-principal)
+      require_env CODEX_AZURE_CLIENT_ID
+      require_env CODEX_AZURE_CLIENT_SECRET
+      require_env CODEX_AZURE_TENANT_ID
+      validate_service_principal_expiry
+
+      echo "Logging into Azure CLI with the Codex Cloud service principal."
+      az login \
+        --service-principal \
+        --username "${CODEX_AZURE_CLIENT_ID}" \
+        --password "${CODEX_AZURE_CLIENT_SECRET}" \
+        --tenant "${CODEX_AZURE_TENANT_ID}" \
+        --output none
+      ;;
+    managed-identity)
+      # Do not let stale service-principal credentials reach child processes when
+      # an Azure-hosted Codex environment uses Managed Identity.
+      unset CODEX_AZURE_CLIENT_ID CODEX_AZURE_CLIENT_SECRET CODEX_AZURE_TENANT_ID
+      unset CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON
+      configure_azure_imds_proxy_bypass
+
+      if [[ -n "${CODEX_AZURE_MANAGED_IDENTITY_CLIENT_ID:-}" ]]; then
+        echo "Logging into Azure CLI with the configured user-assigned managed identity."
+        az login \
+          --identity \
+          --client-id "${CODEX_AZURE_MANAGED_IDENTITY_CLIENT_ID}" \
+          --output none
+      else
+        echo "Logging into Azure CLI with the host system-assigned managed identity."
+        az login --identity --output none
+      fi
+      ;;
+    *)
+      echo "Unsupported CODEX_AZURE_AUTH_MODE: ${CODEX_AZURE_AUTH_MODE}" >&2
+      echo "Use 'managed-identity' or 'service-principal'." >&2
+      exit 1
+      ;;
+  esac
+
   az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
   az account show --query '{name:name, id:id, tenantId:tenantId}' --output table
 }

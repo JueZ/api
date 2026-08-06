@@ -1,10 +1,10 @@
 # Current state
 
-## 2026-08-06 Codex Managed Identity proxy bypass prepared
+## 2026-08-06 Codex Cloud Azure CLI authentication compatibility prepared
 
-- A fresh WSL-hosted Codex setup reached Azure IMDS directly with an HTTP 200 JSON response, but `az login --identity` failed while parsing an empty/non-JSON response because the Python Azure CLI honored the host `HTTP_PROXY` and the link-local IMDS address was absent from `NO_PROXY`.
-- Setup now preserves existing exclusions and appends `169.254.169.254` exactly once to both `NO_PROXY` and `no_proxy` before Managed Identity login. Regression coverage verifies both system-assigned and user-assigned identity paths receive the bypass and that no service-principal secret path is restored.
-- The process-local workaround was proven with a successful Managed Identity login. Remote CI, independent review, merge, and post-merge delivery evidence remain pending.
+- The August 2 setup hardening unconditionally replaced service-principal login with host Managed Identity. That works only on Azure compute with an attached identity; Codex Cloud runs on separate OpenAI-managed compute, so `az login --identity` failed before the external wrapper could reach its service-principal fallback.
+- Setup now keeps Managed Identity as the default for Azure-hosted environments and supports an explicit `CODEX_AZURE_AUTH_MODE=service-principal` path for Codex Cloud. The Cloud path requires complete credentials plus a valid future `CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON`; Managed Identity mode still discards stale service-principal variables and bypasses host proxies for IMDS.
+- The exception exists because direct Azure CLI access is required in Codex Cloud and no attached identity or workload-identity token source is available. Martin owns rotation; RBAC remains limited to `rg-api-test` and `rg-api-prod`, with no Owner or unrelated subscription-wide grant. Cloud runtime verification, remote CI, independent review, merge, and post-merge delivery evidence remain pending.
 
 ## 2026-08-03 Full-repository Codex Security finding repair prepared
 
