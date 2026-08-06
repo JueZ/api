@@ -1,5 +1,13 @@
 # Decision log
 
+## 2026-08-06 — Support explicit Azure authentication modes for Codex hosts
+
+- Decision: Keep `managed-identity` as the default Azure login mode for Azure-hosted Codex environments, including an IMDS proxy bypass and removal of stale service-principal variables. Restore a separately selected `service-principal` mode for Codex Cloud, which has no attached project Managed Identity but requires direct Azure CLI access.
+- Rationale: The August 2 Managed Identity-only hardening made the Codex Cloud setup fail before its external service-principal fallback. Codex Cloud currently has no usable workload-identity token source, so the existing time-limited service principal is the only practical way to retain direct `az` functionality there.
+- Credential boundary: Codex Cloud must set `CODEX_AZURE_AUTH_MODE=service-principal`, keep the secret only in its secret manager, provide the exact future expiry through `CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON`, and rotate it before expiry. Martin is the rotation owner. RBAC is limited to `rg-api-test` and `rg-api-prod`; Owner and unrelated subscription-wide grants remain prohibited.
+- Residual risk: Azure CLI receives the client secret as a process argument during login. Shell tracing, secret output, repository storage, PR/log disclosure, and implicit secret fallback remain prohibited. Managed Identity remains preferred wherever available.
+- Status: Local mocked coverage validates both modes, expiry rejection, secret non-output, Managed Identity secret isolation, and IMDS bypass. Codex Cloud runtime verification plus remote PR gates and merge evidence remain pending.
+
 ## 2026-08-03 — Close the full rescan through default-branch dispatch and bounded trust boundaries
 
 - Decision: Replace branch-selectable privileged `workflow_dispatch` entry points with typed `repository_dispatch` events for test deployment, production promotion, rollback, private-storage preparation, and manual auto-merge. Retain exact current-main, first-attempt, artifact/provenance, environment, OIDC, and production-latch validation in each default-branch receiver.

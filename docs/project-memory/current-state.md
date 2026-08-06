@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-06 Codex Cloud Azure CLI authentication compatibility prepared
+
+- The August 2 setup hardening unconditionally replaced service-principal login with host Managed Identity. That works only on Azure compute with an attached identity; Codex Cloud runs on separate OpenAI-managed compute, so `az login --identity` failed before the external wrapper could reach its service-principal fallback.
+- Setup now keeps Managed Identity as the default for Azure-hosted environments and supports an explicit `CODEX_AZURE_AUTH_MODE=service-principal` path for Codex Cloud. The Cloud path requires complete credentials plus a valid future `CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON`; Managed Identity mode still discards stale service-principal variables and bypasses host proxies for IMDS.
+- The exception exists because direct Azure CLI access is required in Codex Cloud and no attached identity or workload-identity token source is available. Martin owns rotation; RBAC remains limited to `rg-api-test` and `rg-api-prod`, with no Owner or unrelated subscription-wide grant. Cloud runtime verification, remote CI, independent review, merge, and post-merge delivery evidence remain pending.
+
 ## 2026-08-03 Full-repository Codex Security finding repair prepared
 
 - The complete local Codex Security rescan of main commit `988e548fa0b3da2459f274b83677ff534c6ff67d` reported 32 findings: five high, 23 medium, and four low. The earlier six findings were absent. The prepared repair addresses every new finding; remote acceptance and deployment evidence are still pending.
