@@ -37,6 +37,27 @@ test('Codex Azure setup selects system or user-assigned managed identity without
   }
 });
 
+test('Codex Azure setup bypasses proxies for IMDS without duplicating the endpoint', () => {
+  const command = [
+    'source "$SETUP_SCRIPT"',
+    'NO_PROXY="localhost,169.254.169.254"',
+    'no_proxy="localhost"',
+    'configure_azure_imds_proxy_bypass',
+    'configure_azure_imds_proxy_bypass',
+    'printf \'%s\\n%s\\n\' "$NO_PROXY" "$no_proxy"',
+  ].join('\n');
+  const completed = spawnSync('bash', ['-c', command], {
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      SETUP_SCRIPT: setupScript,
+    },
+  });
+
+  assert.equal(completed.status, 0, completed.stderr);
+  assert.equal(completed.stdout, 'localhost,169.254.169.254\nlocalhost,169.254.169.254\n');
+});
+
 test('Codex environment scripts never print an existing Git remote URL', async () => {
   for (const path of [setupScript, maintainScript]) {
     const source = await readFile(path, 'utf8');
@@ -52,6 +73,10 @@ async function captureAzureLogin(directory, managedIdentityClientId) {
     'az() {',
     '  if [[ -n "${CODEX_AZURE_CLIENT_SECRET:-}" ]]; then',
     '    return 97',
+    '  fi',
+    '  if [[ "$1" == "login" ]]; then',
+    '    case ",${NO_PROXY:-}," in *,169.254.169.254,*) ;; *) return 95 ;; esac',
+    '    case ",${no_proxy:-}," in *,169.254.169.254,*) ;; *) return 96 ;; esac',
     '  fi',
     '  printf \'%s\\n\' "$*" >> "$CAPTURE_PATH"',
     '}',

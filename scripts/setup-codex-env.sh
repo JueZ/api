@@ -29,6 +29,23 @@ require_env() {
   fi
 }
 
+configure_azure_imds_proxy_bypass() {
+  local imds_host="169.254.169.254"
+  local variable
+  local current
+
+  # Azure CLI uses Python's proxy handling, which honors uppercase HTTP_PROXY.
+  # Keep the link-local IMDS request on the host even when Codex supplies a proxy.
+  for variable in NO_PROXY no_proxy; do
+    current="${!variable:-}"
+    case ",${current}," in
+      *",${imds_host},"*) ;;
+      *) printf -v "${variable}" '%s%s' "${current}" "${current:+,}${imds_host}" ;;
+    esac
+    export "${variable?}"
+  done
+}
+
 
 configure_git_remote() {
   local repository="${CODEX_GITHUB_REPOSITORY:-JueZ/api}"
@@ -112,6 +129,7 @@ GITHUB_CLI_SOURCES
 login_azure() {
   reject_shell_tracing
   require_env AZURE_SUBSCRIPTION_ID
+  configure_azure_imds_proxy_bypass
 
   if [[ -n "${CODEX_AZURE_MANAGED_IDENTITY_CLIENT_ID:-}" ]]; then
     echo "Logging into Azure CLI with the configured user-assigned managed identity."

@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-06 Codex Managed Identity proxy bypass prepared
+
+- A fresh WSL-hosted Codex setup reached Azure IMDS directly with an HTTP 200 JSON response, but `az login --identity` failed while parsing an empty/non-JSON response because the Python Azure CLI honored the host `HTTP_PROXY` and the link-local IMDS address was absent from `NO_PROXY`.
+- Setup now preserves existing exclusions and appends `169.254.169.254` exactly once to both `NO_PROXY` and `no_proxy` before Managed Identity login. Regression coverage verifies both system-assigned and user-assigned identity paths receive the bypass and that no service-principal secret path is restored.
+- The process-local workaround was proven with a successful Managed Identity login. Remote CI, independent review, merge, and post-merge delivery evidence remain pending.
+
 ## 2026-08-03 Full-repository Codex Security finding repair prepared
 
 - The complete local Codex Security rescan of main commit `988e548fa0b3da2459f274b83677ff534c6ff67d` reported 32 findings: five high, 23 medium, and four low. The earlier six findings were absent. The prepared repair addresses every new finding; remote acceptance and deployment evidence are still pending.

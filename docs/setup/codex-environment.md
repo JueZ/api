@@ -22,6 +22,8 @@ Provide these values only to the setup process:
 
 The host must run on Azure compute with the selected managed identity attached and least-privilege RBAC assigned before setup. Do not provide a standing Azure client secret. The script explicitly unsets the legacy `CODEX_AZURE_CLIENT_ID`, `CODEX_AZURE_CLIENT_SECRET`, and `CODEX_AZURE_TENANT_ID` variables before starting child processes so stale setup configuration cannot be inherited.
 
+When the host environment defines an HTTP proxy, setup preserves the existing proxy exclusions and appends the Azure Instance Metadata Service address `169.254.169.254` to both `NO_PROXY` and `no_proxy` for the setup process. Azure CLI uses Python proxy handling and otherwise may send its Managed Identity request through the proxy, producing a non-JSON or empty IMDS response even though the link-local endpoint is reachable directly.
+
 Do not use `GH_TOKEN` or `GITHUB_TOKEN` for setup. GitHub CLI gives those variables precedence over cached credentials, so authentication may appear to work without being persisted. The setup script explicitly unsets `GH_TOKEN` and `GITHUB_TOKEN` before piping `CODEX_GH_TOKEN` into `gh auth login --with-token`.
 
 ## Secret handling rules
@@ -45,7 +47,7 @@ The setup script:
 1. Installs or updates apt prerequisites.
 2. Configures Microsoft and GitHub CLI apt repositories.
 3. Installs `azure-cli` and `gh`.
-4. Logs into Azure with `az login --identity`, selecting `CODEX_AZURE_MANAGED_IDENTITY_CLIENT_ID` only when configured.
+4. Adds `169.254.169.254` to the process-local uppercase and lowercase proxy bypass lists, then logs into Azure with `az login --identity`, selecting `CODEX_AZURE_MANAGED_IDENTITY_CLIENT_ID` only when configured.
 5. Selects `AZURE_SUBSCRIPTION_ID` with `az account set`.
 6. Unsets `GH_TOKEN` and `GITHUB_TOKEN`.
 7. Logs into GitHub CLI by piping `CODEX_GH_TOKEN` to `gh auth login --with-token` so the credential is cached.

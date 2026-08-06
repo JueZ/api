@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-08-06 — Keep Azure IMDS outside host HTTP proxies
+
+- Decision: Preserve the Codex host's existing proxy exclusions and append the Azure IMDS address `169.254.169.254` exactly once to both `NO_PROXY` and `no_proxy` before `az login --identity`.
+- Rationale: The WSL host could reach IMDS directly and received valid JSON, but Azure CLI's Python HTTP stack honored uppercase `HTTP_PROXY`; without an explicit bypass it received an empty/non-JSON proxy response and failed during Managed Identity token parsing.
+- Security boundary: Authentication remains Managed Identity-only with least-privilege Azure RBAC. The bypass is process-local, targets only the Azure link-local metadata address, preserves all existing proxy rules, and does not reintroduce a client secret or service-principal password argument.
+- Status: The local Managed Identity login succeeded with the bypass. Remote PR gates and merge evidence remain pending.
+
 ## 2026-08-03 — Close the full rescan through default-branch dispatch and bounded trust boundaries
 
 - Decision: Replace branch-selectable privileged `workflow_dispatch` entry points with typed `repository_dispatch` events for test deployment, production promotion, rollback, private-storage preparation, and manual auto-merge. Retain exact current-main, first-attempt, artifact/provenance, environment, OIDC, and production-latch validation in each default-branch receiver.
