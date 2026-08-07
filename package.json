@@ -73,7 +73,9 @@
     "brace-expansion": "5.0.9",
     "fast-uri": "3.1.5",
     "hono": "4.12.34",
-    "undici": "7.29.0",
+    "@angular/build": {
+      "undici": "7.29.0"
+    },
     "@hono/node-server": "2.0.11"
   }
 }
