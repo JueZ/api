@@ -14,6 +14,6 @@ Every callable capability declares:
 
 The registry is consumed by REST authorization, MCP OAuth descriptors/challenges, deterministic agent evals, documentation generation, and architecture checks. Provider or transport names are not authorization policy.
 
-Bring uses two logical registry entries for each destructive operation because complete/remove require different permissions even though they share REST routes. The handler authenticates the caller before reading the bounded body, parses the requested/confirmed operation, then authorizes the matching registry entry. MCP exposes Bring reads and idempotent add only; complete/remove remain on the operator-reviewed REST/web path.
+Bring uses two logical registry entries for each destructive operation because complete/remove require different permissions even though they share REST routes. The handler authenticates the caller before reading the bounded body, parses the requested/confirmed operation, then authorizes the matching registry entry. MCP exposes only Bring reads; write and destructive operations remain on the operator-reviewed REST/web path.
 
 The generated [operation catalogue](operation-catalogue.md) must stay synchronized through `npm run docs:check-operations`.

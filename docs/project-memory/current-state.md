@@ -1,11 +1,5 @@
 # Current state
 
-## 2026-08-06 Bring MCP add restoration prepared
-
-- Production REST Bring add is already enabled with one exact writable shared-list authorization; test remains read-only. The user-facing gap was the August 3 removal of all Bring mutation tools from the bundled MCP gateway.
-- `bring_add_items` is restored as the only MCP mutation. It requires an explicit operator request, a fresh list version, a unique operation UUID, `bring.write`, production-only write policy, exact writable/shared-list allowlisting, current provider membership, and sanitized durable audit. Complete/remove remain REST/web-only.
-- Local type-check, lint, the complete 332-test suite, operation/architecture drift, agent safety evals, and guardrail policy pass. Exact-head CI/policy/security review, merge, staged deployment, runtime tool discovery, and authenticated operator use remain pending. Live mutation canaries remain prohibited.
-
 ## 2026-08-06 Codex Cloud Azure CLI authentication compatibility prepared
 
 - The August 2 setup hardening unconditionally replaced service-principal login with host Managed Identity. That works only on Azure compute with an attached identity; Codex Cloud runs on separate OpenAI-managed compute, so `az login --identity` failed before the external wrapper could reach its service-principal fallback.

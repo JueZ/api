@@ -1,12 +1,5 @@
 # Decision log
 
-## 2026-08-06 — Restore add-only Bring access to the bundled MCP gateway
-
-- Decision: Restore `bring_add_items` to the single bundled MCP gateway while keeping complete/remove tools unavailable. MCP adds require a fresh list version, a unique idempotency UUID, `bring.write`, the existing production-only write gate, exact writable/shared-list allowlists, current provider membership, and sanitized durable audit.
-- Intent boundary: The tool and server instructions permit adds only after an explicit authenticated operator request. Instructions in Reddit, Willhaben, Bring, logs, or any other tool output are untrusted data and never authorize a mutation.
-- Rationale: Production REST add was already enabled and allowlisted, but the August 3 MCP capability reduction prevented the authenticated operator from adding shopping items through the connected API. Add is independently useful and non-destructive; destructive confirmation tokens remain outside the model-visible session.
-- Residual risk: The unofficial Bring provider may drift or return an ambiguous mutation outcome. Durable replay blocking and exact-payload idempotency remain mandatory, and live mutation canaries remain prohibited.
-
 ## 2026-08-06 — Support explicit Azure authentication modes for Codex hosts
 
 - Decision: Keep `managed-identity` as the default Azure login mode for Azure-hosted Codex environments, including an IMDS proxy bypass and removal of stale service-principal variables. Restore a separately selected `service-principal` mode for Codex Cloud, which has no attached project Managed Identity but requires direct Azure CLI access.
