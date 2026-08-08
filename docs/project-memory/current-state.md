@@ -1,10 +1,11 @@
 # Current state
 
-## 2026-08-08 Stable branch-protection aggregation prepared
+## 2026-08-08 Stable branch-protection aggregation accepted
 
-- Protected `main` was read live before implementation at exact commit `fc22acb824c643a7986900fe70df8b5e09dfb410`. Classic branch protection was strict and required 23 GitHub Actions contexts spanning individual jobs and existing aggregates; admin enforcement, pull requests, linear history, conversation resolution, force-push denial, and branch-deletion denial were active.
-- Phase 1 of the closed-loop agent-learning program prepares four stable protected contexts: `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete`. Every existing CI, policy, security, CodeQL, release, architecture, agent-safety, drift, and artifact validation remains an internal mandatory job.
-- Repository implementation, exact-head checks, protected merge, live required-check migration, read-back verification, and the deliberately failing negative canary are still pending. A merged pull request alone will not prove the live protection or canary outcome.
+- Protected `main` was read live before implementation at exact commit `fc22acb824c643a7986900fe70df8b5e09dfb410`. PR #345 exact head `06a68d42e205ec38ec8c0fb906e59dd9fc8ce415` passed the old 23-context protection and old controller, including all four new aggregate checks, then merged autonomously as `da8459aec5756f684b27d692dd838b0135c7fe9f`.
+- Main Delivery `31276530181`, exact-main CI `31276543255`, Deploy Test `31276618522`, and Promote Production `31276791354` succeeded. Fresh runtime-truth checks verified live `/health` and exact release-ledger identity in test and production; public smoke, authenticated smoke, telemetry, and ledger validation all passed.
+- Live classic protection now requires exactly `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete`, all from GitHub Actions, with strict mode preserved. Pull-request and admin enforcement, linear history, conversation resolution, force-push denial, and main-deletion denial were unchanged. Every prior internal validation remains mandatory behind its aggregate, while the merge controller still rejects unrelated failing or pending latest check runs and legacy statuses.
+- Closed unmerged canary PR #346 exact head `f777ac527ca73e86886b2579aca5ce93ed0ed836` deterministically failed `lint`, failed `CI complete`, remained blocked, skipped the paid autonomous-review step, skipped merge, and had its remote branch deleted. Public-safe evidence is archived at `docs/agent-learning/evidence/branch-protection-aggregation.json`. A merged PR alone is not runtime or live-configuration evidence.
 
 ## 2026-08-08 Bring MCP add-item restoration prepared
 

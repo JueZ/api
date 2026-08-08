@@ -1,0 +1,244 @@
+{
+  "schemaVersion": 1,
+  "repository": "JueZ/api",
+  "phase": 1,
+  "capturedAt": "2026-08-08T20:28:15Z",
+  "implementation": {
+    "baselineMainSha": "fc22acb824c643a7986900fe70df8b5e09dfb410",
+    "pullRequest": {
+      "number": 345,
+      "url": "https://github.com/JueZ/api/pull/345",
+      "headSha": "06a68d42e205ec38ec8c0fb906e59dd9fc8ce415",
+      "mergeSha": "da8459aec5756f684b27d692dd838b0135c7fe9f",
+      "mergedAt": "2026-08-08T20:16:57Z"
+    },
+    "exactHeadAggregates": [
+      {
+        "context": "CI complete",
+        "checkRunId": 93150686253,
+        "workflowRunId": 31276396714,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      },
+      {
+        "context": "Policy complete",
+        "checkRunId": 93150548548,
+        "workflowRunId": 31276396688,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      },
+      {
+        "context": "CodeQL complete",
+        "checkRunId": 93150627354,
+        "workflowRunId": 31276396684,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      },
+      {
+        "context": "Autonomous review complete",
+        "checkRunId": 93150798117,
+        "workflowRunId": 31276396717,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      }
+    ],
+    "postMergeDelivery": {
+      "mainDelivery": {
+        "workflowRunId": 31276530181,
+        "conclusion": "success"
+      },
+      "mainCi": {
+        "workflowRunId": 31276543255,
+        "sourceSha": "da8459aec5756f684b27d692dd838b0135c7fe9f",
+        "conclusion": "success"
+      },
+      "deployTest": {
+        "workflowRunId": 31276618522,
+        "sourceSha": "da8459aec5756f684b27d692dd838b0135c7fe9f",
+        "deliveryCorrelation": "c54a95c5de0682cba123c3a8d62a5e4564b9ac25a17b6d26",
+        "conclusion": "success",
+        "publicSmoke": "passed",
+        "authenticatedSmoke": "passed",
+        "telemetry": "passed",
+        "releaseLedger": "validated",
+        "runtimeTruth": {
+          "status": "verified",
+          "checkedAt": "2026-08-08T20:28:02.540Z"
+        }
+      },
+      "promoteProduction": {
+        "workflowRunId": 31276791354,
+        "sourceSha": "da8459aec5756f684b27d692dd838b0135c7fe9f",
+        "deliveryCorrelation": "2b71daf6532050298e900af904b2f9db8a6bcb9c7bd5c60b",
+        "conclusion": "success",
+        "publicSmoke": "passed",
+        "authenticatedSmoke": "passed",
+        "telemetry": "passed",
+        "releaseLedger": "validated",
+        "runtimeTruth": {
+          "status": "verified",
+          "checkedAt": "2026-08-08T20:27:51.098Z"
+        }
+      }
+    }
+  },
+  "branchProtection": {
+    "mutation": {
+      "endpoint": "repos/JueZ/api/branches/main/protection/required_status_checks",
+      "scope": "required status checks only",
+      "strictPreserved": true,
+      "otherSettingsChanged": false
+    },
+    "before": {
+      "inspectedMainSha": "fc22acb824c643a7986900fe70df8b5e09dfb410",
+      "requiredChecks": [
+        "install",
+        "lint",
+        "type-check",
+        "unit tests",
+        "API tests",
+        "Angular build",
+        "Azure Functions build",
+        "OpenAPI validation",
+        "Bicep validation",
+        "security scan",
+        "secret scan",
+        "dependency audit",
+        "cost-policy check",
+        "guardrail policy check",
+        "CI complete",
+        "Policy complete",
+        "workflow and shell lint",
+        "architecture and agent validation",
+        "CodeQL javascript-typescript",
+        "CodeQL actions",
+        "release artifacts",
+        "dependency lock policy",
+        "Autonomous review complete"
+      ],
+      "requiredCheckAppId": 15368,
+      "settings": {
+        "strict": true,
+        "enforceAdmins": true,
+        "pullRequestRequired": true,
+        "requiredApprovingReviewCount": 0,
+        "dismissStaleReviews": false,
+        "requireCodeOwnerReviews": false,
+        "requireLastPushApproval": false,
+        "restrictions": null,
+        "requiredLinearHistory": true,
+        "allowForcePushes": false,
+        "allowDeletions": false,
+        "requiredConversationResolution": true,
+        "lockBranch": false,
+        "allowForkSyncing": false,
+        "rulesets": []
+      }
+    },
+    "after": {
+      "readBackAt": "2026-08-08T20:28:15Z",
+      "readBackMainSha": "da8459aec5756f684b27d692dd838b0135c7fe9f",
+      "requiredChecks": ["CI complete", "Policy complete", "CodeQL complete", "Autonomous review complete"],
+      "requiredCheckAppId": 15368,
+      "settings": {
+        "strict": true,
+        "enforceAdmins": true,
+        "pullRequestRequired": true,
+        "requiredApprovingReviewCount": 0,
+        "dismissStaleReviews": false,
+        "requireCodeOwnerReviews": false,
+        "requireLastPushApproval": false,
+        "restrictions": null,
+        "requiredLinearHistory": true,
+        "allowForcePushes": false,
+        "allowDeletions": false,
+        "requiredConversationResolution": true,
+        "lockBranch": false,
+        "allowForkSyncing": false,
+        "rulesets": []
+      }
+    }
+  },
+  "negativeCanary": {
+    "pullRequest": {
+      "number": 346,
+      "url": "https://github.com/JueZ/api/pull/346",
+      "headSha": "f777ac527ca73e86886b2579aca5ce93ed0ed836",
+      "state": "closed",
+      "merged": false,
+      "mergeStateAtClosure": "BLOCKED"
+    },
+    "deterministicFailure": {
+      "changedPath": "docs/agent-learning/negative-canary.json",
+      "internalCheck": {
+        "context": "lint",
+        "checkRunId": 93151302583,
+        "conclusion": "failure"
+      },
+      "ciAggregate": {
+        "context": "CI complete",
+        "checkRunId": 93151360805,
+        "conclusion": "failure"
+      },
+      "policyAggregate": {
+        "context": "Policy complete",
+        "checkRunId": 93151300696,
+        "conclusion": "success"
+      },
+      "codeqlAggregate": {
+        "context": "CodeQL complete",
+        "checkRunId": 93151375631,
+        "conclusion": "success"
+      },
+      "reviewAggregate": {
+        "context": "Autonomous review complete",
+        "checkRunId": 93151400038,
+        "conclusion": "failure"
+      }
+    },
+    "autonomousController": {
+      "workflowRunId": 31276677166,
+      "conclusion": "failure",
+      "freeGateStep": "failure",
+      "paidReviewStep": "skipped",
+      "paidCallClaimCheckCount": 0,
+      "mergeJobCheckRunId": 93151403328,
+      "mergeJobConclusion": "skipped"
+    },
+    "cleanup": {
+      "pullRequestClosed": true,
+      "remoteBranchDeleted": true
+    }
+  },
+  "localValidation": {
+    "commands": [
+      "npm ci --ignore-scripts",
+      "npm run lint",
+      "npm run type-check",
+      "npm test",
+      "npm run test:api",
+      "npm run build",
+      "node scripts/check-architecture.mjs",
+      "node scripts/validate-agent-skills.mjs",
+      "npm run eval:agents",
+      "npm run ops:policy-guardrails",
+      "npm run ops:check-lockfile",
+      "npm run docs:check-operations",
+      "actionlint with ShellCheck",
+      "Azure CLI Bicep build validation",
+      "git diff --check"
+    ],
+    "conclusion": "passed",
+    "repairAttempts": 0
+  },
+  "assertions": {
+    "allExistingInternalValidationPreserved": true,
+    "controllerCompleteRollupDefensePreserved": true,
+    "oldProtectionPassedBeforeMigration": true,
+    "strictProtectionPreserved": true,
+    "adminBypassUsed": false,
+    "negativeCanaryMerged": false,
+    "negativeCanaryPaidReviewStarted": false,
+    "secretsOrCredentialsArchived": false
+  }
+}

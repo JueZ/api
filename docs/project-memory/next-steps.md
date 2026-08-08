@@ -2,9 +2,9 @@
 
 ## Closed-loop agent-learning program
 
-- `docs/agent-learning/program.md` is authoritative. Phase 1 stable branch-protection aggregation is in progress from protected-main baseline `fc22acb824c643a7986900fe70df8b5e09dfb410`.
-- Finish the one Phase 1 implementation PR under the existing protection, observe all four aggregate contexts on its exact head, migrate only the live required-check list with strict mode preserved, verify the complete protection read-back, run and close the deterministic negative canary, archive public-safe evidence, and then mark Phase 1 accepted.
-- Do not begin Phase 2 artifact-schema work until Phase 1 has terminal PR, live-protection, and canary evidence. A merge alone is not runtime or live-configuration evidence.
+- `docs/agent-learning/program.md` is authoritative. Phase 1 is accepted at implementation merge `da8459aec5756f684b27d692dd838b0135c7fe9f`; live protection and negative-canary evidence is archived under `docs/agent-learning/evidence/`.
+- Next exact slice: deliver Phase 2 as one separate high-risk PR. Add the versioned artifact schema and directories, strict validator, reproducible index, package aliases, closed-loop-learning skill, governance-path policy coverage, fixed-path CI integration, deterministic tests, and the three GitHub-verified historical artifacts.
+- Keep the existing policy evaluation compatible, add no new protected context, and do not begin Phase 3 issue automation or Phase 4 paid/general task execution in the Phase 2 slice. A merged PR alone remains insufficient runtime or live-configuration evidence.
 
 ## Quality 10 program
 
@@ -15,7 +15,7 @@
 
 ## Current delivery boundary
 
-- Main Delivery `30746175284`, exact-main CI `30746184730`, Deploy Test `30746252148`, and Promote Production `30746368440` accepted exact release `056c7b4eb1938549d7d901f27d9b47c022f8d8f9` with exact-generation, public/authenticated smoke, telemetry, provenance, release-ledger, and runtime-truth evidence.
+- Main Delivery `31276530181`, exact-main CI `31276543255`, Deploy Test `31276618522`, and Promote Production `31276791354` accepted exact release `da8459aec5756f684b27d692dd838b0135c7fe9f` with exact-generation, public/authenticated smoke, telemetry, provenance, release-ledger, and fresh live-plus-ledger runtime-truth evidence.
 - The one existing production smoke federation record was repaired in place under explicit operator authorization. Keep the exact repository/environment/`deploy-environment.yml` subject and the minimal `catalogue.read`/`reddit.read` roles; do not create an alternate or broader trust route.
 - `DEPLOY_PRODUCTION_ENABLED=true` remains intentionally configured. Codex Auto-Merge, Codex Main Delivery, Deploy Test, and Promote Production remain active for always-on autonomous delivery overseen by Codex. Any later main commit still requires fresh exact-main CI, accepted Deploy Test provenance, and the complete production promotion gates. Rollback remains a separately requested operation.
 - The operator deferred credential rotation and an independent trust-root bootstrap. Keep the stronger workflow-bound GitHub OIDC subject; do not restore the legacy broad subject. Superseded PR #285 is closed and is not the current delivery path.
