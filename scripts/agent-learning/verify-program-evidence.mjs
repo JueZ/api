@@ -7,6 +7,18 @@ import { validateReleaseLedger } from '../validate-release-ledger.mjs';
 import { REPOSITORY_ROOT } from './validate-artifacts.mjs';
 
 const PHASE_2_EVIDENCE_PATH = 'docs/agent-learning/evidence/phase-2-versioned-artifacts.json';
+const PROGRAM_PATH = 'docs/agent-learning/program.md';
+const PROGRAM_EVIDENCE = Object.freeze({
+  1: 'docs/agent-learning/evidence/branch-protection-aggregation.json',
+  2: PHASE_2_EVIDENCE_PATH,
+});
+const ACCEPTANCE_CONTEXT_PATHS = Object.freeze([
+  PROGRAM_PATH,
+  'docs/project-memory/current-state.md',
+  'docs/project-memory/decision-log.md',
+  'docs/project-memory/deployment-log.md',
+  'docs/project-memory/next-steps.md',
+]);
 const EXPECTED_AGGREGATES = Object.freeze({
   'CI complete': Object.freeze({ path: '.github/workflows/ci.yml', event: 'pull_request' }),
   'Policy complete': Object.freeze({ path: '.github/workflows/policy-check.yml', event: 'pull_request' }),
@@ -36,6 +48,63 @@ function exactSha(value) {
 
 function exactPositiveInteger(value) {
   return Number.isSafeInteger(value) && value > 0;
+}
+
+function programPhaseRecord(programText, phase) {
+  for (const line of String(programText ?? '').split('\n')) {
+    if (!line.startsWith('|')) continue;
+    const cells = line.split('|').map((cell) => cell.trim());
+    if (cells[1] === String(phase)) {
+      return { status: cells[3]?.replaceAll('`', '') || '', line };
+    }
+  }
+  return { status: '', line: '' };
+}
+
+export function acceptedPhaseEvidenceFindings(programText, pathExists = existsSync) {
+  const findings = [];
+  for (const line of String(programText ?? '').split('\n')) {
+    if (!line.startsWith('|')) continue;
+    const cells = line.split('|').map((cell) => cell.trim());
+    const phase = Number(cells[1]);
+    if (!Number.isSafeInteger(phase) || cells[3]?.replaceAll('`', '') !== 'accepted') continue;
+    const evidencePath = PROGRAM_EVIDENCE[phase];
+    addFinding(findings, Boolean(evidencePath), `accepted phase ${phase} has no registered evidence record`);
+    if (!evidencePath) continue;
+    addFinding(findings, line.includes(evidencePath), `accepted phase ${phase} does not reference ${evidencePath}`);
+    addFinding(findings, pathExists(evidencePath), `accepted phase ${phase} evidence is missing: ${evidencePath}`);
+  }
+  return findings;
+}
+
+export function phaseEvidenceNeedsLiveVerification({
+  phase,
+  changedPaths = [],
+  previousProgramText = '',
+  currentProgramText = '',
+  acceptanceDiff = '',
+  verifyAll = false,
+}) {
+  if (verifyAll) return true;
+  const evidencePath = PROGRAM_EVIDENCE[phase];
+  if (changedPaths.includes(evidencePath)) return true;
+  const previous = programPhaseRecord(previousProgramText, phase);
+  const current = programPhaseRecord(currentProgramText, phase);
+  if (
+    previous.status !== current.status ||
+    previous.line.includes(evidencePath) !== current.line.includes(evidencePath)
+  ) {
+    return true;
+  }
+  const phasePattern = new RegExp(
+    phase === 2
+      ? '(?:Phase 2|phase-2-versioned-artifacts|PR #349|9310c94f97541e57f83b186af2cacf989d6f5330)'
+      : `(?:Phase ${phase}|phase-${phase})`,
+    'i',
+  );
+  return String(acceptanceDiff ?? '')
+    .split('\n')
+    .some((line) => /^[+-](?![+-])/.test(line) && phasePattern.test(line));
 }
 
 function githubToken(env = process.env, spawn = spawnSync) {
@@ -405,26 +474,62 @@ async function collectPhase2Observed(evidence, options = {}) {
   return observed;
 }
 
-function evidenceChanged(path, options = {}) {
-  if (options.verifyAll === true || process.env.GITHUB_ACTIONS !== 'true') return true;
+function gitOutput(args) {
+  const completed = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 5 * 1024 * 1024 });
+  if (completed.status !== 0) throw new Error(`git ${args[0]} failed while resolving program-evidence changes`);
+  return completed.stdout;
+}
+
+function evidenceChangeContext(options = {}) {
+  const verifyAll = options.verifyAll === true || process.env.GITHUB_ACTIONS !== 'true';
+  if (verifyAll) return { verifyAll, changedPaths: [], previousProgramText: '', acceptanceDiff: '' };
   const baseRef = process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : 'HEAD^';
   const range = process.env.GITHUB_BASE_REF ? `${baseRef}...HEAD` : `${baseRef}..HEAD`;
-  const completed = spawnSync('git', ['diff', '--quiet', range, '--', path], { encoding: 'utf8' });
-  if (completed.status === 0) return false;
-  if (completed.status === 1) return true;
-  throw new Error(`could not determine whether ${path} changed`);
+  const changedPaths = gitOutput([
+    'diff',
+    '--name-only',
+    range,
+    '--',
+    ...Object.values(PROGRAM_EVIDENCE),
+    ...ACCEPTANCE_CONTEXT_PATHS,
+  ])
+    .split('\n')
+    .filter(Boolean);
+  const previousProgramText = gitOutput(['show', `${baseRef}:${PROGRAM_PATH}`]);
+  const acceptanceDiff = gitOutput([
+    'diff',
+    '--unified=0',
+    range,
+    '--',
+    ...ACCEPTANCE_CONTEXT_PATHS.filter((path) => path !== PROGRAM_PATH),
+  ]);
+  return { verifyAll, changedPaths, previousProgramText, acceptanceDiff };
 }
 
 export async function verifyChangedProgramEvidence(options = {}) {
   const repositoryRoot = options.repositoryRoot || REPOSITORY_ROOT;
+  const programPath = join(repositoryRoot, PROGRAM_PATH);
   const evidencePath = join(repositoryRoot, PHASE_2_EVIDENCE_PATH);
-  if (!existsSync(evidencePath) || !evidenceChanged(PHASE_2_EVIDENCE_PATH, options)) {
-    return { verified: 0, errors: [] };
+  if (!existsSync(programPath)) return { verified: 0, errors: [`${PROGRAM_PATH}: authoritative program is missing`] };
+  const programText = await readFile(programPath, 'utf8');
+  const errors = acceptedPhaseEvidenceFindings(programText, (path) => existsSync(join(repositoryRoot, path)));
+  const changeContext = evidenceChangeContext(options);
+  const verifyPhase2 = phaseEvidenceNeedsLiveVerification({
+    phase: 2,
+    currentProgramText: programText,
+    ...changeContext,
+  });
+  if (errors.length > 0 || !verifyPhase2) return { verified: 0, errors };
+  if (!existsSync(evidencePath)) {
+    return { verified: 0, errors: [`${PHASE_2_EVIDENCE_PATH}: registered evidence is missing`] };
   }
   const evidence = JSON.parse(await readFile(evidencePath, 'utf8'));
   const observed = await collectPhase2Observed(evidence, options);
   return {
     verified: 1,
-    errors: phase2EvidenceFindings(evidence, observed).map((finding) => `${PHASE_2_EVIDENCE_PATH}: ${finding}`),
+    errors: [
+      ...errors,
+      ...phase2EvidenceFindings(evidence, observed).map((finding) => `${PHASE_2_EVIDENCE_PATH}: ${finding}`),
+    ],
   };
 }

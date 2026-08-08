@@ -13,7 +13,11 @@ import {
   validateArtifactRepository,
 } from '../agent-learning/validate-artifacts.mjs';
 import { historicalScorerFindings, pullRequestProvenanceFindings } from '../agent-learning/verify-artifacts.mjs';
-import { phase2EvidenceFindings } from '../agent-learning/verify-program-evidence.mjs';
+import {
+  acceptedPhaseEvidenceFindings,
+  phase2EvidenceFindings,
+  phaseEvidenceNeedsLiveVerification,
+} from '../agent-learning/verify-program-evidence.mjs';
 
 const BROKEN_SHA = 'a'.repeat(40);
 const FIXED_SHA = 'b'.repeat(40);
@@ -476,6 +480,42 @@ test('Phase 2 acceptance evidence rejects stale or mismatched remote proof', () 
   assert.ok(findings.some((finding) => finding.includes('CI complete head SHA')));
   assert.ok(findings.some((finding) => finding.includes('prod ledger deployed commit')));
   assert.ok(findings.some((finding) => finding.includes('test live /health commit')));
+});
+
+test('accepted program phases fail closed when registered evidence is deleted', () => {
+  const program = readFileSync(join(REPOSITORY_ROOT, 'docs/agent-learning/program.md'), 'utf8');
+  const findings = acceptedPhaseEvidenceFindings(
+    program,
+    (path) => path !== 'docs/agent-learning/evidence/phase-2-versioned-artifacts.json',
+  );
+  assert.deepEqual(findings, [
+    'accepted phase 2 evidence is missing: docs/agent-learning/evidence/phase-2-versioned-artifacts.json',
+  ]);
+});
+
+test('Phase 2 status-only and memory-only changes require live evidence verification', () => {
+  const acceptedProgram = readFileSync(join(REPOSITORY_ROOT, 'docs/agent-learning/program.md'), 'utf8');
+  const pendingProgram = acceptedProgram.replace(
+    /\| 2\s+\| Versioned learning artifacts and closed-loop skill \| `accepted`/,
+    '| 2     | Versioned learning artifacts and closed-loop skill | `in_progress`',
+  );
+  assert.equal(
+    phaseEvidenceNeedsLiveVerification({
+      phase: 2,
+      previousProgramText: pendingProgram,
+      currentProgramText: acceptedProgram,
+    }),
+    true,
+  );
+  assert.equal(
+    phaseEvidenceNeedsLiveVerification({
+      phase: 2,
+      previousProgramText: acceptedProgram,
+      currentProgramText: acceptedProgram,
+      acceptanceDiff: '+Phase 2 is accepted through PR #349.\n',
+    }),
+    true,
+  );
 });
 
 test('policy alias remains compatible and reserved task aliases fail closed', () => {

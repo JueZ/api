@@ -344,7 +344,12 @@ test('required checks and deployment never dispatch repository-controlled npm sc
 
 test('program evidence verification uses the fixed validator with least-privilege authenticated reads', () => {
   const job = ciWorkflowDefinition.jobs['architecture-validation'];
-  assert.deepEqual(job.permissions, { actions: 'read', contents: 'read', 'pull-requests': 'read' });
+  assert.deepEqual(job.permissions, {
+    actions: 'read',
+    checks: 'read',
+    contents: 'read',
+    'pull-requests': 'read',
+  });
   const step = job.steps.find((candidate) => candidate.name === 'Validate versioned agent learning');
   assert.equal(step.env.GH_TOKEN, '${{ github.token }}');
   assert.match(step.run, /node scripts\/agent-learning\/validate-artifacts\.mjs/);
