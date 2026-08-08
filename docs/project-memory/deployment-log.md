@@ -5,7 +5,7 @@
 - Source: PR #349 exact head `7188188cc0b3fd1a58a5ee14ae5335158294135c` passed exact-head CI `31279530179`, Policy Check `31279530178`, CodeQL `31279530171`, and autonomous review/merge `31279529529`, then squash-merged as `9310c94f97541e57f83b186af2cacf989d6f5330`.
 - Main delivery: controller `31279667347`, exact-main CI `31279682790`, Deploy Test `31279752243`, and Promote Production `31279913572` all succeeded for the exact merge.
 - Acceptance: test and production passed immutable-source validation, public runtime smoke, authenticated hello and Reddit smoke, telemetry correlation, release-ledger publication, and final generation checks. Fresh `ops:runtime-truth` checks matched live `/health`, exact workflow metadata, and exact ledger identity to the merge in both environments with no blockers.
-- Governance state: three curated historical learning artifacts are verified, zero are waived, trusted exact-Git and GitHub provenance scorers run inside the existing CI aggregate, and no paid general task evaluation or historical learning-issue backfill ran. Live branch protection remains the same four strict GitHub Actions aggregate contexts.
+- Governance state: three curated historical learning artifacts are verified, zero are waived, and the existing CI aggregate now authenticates exact check/workflow bindings, release-ledger artifacts, and live runtime identity when acceptance evidence changes. No paid general task evaluation or historical learning-issue backfill ran.
 
 ## 2026-08-08 — Stable branch-protection aggregation accepted through production
 

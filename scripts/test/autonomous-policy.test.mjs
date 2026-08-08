@@ -342,6 +342,16 @@ test('required checks and deployment never dispatch repository-controlled npm sc
   assert.deepEqual(await exclusiveWorkflowCheckWriteFindings(), []);
 });
 
+test('program evidence verification uses the fixed validator with least-privilege authenticated reads', () => {
+  const job = ciWorkflowDefinition.jobs['architecture-validation'];
+  assert.deepEqual(job.permissions, { actions: 'read', contents: 'read', 'pull-requests': 'read' });
+  const step = job.steps.find((candidate) => candidate.name === 'Validate versioned agent learning');
+  assert.equal(step.env.GH_TOKEN, '${{ github.token }}');
+  assert.match(step.run, /node scripts\/agent-learning\/validate-artifacts\.mjs/);
+  assert.match(step.run, /node scripts\/agent-learning\/verify-artifacts\.mjs --github/);
+  assert.match(step.run, /node scripts\/agent-learning\/generate-index\.mjs --check/);
+});
+
 test('trusted workflow hashes bind complete run blocks and reject indirect command reconstruction', () => {
   const approvedWorkflow = 'jobs:\n  test:\n    steps:\n      - run: node --test\n';
   const approvedDigest = 'f88f2a2a45020d781428e709a66f1e117291851f6bdf2f57cad5e97fc763b07f';

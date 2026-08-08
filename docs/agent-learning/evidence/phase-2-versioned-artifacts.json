@@ -3,6 +3,12 @@
   "repository": "JueZ/api",
   "phase": 2,
   "capturedAt": "2026-08-08T21:51:55Z",
+  "verification": {
+    "mode": "authenticated-github-actions-and-live-runtime",
+    "validator": "scripts/agent-learning/verify-program-evidence.mjs",
+    "trustedEntryPoint": "node scripts/agent-learning/verify-artifacts.mjs --github",
+    "scope": "exact implementation PR and aggregates, exact delivery workflows, authenticated release-ledger artifacts, and live test/production health"
+  },
   "implementation": {
     "baselineMainSha": "eab88f735d3644181d2a043156970f0df02e3ff8",
     "pullRequest": {
@@ -152,6 +158,7 @@
       "npm run ops:validate-agent-skills",
       "npm run eval:agent-policy",
       "npm run agent:learning:validate",
+      "node scripts/agent-learning/verify-artifacts.mjs --github",
       "npm run agent:learning:index -- --check",
       "npm run agent:learning:status",
       "npm run ops:policy-guardrails",
@@ -166,26 +173,5 @@
     "authoritativeCiActionlint": "passed",
     "taskEvaluationsExecuted": 0,
     "paidGeneralEvaluationsExecuted": 0
-  },
-  "liveProtectionReadBack": {
-    "readBackAt": "2026-08-08T21:51:55Z",
-    "strict": true,
-    "requiredChecks": ["CI complete", "Policy complete", "CodeQL complete", "Autonomous review complete"],
-    "requiredCheckAppId": 15368,
-    "pullRequestRequired": true,
-    "enforceAdmins": true,
-    "requiredLinearHistory": true,
-    "requiredConversationResolution": true,
-    "allowForcePushes": false,
-    "allowDeletions": false
-  },
-  "assertions": {
-    "mergedPrAloneTreatedAsRuntimeEvidence": false,
-    "existingSecurityOrDeliveryControlWeakened": false,
-    "newProtectedContextAdded": false,
-    "automaticGovernanceRewriteEnabled": false,
-    "historicalLearningIssueFloodCreated": false,
-    "productionCredentialUsedForGeneralEvaluation": false,
-    "secretsOrProviderContentArchived": false
   }
 }

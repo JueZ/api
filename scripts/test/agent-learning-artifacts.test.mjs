@@ -13,10 +13,124 @@ import {
   validateArtifactRepository,
 } from '../agent-learning/validate-artifacts.mjs';
 import { historicalScorerFindings, pullRequestProvenanceFindings } from '../agent-learning/verify-artifacts.mjs';
+import { phase2EvidenceFindings } from '../agent-learning/verify-program-evidence.mjs';
 
 const BROKEN_SHA = 'a'.repeat(40);
 const FIXED_SHA = 'b'.repeat(40);
 const AS_OF_DATE = '2026-08-08';
+
+function validPhase2Observed(evidence) {
+  const implementation = evidence.implementation.pullRequest;
+  const observed = {
+    pullRequest: {
+      number: implementation.number,
+      html_url: implementation.url,
+      state: 'closed',
+      merged_at: implementation.mergedAt,
+      head: { ref: implementation.branch, sha: implementation.headSha },
+      base: { sha: evidence.implementation.baselineMainSha },
+      merge_commit_sha: implementation.mergeSha,
+    },
+    checkRuns: {},
+    workflowRuns: {},
+    artifacts: {},
+    ledgers: {},
+    liveHealth: {},
+  };
+  const aggregateWorkflows = {
+    'CI complete': ['.github/workflows/ci.yml', 'pull_request'],
+    'Policy complete': ['.github/workflows/policy-check.yml', 'pull_request'],
+    'CodeQL complete': ['.github/workflows/codeql.yml', 'pull_request'],
+    'Autonomous review complete': ['.github/workflows/codex-automerge.yml', 'pull_request_target'],
+  };
+  for (const record of evidence.implementation.exactHeadAggregates) {
+    const autonomous = record.context === 'Autonomous review complete';
+    observed.checkRuns[String(record.checkRunId)] = {
+      id: record.checkRunId,
+      name: record.context,
+      head_sha: implementation.headSha,
+      status: 'completed',
+      conclusion: 'success',
+      app: { id: 15368, slug: 'github-actions' },
+      external_id: autonomous
+        ? `juez-autonomous-review-decision:v1:JueZ/api:pull:${implementation.number}:head:${implementation.headSha}:run:${record.workflowRunId}`
+        : 'workflow-job',
+      details_url: autonomous
+        ? `https://github.com/JueZ/api/runs/${record.checkRunId}`
+        : `https://github.com/JueZ/api/actions/runs/${record.workflowRunId}/job/${record.checkRunId}`,
+    };
+    observed.workflowRuns[String(record.workflowRunId)] = {
+      id: record.workflowRunId,
+      repository: { full_name: 'JueZ/api' },
+      path: aggregateWorkflows[record.context][0],
+      event: aggregateWorkflows[record.context][1],
+      run_attempt: 1,
+      status: 'completed',
+      conclusion: 'success',
+      head_sha: implementation.headSha,
+    };
+  }
+  const deliveryWorkflows = {
+    mainDelivery: ['.github/workflows/codex-main-delivery.yml', 'workflow_run'],
+    mainCi: ['.github/workflows/ci.yml', 'workflow_dispatch'],
+    deployTest: ['.github/workflows/deploy-test.yml', 'repository_dispatch'],
+    promoteProduction: ['.github/workflows/promote-production.yml', 'repository_dispatch'],
+  };
+  for (const [key, record] of Object.entries(evidence.implementation.postMergeDelivery)) {
+    observed.workflowRuns[String(record.workflowRunId)] = {
+      id: record.workflowRunId,
+      repository: { full_name: 'JueZ/api' },
+      path: deliveryWorkflows[key][0],
+      event: deliveryWorkflows[key][1],
+      run_attempt: 1,
+      status: 'completed',
+      conclusion: 'success',
+      head_sha: implementation.mergeSha,
+      display_title:
+        key === 'deployTest'
+          ? `Deploy Test ${record.sourceSha} ${record.deliveryCorrelation}`
+          : key === 'promoteProduction'
+            ? `Promote Production ${record.sourceSha} ${record.deliveryCorrelation}`
+            : undefined,
+    };
+  }
+  for (const [environment, key] of [
+    ['test', 'deployTest'],
+    ['prod', 'promoteProduction'],
+  ]) {
+    const record = evidence.implementation.postMergeDelivery[key];
+    observed.artifacts[String(record.workflowRunId)] = {
+      artifacts: [
+        {
+          id: record.releaseLedgerArtifactId,
+          name: `release-ledger-${environment}-${record.sourceSha}-${record.deliveryCorrelation}`,
+          expired: false,
+        },
+      ],
+    };
+    observed.ledgers[environment] = {
+      environment,
+      deployedCommit: record.sourceSha,
+      sourceRef: record.sourceSha,
+      workflowRunId: String(record.workflowRunId),
+      deliveryCorrelation: record.deliveryCorrelation,
+      functionAppName: `fixture-${environment}`,
+      apiBaseUrl: `https://example.invalid/${environment}`,
+      artifacts: {
+        functionappSha256: 'a'.repeat(64),
+        frontendSha256: 'b'.repeat(64),
+        sbomSha256: 'c'.repeat(64),
+      },
+      smokeRunId: `smoke-${environment}`,
+      smokeResults: { status: 'passed' },
+      authenticatedSmokeResults: { status: 'passed' },
+      telemetryCheckResult: { status: 'passed' },
+      verifiedAt: '2026-08-08T21:00:00Z',
+    };
+    observed.liveHealth[environment] = { status: 'ok', deployedCommitSha: implementation.mergeSha };
+  }
+  return observed;
+}
 
 function validVerifiedArtifact(overrides = {}) {
   return {
@@ -340,6 +454,28 @@ test('live PR provenance must bind the implementation number and exact broken/fi
       finding.includes('merge SHA'),
     ),
   );
+});
+
+test('Phase 2 acceptance evidence binds authenticated checks, workflow runs, ledgers, and live runtime', () => {
+  const evidence = JSON.parse(
+    readFileSync(join(REPOSITORY_ROOT, 'docs/agent-learning/evidence/phase-2-versioned-artifacts.json'), 'utf8'),
+  );
+  assert.deepEqual(phase2EvidenceFindings(evidence, validPhase2Observed(evidence)), []);
+});
+
+test('Phase 2 acceptance evidence rejects stale or mismatched remote proof', () => {
+  const evidence = JSON.parse(
+    readFileSync(join(REPOSITORY_ROOT, 'docs/agent-learning/evidence/phase-2-versioned-artifacts.json'), 'utf8'),
+  );
+  const observed = validPhase2Observed(evidence);
+  const aggregate = evidence.implementation.exactHeadAggregates[0];
+  observed.checkRuns[String(aggregate.checkRunId)].head_sha = 'd'.repeat(40);
+  observed.ledgers.prod.deployedCommit = 'e'.repeat(40);
+  observed.liveHealth.test.deployedCommitSha = 'f'.repeat(40);
+  const findings = phase2EvidenceFindings(evidence, observed);
+  assert.ok(findings.some((finding) => finding.includes('CI complete head SHA')));
+  assert.ok(findings.some((finding) => finding.includes('prod ledger deployed commit')));
+  assert.ok(findings.some((finding) => finding.includes('test live /health commit')));
 });
 
 test('policy alias remains compatible and reserved task aliases fail closed', () => {
