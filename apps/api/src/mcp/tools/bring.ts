@@ -137,31 +137,31 @@ export function registerBringTools(server: McpServer, options: BringToolRegistra
   );
 
   server.registerTool(
-    'bring_add_items',
+    'bring_add_item',
     {
-      title: 'Add Bring items',
+      title: 'Add Bring item',
       description:
-        'Idempotently add 1–50 items to one explicitly writable list. Generate a new operationId; retry only the identical payload with that ID.',
+        'Idempotently add one item to an explicitly writable list. Generate a new operationId; retry only the identical payload with that ID.',
       inputSchema: {
         operationId: operationIdSchema,
         listUuid: writeListUuidSchema,
         expectedListVersion: expectedListVersionSchema,
-        items: z.array(itemInputSchema).min(1).max(50),
+        item: itemInputSchema,
       },
       outputSchema: mutationOutputSchema,
       annotations: addAnnotations,
       ...security([OPERATION_IDS.bringAddItems], 'Adding Bring items…', 'Bring items added'),
     },
-    async ({ operationId, listUuid, expectedListVersion, items }) => {
+    async ({ operationId, listUuid, expectedListVersion, item }) => {
       const principal = await options.requirePrincipal(OPERATION_IDS.bringAddItems);
       if (isToolResult(principal)) return principal;
       return options.run(OPERATION_IDS.bringAddItems, async () => {
         const result = await options.bring.addItems(
           principal,
-          { operationId, listUuid, expectedListVersion, items },
+          { operationId, listUuid, expectedListVersion, items: [item] },
           options.invocationId,
         );
-        return textResult(result, `${result.replayed ? 'Replayed' : 'Added'} ${result.itemCount} Bring items.`);
+        return textResult(result, `${result.replayed ? 'Replayed' : 'Added'} Bring item.`);
       });
     },
   );

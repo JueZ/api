@@ -20,12 +20,12 @@ test('MCP registration parser finds tools in a bundled server or registration he
     registeredMcpToolsFromSource(`
       server.registerTool('health_check', {}, handler);
       server.registerTool(
-        "bring_add_items",
+        "bring_add_item",
         {},
         handler,
       );
     `),
-    new Set(['health_check', 'bring_add_items']),
+    new Set(['health_check', 'bring_add_item']),
   );
 });
 

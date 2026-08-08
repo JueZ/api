@@ -118,7 +118,7 @@ const definitions = [
     confirmation: 'not-applicable',
     audit: mutationAudit,
     rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/items' },
-    mcp: { toolName: 'bring_add_items' },
+    mcp: { toolName: 'bring_add_item' },
   }),
   define({
     id: OPERATION_IDS.bringPrepareComplete,

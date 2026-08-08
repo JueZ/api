@@ -1,9 +1,9 @@
 # Current state
 
-## 2026-08-08 Bring MCP add-items restoration prepared
+## 2026-08-08 Bring MCP add-item restoration prepared
 
-- Production correctly lacked `bring_add_items`: the August 3 security repair intentionally removed every Bring mutation from the bundled MCP server, so the earlier claim that the tool was currently registered was inaccurate.
-- The prepared correction restores only the non-destructive, idempotent `bring_add_items` MCP tool. It continues to require `bring.write`, a caller-generated operation UUID, an explicit policy-authorized list UUID, bounded item input, current provider membership checks, and the existing mutation audit/idempotency path.
+- Production briefly exposed the restored batch-named `bring_add_items` tool after the August 3 security repair had intentionally removed every Bring mutation from the bundled MCP server.
+- The prepared correction exposes the requested singular `bring_add_item` MCP tool and accepts exactly one item per call. It continues to require `bring.write`, a caller-generated operation UUID, an explicit policy-authorized list UUID, bounded item input, current provider membership checks, and the existing mutation audit/idempotency path.
 - Complete and remove operations remain unavailable to the model-visible MCP session; their confirmation tokens stay confined to the authenticated REST/web flow. Local validation, exact-head CI/policy/review, merge, staged deployment, and live production tool discovery remain pending.
 
 ## 2026-08-06 Codex Cloud Azure CLI authentication compatibility prepared
