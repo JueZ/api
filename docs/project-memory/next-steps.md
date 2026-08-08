@@ -1,5 +1,11 @@
 # Next steps
 
+## Closed-loop agent-learning program
+
+- `docs/agent-learning/program.md` is authoritative. Phase 1 stable branch-protection aggregation is in progress from protected-main baseline `fc22acb824c643a7986900fe70df8b5e09dfb410`.
+- Finish the one Phase 1 implementation PR under the existing protection, observe all four aggregate contexts on its exact head, migrate only the live required-check list with strict mode preserved, verify the complete protection read-back, run and close the deterministic negative canary, archive public-safe evidence, and then mark Phase 1 accepted.
+- Do not begin Phase 2 artifact-schema work until Phase 1 has terminal PR, live-protection, and canary evidence. A merge alone is not runtime or live-configuration evidence.
+
 ## Quality 10 program
 
 - Parent issue [#316](https://github.com/JueZ/api/issues/316) tracks the resumable program; `docs/quality/quality-10-program.md` is authoritative.

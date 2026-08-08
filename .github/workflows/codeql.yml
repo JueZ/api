@@ -41,3 +41,23 @@ jobs:
         uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # tag=v4
         with:
           category: /language:${{ matrix.language }}
+
+  codeql-complete:
+    name: CodeQL complete
+    if: always()
+    needs:
+      - analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify every CodeQL matrix analysis passed
+        shell: bash
+        run: |
+          set -euo pipefail
+          results='${{ toJson(needs) }}'
+          if echo "$results" | jq -e 'to_entries | all(.value.result == "success")' >/dev/null; then
+            echo "All CodeQL analyses passed."
+          else
+            echo "One or more CodeQL analyses did not pass."
+            exit 1
+          fi

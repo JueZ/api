@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-08 Stable branch-protection aggregation prepared
+
+- Protected `main` was read live before implementation at exact commit `fc22acb824c643a7986900fe70df8b5e09dfb410`. Classic branch protection was strict and required 23 GitHub Actions contexts spanning individual jobs and existing aggregates; admin enforcement, pull requests, linear history, conversation resolution, force-push denial, and branch-deletion denial were active.
+- Phase 1 of the closed-loop agent-learning program prepares four stable protected contexts: `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete`. Every existing CI, policy, security, CodeQL, release, architecture, agent-safety, drift, and artifact validation remains an internal mandatory job.
+- Repository implementation, exact-head checks, protected merge, live required-check migration, read-back verification, and the deliberately failing negative canary are still pending. A merged pull request alone will not prove the live protection or canary outcome.
+
 ## 2026-08-08 Bring MCP add-item restoration prepared
 
 - Production briefly exposed the restored batch-named `bring_add_items` tool after the August 3 security repair had intentionally removed every Bring mutation from the bundled MCP server.
