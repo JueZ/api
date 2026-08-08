@@ -2,9 +2,9 @@
 
 ## Closed-loop agent-learning program
 
-- `docs/agent-learning/program.md` is authoritative. Phase 1 is accepted at implementation merge `da8459aec5756f684b27d692dd838b0135c7fe9f`; live protection and negative-canary evidence is archived under `docs/agent-learning/evidence/`.
-- Phase 2 is in progress on `codex/agent-learning-phase-2-artifacts` from exact baseline `eab88f735d3644181d2a043156970f0df02e3ff8`. Finish its complete local validation, protected PR, exact-head checks, merge, main delivery, and evidence-ledger update before beginning another phase.
-- Keep the existing policy evaluation compatible, keep the task-evaluation aliases fail closed until Phase 4 implements the harness, add no new protected context, and do not begin Phase 3 issue automation or paid/general task execution in the Phase 2 slice. A merged PR alone remains insufficient runtime or live-configuration evidence.
+- `docs/agent-learning/program.md` is authoritative. Phases 1 and 2 are accepted at implementation merges `da8459aec5756f684b27d692dd838b0135c7fe9f` and `9310c94f97541e57f83b186af2cacf989d6f5330`; public-safe protection, canary, artifact, delivery, and runtime evidence is archived under `docs/agent-learning/evidence/`.
+- The next exact slice is Phase 3: extend `scripts/triage-repair-issues.mjs` and its existing workflow with deterministic significant-failure disposition, normalized fingerprints, stable idempotency markers, candidate deduplication/recurrence, explicit exception validation, rollout timestamp, dry-run exact-range backfill, least-privilege write mode, labels, repair linkage/closure rules, and regression coverage in one high-risk protected PR.
+- Do not start the Phase 4 detached-worktree task harness or any paid general task execution in the Phase 3 slice. Keep all governance changes behind ordinary protected PRs, retain the four aggregate contexts, and treat a merged PR alone as insufficient runtime or live-configuration evidence.
 
 ## Quality 10 program
 
@@ -15,7 +15,7 @@
 
 ## Current delivery boundary
 
-- Main Delivery `31276530181`, exact-main CI `31276543255`, Deploy Test `31276618522`, and Promote Production `31276791354` accepted exact release `da8459aec5756f684b27d692dd838b0135c7fe9f` with exact-generation, public/authenticated smoke, telemetry, provenance, release-ledger, and fresh live-plus-ledger runtime-truth evidence.
+- Main Delivery `31279667347`, exact-main CI `31279682790`, Deploy Test `31279752243`, and Promote Production `31279913572` accepted exact release `9310c94f97541e57f83b186af2cacf989d6f5330` with exact-generation, public/authenticated smoke, telemetry, provenance, release-ledger, and fresh live-plus-ledger runtime-truth evidence.
 - The one existing production smoke federation record was repaired in place under explicit operator authorization. Keep the exact repository/environment/`deploy-environment.yml` subject and the minimal `catalogue.read`/`reddit.read` roles; do not create an alternate or broader trust route.
 - `DEPLOY_PRODUCTION_ENABLED=true` remains intentionally configured. Codex Auto-Merge, Codex Main Delivery, Deploy Test, and Promote Production remain active for always-on autonomous delivery overseen by Codex. Any later main commit still requires fresh exact-main CI, accepted Deploy Test provenance, and the complete production promotion gates. Rollback remains a separately requested operation.
 - The operator deferred credential rotation and an independent trust-root bootstrap. Keep the stronger workflow-bound GitHub OIDC subject; do not restore the legacy broad subject. Superseded PR #285 is closed and is not the current delivery path.
