@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { artifactStatusCounts, ARTIFACT_STATES, validateArtifactRepository } from './validate-artifacts.mjs';
+import { authenticatedGitHubJson, verifyChangedProgramEvidence } from './verify-program-evidence.mjs';
 
 const HISTORICAL_SCORERS = Object.freeze({
   'historical.workflow-run-identity': Object.freeze({
@@ -167,19 +168,7 @@ export function pullRequestProvenanceFindings(artifact, pullRequest) {
 }
 
 async function fetchPullRequest(repository, number) {
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  const headers = {
-    Accept: 'application/vnd.github+json',
-    'User-Agent': 'JueZ-api-agent-learning-validator',
-    'X-GitHub-Api-Version': '2022-11-28',
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`https://api.github.com/repos/${repository}/pulls/${number}`, {
-    headers,
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) throw new Error(`GitHub PR metadata request failed with HTTP ${response.status}`);
-  return response.json();
+  return authenticatedGitHubJson(`repos/${repository}/pulls/${number}`);
 }
 
 export async function verifyArtifactRepository(options = {}) {
@@ -213,6 +202,11 @@ async function runCli() {
     throw new Error(`Unsupported arguments: ${args.filter((arg) => !allowedArgs.has(arg)).join(' ')}`);
   }
   const result = await verifyArtifactRepository({ verifyGitHub: args.includes('--github') });
+  if (args.includes('--github')) {
+    const programEvidence = await verifyChangedProgramEvidence();
+    result.errors.push(...programEvidence.errors);
+    result.verifiedProgramEvidence = programEvidence.verified;
+  }
   if (result.errors.length > 0) {
     console.error(`Learning artifact proof verification failed:\n- ${result.errors.join('\n- ')}`);
     process.exitCode = 1;
@@ -225,7 +219,7 @@ async function runCli() {
     return;
   }
   console.log(
-    `Verified counterfactual proof for ${result.artifacts.filter(({ artifact }) => artifact.status === 'verified').length} learning artifacts${args.includes('--github') ? ' with live GitHub provenance' : ''}.`,
+    `Verified counterfactual proof for ${result.artifacts.filter(({ artifact }) => artifact.status === 'verified').length} learning artifacts${args.includes('--github') ? ` with authenticated GitHub provenance${result.verifiedProgramEvidence ? ' and live program evidence' : ''}` : ''}.`,
   );
 }
 
