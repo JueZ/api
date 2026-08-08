@@ -758,17 +758,58 @@ test('policy glob matcher handles recursive and exact AGENTS paths', () => {
   assert.equal(matchesPolicyGlob('README.md', '**/AGENTS.md'), false);
 });
 
-test('risk classification covers workflow, MCP, Bring, contracts, and agent skills', () => {
+test('risk classification covers workflows, integrations, contracts, and agent-governance artifacts', () => {
   const paths = [
     '.github/workflows/ci.yml',
     'apps/api/src/mcp/server.ts',
     'apps/api/src/shared/bring/client.ts',
     'contracts/openapi.yaml',
     '.agents/skills/example/SKILL.md',
+    'evals/agent-tasks/example.yml',
+    'docs/agent-learning/artifacts/example.yml',
+    'scripts/agent-learning/validate-artifacts.mjs',
+    'scripts/agent-task-evals/run.mjs',
   ];
   const risk = classifyRisk(paths, policy);
   assert.equal(risk.highRisk, true);
   assert.deepEqual(risk.highRiskPaths, paths);
+  assert.deepEqual(risk.classes.agentGovernance, paths.slice(4));
+});
+
+test('agent-governance classifier roots cannot be removed', () => {
+  const requiredPatterns = [
+    'AGENTS.md',
+    '**/AGENTS.md',
+    '.agents/skills/**',
+    'evals/agent-tasks/**',
+    'docs/agent-learning/**',
+    'scripts/agent-learning/**',
+    'scripts/agent-task-evals/**',
+  ];
+  for (const removedPattern of requiredPatterns) {
+    const missingHighRisk = {
+      ...policy,
+      highRiskPaths: policy.highRiskPaths.filter((pattern) => pattern !== removedPattern),
+    };
+    assert.ok(
+      validateAutonomousPolicy(missingHighRisk).includes(
+        `highRiskPaths must include agent-governance pattern: ${removedPattern}`,
+      ),
+    );
+
+    const missingClass = {
+      ...policy,
+      riskClasses: {
+        ...policy.riskClasses,
+        agentGovernance: policy.riskClasses.agentGovernance.filter((pattern) => pattern !== removedPattern),
+      },
+    };
+    assert.ok(
+      validateAutonomousPolicy(missingClass).includes(
+        `riskClasses.agentGovernance must include pattern: ${removedPattern}`,
+      ),
+    );
+  }
 });
 
 test('package scripts, build controls, and executable code always require independent review', () => {

@@ -3,8 +3,8 @@
 ## Closed-loop agent-learning program
 
 - `docs/agent-learning/program.md` is authoritative. Phase 1 is accepted at implementation merge `da8459aec5756f684b27d692dd838b0135c7fe9f`; live protection and negative-canary evidence is archived under `docs/agent-learning/evidence/`.
-- Next exact slice: deliver Phase 2 as one separate high-risk PR. Add the versioned artifact schema and directories, strict validator, reproducible index, package aliases, closed-loop-learning skill, governance-path policy coverage, fixed-path CI integration, deterministic tests, and the three GitHub-verified historical artifacts.
-- Keep the existing policy evaluation compatible, add no new protected context, and do not begin Phase 3 issue automation or Phase 4 paid/general task execution in the Phase 2 slice. A merged PR alone remains insufficient runtime or live-configuration evidence.
+- Phase 2 is in progress on `codex/agent-learning-phase-2-artifacts` from exact baseline `eab88f735d3644181d2a043156970f0df02e3ff8`. Finish its complete local validation, protected PR, exact-head checks, merge, main delivery, and evidence-ledger update before beginning another phase.
+- Keep the existing policy evaluation compatible, keep the task-evaluation aliases fail closed until Phase 4 implements the harness, add no new protected context, and do not begin Phase 3 issue automation or paid/general task execution in the Phase 2 slice. A merged PR alone remains insufficient runtime or live-configuration evidence.
 
 ## Quality 10 program
 

@@ -264,6 +264,10 @@ jobs:
         run: node scripts/check-architecture.mjs
       - name: Validate repository agent skills
         run: node scripts/validate-agent-skills.mjs
+      - name: Validate versioned agent learning
+        run: |
+          node scripts/agent-learning/validate-artifacts.mjs
+          node scripts/agent-learning/generate-index.mjs --check
       - name: Run deterministic agent safety evals
         run: |
           ./node_modules/.bin/tsc -p apps/api/tsconfig.json

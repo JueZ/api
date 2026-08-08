@@ -1,0 +1,43 @@
+version: 1
+id: ci-script-indirection
+title: CI package-script indirection bypass
+fingerprint: ci.package-script.mutable-indirection
+source:
+  type: autonomous_review
+  references:
+    - kind: pull_request
+      locator: JueZ/api#324
+      url: https://github.com/JueZ/api/pull/324
+classification:
+  failureArea: ci-policy
+  severity: critical
+  symptom: A package script could change the behavior of a required workflow command without the workflow file itself changing.
+  rootCause: Trusted CI controls invoked mutable package-script aliases while risk classification did not unconditionally treat package scripts and executable controls as high risk.
+disposition:
+  primary: regression-test
+  rationale: Required validation uses fixed trusted script paths and policy tests classify package scripts, build controls, and executable code as independently reviewed high-risk changes.
+artifacts:
+  - path: .github/workflows/ci.yml
+    kind: workflow
+  - path: .github/autonomous-policy.yml
+    kind: policy
+  - path: scripts/lib/autonomous-policy.mjs
+    kind: implementation
+  - path: scripts/test/autonomous-policy.test.mjs
+    kind: regression-test
+counterfactual:
+  hypothesis: The policy regression permits mutable package-script indirection at the broken base and denies it after the fixed merge.
+  broken:
+    commit: b9ea568fffa0f51aa0be8c5d4dc73a6c3884c005
+    expectedResult: The executable-control regression fails because package script changes can avoid the intended independent-review boundary.
+  fixed:
+    commit: fcdcc1f00a64a2679eefd64d2d2b606dba21bf91
+    expectedResult: The executable-control regression passes and required workflows call fixed trusted paths.
+  verification:
+    commands:
+      - node --test scripts/test/autonomous-policy.test.mjs
+  implementationPr:
+    repository: JueZ/api
+    number: 324
+    url: https://github.com/JueZ/api/pull/324
+status: verified

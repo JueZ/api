@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-08 Versioned agent learning Phase 2 in progress
+
+- Work is isolated on `codex/agent-learning-phase-2-artifacts` from protected-main baseline `eab88f735d3644181d2a043156970f0df02e3ff8`. Authenticated GitHub reads verified PRs #321, #324, and #344 plus each supplied exact broken base and fixed merge before their historical artifacts were seeded.
+- The prepared system uses one strict YAML record per learning, a reproducible generated index, repository-contained artifact paths, exact commit counterfactuals, owned dated exceptions, secret-shaped-content rejection, and a closed-loop-learning skill that forbids automatic governance rewriting. Fixed-path validation stays inside the existing architecture CI job and does not create a fifth protected context.
+- Local focused validator and regression tests pass. Exact-head CI, Policy Check, CodeQL, independent review, merge, main delivery, and runtime evidence are pending; this entry does not claim remote acceptance.
+
 ## 2026-08-08 Stable branch-protection aggregation accepted
 
 - Protected `main` was read live before implementation at exact commit `fc22acb824c643a7986900fe70df8b5e09dfb410`. PR #345 exact head `06a68d42e205ec38ec8c0fb906e59dd9fc8ce415` passed the old 23-context protection and old controller, including all four new aggregate checks, then merged autonomously as `da8459aec5756f684b27d692dd838b0135c7fe9f`.

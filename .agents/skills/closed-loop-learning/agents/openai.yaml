@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Closed-loop learning'
+  short_description: 'Turn failures into durable prevention'
+  default_prompt: 'Use $closed-loop-learning to convert this significant failure into a verified repository learning artifact.'

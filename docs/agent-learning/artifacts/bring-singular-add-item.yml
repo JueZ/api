@@ -1,0 +1,46 @@
+version: 1
+id: bring-singular-add-item
+title: Singular Bring add-item MCP correction
+fingerprint: bring.mcp.singular-add-item
+source:
+  type: user_correction
+  references:
+    - kind: pull_request
+      locator: JueZ/api#344
+      url: https://github.com/JueZ/api/pull/344
+classification:
+  failureArea: bring-mcp
+  severity: high
+  symptom: The MCP contract omitted the requested singular Bring add-item operation and therefore did not expose one-item write behavior.
+  rootCause: The operation registry and generated MCP surface encoded bulk-oriented behavior without preserving the explicitly requested singular add-item contract.
+disposition:
+  primary: regression-test
+  rationale: Operation-registry drift and MCP tool tests now require the singular bring_add_item operation, its authorization, and its non-read-only annotation.
+artifacts:
+  - path: apps/api/src/application/operations/registry.ts
+    kind: implementation
+  - path: apps/api/src/mcp/tools/bring.ts
+    kind: implementation
+  - path: apps/api/test/mcp-tools.test.mjs
+    kind: regression-test
+  - path: scripts/test/operation-contract-drift.test.mjs
+    kind: regression-test
+  - path: docs/architecture/operation-catalogue.md
+    kind: architecture-documentation
+counterfactual:
+  hypothesis: The contract and MCP tests cannot find the singular add-item operation at the broken base and require it after the fixed merge.
+  broken:
+    commit: 0cb159d8c05248de2e6decbd80d8325bd38d6623
+    expectedResult: The singular-operation assertions fail because bring_add_item is absent from the registered MCP surface.
+  fixed:
+    commit: fc22acb824c643a7986900fe70df8b5e09dfb410
+    expectedResult: API and operation-drift tests pass with bring_add_item registered as the singular authorized write operation.
+  verification:
+    commands:
+      - npm run test:api
+      - npm run test:ops
+  implementationPr:
+    repository: JueZ/api
+    number: 344
+    url: https://github.com/JueZ/api/pull/344
+status: verified
