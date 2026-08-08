@@ -30,7 +30,7 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
     assert.deepEqual(
       names,
       [
-        'bring_add_items',
+        'bring_add_item',
         'bring_get_items',
         'bring_list_lists',
         'health_check',
@@ -46,7 +46,7 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
     );
 
     for (const tool of tools) {
-      assert.equal(tool.annotations.readOnlyHint, tool.name !== 'bring_add_items', `${tool.name} read-only hint`);
+      assert.equal(tool.annotations.readOnlyHint, tool.name !== 'bring_add_item', `${tool.name} read-only hint`);
       assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`);
       assert.equal(tool.annotations.idempotentHint, true, `${tool.name} must be idempotent`);
       assert.ok(tool.outputSchema, `${tool.name} must expose an output schema`);
@@ -107,11 +107,11 @@ test('MCP Bring exposes reads and idempotent add while destructive mutations rem
     const selected = await mcpCall('bring_get_items', { listUuid: bringListUuid }, 'Bearer local-dev-token', services);
     assert.equal(selected.jsonBody.result.structuredContent.uuid, bringListUuid);
     const added = await mcpCall(
-      'bring_add_items',
+      'bring_add_item',
       {
         operationId: bringAddOperationId,
         listUuid: bringListUuid,
-        items: [{ name: 'Baguette' }],
+        item: { name: 'Baguette' },
       },
       'Bearer local-dev-token',
       services,
@@ -641,7 +641,7 @@ function expectedScopes(toolName) {
   if (toolName === 'hello_authenticated') return ['catalogue.read'];
   if (toolName.startsWith('reddit_')) return ['reddit.read'];
   if (toolName.startsWith('wlh_')) return ['wlh.read'];
-  if (toolName === 'bring_add_items') return ['bring.write'];
+  if (toolName === 'bring_add_item') return ['bring.write'];
   if (toolName === 'bring_prepare_item_mutation' || toolName === 'bring_apply_item_mutation') {
     return ['bring.complete', 'bring.remove'];
   }
