@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-08 Bring MCP add-items restoration prepared
+
+- Production correctly lacked `bring_add_items`: the August 3 security repair intentionally removed every Bring mutation from the bundled MCP server, so the earlier claim that the tool was currently registered was inaccurate.
+- The prepared correction restores only the non-destructive, idempotent `bring_add_items` MCP tool. It continues to require `bring.write`, a caller-generated operation UUID, an explicit policy-authorized list UUID, bounded item input, current provider membership checks, and the existing mutation audit/idempotency path.
+- Complete and remove operations remain unavailable to the model-visible MCP session; their confirmation tokens stay confined to the authenticated REST/web flow. Local validation, exact-head CI/policy/review, merge, staged deployment, and live production tool discovery remain pending.
+
 ## 2026-08-06 Codex Cloud Azure CLI authentication compatibility prepared
 
 - The August 2 setup hardening unconditionally replaced service-principal login with host Managed Identity. That works only on Azure compute with an attached identity; Codex Cloud runs on separate OpenAI-managed compute, so `az login --identity` failed before the external wrapper could reach its service-principal fallback.

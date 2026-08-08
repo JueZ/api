@@ -66,10 +66,10 @@ const maxCategoryMatches = 10;
 const maxCategoryScan = 200;
 
 const serverInstructions = [
-  'This private API catalogue MCP server exposes read-only Reddit, Willhaben, and Bring tools for the authenticated operator.',
+  'This private API catalogue MCP server exposes Reddit and Willhaben reads plus controlled Bring reads and item additions for the authenticated operator.',
   'For Reddit analysis, call reddit_get_thread_overview first; call reddit_get_thread only when comment bodies or a fuller snapshot are needed.',
   'For a specific Willhaben URL or ad ID, call wlh_get_offer directly. For broad Willhaben searches, call wlh_find_category if the category is unclear, then wlh_search, then wlh_get_offer for selected listings.',
-  'Bring mutations are intentionally unavailable over MCP; use the authenticated web explorer REST flow for operator-reviewed writes.',
+  'Bring item additions require bring.write, an explicit writable list UUID, and a caller-generated operation UUID. Complete and remove mutations remain unavailable over MCP.',
   'When a tool fails, read structuredContent.repairable_problem before retrying. Follow caller_instruction and retry_policy.same_request exactly; do not invent arguments after dependency or internal failures.',
   'Do not use these tools for unrelated requests, account management, list sharing/deletion, notifications, or arbitrary upstream calls.',
 ].join('\n');
