@@ -1,5 +1,13 @@
 # Current state
 
+## 2026-08-08 Versioned agent learning Phase 2 in progress
+
+- Work is isolated on `codex/agent-learning-phase-2-artifacts` from protected-main baseline `eab88f735d3644181d2a043156970f0df02e3ff8`. Authenticated GitHub reads verified PRs #321, #324, and #344 plus each supplied exact broken base and fixed merge before their historical artifacts were seeded.
+- The prepared system uses one strict YAML record per learning, a reproducible generated index, repository-contained artifact paths, exact commit counterfactuals, owned dated exceptions, secret-shaped-content rejection, and a closed-loop-learning skill that forbids automatic governance rewriting. Fixed-path validation stays inside the existing architecture CI job and does not create a fifth protected context.
+- First-head Policy Check `31278953662` exposed that the dependency co-change rule rejected a scripts-only `package.json` change even though npm lockfiles do not serialize scripts. The scoped repair permits only script-only changes without lockfile churn; every dependency/install metadata change still requires the lockfile, lifecycle scripts remain forbidden, and package scripts remain independently high risk behind fixed-path required checks.
+- Replacement head `58b65d477126cd63b136ddfc5554361d06f7fcbd` passed exact-head CI `31279113577`, Policy Check `31279113631`, and CodeQL `31279113560`, but independent review `31279112806` correctly rejected declarative-only historical verification. The scoped repair adds trusted scorers over exact Git objects plus live GitHub PR/base/merge provenance validation and never executes historical code.
+- Local focused validator and regression tests pass. The next exact head must repeat CI, Policy Check, CodeQL, and independent review before merge; main delivery and runtime evidence remain pending. This entry does not claim remote acceptance.
+
 ## 2026-08-08 Stable branch-protection aggregation accepted
 
 - Protected `main` was read live before implementation at exact commit `fc22acb824c643a7986900fe70df8b5e09dfb410`. PR #345 exact head `06a68d42e205ec38ec8c0fb906e59dd9fc8ce415` passed the old 23-context protection and old controller, including all four new aggregate checks, then merged autonomously as `da8459aec5756f684b27d692dd838b0135c7fe9f`.

@@ -4,6 +4,7 @@
 - Bind review, checks, artifacts, and merge to the exact PR head SHA and expected GitHub App.
 - Pin third-party actions to full commit SHAs and keep Dependabot coverage.
 - Preserve CodeQL, lint, tests, secret/security/dependency scans, lockfile policy, architecture/evals, policy, and aggregate checks.
+- Run learning-artifact validation and generated-index checking by fixed trusted script paths inside the existing architecture/agent job; do not create a separate protected context or route these checks through mutable package aliases.
 - Keep every mandatory validation as an internal job while exposing only `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete` as stable protected-branch contexts.
 - Aggregate jobs must run with `if: always()`, explicitly depend on all applicable internal jobs, and fail for every result other than success; do not include a PR-inapplicable main-only job in a PR aggregate.
 - Build release artifacts once and promote identical digests through test and production.

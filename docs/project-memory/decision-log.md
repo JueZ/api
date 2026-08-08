@@ -1,5 +1,13 @@
 # Decision log
 
+## 2026-08-08 — Version repository learning as strict counterfactual artifacts
+
+- Decision: Store each durable learning in its own strict versioned YAML file under `docs/agent-learning/artifacts/`, deduplicate active records by normalized recurrence fingerprint, and require explicit bidirectional supersession instead of a conflict-prone central editable ledger.
+- Decision: Count a learning as `verified` only with exact distinct broken/fixed commits, expected results, trusted verification, implementation PR, and existing repository-contained artifact paths. Waived, external-transient, and no-artifact dispositions require an owned current exception and never count as passing proof.
+- Decision: Treat instructions, skills, learning records, task definitions, and validator/scorer paths as high-risk agent governance. Failure evidence may become a candidate, but cannot rewrite those controls automatically; changes and waivers use ordinary protected delivery and independent review.
+- Rationale: A closed learning loop must prevent recurrence without letting untrusted issue/log/model content self-authorize repository policy changes. Strict records, secret-shaped-content rejection, deterministic indexes, fixed-path CI validation, and executable-prevention preference provide a reviewable and reproducible boundary.
+- Status: Implemented locally on `codex/agent-learning-phase-2-artifacts`; exact-head CI, policy, CodeQL, independent review, merge, and post-merge delivery evidence remain pending.
+
 ## 2026-08-08 — Require stable aggregate checks without narrowing fail-closed validation
 
 - Decision: Protected `main` requires exactly `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete`, all bound to GitHub Actions. Every merge-relevant validation remains an explicit mandatory dependency behind its aggregate; PR-inapplicable main-only attestation is not added to `CI complete`.

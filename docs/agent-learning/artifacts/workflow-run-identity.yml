@@ -1,0 +1,41 @@
+version: 1
+id: workflow-run-identity
+title: Dynamic workflow run name versus immutable workflow path
+fingerprint: delivery.workflow.dynamic-name-vs-path
+source:
+  type: deployment_incident
+  references:
+    - kind: pull_request
+      locator: JueZ/api#321
+      url: https://github.com/JueZ/api/pull/321
+classification:
+  failureArea: delivery-workflow
+  severity: high
+  symptom: The main-delivery controller could select or validate a workflow run using a dynamic display name instead of its immutable workflow identity.
+  rootCause: GitHub workflow run_name output was treated as the stable workflow name even though the workflow path is the immutable controller identity.
+disposition:
+  primary: regression-test
+  rationale: Controller selection and policy tests now require immutable workflow path identity while allowing the dynamic run display name only as display data.
+artifacts:
+  - path: .github/workflows/codex-main-delivery.yml
+    kind: workflow
+  - path: scripts/test/autonomous-policy.test.mjs
+    kind: regression-test
+  - path: docs/autonomous-delivery.md
+    kind: architecture-documentation
+counterfactual:
+  hypothesis: The regression rejects workflow selection based on dynamic display text at the broken base and accepts immutable path selection after the repair.
+  broken:
+    commit: d24fe187ce5b3aeaf238e5b66e0339c5ccc7afbd
+    expectedResult: The workflow-identity regression fails because delivery lookup relies on the resolved dynamic run name.
+  fixed:
+    commit: 056c7b4eb1938549d7d901f27d9b47c022f8d8f9
+    expectedResult: The workflow-identity regression passes because the immutable workflow path is authoritative.
+  verification:
+    trustedScorers:
+      - historical.workflow-run-identity
+  implementationPr:
+    repository: JueZ/api
+    number: 321
+    url: https://github.com/JueZ/api/pull/321
+status: verified

@@ -26,6 +26,15 @@ const REQUIRED_EXECUTABLE_HIGH_RISK_PATTERNS = Object.freeze([
   'apps/**',
   'scripts/**',
 ]);
+const REQUIRED_AGENT_GOVERNANCE_PATTERNS = Object.freeze([
+  'AGENTS.md',
+  '**/AGENTS.md',
+  '.agents/skills/**',
+  'evals/agent-tasks/**',
+  'docs/agent-learning/**',
+  'scripts/agent-learning/**',
+  'scripts/agent-task-evals/**',
+]);
 
 export function loadAutonomousPolicy(policyPath = DEFAULT_POLICY_PATH) {
   const policy = parse(readFileSync(policyPath, 'utf8'));
@@ -82,6 +91,18 @@ export function validateAutonomousPolicy(policy) {
   for (const pattern of REQUIRED_EXECUTABLE_HIGH_RISK_PATTERNS) {
     if (!highRiskPatterns.has(pattern)) {
       errors.push(`highRiskPaths must include executable control pattern: ${pattern}`);
+    }
+  }
+  validateStringArray(policy.riskClasses?.agentGovernance, 'riskClasses.agentGovernance', errors);
+  const agentGovernancePatterns = new Set(
+    Array.isArray(policy.riskClasses?.agentGovernance) ? policy.riskClasses.agentGovernance : [],
+  );
+  for (const pattern of REQUIRED_AGENT_GOVERNANCE_PATTERNS) {
+    if (!highRiskPatterns.has(pattern)) {
+      errors.push(`highRiskPaths must include agent-governance pattern: ${pattern}`);
+    }
+    if (!agentGovernancePatterns.has(pattern)) {
+      errors.push(`riskClasses.agentGovernance must include pattern: ${pattern}`);
     }
   }
   validateStringArray(policy.merge?.allowedBranchPrefixes, 'merge.allowedBranchPrefixes', errors);

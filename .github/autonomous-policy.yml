@@ -4,7 +4,7 @@ version: 1
 # requires an independently reviewed update to this canonical manifest.
 trustedWorkflowSha256:
   bring-readonly-canary.yml: 9cd2cd547a3b36b1c1de1769730883e613dc370493d978c356d37d90f1e08898
-  ci.yml: 389e2cde48c13a49b7e81090894728f5fbac21e2b2c75ca7b363e3244e3faa45
+  ci.yml: efeb30eb91562a8a3248117520fe7719034d22a5f448721fc570d599bc674cba
   codeql.yml: 8220b94fdc56f9b33d7db4111fd41e60beb814ef3f2fc99611a09dd71e910590
   codex-automerge.yml: 76b217b5dfa539616ee3844c1776e05e7886f1bb6a0e47c04bf4e0a950a52380
   codex-main-delivery.yml: 6d9510c8ca610bad996c1310d4a31fc7abb77738402fe57fb510e01b1f4c6b03
@@ -77,6 +77,10 @@ highRiskPaths:
   - AGENTS.md
   - '**/AGENTS.md'
   - .agents/skills/**
+  - evals/agent-tasks/**
+  - docs/agent-learning/**
+  - scripts/agent-learning/**
+  - scripts/agent-task-evals/**
 
 riskClasses:
   supplyChain:
@@ -108,6 +112,10 @@ riskClasses:
     - AGENTS.md
     - '**/AGENTS.md'
     - .agents/skills/**
+    - evals/agent-tasks/**
+    - docs/agent-learning/**
+    - scripts/agent-learning/**
+    - scripts/agent-task-evals/**
 
 autonomousReview:
   checkName: Autonomous review complete

@@ -10,7 +10,7 @@ import {
   importsFrom,
   sourceArchitectureFindings,
 } from '../check-architecture.mjs';
-import { inspectDependencyFiles } from '../check-lockfile-policy.mjs';
+import { inspectDependencyFiles, packageChangeRequiresLockfile } from '../check-lockfile-policy.mjs';
 import { exclusiveWorkflowCheckWriteFindings } from '../autonomous-merge-controller.mjs';
 import { validateAgentSkills } from '../validate-agent-skills.mjs';
 
@@ -173,4 +173,30 @@ test('dependency policy rejects lifecycle scripts and non-registry dependencies'
   assert.ok(findings.some((finding) => finding.includes('postinstall')));
   assert.ok(findings.some((finding) => finding.includes('non-registry')));
   assert.ok(findings.some((finding) => finding.includes('lockfileVersion 3')));
+});
+
+test('dependency lock co-change exception is limited to package scripts', () => {
+  const base = {
+    name: 'example',
+    version: '1.0.0',
+    scripts: { test: 'node --test' },
+    dependencies: { yaml: '^2.9.0' },
+    engines: { node: '>=22' },
+  };
+  assert.equal(
+    packageChangeRequiresLockfile(base, {
+      ...base,
+      scripts: { ...base.scripts, 'agent:learning:validate': 'node validate.mjs' },
+    }),
+    false,
+  );
+  assert.equal(
+    packageChangeRequiresLockfile(base, {
+      ...base,
+      dependencies: { yaml: '^2.10.0' },
+    }),
+    true,
+  );
+  assert.equal(packageChangeRequiresLockfile(base, { ...base, engines: { node: '>=24' } }), true);
+  assert.equal(packageChangeRequiresLockfile(base, { ...base, packageManager: 'npm@11.0.0' }), true);
 });
