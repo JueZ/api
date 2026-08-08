@@ -4,7 +4,8 @@
 
 - Work is isolated on `codex/agent-learning-phase-2-artifacts` from protected-main baseline `eab88f735d3644181d2a043156970f0df02e3ff8`. Authenticated GitHub reads verified PRs #321, #324, and #344 plus each supplied exact broken base and fixed merge before their historical artifacts were seeded.
 - The prepared system uses one strict YAML record per learning, a reproducible generated index, repository-contained artifact paths, exact commit counterfactuals, owned dated exceptions, secret-shaped-content rejection, and a closed-loop-learning skill that forbids automatic governance rewriting. Fixed-path validation stays inside the existing architecture CI job and does not create a fifth protected context.
-- Local focused validator and regression tests pass. Exact-head CI, Policy Check, CodeQL, independent review, merge, main delivery, and runtime evidence are pending; this entry does not claim remote acceptance.
+- First-head Policy Check `31278953662` exposed that the dependency co-change rule rejected a scripts-only `package.json` change even though npm lockfiles do not serialize scripts. The scoped repair permits only script-only changes without lockfile churn; every dependency/install metadata change still requires the lockfile, lifecycle scripts remain forbidden, and package scripts remain independently high risk behind fixed-path required checks.
+- Local focused validator and regression tests pass. Replacement exact-head CI, Policy Check, CodeQL, independent review, merge, main delivery, and runtime evidence are pending; this entry does not claim remote acceptance.
 
 ## 2026-08-08 Stable branch-protection aggregation accepted
 
