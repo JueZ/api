@@ -170,12 +170,7 @@
   "liveProtectionReadBack": {
     "readBackAt": "2026-08-08T21:51:55Z",
     "strict": true,
-    "requiredChecks": [
-      "CI complete",
-      "Policy complete",
-      "CodeQL complete",
-      "Autonomous review complete"
-    ],
+    "requiredChecks": ["CI complete", "Policy complete", "CodeQL complete", "Autonomous review complete"],
     "requiredCheckAppId": 15368,
     "pullRequestRequired": true,
     "enforceAdmins": true,
