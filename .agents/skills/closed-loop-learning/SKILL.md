@@ -60,6 +60,8 @@ State a falsifiable hypothesis. For `verified` status, record:
 
 Prefer a test that fails for the broken behavior and passes for the fixed behavior. Score behavior and invariants rather than requiring an identical historical patch. Never treat an unavailable adapter, authentication failure, skipped command, waiver, or blocked check as passing proof.
 
+For a historical artifact, use a scorer registered in the trusted controller checkout. The scorer must inspect exact Git objects as data, prove the broken/fixed invariant transition without executing historical code, and bind live GitHub PR metadata to the declared base and merge commits.
+
 ### 5. Validate and deliver through protection
 
 Use one YAML file per learning under `docs/agent-learning/artifacts/<id>.yml`. Run:

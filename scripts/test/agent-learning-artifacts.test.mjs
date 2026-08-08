@@ -12,6 +12,7 @@ import {
   REPOSITORY_ROOT,
   validateArtifactRepository,
 } from '../agent-learning/validate-artifacts.mjs';
+import { historicalScorerFindings, pullRequestProvenanceFindings } from '../agent-learning/verify-artifacts.mjs';
 
 const BROKEN_SHA = 'a'.repeat(40);
 const FIXED_SHA = 'b'.repeat(40);
@@ -281,6 +282,64 @@ test('generated index is deterministic and sorted by artifact ID', async (contex
   assert.equal(firstRender, secondRender);
   assert.ok(firstRender.indexOf('[example-learning]') < firstRender.indexOf('[zeta-learning]'));
   assert.doesNotMatch(firstRender, /Generated at|2026-08-08/);
+});
+
+test('registered historical scorers prove each broken and fixed invariant transition', () => {
+  const fixtures = new Map([
+    [
+      `${BROKEN_SHA}:.github/workflows/codex-main-delivery.yml`,
+      "github.event.workflow_run.name == 'CI'\ngithub.event.workflow_run.name == 'Codex Auto-Merge'\n",
+    ],
+    [
+      `${FIXED_SHA}:.github/workflows/codex-main-delivery.yml`,
+      "github.event.workflow_run.path == '.github/workflows/ci.yml'\ngithub.event.workflow_run.path == '.github/workflows/codex-automerge.yml'\n",
+    ],
+    [`${BROKEN_SHA}:.github/workflows/ci.yml`, 'npm run lint\n'],
+    [`${FIXED_SHA}:.github/workflows/ci.yml`, './node_modules/.bin/eslint apps scripts --max-warnings 0\n'],
+    [`${BROKEN_SHA}:.github/autonomous-policy.yml`, 'highRiskPaths:\n  - .github/workflows/**\n'],
+    [`${FIXED_SHA}:.github/autonomous-policy.yml`, 'highRiskPaths:\n  - package.json\n  - scripts/**\n'],
+    [`${BROKEN_SHA}:apps/api/src/application/operations/registry.ts`, "mcp: { toolName: 'bring_add_items' }\n"],
+    [`${FIXED_SHA}:apps/api/src/application/operations/registry.ts`, "mcp: { toolName: 'bring_add_item' }\n"],
+    [`${BROKEN_SHA}:apps/api/src/mcp/tools/bring.ts`, "server.registerTool('bring_add_items')\n"],
+    [
+      `${FIXED_SHA}:apps/api/src/mcp/tools/bring.ts`,
+      "server.registerTool('bring_add_item')\nitem: itemInputSchema\nitems: [item]\n",
+    ],
+  ]);
+  const readAt = (commit, path) => fixtures.get(`${commit}:${path}`) ?? '';
+  for (const [id, scorerId] of [
+    ['workflow-run-identity', 'historical.workflow-run-identity'],
+    ['ci-script-indirection', 'historical.ci-script-indirection'],
+    ['bring-singular-add-item', 'historical.bring-singular-add-item'],
+  ]) {
+    const artifact = validVerifiedArtifact({ id });
+    artifact.counterfactual.verification = { trustedScorers: [scorerId] };
+    assert.deepEqual(historicalScorerFindings(artifact, readAt), []);
+  }
+
+  const invalid = validVerifiedArtifact({ id: 'workflow-run-identity' });
+  invalid.counterfactual.verification = { trustedScorers: ['historical.workflow-run-identity'] };
+  assert.ok(
+    historicalScorerFindings(invalid, () => fixtures.get(`${BROKEN_SHA}:.github/workflows/codex-main-delivery.yml`))
+      .length > 0,
+  );
+});
+
+test('live PR provenance must bind the implementation number and exact broken/fixed SHAs', () => {
+  const artifact = validVerifiedArtifact();
+  const pullRequest = {
+    number: 123,
+    state: 'closed',
+    merged_at: '2026-08-08T00:00:00Z',
+    base: { sha: BROKEN_SHA },
+    merge_commit_sha: FIXED_SHA,
+  };
+  assert.deepEqual(pullRequestProvenanceFindings(artifact, pullRequest), []);
+  assert.ok(
+    pullRequestProvenanceFindings(artifact, { ...pullRequest, merge_commit_sha: 'c'.repeat(40) }).some((finding) =>
+      finding.includes('merge SHA'),
+    ),
+  );
 });
 
 test('policy alias remains compatible and reserved task aliases fail closed', () => {

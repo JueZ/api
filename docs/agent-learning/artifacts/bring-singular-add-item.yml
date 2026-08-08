@@ -36,9 +36,8 @@ counterfactual:
     commit: fc22acb824c643a7986900fe70df8b5e09dfb410
     expectedResult: API and operation-drift tests pass with bring_add_item registered as the singular authorized write operation.
   verification:
-    commands:
-      - npm run test:api
-      - npm run test:ops
+    trustedScorers:
+      - historical.bring-singular-add-item
   implementationPr:
     repository: JueZ/api
     number: 344

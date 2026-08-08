@@ -32,8 +32,8 @@ counterfactual:
     commit: 056c7b4eb1938549d7d901f27d9b47c022f8d8f9
     expectedResult: The workflow-identity regression passes because the immutable workflow path is authoritative.
   verification:
-    commands:
-      - node --test scripts/test/autonomous-policy.test.mjs
+    trustedScorers:
+      - historical.workflow-run-identity
   implementationPr:
     repository: JueZ/api
     number: 321

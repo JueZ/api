@@ -34,8 +34,8 @@ counterfactual:
     commit: fcdcc1f00a64a2679eefd64d2d2b606dba21bf91
     expectedResult: The executable-control regression passes and required workflows call fixed trusted paths.
   verification:
-    commands:
-      - node --test scripts/test/autonomous-policy.test.mjs
+    trustedScorers:
+      - historical.ci-script-indirection
   implementationPr:
     repository: JueZ/api
     number: 324

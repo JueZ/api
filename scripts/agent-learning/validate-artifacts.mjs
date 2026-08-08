@@ -186,6 +186,9 @@ function validateSource(source, path, errors) {
       addError(errors, `${referencePath}.kind`, 'is not a supported reference kind');
     }
     validateString(reference.locator, `${referencePath}.locator`, errors, { maxLength: 300 });
+    if (reference.kind === 'commit' && !SHA_PATTERN.test(reference.locator ?? '')) {
+      addError(errors, `${referencePath}.locator`, 'must be an exact 40-character lowercase SHA for commit references');
+    }
     if (Object.hasOwn(reference, 'url')) validatePublicUrl(reference.url, `${referencePath}.url`, errors);
   });
 }
