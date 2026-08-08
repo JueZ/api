@@ -1,5 +1,12 @@
 # Deployment log
 
+## 2026-08-08 — Versioned agent-learning artifacts accepted through production
+
+- Source: PR #349 exact head `7188188cc0b3fd1a58a5ee14ae5335158294135c` passed exact-head CI `31279530179`, Policy Check `31279530178`, CodeQL `31279530171`, and autonomous review/merge `31279529529`, then squash-merged as `9310c94f97541e57f83b186af2cacf989d6f5330`.
+- Main delivery: controller `31279667347`, exact-main CI `31279682790`, Deploy Test `31279752243`, and Promote Production `31279913572` all succeeded for the exact merge.
+- Acceptance: test and production passed immutable-source validation, public runtime smoke, authenticated hello and Reddit smoke, telemetry correlation, release-ledger publication, and final generation checks. Fresh `ops:runtime-truth` checks matched live `/health`, exact workflow metadata, and exact ledger identity to the merge in both environments with no blockers.
+- Governance state: three curated historical learning artifacts are verified, zero are waived, trusted exact-Git and GitHub provenance scorers run inside the existing CI aggregate, and no paid general task evaluation or historical learning-issue backfill ran. Live branch protection remains the same four strict GitHub Actions aggregate contexts.
+
 ## 2026-08-08 — Stable branch-protection aggregation accepted through production
 
 - Source: PR #345 exact head `06a68d42e205ec38ec8c0fb906e59dd9fc8ce415` passed exact-head CI `31276396714`, Policy Check `31276396688`, CodeQL `31276396684`, and autonomous review/merge `31276396717`, then squash-merged as `da8459aec5756f684b27d692dd838b0135c7fe9f`.

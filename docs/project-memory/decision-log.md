@@ -6,7 +6,7 @@
 - Decision: Count a learning as `verified` only with exact distinct broken/fixed commits, expected results, trusted verification, implementation PR, and existing repository-contained artifact paths. Waived, external-transient, and no-artifact dispositions require an owned current exception and never count as passing proof.
 - Decision: Treat instructions, skills, learning records, task definitions, and validator/scorer paths as high-risk agent governance. Failure evidence may become a candidate, but cannot rewrite those controls automatically; changes and waivers use ordinary protected delivery and independent review.
 - Rationale: A closed learning loop must prevent recurrence without letting untrusted issue/log/model content self-authorize repository policy changes. Strict records, secret-shaped-content rejection, deterministic indexes, fixed-path CI validation, and executable-prevention preference provide a reviewable and reproducible boundary.
-- Status: Implemented locally on `codex/agent-learning-phase-2-artifacts`; exact-head CI, policy, CodeQL, independent review, merge, and post-merge delivery evidence remain pending.
+- Status: Accepted through PR #349 head `7188188cc0b3fd1a58a5ee14ae5335158294135c`, merge `9310c94f97541e57f83b186af2cacf989d6f5330`, exact-head protected checks, trusted historical proof, full staged delivery, and fresh test/production live-plus-ledger runtime truth.
 
 ## 2026-08-08 — Require stable aggregate checks without narrowing fail-closed validation
 

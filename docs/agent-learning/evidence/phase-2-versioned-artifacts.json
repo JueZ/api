@@ -1,0 +1,196 @@
+{
+  "schemaVersion": 1,
+  "repository": "JueZ/api",
+  "phase": 2,
+  "capturedAt": "2026-08-08T21:51:55Z",
+  "implementation": {
+    "baselineMainSha": "eab88f735d3644181d2a043156970f0df02e3ff8",
+    "pullRequest": {
+      "number": 349,
+      "url": "https://github.com/JueZ/api/pull/349",
+      "branch": "codex/agent-learning-phase-2-artifacts",
+      "headSha": "7188188cc0b3fd1a58a5ee14ae5335158294135c",
+      "mergeSha": "9310c94f97541e57f83b186af2cacf989d6f5330",
+      "mergedAt": "2026-08-08T21:35:12Z"
+    },
+    "exactHeadAggregates": [
+      {
+        "context": "CI complete",
+        "checkRunId": 93158693886,
+        "workflowRunId": 31279530179,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      },
+      {
+        "context": "Policy complete",
+        "checkRunId": 93158540339,
+        "workflowRunId": 31279530178,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      },
+      {
+        "context": "CodeQL complete",
+        "checkRunId": 93158614982,
+        "workflowRunId": 31279530171,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      },
+      {
+        "context": "Autonomous review complete",
+        "checkRunId": 93158796793,
+        "workflowRunId": 31279529529,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      }
+    ],
+    "postMergeDelivery": {
+      "mainDelivery": {
+        "workflowRunId": 31279667347,
+        "sourceSha": "9310c94f97541e57f83b186af2cacf989d6f5330",
+        "conclusion": "success"
+      },
+      "mainCi": {
+        "workflowRunId": 31279682790,
+        "sourceSha": "9310c94f97541e57f83b186af2cacf989d6f5330",
+        "conclusion": "success"
+      },
+      "deployTest": {
+        "workflowRunId": 31279752243,
+        "sourceSha": "9310c94f97541e57f83b186af2cacf989d6f5330",
+        "deliveryCorrelation": "3224b951116e313a443c8bb6ae041c095491c217579afdae",
+        "conclusion": "success",
+        "publicSmoke": "passed",
+        "authenticatedSmoke": "passed",
+        "telemetry": "passed",
+        "releaseLedgerArtifactId": 9028101525,
+        "releaseLedger": "validated",
+        "runtimeTruth": {
+          "status": "verified",
+          "checkedAt": "2026-08-08T21:47:09.509Z",
+          "failures": 0,
+          "blockers": 0
+        }
+      },
+      "promoteProduction": {
+        "workflowRunId": 31279913572,
+        "sourceSha": "9310c94f97541e57f83b186af2cacf989d6f5330",
+        "deliveryCorrelation": "00f6c049f7dd7607007131dae4b30541daedc184cc483a0f",
+        "conclusion": "success",
+        "publicSmoke": "passed",
+        "authenticatedSmoke": "passed",
+        "telemetry": "passed",
+        "releaseLedgerArtifactId": 9028141502,
+        "releaseLedger": "validated",
+        "runtimeTruth": {
+          "status": "verified",
+          "checkedAt": "2026-08-08T21:47:22.736Z",
+          "failures": 0,
+          "blockers": 0
+        }
+      }
+    }
+  },
+  "learningArtifacts": {
+    "verified": 3,
+    "waived": 0,
+    "records": [
+      {
+        "id": "workflow-run-identity",
+        "sourcePullRequest": 321,
+        "brokenSha": "d24fe187ce5b3aeaf238e5b66e0339c5ccc7afbd",
+        "fixedSha": "056c7b4eb1938549d7d901f27d9b47c022f8d8f9",
+        "trustedScorer": "historical.workflow-run-identity",
+        "proof": "verified"
+      },
+      {
+        "id": "ci-script-indirection",
+        "sourcePullRequest": 324,
+        "brokenSha": "b9ea568fffa0f51aa0be8c5d4dc73a6c3884c005",
+        "fixedSha": "fcdcc1f00a64a2679eefd64d2d2b606dba21bf91",
+        "trustedScorer": "historical.ci-script-indirection",
+        "proof": "verified"
+      },
+      {
+        "id": "bring-singular-add-item",
+        "sourcePullRequest": 344,
+        "brokenSha": "0cb159d8c05248de2e6decbd80d8325bd38d6623",
+        "fixedSha": "fc22acb824c643a7986900fe70df8b5e09dfb410",
+        "trustedScorer": "historical.bring-singular-add-item",
+        "proof": "verified"
+      }
+    ],
+    "indexReproducible": true,
+    "repositoryPathsExist": true,
+    "historicalCodeExecuted": false,
+    "githubProvenanceVerified": true
+  },
+  "repairs": [
+    {
+      "area": "dependency lock policy",
+      "attempt": 1,
+      "failingWorkflowRunId": 31278953662,
+      "repairCommit": "58b65d477126cd63b136ddfc5554361d06f7fcbd",
+      "result": "passed"
+    },
+    {
+      "area": "historical counterfactual verification",
+      "attempt": 1,
+      "failingWorkflowRunId": 31279112806,
+      "repairCommit": "7188188cc0b3fd1a58a5ee14ae5335158294135c",
+      "result": "passed"
+    }
+  ],
+  "localValidation": {
+    "commands": [
+      "npm ci --ignore-scripts",
+      "npm run lint",
+      "npm run type-check",
+      "npm test",
+      "npm run test:api",
+      "npm run build",
+      "npm run ops:check-architecture",
+      "npm run ops:validate-agent-skills",
+      "npm run eval:agent-policy",
+      "npm run agent:learning:validate",
+      "npm run agent:learning:index -- --check",
+      "npm run agent:learning:status",
+      "npm run ops:policy-guardrails",
+      "npm run ops:check-lockfile",
+      "npm run docs:check-operations",
+      "actionlint with ShellCheck",
+      "Azure CLI Bicep build validation",
+      "git diff --check"
+    ],
+    "conclusion": "passed",
+    "exactLocalGoToolchainActionlint": "blocked",
+    "authoritativeCiActionlint": "passed",
+    "taskEvaluationsExecuted": 0,
+    "paidGeneralEvaluationsExecuted": 0
+  },
+  "liveProtectionReadBack": {
+    "readBackAt": "2026-08-08T21:51:55Z",
+    "strict": true,
+    "requiredChecks": [
+      "CI complete",
+      "Policy complete",
+      "CodeQL complete",
+      "Autonomous review complete"
+    ],
+    "requiredCheckAppId": 15368,
+    "pullRequestRequired": true,
+    "enforceAdmins": true,
+    "requiredLinearHistory": true,
+    "requiredConversationResolution": true,
+    "allowForcePushes": false,
+    "allowDeletions": false
+  },
+  "assertions": {
+    "mergedPrAloneTreatedAsRuntimeEvidence": false,
+    "existingSecurityOrDeliveryControlWeakened": false,
+    "newProtectedContextAdded": false,
+    "automaticGovernanceRewriteEnabled": false,
+    "historicalLearningIssueFloodCreated": false,
+    "productionCredentialUsedForGeneralEvaluation": false,
+    "secretsOrProviderContentArchived": false
+  }
+}
