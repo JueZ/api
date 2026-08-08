@@ -28,6 +28,8 @@ The live API path is accepted only from the exact `Codex Auto-Merge` GitHub Acti
 
 ## Required checks
 
+Mandatory internal jobs remain:
+
 - install, lint, type-check, unit tests, API tests;
 - Angular and Azure Functions builds;
 - OpenAPI and Bicep validation;
@@ -36,10 +38,13 @@ The live API path is accepted only from the exact `Codex Auto-Merge` GitHub Acti
 - Trivy, Gitleaks, dependency audit, npm lock policy;
 - CodeQL JavaScript/TypeScript and Actions;
 - immutable release artifacts;
-- cost and guardrail policy;
-- `CI complete`, `Policy complete`, and `Autonomous review complete`.
+- cost and guardrail policy.
 
-The live branch ruleset must require the exact names in `.github/autonomous-policy.yml`, disallow direct/force pushes and `main` deletion, require up-to-date PRs, and prevent admin bypass. CODEOWNERS records accountability but is not a routine approval gate.
+Protected `main` intentionally requires only four stable aggregate contexts from GitHub Actions: `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete`. `CI complete` and `Policy complete` use explicit `needs` lists plus `if: always()` and reject every non-success dependency result. `CodeQL complete` waits for the complete analysis matrix and likewise rejects every non-success result. The PR-inapplicable main-only release attestation remains required when applicable but is not included in the PR `CI complete` dependency set.
+
+Aggregate protection reduces configuration drift; it does not reduce validation. Immediately before merge, the controller still evaluates every latest exact-head check run and legacy commit status, including contexts outside the four configured aggregates. Any unrelated pending or failing result blocks merge. GitHub aggregate `unstable` is explainable only by the one in-progress `merge exact PR head` job bound to the current trusted controller run.
+
+The live branch ruleset must require exactly the aggregate names in `.github/autonomous-policy.yml`, disallow direct/force pushes and `main` deletion, require up-to-date PRs, and prevent admin bypass. CODEOWNERS records accountability but is not a routine approval gate.
 
 ## Build and delivery
 

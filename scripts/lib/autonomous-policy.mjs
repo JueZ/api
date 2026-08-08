@@ -9,6 +9,12 @@ export const AUTONOMOUS_REVIEW_MODEL_PRICING = Object.freeze({
     outputUsdPerMillionTokens: 30,
   }),
 });
+export const STABLE_REQUIRED_CHECKS = Object.freeze([
+  Object.freeze({ name: 'CI complete', appSlug: 'github-actions' }),
+  Object.freeze({ name: 'Policy complete', appSlug: 'github-actions' }),
+  Object.freeze({ name: 'CodeQL complete', appSlug: 'github-actions' }),
+  Object.freeze({ name: 'Autonomous review complete', appSlug: 'github-actions' }),
+]);
 const REQUIRED_EXECUTABLE_HIGH_RISK_PATTERNS = Object.freeze([
   'package.json',
   'package-lock.json',
@@ -56,6 +62,18 @@ export function validateAutonomousPolicy(policy) {
       }
       if (names.has(check.name)) errors.push(`required check name is duplicated: ${check.name}`);
       names.add(check.name);
+    }
+    if (
+      policy.requiredChecks.length !== STABLE_REQUIRED_CHECKS.length ||
+      STABLE_REQUIRED_CHECKS.some(
+        (expected, index) =>
+          policy.requiredChecks[index]?.name !== expected.name ||
+          policy.requiredChecks[index]?.appSlug !== expected.appSlug,
+      )
+    ) {
+      errors.push(
+        `requiredChecks must contain exactly the stable aggregate checks: ${STABLE_REQUIRED_CHECKS.map((check) => check.name).join(', ')}`,
+      );
     }
   }
 

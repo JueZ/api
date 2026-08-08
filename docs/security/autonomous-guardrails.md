@@ -8,6 +8,8 @@ Autonomous delivery is allowed only when controls fail closed.
 - PR code never executes under `pull_request_target` write permissions.
 - Review, check runs, artifacts, and merge bind to the same full head SHA.
 - Required checks must have the canonical name and expected GitHub App.
+- Protected `main` requires only the four stable aggregate contexts `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete`; every underlying validation remains mandatory inside its owning aggregate.
+- CI and policy aggregates have `if: always()` and explicit dependencies covering every applicable internal job. The CodeQL aggregate depends on the complete analysis matrix. Cancelled, timed-out, action-required, skipped-when-required, and failed dependencies are non-passing.
 - The final merge boundary re-reads every latest exact-head check run and legacy commit-status context. It permits GitHub aggregate `unstable` only when every external result is terminal-passing and exactly one pending `merge exact PR head` check is bound to the current trusted controller run; unrelated pending or failing results remain denied.
 - Forks, stale/behind heads, conflicts, blocked labels, and admin bypass are denied.
 - Post-merge `workflow_run` authorization binds the exact trusted workflow file path; display/run names are never used as the security identity because `run-name` can replace the observed `.name` value.

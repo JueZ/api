@@ -5,7 +5,7 @@ version: 1
 trustedWorkflowSha256:
   bring-readonly-canary.yml: 9cd2cd547a3b36b1c1de1769730883e613dc370493d978c356d37d90f1e08898
   ci.yml: 389e2cde48c13a49b7e81090894728f5fbac21e2b2c75ca7b363e3244e3faa45
-  codeql.yml: c543422d77c3879a7f1b61e6fee0e1a036194c78a38a33f1ea16f268d4b2bc6a
+  codeql.yml: 8220b94fdc56f9b33d7db4111fd41e60beb814ef3f2fc99611a09dd71e910590
   codex-automerge.yml: 76b217b5dfa539616ee3844c1776e05e7886f1bb6a0e47c04bf4e0a950a52380
   codex-main-delivery.yml: 6d9510c8ca610bad996c1310d4a31fc7abb77738402fe57fb510e01b1f4c6b03
   deploy-environment.yml: cd36744ebf07c466d407ca4ecd83751e2f6445263a7bab90145c69326d844be9
@@ -20,50 +20,14 @@ trustedWorkflowSha256:
 
 # This file is the canonical repository policy consumed by CI, the autonomous
 # review workflow, documentation generation, and agent-instruction validation.
+# requiredChecks intentionally contains only stable protected-branch aggregates;
+# each owning workflow keeps its complete internal validation graph mandatory.
 requiredChecks:
-  - name: install
-    appSlug: github-actions
-  - name: lint
-    appSlug: github-actions
-  - name: type-check
-    appSlug: github-actions
-  - name: unit tests
-    appSlug: github-actions
-  - name: API tests
-    appSlug: github-actions
-  - name: Angular build
-    appSlug: github-actions
-  - name: Azure Functions build
-    appSlug: github-actions
-  - name: OpenAPI validation
-    appSlug: github-actions
-  - name: Bicep validation
-    appSlug: github-actions
-  - name: workflow and shell lint
-    appSlug: github-actions
-  - name: architecture and agent validation
-    appSlug: github-actions
-  - name: security scan
-    appSlug: github-actions
-  - name: secret scan
-    appSlug: github-actions
-  - name: dependency audit
-    appSlug: github-actions
-  - name: CodeQL javascript-typescript
-    appSlug: github-actions
-  - name: CodeQL actions
-    appSlug: github-actions
-  - name: release artifacts
-    appSlug: github-actions
-  - name: cost-policy check
-    appSlug: github-actions
-  - name: guardrail policy check
-    appSlug: github-actions
-  - name: dependency lock policy
-    appSlug: github-actions
   - name: CI complete
     appSlug: github-actions
   - name: Policy complete
+    appSlug: github-actions
+  - name: CodeQL complete
     appSlug: github-actions
   - name: Autonomous review complete
     appSlug: github-actions

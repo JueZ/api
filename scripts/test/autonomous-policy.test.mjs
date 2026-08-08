@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { parse as parseYaml } from 'yaml';
 import {
   classifyRisk,
   isAutomergeCandidate,
   loadAutonomousPolicy,
   matchesPolicyGlob,
+  STABLE_REQUIRED_CHECKS,
   validateAutonomousPolicy,
 } from '../lib/autonomous-policy.mjs';
 import {
@@ -46,6 +49,7 @@ const mainDeliveryWorkflow = readFileSync(
 );
 const ciWorkflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const policyCheckWorkflow = readFileSync(new URL('../../.github/workflows/policy-check.yml', import.meta.url), 'utf8');
+const codeqlWorkflow = readFileSync(new URL('../../.github/workflows/codeql.yml', import.meta.url), 'utf8');
 const codexAutomergeWorkflow = readFileSync(
   new URL('../../.github/workflows/codex-automerge.yml', import.meta.url),
   'utf8',
@@ -85,6 +89,46 @@ const privateStorageModule = readFileSync(
   new URL('../../infra/modules/private-storage.bicep', import.meta.url),
   'utf8',
 );
+const ciWorkflowDefinition = parseYaml(ciWorkflow);
+const policyCheckWorkflowDefinition = parseYaml(policyCheckWorkflow);
+const codeqlWorkflowDefinition = parseYaml(codeqlWorkflow);
+
+const MERGE_RELEVANT_CI_JOBS = Object.freeze([
+  'install',
+  'lint',
+  'type-check',
+  'unit-tests',
+  'api-tests',
+  'angular-build',
+  'azure-functions-build',
+  'openapi-validation',
+  'bicep-validation',
+  'workflow-and-shell-lint',
+  'architecture-validation',
+  'security-scan',
+  'secret-scan',
+  'dependency-audit',
+  'release-artifacts',
+]);
+const POLICY_JOBS = Object.freeze(['cost-policy-check', 'guardrail-policy-check', 'dependency-lock-policy']);
+
+function normalizedNeeds(job) {
+  return Array.isArray(job?.needs) ? job.needs : typeof job?.needs === 'string' ? [job.needs] : [];
+}
+
+function workflowResults(jobIds, override = {}) {
+  return Object.fromEntries(jobIds.map((jobId) => [jobId, { result: override[jobId] ?? 'success', outputs: {} }]));
+}
+
+function runAggregateStep(workflow, aggregateJobId, results) {
+  const job = workflow.jobs[aggregateJobId];
+  const step = job.steps.find((candidate) => typeof candidate.run === 'string');
+  assert.ok(step, `${aggregateJobId} must contain an executable aggregate step`);
+  const expression = '${{ toJson(needs) }}';
+  assert.equal(step.run.split(expression).length - 1, 1, `${aggregateJobId} must evaluate needs exactly once`);
+  const script = step.run.replace(expression, JSON.stringify(results));
+  return spawnSync('bash', ['-c', script], { encoding: 'utf8' });
+}
 
 function pullRequest(overrides = {}) {
   return {
@@ -167,6 +211,7 @@ function withInputTokenCounter(client, { inputTokens = 1_000, requests = [] } = 
 
 test('canonical autonomous policy is internally valid', () => {
   assert.deepEqual(validateAutonomousPolicy(policy), []);
+  assert.deepEqual(policy.requiredChecks, STABLE_REQUIRED_CHECKS);
   assert.equal(policy.merge.allowAdminBypass, false);
   assert.equal(policy.autonomousReview.humanApprovalRequired, false);
   assert.equal(policy.autonomousReview.model, 'gpt-5.6-sol');
@@ -212,6 +257,72 @@ test('canonical autonomous policy is internally valid', () => {
   assert.match(codexAutomergeWorkflow, /ref: \$\{\{ github\.workflow_sha \}\}/);
   assert.doesNotMatch(codexAutomergeWorkflow, /source-run-id|Reuse approved exact-head review evidence/);
   assert.doesNotMatch(autonomousControllerSource, /releaseReviewClaim|method: 'PATCH'[\s\S]*check-runs/);
+});
+
+test('stable aggregate jobs cover every merge-relevant internal validation and fail closed', () => {
+  const ciComplete = ciWorkflowDefinition.jobs['ci-complete'];
+  assert.equal(ciComplete.name, 'CI complete');
+  assert.equal(ciComplete.if, 'always()');
+  assert.deepEqual(normalizedNeeds(ciComplete), MERGE_RELEVANT_CI_JOBS);
+  assert.deepEqual(
+    Object.keys(ciWorkflowDefinition.jobs).filter(
+      (jobId) => !['ci-complete', 'attest-release-artifacts'].includes(jobId),
+    ),
+    MERGE_RELEVANT_CI_JOBS,
+  );
+  assert.match(ciWorkflowDefinition.jobs['attest-release-artifacts'].if, /github\.event_name == 'push'/);
+  assert.equal(
+    runAggregateStep(ciWorkflowDefinition, 'ci-complete', workflowResults(MERGE_RELEVANT_CI_JOBS)).status,
+    0,
+  );
+  assert.notEqual(
+    runAggregateStep(ciWorkflowDefinition, 'ci-complete', workflowResults(MERGE_RELEVANT_CI_JOBS, { lint: 'failure' }))
+      .status,
+    0,
+  );
+
+  const policyComplete = policyCheckWorkflowDefinition.jobs['policy-complete'];
+  assert.equal(policyComplete.name, 'Policy complete');
+  assert.equal(policyComplete.if, 'always()');
+  assert.deepEqual(normalizedNeeds(policyComplete), POLICY_JOBS);
+  assert.deepEqual(
+    Object.keys(policyCheckWorkflowDefinition.jobs).filter((jobId) => jobId !== 'policy-complete'),
+    POLICY_JOBS,
+  );
+  assert.equal(
+    runAggregateStep(policyCheckWorkflowDefinition, 'policy-complete', workflowResults(POLICY_JOBS)).status,
+    0,
+  );
+  assert.notEqual(
+    runAggregateStep(
+      policyCheckWorkflowDefinition,
+      'policy-complete',
+      workflowResults(POLICY_JOBS, { 'guardrail-policy-check': 'failure' }),
+    ).status,
+    0,
+  );
+
+  const codeqlComplete = codeqlWorkflowDefinition.jobs['codeql-complete'];
+  assert.equal(codeqlComplete.name, 'CodeQL complete');
+  assert.equal(codeqlComplete.if, 'always()');
+  assert.deepEqual(normalizedNeeds(codeqlComplete), ['analyze']);
+  assert.equal(codeqlWorkflowDefinition.jobs.analyze.strategy['fail-fast'], false);
+  assert.deepEqual(codeqlWorkflowDefinition.jobs.analyze.strategy.matrix.language, [
+    'javascript-typescript',
+    'actions',
+  ]);
+  assert.equal(runAggregateStep(codeqlWorkflowDefinition, 'codeql-complete', workflowResults(['analyze'])).status, 0);
+  for (const nonPassingResult of ['failure', 'cancelled', 'timed_out', 'action_required', 'skipped']) {
+    assert.notEqual(
+      runAggregateStep(
+        codeqlWorkflowDefinition,
+        'codeql-complete',
+        workflowResults(['analyze'], { analyze: nonPassingResult }),
+      ).status,
+      0,
+      `CodeQL complete must reject ${nonPassingResult}`,
+    );
+  }
 });
 
 test('required checks and deployment never dispatch repository-controlled npm scripts', async () => {
@@ -711,15 +822,39 @@ test('required checks pass only for exact head and expected GitHub app', () => {
   const evaluation = evaluateRequiredChecks(wrongHead, headSha, policy.requiredChecks);
   assert.ok(evaluation.failures.some((failure) => failure.reason === 'wrong_head_sha'));
   assert.ok(evaluation.pending.some((pending) => pending.reason === 'missing'));
+
+  const duplicateWrongApp = [
+    ...successfulChecks(),
+    { ...successfulChecks()[0], id: 100, app: { slug: 'untrusted-app' } },
+  ];
+  assert.ok(
+    evaluateRequiredChecks(duplicateWrongApp, headSha, policy.requiredChecks).failures.some(
+      (failure) => failure.check === 'CI complete' && failure.reason === 'wrong_app',
+    ),
+  );
+
+  const staleWrongHead = [...successfulChecks(), { ...successfulChecks()[0], id: 101, head_sha: 'b'.repeat(40) }];
+  assert.ok(
+    evaluateRequiredChecks(staleWrongHead, headSha, policy.requiredChecks).failures.some(
+      (failure) => failure.check === 'CI complete' && failure.reason === 'wrong_head_sha',
+    ),
+  );
 });
 
-test('required checks treat pending and failed checks as non-passing', () => {
+test('required checks treat missing, pending, and failed aggregate checks as non-passing', () => {
+  const missing = successfulChecks().filter((check) => check.name !== 'CI complete');
+  assert.deepEqual(evaluateRequiredChecks(missing, headSha, policy.requiredChecks).pending, [
+    { check: 'CI complete', reason: 'missing' },
+  ]);
+
   const pending = successfulChecks();
-  pending[2] = { ...pending[2], status: 'in_progress', conclusion: null };
-  assert.equal(evaluateRequiredChecks(pending, headSha, policy.requiredChecks).ok, false);
+  pending[0] = { ...pending[0], status: 'in_progress', conclusion: null };
+  assert.deepEqual(evaluateRequiredChecks(pending, headSha, policy.requiredChecks).pending, [
+    { check: 'CI complete', reason: 'in_progress' },
+  ]);
 
   const failed = successfulChecks();
-  failed[3] = { ...failed[3], conclusion: 'failure' };
+  failed[0] = { ...failed[0], conclusion: 'failure' };
   assert.equal(evaluateRequiredChecks(failed, headSha, policy.requiredChecks).failures[0].reason, 'failure');
 });
 
@@ -792,6 +927,21 @@ test('complete check rollup permits only the current trusted merge job to remain
   );
   assert.equal(wrongRepository.ok, false);
   assert.deepEqual(wrongRepository.pending, [{ check: 'merge exact PR head', reason: 'in_progress' }]);
+
+  const staleDuplicateController = evaluateCompleteCheckRollup(
+    [
+      ...successfulChecks(),
+      currentControllerMergeCheck(currentRunId),
+      currentControllerMergeCheck(9999, { id: 10_003 }),
+    ],
+    [],
+    headSha,
+    currentRunId,
+    'JueZ/api',
+  );
+  assert.equal(staleDuplicateController.ok, false);
+  assert.equal(staleDuplicateController.explainsControllerUnstable, false);
+  assert.deepEqual(staleDuplicateController.pending, [{ check: 'merge exact PR head', reason: 'in_progress' }]);
 });
 
 test('autonomous review is bound to the exact head and rejects blocking findings', () => {
@@ -1223,7 +1373,7 @@ test('paid review revalidates every free check after token counting and immediat
     async getCheckRuns() {
       checkReads += 1;
       const freeChecks = successfulFreeChecks().map((check) =>
-        checkReads >= 5 && check.name === 'lint' ? { ...check, conclusion: 'failure' } : check,
+        checkReads >= 5 && check.name === 'CI complete' ? { ...check, conclusion: 'failure' } : check,
       );
       return [...freeChecks, ...(marker ? [marker] : [])];
     },
@@ -1266,7 +1416,7 @@ test('paid review revalidates every free check after token counting and immediat
       github,
       client,
     ),
-    /generation boundary: lint: failure/,
+    /generation boundary: CI complete: failure/,
   );
   assert.equal(attempts, 0);
   assert.equal(tokenCountRequests.length, 1);
@@ -1343,10 +1493,10 @@ test('paid review preflight excludes its own check and requires every free exact
   github.getCheckRuns = async () =>
     successfulChecks()
       .filter((check) => check.name !== policy.autonomousReview.checkName)
-      .map((check) => (check.name === 'lint' ? { ...check, conclusion: 'failure' } : check));
+      .map((check) => (check.name === 'CI complete' ? { ...check, conclusion: 'failure' } : check));
   await assert.rejects(
     runRequiredCheckPreflight({ prNumber: 1, headSha, waitSeconds: 0, pollSeconds: 0 }, policy, github),
-    /lint: failure/,
+    /CI complete: failure/,
   );
 });
 
@@ -1712,7 +1862,7 @@ test('merge decision requires pull request state, checks, and review to all pass
     mergeGateDecision({
       pullRequest: pullRequest(),
       expectedHeadSha: headSha,
-      checkEvaluation: { ...checkEvaluation, pending: [{ check: 'lint', reason: 'missing' }], ok: false },
+      checkEvaluation: { ...checkEvaluation, pending: [{ check: 'CI complete', reason: 'missing' }], ok: false },
       review,
       policy,
     }).ok,
