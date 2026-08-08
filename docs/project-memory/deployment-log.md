@@ -1,5 +1,12 @@
 # Deployment log
 
+## 2026-08-08 — Stable branch-protection aggregation accepted through production
+
+- Source: PR #345 exact head `06a68d42e205ec38ec8c0fb906e59dd9fc8ce415` passed exact-head CI `31276396714`, Policy Check `31276396688`, CodeQL `31276396684`, and autonomous review/merge `31276396717`, then squash-merged as `da8459aec5756f684b27d692dd838b0135c7fe9f`.
+- Main delivery: controller `31276530181`, exact-main CI `31276543255`, Deploy Test `31276618522`, and Promote Production `31276791354` all succeeded for the exact merge.
+- Acceptance: both deployment workflows passed immutable-source validation, public runtime smoke, authenticated hello and Reddit smoke, telemetry correlation, and release-ledger publication. Fresh `ops:runtime-truth` checks verified live `/health` plus exact ledger identity in both environments.
+- Live repository state: classic `main` protection is strict and requires only the four stable aggregate contexts. All other inspected protection settings were preserved. Canary PR #346 independently proved an internal lint failure fails `CI complete`, prevents paid review, and remains unmergeable.
+
 ## 2026-08-02 — Always-on autonomous-delivery canary accepted
 
 - Source: PR #318 exact head `de88f6eacddf6f795ce51484f54058e54622f2b3`, squash-merged as `e8e1070b4a4f2e67b9d60b97a3586bf16b3bfeea` after CI `30743179098`, Policy `30743179152`, CodeQL `30743179115`, and autonomous review/merge `30744502912` passed.

@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-08-08 — Require stable aggregate checks without narrowing fail-closed validation
+
+- Decision: Protected `main` requires exactly `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete`, all bound to GitHub Actions. Every merge-relevant validation remains an explicit mandatory dependency behind its aggregate; PR-inapplicable main-only attestation is not added to `CI complete`.
+- Decision: The autonomous merge controller retains its complete latest-check-run and legacy-status rollup. The four configured aggregates are necessary but not sufficient when any unrelated latest check is failing or pending; only the controller's own exact current merge job may explain GitHub's aggregate `unstable` state.
+- Rationale: Stable aggregates reduce live branch-protection churn when internal jobs evolve while preserving security, build, policy, provenance, release, architecture, agent-safety, and delivery controls. Canary PR #346 proved a harmless internal failure still blocks the aggregate, paid review, and merge.
+- Status: Accepted through PR #345 head `06a68d42e205ec38ec8c0fb906e59dd9fc8ce415`, merge `da8459aec5756f684b27d692dd838b0135c7fe9f`, full staged delivery, live protection read-back, and archived public-safe evidence.
+
 ## 2026-08-06 — Support explicit Azure authentication modes for Codex hosts
 
 - Decision: Keep `managed-identity` as the default Azure login mode for Azure-hosted Codex environments, including an IMDS proxy bypass and removal of stale service-principal variables. Restore a separately selected `service-principal` mode for Codex Cloud, which has no attached project Managed Identity but requires direct Azure CLI access.
