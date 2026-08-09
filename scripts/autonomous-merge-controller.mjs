@@ -250,7 +250,7 @@ export function mergeGateDecision({
   };
 }
 
-export async function runReview(options, policy, github, openAIClient) {
+export async function runReview(options, policy, github, openAIClient, runtime = {}) {
   await assertExclusiveWorkflowCheckWriter();
   const pullRequest = await github.getPullRequest(options.prNumber);
   assertExpectedHead(pullRequest, options.headSha);
@@ -273,6 +273,36 @@ export async function runReview(options, policy, github, openAIClient) {
     };
     await publishReview(review, options);
     return review;
+  }
+
+  const enforceCapacity = runtime.enforceCapacity ?? !openAIClient;
+  const capacityReady = runtime.capacityReady ?? process.env.AUTONOMOUS_REVIEW_CAPACITY_READY;
+  try {
+    assertAutonomousReviewCapacity(capacityReady, { enforce: enforceCapacity });
+  } catch (error) {
+    const review = {
+      decision: 'reject',
+      reviewedHeadSha: options.headSha,
+      summary:
+        'Independent high-risk review is paused before claim creation because review capacity is not declared ready.',
+      findings: [
+        {
+          severity: 'high',
+          title: 'Autonomous review capacity is not ready',
+          evidence:
+            'The trusted capacity declaration did not equal true, so no paid-call claim or provider request was made.',
+          remediation:
+            'An authorized operator must restore the existing review capacity and set the repository capacity declaration to true; do not change credentials or bypass review.',
+        },
+      ],
+      risk,
+      modelInvoked: false,
+      tokenCountInvoked: false,
+      model: policy.autonomousReview.model,
+      reviewClaim: { status: 'not_created', reason: 'capacity_not_ready' },
+    };
+    await publishReview(review, options);
+    throw error;
   }
 
   if (!openAIClient && process.env.AUTONOMOUS_REVIEW_LIVE_API_ENABLED !== 'true') {
@@ -522,6 +552,15 @@ export async function runReview(options, policy, github, openAIClient) {
     throw new Error(`Autonomous review rejected the pull request: ${review.summary}`);
   }
   return review;
+}
+
+export function assertAutonomousReviewCapacity(capacityReady, { enforce = true } = {}) {
+  if (!enforce) return;
+  if (capacityReady !== 'true') {
+    throw new Error(
+      'Autonomous review capacity is not declared ready; no permanent paid-call claim or provider request was created.',
+    );
+  }
 }
 
 export function buildReviewDiffCapsule(sourceDiff, risk, changedPaths) {

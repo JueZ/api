@@ -1,0 +1,45 @@
+version: 1
+id: autonomous-review-capacity-circuit-breaker
+title: Fail before consuming a review claim during known capacity outages
+fingerprint: agent-learning.autonomous-review.credit-balance-exhausted
+source:
+  type: autonomous_review
+  references:
+    - kind: issue
+      locator: JueZ/api#382
+      url: https://github.com/JueZ/api/issues/382
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31321542198
+      url: https://github.com/JueZ/api/actions/runs/31321542198
+classification:
+  failureArea: autonomous-review-delivery
+  severity: high
+  symptom: A known exhausted review balance was discovered only after a high-risk exact head had passed free gates and consumed its permanent paid-call claim.
+  rootCause: The trusted reviewer had no explicit fail-closed capacity declaration before source-diff collection and claim creation, so known external unavailability could consume otherwise valid exact heads.
+disposition:
+  primary: regression-test
+  rationale: Trusted classification now requires an exact non-secret capacity declaration for high-risk review and deterministic tests prove that an outage makes no diff, claim, token-count, or generation call while low-risk approval remains available.
+artifacts:
+  - path: scripts/autonomous-merge-controller.mjs
+    kind: implementation
+  - path: scripts/test/autonomous-policy.test.mjs
+    kind: regression-test
+  - path: .github/workflows/codex-automerge.yml
+    kind: workflow
+  - path: .github/autonomous-policy.yml
+    kind: policy
+  - path: .agents/skills/autonomous-pr-delivery/SKILL.md
+    kind: skill
+  - path: docs/autonomous-delivery.md
+    kind: architecture-documentation
+  - path: docs/security/autonomous-guardrails.md
+    kind: architecture-documentation
+counterfactual:
+  hypothesis: The focused policy tests fail when high-risk review can reach diff or claim creation without a trusted capacity declaration and pass only when false capacity blocks before every provider boundary without freezing low-risk delivery.
+  broken:
+    commit: f56422021640b34be2588c33999f63b59a87399a
+    expectedResult: The focused tests fail because the workflow supplies no capacity declaration and high-risk review proceeds toward claim creation during a known outage.
+  verification:
+    commands:
+      - node --test --test-name-pattern 'trusted review receives an exact fail-closed capacity declaration|known review-capacity outage blocks' scripts/test/autonomous-policy.test.mjs
+status: implemented

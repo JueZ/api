@@ -137,6 +137,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'
+          AUTONOMOUS_REVIEW_CAPACITY_READY: ${{ vars.AUTONOMOUS_REVIEW_CAPACITY_READY }}
         shell: bash
         run: |
           set -euo pipefail

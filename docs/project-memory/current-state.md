@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-09 Review capacity exhausted; fail-closed circuit breaker prepared locally
+
+- Efficiency PR #381 head `475ace1a9938748567bc8234011834c27a537f7b` passed CI `31321542204`, Policy Check `31321542211`, and CodeQL `31321542223`. Its single bounded high-risk review request returned sanitized HTTP 429 `credit_balance_exhausted` after claim `93265421643`; required aggregate `93265455752` failed, merge job `93265458262` skipped, and the PR closed unmerged without a rerun or repair commit.
+- Issue #382 records the external capacity blocker. The current unpushed branch combines issue #380's rerun guidance with a fail-closed capacity declaration. High-risk review blocks with sanitized evidence before source-diff collection, permanent claim creation, token counting, or generation unless `AUTONOMOUS_REVIEW_CAPACITY_READY` is exactly `true`; low-risk deterministic approval remains available.
+- Focused counterfactual tests fail on protected main and pass locally after the correction. Authenticated live read-back records the new non-secret repository variable as `AUTONOMOUS_REVIEW_CAPACITY_READY=false`; current main does not consume it, and the implementation is not merged, deployed, or runtime evidence. Do not open another high-risk PR, change the shared key, or manufacture a retry head until an authorized operator confirms usable review capacity.
+
 ## 2026-08-09 Required evidence aggregate delivered; rerun guidance capsule started
 
 - Required-aggregate PR #378 exact head `e190905af82dcf0c80b148e064ec0b3b96331a2d` passed all four exact-head aggregates and merged as `f56422021640b34be2588c33999f63b59a87399a`. Main Delivery `31320185273`, exact-main CI `31320199555`, Deploy Test `31320281566`, Promote Production `31320447859`, and fresh test/production runtime truth passed. The evidence verifier is now part of the existing required `Autonomous review complete` aggregate; no fifth context or duplicate verifier was added.

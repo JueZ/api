@@ -179,6 +179,8 @@ Codex delivery checks to monitor for Codex PRs include:
 - `enable auto-merge`
 - `run main delivery after Codex auto-merge`
 
+Before opening a high-risk PR, query the non-secret `AUTONOMOUS_REVIEW_CAPACITY_READY` repository variable. When it is not exactly `true`, keep the complete change local and report the blocker instead of consuming a permanent exact-head claim that cannot succeed. Low-risk PRs continue through deterministic approval. A trusted sanitized `credit_balance_exhausted` failure may set the variable to `false`; only explicit operator confirmation of restored capacity may set it to `true`. Never inspect, change, or reveal the shared API key to repair review capacity.
+
 `enable auto-merge` should pass for Codex PRs, but branch protection must still rely on CI and policy checks as the merge gate.
 
 `run main delivery after Codex auto-merge` is the post-merge delivery chain that dispatches and waits for `CI` on `main`, `Deploy Test`, and `Promote Production` after a Codex auto-merge. It is not a PR merge gate, but Codex must monitor and report it when it applies.

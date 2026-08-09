@@ -275,6 +275,17 @@ test('canonical autonomous policy is internally valid', () => {
   assert.doesNotMatch(autonomousControllerSource, /releaseReviewClaim|method: 'PATCH'[\s\S]*check-runs/);
 });
 
+test('trusted review receives an exact fail-closed capacity declaration before claim creation', () => {
+  const reviewStep = codexAutomergeDefinition.jobs['autonomous-review'].steps.find(
+    (step) => step.name === 'Claim exact head and run deterministic classification and independent review',
+  );
+  assert.equal(reviewStep.env.AUTONOMOUS_REVIEW_CAPACITY_READY, '${{ vars.AUTONOMOUS_REVIEW_CAPACITY_READY }}');
+  assert.ok(
+    autonomousControllerSource.indexOf('assertAutonomousReviewCapacity') <
+      autonomousControllerSource.indexOf('const reviewClaim = await claimAutonomousReview'),
+  );
+});
+
 test('delivery guidance prevents futile autonomous-review reruns after a permanent exact-head claim', () => {
   assert.match(autonomousDeliverySkill, /Autonomous review paid-call claim/);
   assert.match(autonomousDeliverySkill, /inspect[^\n]*exact-head[^\n]*claim/i);
@@ -282,6 +293,11 @@ test('delivery guidance prevents futile autonomous-review reruns after a permane
   assert.match(autonomousDeliverySkill, /substantive[^\n]*new[^\n]*head/i);
   assert.match(autonomousDeliverySkill, /no-op[^\n]*commit/i);
   assert.match(autonomousDeliverySkill, /permanent[^\n]*one[^\n]*paid[^\n]*call/i);
+  assert.match(autonomousDeliverySkill, /AUTONOMOUS_REVIEW_CAPACITY_READY/);
+  assert.match(autonomousDeliverySkill, /high-risk[^\n]*not exactly `true`[^\n]*local/i);
+  assert.match(autonomousDeliverySkill, /Low-risk[^\n]*deterministic approval/i);
+  assert.match(autonomousDeliverySkill, /Never set it to `true`[^\n]*explicit operator confirmation/i);
+  assert.match(autonomousDeliverySkill, /Never inspect, replace, or reveal the shared API key/i);
 });
 
 test('protected program evidence is part of the required autonomous review aggregate', () => {
@@ -1082,6 +1098,78 @@ test('autonomous review rechecks the mutable pull-request head after loading fil
     ),
     /Pull request head changed/,
   );
+});
+
+test('known review-capacity outage blocks high-risk work before diff, claim, counting, or generation', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-capacity-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const reviewFile = join(directory, 'review.json');
+  let diffReads = 0;
+  let claimAttempts = 0;
+  let tokenCountAttempts = 0;
+  let generationAttempts = 0;
+  const github = {
+    async getPullRequest() {
+      return { ...pullRequest(), title: 'High-risk change' };
+    },
+    async getPullRequestFiles() {
+      return [{ filename: '.github/workflows/example.yml', status: 'modified' }];
+    },
+    async getPullRequestDiff() {
+      diffReads += 1;
+      return highRiskDiff;
+    },
+    async createReviewClaim() {
+      claimAttempts += 1;
+    },
+  };
+  const client = {
+    responses: {
+      inputTokens: {
+        async count() {
+          tokenCountAttempts += 1;
+        },
+      },
+      async create() {
+        generationAttempts += 1;
+      },
+    },
+  };
+
+  await assert.rejects(
+    runReview({ repository: 'JueZ/api', prNumber: 1, headSha, runId: 12345, reviewFile }, policy, github, client, {
+      enforceCapacity: true,
+      capacityReady: 'false',
+    }),
+    /capacity is not declared ready/,
+  );
+
+  assert.equal(diffReads, 0);
+  assert.equal(claimAttempts, 0);
+  assert.equal(tokenCountAttempts, 0);
+  assert.equal(generationAttempts, 0);
+  const review = JSON.parse(await readFile(reviewFile, 'utf8'));
+  assert.equal(review.decision, 'reject');
+  assert.equal(review.modelInvoked, false);
+  assert.equal(review.tokenCountInvoked, false);
+  assert.deepEqual(review.reviewClaim, { status: 'not_created', reason: 'capacity_not_ready' });
+
+  const lowRisk = await runReview(
+    { repository: 'JueZ/api', prNumber: 1, headSha, reviewFile },
+    policy,
+    {
+      async getPullRequest() {
+        return pullRequest();
+      },
+      async getPullRequestFiles() {
+        return [{ filename: 'README.md', status: 'modified' }];
+      },
+    },
+    undefined,
+    { enforceCapacity: true, capacityReady: 'false' },
+  );
+  assert.equal(lowRisk.decision, 'approve');
+  assert.equal(lowRisk.modelInvoked, false);
 });
 
 test('high-risk autonomous review uses one cost-bounded generation and records sanitized usage', async (context) => {

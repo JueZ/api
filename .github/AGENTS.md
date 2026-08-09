@@ -7,6 +7,7 @@
 - Run learning-artifact validation and generated-index checking by fixed trusted script paths inside the existing architecture/agent job; do not create a separate protected context or route these checks through mutable package aliases.
 - Keep every mandatory validation as an internal job while exposing only `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete` as stable protected-branch contexts.
 - Publish `Autonomous review complete` successfully only when exact-head independent review and any applicable protected-main program-evidence verification both pass; do not defer the evidence decision only to the later merge job or add another context.
+- For high-risk review, require `AUTONOMOUS_REVIEW_CAPACITY_READY` to be exactly `true` before source-diff collection, permanent claim creation, token counting, or model generation. Missing or false capacity must fail the existing aggregate with sanitized evidence and no provider request; low-risk deterministic approval remains available.
 - Aggregate jobs must run with `if: always()`, explicitly depend on all applicable internal jobs, and fail for every result other than success; do not include a PR-inapplicable main-only job in a PR aggregate.
 - Build release artifacts once and promote identical digests through test and production.
 - Use explicit workflow dispatch for delivery chaining; avoid recursive trigger assumptions.
