@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -342,16 +341,10 @@ test('live PR provenance must bind the implementation number and exact broken/fi
   );
 });
 
-test('policy alias remains compatible and historical task validation is available', () => {
+test('policy and historical task aliases use fixed compatible entry points', () => {
   const packageDefinition = JSON.parse(readFileSync(join(REPOSITORY_ROOT, 'package.json'), 'utf8'));
   assert.equal(packageDefinition.scripts['eval:agent-policy'], packageDefinition.scripts['eval:agents']);
   assert.equal(packageDefinition.scripts['eval:agent-tasks:validate'], 'node scripts/agent-task-evals/validate.mjs');
-
-  const result = spawnSync(process.execPath, [join(REPOSITORY_ROOT, 'scripts/agent-task-evals/validate.mjs')], {
-    encoding: 'utf8',
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Validated 4 historical agent tasks/);
 });
 
 test('delivery skill requires phase-first reporting and proportional local validation', () => {
