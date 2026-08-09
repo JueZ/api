@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-09 Required evidence aggregate delivered; rerun guidance capsule started
+
+- Required-aggregate PR #378 exact head `e190905af82dcf0c80b148e064ec0b3b96331a2d` passed all four exact-head aggregates and merged as `f56422021640b34be2588c33999f63b59a87399a`. Main Delivery `31320185273`, exact-main CI `31320199555`, Deploy Test `31320281566`, Promote Production `31320447859`, and fresh test/production runtime truth passed. The evidence verifier is now part of the existing required `Autonomous review complete` aggregate; no fifth context or duplicate verifier was added.
+- Evidence retry PR #379 head `b8bc7f236c1ed229d0a23a26df40756e516aad6b` passed CI `31320980688`, Policy Check `31320980728`, and CodeQL `31320980735`. Autonomous review run `31320980679` failed closed on an external `request_error`; one same-run retry was then deterministically denied because the permanent exact-head paid-call claim already existed. The PR closed unmerged, the merge job was skipped, and no downstream evidence exists.
+- Issue #380 and implemented artifact `autonomous-review-permanent-claim-rerun` record the user-correction fingerprint. The current branch adds executable delivery-skill prevention: inspect the exact-head claim before rerunning, never rerun the high-risk review for a consumed head, preserve the permanent one-paid-call boundary, and prohibit no-op retry commits. Phase 2 remains `in_progress`; a merged PR alone is not runtime evidence.
+
 ## 2026-08-09 Phase 2 evidence aggregate-boundary repair started
 
 - Compatibility PR #375 merged as `f7ec8cbb4d9bc44fecd9a833c3d7cc483f6974f2` and completed exact-main CI `31318612977`, Main Delivery `31318690680`, Deploy Test `31318705872`, Promote Production `31318872853`, and fresh test/production runtime truth with public and authenticated smoke, telemetry, and release ledgers.

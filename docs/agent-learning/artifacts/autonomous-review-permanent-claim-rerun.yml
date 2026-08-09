@@ -1,0 +1,34 @@
+version: 1
+id: autonomous-review-permanent-claim-rerun
+title: Prevent futile same-head autonomous-review reruns
+fingerprint: agent-learning.autonomous-review.permanent-claim-rerun
+source:
+  type: user_correction
+  references:
+    - kind: issue
+      locator: JueZ/api#380
+      url: https://github.com/JueZ/api/issues/380
+classification:
+  failureArea: autonomous-review-delivery
+  severity: high
+  symptom: A bounded rerun of a failed high-risk review spent delivery time reinstalling the controller only to be deterministically denied because the exact head already owned a permanent paid-call claim.
+  rootCause: The repository delivery skill did not require exact-head claim inspection before rerunning Codex Auto-Merge, even though the controller and architecture documentation already made the one-paid-call claim permanent.
+disposition:
+  primary: skill-update
+  rationale: The day-to-day delivery procedure now denies same-head autonomous-review reruns after claim consumption, requires substantive new-head corrections, and is enforced by a deterministic policy test.
+artifacts:
+  - path: .agents/skills/autonomous-pr-delivery/SKILL.md
+    kind: skill
+  - path: scripts/test/autonomous-policy.test.mjs
+    kind: regression-test
+  - path: docs/autonomous-delivery.md
+    kind: architecture-documentation
+counterfactual:
+  hypothesis: The focused policy test fails when delivery guidance omits permanent-claim inspection and passes only when same-head reruns and no-op retry commits are explicitly denied without relaxing the one-paid-call boundary.
+  broken:
+    commit: f56422021640b34be2588c33999f63b59a87399a
+    expectedResult: The focused policy test fails because the autonomous delivery skill has no rule to inspect a consumed exact-head claim before rerunning the high-risk review workflow.
+  verification:
+    commands:
+      - node --test --test-name-pattern 'delivery guidance prevents futile autonomous-review reruns' scripts/test/autonomous-policy.test.mjs
+status: implemented
