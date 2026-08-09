@@ -1,4 +1,11 @@
+<!-- project-memory-asOf: 2026-08-09 -->
 # Current state
+
+## 2026-08-09 Phase 5 memory freshness and model-free reporting in progress
+
+- Branch `codex/agent-learning-phase-5-reporting` is based on exact protected main `7ccc5ba85b17222cd7b98142de520629fe34f287`. It adds deterministic offline/live memory freshness, combined learning status, one sanitized marker-deduplicated stale-memory issue path, fixed-path CI validation, and a non-required scheduled report workflow.
+- Offline validation currently reports zero malformed memory findings. An authenticated read-only GitHub exercise reports zero explicit current-state contradictions, zero post-rollout significant repair failures, zero open learning candidates, four verified artifacts, zero waivers, and no model use. These are local/live diagnostic observations, not exact-head CI or phase acceptance evidence.
+- The runtime-neutral allowlist is extended only to non-shipped agent-task definitions, dedicated agent-learning/task-evaluation controllers, and their scoped tests. They remain high-risk and keep all PR aggregates and exact-main CI. Workflows, policy, packages, application code, contracts, infrastructure, other scripts, ambiguous metadata, and mixed changes remain deployment-required.
 
 ## 2026-08-09 Phases 3 and 4 accepted; Phase 5 is next
 

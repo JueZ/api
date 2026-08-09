@@ -55,6 +55,7 @@ npm run agent:learning:validate
 npm run agent:learning:index
 npm run agent:learning:index -- --check
 npm run agent:learning:status
+npm run ops:check-memory-freshness
 ```
 
 The generated index contains no timestamp, so repeated generation from the same artifacts is byte-for-byte reproducible. CI invokes schema validation, trusted historical scoring, live GitHub provenance validation, and the index checker by fixed script path inside the existing `architecture and agent validation` job; learning validation does not create a protected-branch status context.
@@ -64,6 +65,14 @@ Phase 2 acceptance verification is intentionally separated from candidate-contro
 Phase 3 and Phase 4 use separately registered strict public-safe schemas in the same offline validator. Their records bind exact implementation identities, aggregate runs, exact-main CI, runtime-neutral delivery decisions, and phase-specific deterministic behavior. An unrelated phase-row edit does not activate Phase 2's authenticated historical/runtime audit; malformed ledgers and Phase 2 row or evidence changes remain fail closed. This proportionality changes validation selection, not the four protected aggregates or any underlying job.
 
 `npm run eval:agents` remains the deterministic agent-policy evaluation command, and `npm run eval:agent-policy` is its clearer alias.
+
+## Memory freshness and status reporting
+
+`ops:check-memory-freshness` is an offline, read-only validator for dated headings, explicit active/superseded state markers, status statements without an `asOf` date, and malformed PR, workflow-run, or exact-SHA references. Authenticated `--live` mode queries GitHub only for narrowly parsed current-state claims such as “PR #42 remains open” and reports unavailable metadata as `blocked`, never passing.
+
+`agent:learning:status` combines artifact counts, post-rollout significant-failure and disposition coverage, open/deduplicated learning candidates, recurring fingerprints, historical task pass rates by context, and missing or stale evidence. Without authenticated live mode, live counts remain unavailable rather than being reported as zero. Missing, blocked, timed-out, malformed, or adapter-unavailable agent-task results never count as passing.
+
+The non-required `Agent Learning Status` schedule runs fixed validators and authenticated reporting without a model. It writes only sanitized JSON/Markdown summaries and may create at most one marker-deduplicated `agent-learning` issue for a proven stale-memory contradiction. It cannot rewrite project memory, modify code, push, open a PR, deploy, or mutate production.
 
 ## Historical agent-task harness
 

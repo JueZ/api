@@ -14,6 +14,10 @@ export const RUNTIME_NEUTRAL_DEPLOYMENT_PATHS = Object.freeze([
   'docs/**',
   '.github/**/*.md',
   '.agents/skills/**/*.md',
+  'evals/agent-tasks/**',
+  'scripts/agent-learning/**',
+  'scripts/agent-task-evals/**',
+  'scripts/test/agent-learning-*.test.mjs',
 ]);
 export const AGENT_LEARNING_ROLLOUT_TIMESTAMP = '2026-08-09T20:24:47Z';
 const GITHUB_FILE_STATUSES = new Set(['added', 'changed', 'copied', 'modified', 'removed', 'renamed', 'unchanged']);

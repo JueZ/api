@@ -1,3 +1,4 @@
+<!-- project-memory-asOf: 2026-08-09 -->
 # Known issues and unresolved risks
 
 ## First genuine post-rollout learning candidate has not occurred

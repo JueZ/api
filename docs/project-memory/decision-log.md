@@ -1,5 +1,11 @@
 # Decision log
 
+## 2026-08-09 — Keep memory reporting model-free and deployment proportional
+
+- Decision: Validate memory syntax offline and query only bounded GitHub PR/run/issue metadata in authenticated live mode. Report unavailable evidence as blocked, never rewrite memory automatically, and create at most one sanitized marker-deduplicated learning issue for a proven contradiction.
+- Decision: Keep agent-learning/task-evaluation governance high risk behind every protected aggregate and exact-main CI, while classifying only its dedicated non-shipped tasks, controllers, and tests as runtime neutral for Azure environment deployment. Workflow, policy, package, application, contract, infrastructure, other-script, ambiguous, and mixed changes remain deployment-required.
+- Rationale: A production deployment cannot validate bytes that are absent from both application packages. Fixed-path deterministic CI and protected governance are the relevant controls, while omitting inapplicable Azure work reduces delivery time without weakening runtime or repository protection.
+
 ## 2026-08-09 — Skip environment deployment for proven runtime-neutral changes
 
 - Decision: Keep every PR aggregate and exact-main CI mandatory, then automatically omit Deploy Test and Promote Production only when protected-main code authenticates the complete PR file list and every current/previous rename path matches the exact runtime-neutral documentation allowlist.

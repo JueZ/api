@@ -273,6 +273,8 @@ jobs:
           node scripts/agent-learning/verify-artifacts.mjs --github
           node scripts/agent-learning/generate-index.mjs --check
           node scripts/agent-learning/verify-program-evidence.mjs offline
+          node scripts/agent-learning/check-memory-freshness.mjs
+          node --test scripts/test/agent-learning-memory.test.mjs
       - name: Validate historical agent-task harness
         run: |
           node scripts/agent-task-evals/validate.mjs

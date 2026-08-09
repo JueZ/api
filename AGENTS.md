@@ -127,7 +127,7 @@ Normal autonomous delivery is:
    - `Deploy Test`
    - `Promote Production`
 6. Deployment may be skipped when the user explicitly asks for no deployment and the PR includes `[skip deploy]`, `[skip autodeploy]`, or the `skip-autodeploy` label.
-7. After exact-main CI, the protected controller also skips Deploy Test and Promote Production automatically when its authenticated complete PR file list matches the exact runtime-neutral allowlist in `.github/autonomous-policy.yml`. Mixed, malformed, renamed-from-code, workflow, policy, script, package, contract, infrastructure, or application changes remain deployment-required.
+7. After exact-main CI, the protected controller also skips Deploy Test and Promote Production automatically when its authenticated complete PR file list matches the exact runtime-neutral allowlist in `.github/autonomous-policy.yml`. This includes documentation, scoped instructions, agent-task definitions, and the dedicated non-shipped agent-learning/evaluation controllers and tests. Mixed, malformed, renamed-from-runtime-code, workflow, policy, package, contract, infrastructure, application, or other script changes remain deployment-required.
 
 Normal repository-changing PRs may promote automatically through the repository delivery flow when all required checks pass, `DEPLOY_PRODUCTION_ENABLED=true`, and deployment is not skipped. Do not interpret this as requiring a separate user request for every routine production promotion.
 

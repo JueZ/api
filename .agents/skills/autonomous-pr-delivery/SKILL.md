@@ -121,8 +121,10 @@ Complete repository-changing work through the required autonomous delivery loop 
    - `run main delivery after Codex auto-merge`
    - `CI`
    - `Policy Check`
-   - `Deploy Test`
-   - `Promote Production`
+   - `Deploy Test`, when deployment is applicable
+   - `Promote Production`, when deployment is applicable
+
+   After exact-main CI, treat a protected-controller runtime-neutral decision as terminal evidence that environment deployment was not applicable. Report Deploy Test, Promote Production, smoke, telemetry, release ledger, and runtime truth as `not applicable`; never wait for those workflows or describe them as passing when the controller intentionally omitted them.
 
 9. If checks fail, apply the smallest safe fix and repeat at most 2 repair attempts for the same failing area.
 
