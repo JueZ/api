@@ -1,11 +1,11 @@
 # Known issues and unresolved risks
 
-## Phase 2 acceptance still lacks a merged trusted verifier
+## Phase 2 trusted verifier successor is prepared but not accepted
 
 - PR #349 implemented and delivered the versioned-learning system, but Phase 2 acceptance evidence is not yet protected by a merged trusted verifier.
 - PR #350 closed after its second repair because environment identity was not independently bound. PR #352 final head `54d76353d72d5342f4b7f3944b58d384a95b7075` passed all free gates, but autonomous review `31301156652` rejected the design because it exported an authenticated Actions/deployment token to scripts from the PR checkout. The same review found that generic HTTPS origins plus default redirects permit SSRF/redirect escape.
 - PR #354 moved authenticated verification into protected-main controller code and repaired the runtime-host, redirect, byte-bound, digest, and candidate/controller identity boundaries. Its final head `0fef86e2de488545970507f362e2abbc974681ca` passed CI `31305790271`, Policy Check `31305790288`, and CodeQL `31305790267`, but autonomous review `31305789487` found that generic authenticated evidence was not pinned to designated Phase 2 implementation PR #349. It closed unmerged after both repairs.
-- Keep ordinary PR CI tokenless. The successor must retain every #354 boundary and bind Phase 2 to exact PR #349, baseline `eab88f735d3644181d2a043156970f0df02e3ff8`, branch `codex/agent-learning-phase-2-artifacts`, head `7188188cc0b3fd1a58a5ee14ae5335158294135c`, and merge `9310c94f97541e57f83b186af2cacf989d6f5330`, with negative tests for every mismatch. Issues #351, #355, and #356 remain open; no waiver or passing proof exists.
+- Draft PR #358 implementation commit `eecc95625608f316ca4e4de9237073a783f2c19a` retains every #354 boundary and adds the exact PR #349 base, branch, head, and merge binding with negative tests for every mismatch. It still has no exact-head, review, merge, delivery, or runtime acceptance. Issues #351, #355, and #356 remain open; no waiver or passing proof exists.
 
 ## Test and production are accepted on the same immutable release
 

@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-09 Trusted Phase 2 verifier successor prepared
+
+- Draft PR #358 is based on protected main `5aa5ac93e9ca9c0677a4edf38d2364a08a5df372`. Implementation commit `eecc95625608f316ca4e4de9237073a783f2c19a` restores the protected-main, read-only verifier boundary from #354 and adds the missing immutable binding to PR #349, baseline `eab88f735d3644181d2a043156970f0df02e3ff8`, branch `codex/agent-learning-phase-2-artifacts`, head `7188188cc0b3fd1a58a5ee14ae5335158294135c`, and merge `9310c94f97541e57f83b186af2cacf989d6f5330`.
+- Deterministic tests reject otherwise-valid evidence with a substituted PR, baseline, branch, head, or merge and retain the separate `pull_request_target` candidate-head versus protected workflow-code identity regression. Local high-risk validation passed, but exact-head CI, Policy Check, CodeQL, autonomous review, merge, delivery, and runtime evidence are still pending.
+- Phase 2 remains `in_progress`. After #358 is accepted and active on main, a separate protected evidence PR must exercise the trusted verifier, add versioned artifacts for #351, #355, and #356, close those issues, and record Phase 2 acceptance. A merged PR alone is not runtime evidence.
+
 ## 2026-08-09 Trusted Phase 2 verifier successor required
 
 - Trusted-verifier foundation PR #354 was based on protected main `74f09b72789ad3acc5c2ce82747298b4bd8264be` and closed unmerged after both allowed repairs. Its final head `0fef86e2de488545970507f362e2abbc974681ca` passed CI `31305790271`, Policy Check `31305790288`, and CodeQL `31305790267`, but autonomous review `31305789487` rejected a missing immutable binding from Phase 2 to designated implementation PR #349.
