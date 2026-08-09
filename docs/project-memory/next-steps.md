@@ -4,8 +4,8 @@
 
 - `docs/agent-learning/program.md` is authoritative. Phase 1 is accepted at implementation merge `da8459aec5756f684b27d692dd838b0135c7fe9f`; live protection and negative-canary evidence is archived under `docs/agent-learning/evidence/`.
 - Phase 2 implementation PR #349 merged as `9310c94f97541e57f83b186af2cacf989d6f5330` and completed delivery/runtime verification, but Phase 2 remains `in_progress`. Evidence PRs #350 and #352 and verifier PR #354 closed after their repair limits; issues #351, #355, and #356 record durable follow-up.
-- PR #358 repair-attempt-1 head `9a63d1baab9957a6518ff1652fc5c08f5d8ac87d` passed free gates but review `31307836692` rejected two bypasses. Commit `eaeff6cc5ee5ecaa0dd584b3a0b5c98467a8c99d` contains the final permitted executable repair. Next, commit its ledger, push, and monitor every exact-head, review, merge, delivery, smoke, telemetry, ledger, and runtime gate to terminal truth.
-- After #358 is merged, delivered, and active, use a separate evidence-only PR to exercise it, add verified artifacts for issues #351, #355, #356, #359, and #360, close those issues, and record final acceptance. Keep task-evaluation aliases fail closed until Phase 4, add no new protected context, and do not begin Phase 3 or paid/general task execution first. A merged PR alone remains insufficient runtime or live-configuration evidence.
+- PR #358 closed unmerged after final review `31308451194`; issue #361 records the deployment-provenance gap. Deliver successor library commit `73de4db53d70089b2eb5a27db477e1ad53923014`, including offline CI registration and executable workflow/job/timestamp regressions, through exact-head review and delivery.
+- After that library is accepted, use one small protected PR to wire its `trusted-pr` mode into the protected-main controller, then one evidence-only PR to exercise it and add verified artifacts for #351, #355, #356, #359, #360, and #361. Keep task-evaluation aliases fail closed until Phase 4 and add no new protected context. A merged PR alone remains insufficient runtime evidence.
 
 ## Quality 10 program
 
