@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-09 Runtime-neutral delivery optimization authorized
+
+- PR #391 changed only two project-memory Markdown files, yet its successful protected merge still caused exact-main CI, Deploy Test `31332383421`, and Promote Production `31332564172`. An operator cancellation stopped parent Main Delivery `31332272018` only after the production child had already dispatched; both environment runs completed successfully rather than being interrupted during Azure mutation.
+- The operator authorized automatic environment-deployment omission for changes that provably cannot affect deployed code. Issue #392 tracks a protected exact-file-list classifier with executable regression coverage. Exact-main CI and every PR/security/provenance control remain mandatory; ambiguous or mixed changes still deploy.
+- This entry records the correction and safe boundary, not acceptance of the pending implementation. A merge alone will not prove the live controller behavior.
+
 ## 2026-08-09 Phase 2 accepted after protected historical-evidence verification
 
 - PR #389 exact head `91f79994c62cdcbe67b489c06629a862aff14ac5` passed CI `31330795938`, Policy Check `31330795948`, CodeQL `31330795967`, and deterministic governance `31330796084`. The required aggregate authenticated the complete Phase 2 historical record before exact-head merge `c71db002a86ac82f1076f6e6fe031c4bbc2b91b7`.

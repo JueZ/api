@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-08-09 — Skip environment deployment for proven runtime-neutral changes
+
+- Decision: Keep every PR aggregate and exact-main CI mandatory, then automatically omit Deploy Test and Promote Production only when protected-main code authenticates the complete PR file list and every current/previous rename path matches the exact runtime-neutral documentation allowlist.
+- Fail-closed boundary: Missing, malformed, duplicated, traversing, incomplete, mixed, or deployment-impacting paths continue through full environment delivery. The protected policy validator prevents broadening the allowlist to application, workflow, policy, package, script, contract, infrastructure, or runtime paths.
+- Rationale: Project-memory-only PR #391 rebuilt and redeployed unchanged application code through test and production. The operator explicitly corrected that behavior. Exact-main CI supplies repository and release-integrity evidence; repeating Azure mutations, smoke, telemetry, and ledgers cannot add runtime-change evidence when the authenticated diff is strictly runtime-neutral.
+- Durable learning: Issue #392 and artifact `runtime-neutral-delivery-classification` require the executable classifier and regression tests. No provider model is involved.
+
 ## 2026-08-09 — Replace independent API-backed PR review with deterministic governance
 
 - Decision: Remove provider generation, token counting, cost limits, and paid-call claims from pull-request automation. Keep `Autonomous review complete` as the stable branch-required name, but produce it from deterministic exact-head governance plus applicable protected-main program-evidence verification. Restrict provider-backed inference to bounded repairable-error diagnostics using `gpt-5.6-luna` with high reasoning.

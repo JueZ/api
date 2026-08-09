@@ -329,12 +329,75 @@ jobs:
           # that stopped being the current generation while checks were running.
           assert_current_main
 
-          skip_autodeploy="$(jq -r '(
+          explicit_skip_autodeploy="$(jq -r '(
             ([.labels[]?.name] | map(ascii_downcase) | index("skip-autodeploy")) != null
             or ((.body // "") | test("\\[skip deploy\\]|\\[skip autodeploy\\]"; "i"))
           )' <<<"$associated_pr")"
-          if [ "$skip_autodeploy" = "true" ]; then
-            echo "The PR associated with $SOURCE_REF explicitly skipped deployment."
+
+          skip_reason=""
+          deployment_classification_reason="not-requested-explicit-skip"
+          if [ "$explicit_skip_autodeploy" = "true" ]; then
+            skip_reason="explicit PR marker or label"
+          else
+            automatic_skip_autodeploy="false"
+            deployment_classification_reason="unavailable-associated-pull-request"
+            associated_pr_number="$(jq -r '.number // ""' <<<"$associated_pr")"
+            associated_pr_merge="$(jq -r '.merge_commit_sha // ""' <<<"$associated_pr")"
+            expected_changed_files="$(jq -r '.changed_files // ""' <<<"$associated_pr")"
+            if [[ "$associated_pr_number" =~ ^[0-9]+$ ]] &&
+               [ "$associated_pr_merge" = "$SOURCE_REF" ] &&
+               [[ "$expected_changed_files" =~ ^[1-9][0-9]*$ ]]; then
+              changed_file_pages="$RUNNER_TEMP/associated-pr-file-pages.json"
+              changed_files="$RUNNER_TEMP/associated-pr-files.json"
+              if gh api --paginate --slurp \
+                -H 'Accept: application/vnd.github+json' \
+                "repos/$REPOSITORY/pulls/$associated_pr_number/files?per_page=100" > "$changed_file_pages" &&
+                 jq -e '[.[] | .[]]' "$changed_file_pages" > "$changed_files"; then
+                actual_changed_files="$(jq 'length' "$changed_files")"
+                if [ "$actual_changed_files" = "$expected_changed_files" ]; then
+                  if deployment_classification="$(node scripts/classify-deployment-impact.mjs "$changed_files")" &&
+                     jq -e '
+                       type == "object"
+                       and (.valid | type == "boolean")
+                       and (.deploymentRequired | type == "boolean")
+                       and (.reason | type == "string")
+                       and (.fileCount | type == "number")
+                       and (.impactPathCount | type == "number")' \
+                       <<<"$deployment_classification" >/dev/null; then
+                    deployment_classification_reason="$(jq -r '.reason' <<<"$deployment_classification")"
+                    automatic_skip_autodeploy="$(jq -r \
+                      --argjson expected "$expected_changed_files" \
+                      '.valid == true
+                        and .deploymentRequired == false
+                        and .reason == "runtime-neutral-only"
+                        and .fileCount == $expected
+                        and .impactPathCount == 0' \
+                      <<<"$deployment_classification")"
+                  else
+                    deployment_classification_reason="malformed-classifier-result"
+                  fi
+                else
+                  deployment_classification_reason="changed-file-count-mismatch"
+                fi
+              else
+                deployment_classification_reason="changed-file-list-unavailable"
+              fi
+            fi
+            if [ "$automatic_skip_autodeploy" = "true" ]; then
+              skip_reason="trusted runtime-neutral path classification"
+            else
+              echo "Environment deployment remains required: $deployment_classification_reason."
+            fi
+          fi
+          if [ -n "$skip_reason" ]; then
+            echo "The PR associated with $SOURCE_REF skipped environment deployment: $skip_reason."
+            {
+              echo "### Main delivery environment deployment skipped"
+              echo "- Source SHA: $SOURCE_REF"
+              echo "- CI: $CI_RUN_URL"
+              echo "- Reason: $skip_reason"
+              echo "- Classification: $deployment_classification_reason"
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
