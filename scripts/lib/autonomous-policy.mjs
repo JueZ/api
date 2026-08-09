@@ -15,6 +15,7 @@ export const RUNTIME_NEUTRAL_DEPLOYMENT_PATHS = Object.freeze([
   '.github/**/*.md',
   '.agents/skills/**/*.md',
 ]);
+export const AGENT_LEARNING_ROLLOUT_TIMESTAMP = '2026-08-09T20:24:47Z';
 const GITHUB_FILE_STATUSES = new Set(['added', 'changed', 'copied', 'modified', 'removed', 'renamed', 'unchanged']);
 const REQUIRED_EXECUTABLE_HIGH_RISK_PATTERNS = Object.freeze([
   'package.json',
@@ -124,6 +125,9 @@ export function validateAutonomousPolicy(policy) {
   }
   if (policy.autonomousGovernance?.humanApprovalRequired !== false) {
     errors.push('autonomousGovernance.humanApprovalRequired must be false for the selected autonomous policy');
+  }
+  if (policy.agentLearning?.rolloutTimestamp !== AGENT_LEARNING_ROLLOUT_TIMESTAMP) {
+    errors.push(`agentLearning.rolloutTimestamp must be ${AGENT_LEARNING_ROLLOUT_TIMESTAMP}`);
   }
   if (policy.merge?.exactHeadSha !== true) errors.push('merge.exactHeadSha must be true');
   if (policy.merge?.requireUpToDate !== true) errors.push('merge.requireUpToDate must be true');
