@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   ACCEPTANCE_RUNTIME_HOSTS,
+  OPEN_PR_LEDGER_PATHS,
   PHASE_2_IMPLEMENTATION_IDENTITY,
   PHASE_2_EVIDENCE_PATH,
   PROGRAM_PATH,
@@ -18,10 +19,12 @@ import {
   currentRuntimeFindings,
   fetchAllowedRuntimeHealth,
   lowRiskReviewEvidenceFindings,
+  openPullRequestLedgerFindings,
   phase2EvidenceFindings,
   phase2EvidenceShapeFindings,
   phase2ImplementationIdentityFindings,
   phaseEvidenceNeedsLiveVerification,
+  protectedMainControllerFindings,
   reviewEvidenceFindings,
   trustedControllerFindings,
   verifyArtifactArchiveDigest,
@@ -116,6 +119,17 @@ function workflowRun(id, path, event, sha, overrides = {}) {
     conclusion: 'success',
     head_sha: sha,
     ...overrides,
+  };
+}
+
+function protectedMainComparison(controllerSha = mergeSha, mainSha = currentMainSha) {
+  return {
+    status: controllerSha === mainSha ? 'identical' : 'ahead',
+    ahead_by: controllerSha === mainSha ? 0 : 1,
+    behind_by: 0,
+    base_commit: { sha: controllerSha },
+    merge_base_commit: { sha: controllerSha },
+    url: `https://api.github.com/repos/JueZ/api/compare/${controllerSha}...${mainSha}`,
   };
 }
 
@@ -808,6 +822,7 @@ test('trusted controller identity rejects the wrong workflow, run, repository, o
   const env = {
     GITHUB_ACTIONS: 'true',
     GITHUB_WORKFLOW: 'Codex Auto-Merge',
+    GITHUB_WORKFLOW_SHA: mergeSha,
     GITHUB_REPOSITORY: 'JueZ/api',
     GITHUB_RUN_ID: '900',
   };
@@ -815,7 +830,57 @@ test('trusted controller identity rejects the wrong workflow, run, repository, o
   assert.ok(
     trustedControllerFindings(options, { env: { ...env, GITHUB_WORKFLOW: 'CI' }, checkoutSha: mergeSha }).length > 0,
   );
+  assert.ok(
+    trustedControllerFindings(options, { env: { ...env, GITHUB_WORKFLOW_SHA: headSha }, checkoutSha: mergeSha })
+      .length > 0,
+  );
   assert.ok(trustedControllerFindings(options, { env, checkoutSha: headSha }).length > 0);
+});
+
+test('trusted controller workflow SHA must be authenticated as stable protected-main history', () => {
+  const options = { controllerSha: mergeSha };
+  const main = { object: { type: 'commit', sha: currentMainSha } };
+  const comparison = protectedMainComparison();
+  assert.deepEqual(protectedMainControllerFindings(main, main, comparison, options), []);
+  assert.ok(
+    protectedMainControllerFindings(main, main, { ...comparison, merge_base_commit: { sha: headSha } }, options).some(
+      (finding) => finding.includes('not an ancestor'),
+    ),
+  );
+  assert.ok(
+    protectedMainControllerFindings(main, { object: { type: 'commit', sha: headSha } }, comparison, options).some(
+      (finding) => finding.includes('changed'),
+    ),
+  );
+  assert.ok(
+    protectedMainControllerFindings(main, main, { ...comparison, url: 'https://api.github.com/stale' }, options).some(
+      (finding) => finding.includes('comparison URL'),
+    ),
+  );
+});
+
+test('an open PR cannot describe an in-PR implementation commit as its final reviewed head', () => {
+  const options = { prNumber: 364 };
+  assert.deepEqual(
+    openPullRequestLedgerFindings(
+      {
+        [PROGRAM_PATH]: `PR #364 implementation commit \`${mergeSha}\`; exact-head review is pending.`,
+      },
+      options,
+    ),
+    [],
+  );
+  for (const phrase of ['final repair', 'final head', 'final reviewed head']) {
+    const findings = openPullRequestLedgerFindings(
+      Object.fromEntries(OPEN_PR_LEDGER_PATHS.map((path) => [path, `PR #364 ${phrase} \`${mergeSha}\``])),
+      options,
+    );
+    assert.equal(findings.length, OPEN_PR_LEDGER_PATHS.length);
+  }
+  assert.deepEqual(
+    openPullRequestLedgerFindings({ [PROGRAM_PATH]: `PR #362 final head \`${mergeSha}\`` }, options),
+    [],
+  );
 });
 
 test('pull_request_target REST head binds the candidate while trusted checkout binds workflow SHA', () => {
@@ -853,6 +918,8 @@ test('trusted verification rejects an invalid review claim before querying a che
   const client = {
     async getJson(path) {
       requests.push(path);
+      if (path === '/git/ref/heads/main') return { object: { type: 'commit', sha: currentMainSha } };
+      if (path === `/compare/${mergeSha}...${currentMainSha}`) return protectedMainComparison();
       if (path.startsWith('/pulls/')) {
         return {
           number: 400,
@@ -881,6 +948,7 @@ test('trusted verification rejects an invalid review claim before querying a che
   const env = {
     GITHUB_ACTIONS: 'true',
     GITHUB_WORKFLOW: 'Codex Auto-Merge',
+    GITHUB_WORKFLOW_SHA: mergeSha,
     GITHUB_REPOSITORY: 'JueZ/api',
     GITHUB_RUN_ID: '900',
   };
@@ -911,6 +979,8 @@ test('trusted verification accepts a bound low-risk review only when program evi
   const client = {
     async getJson(path) {
       requests.push(path);
+      if (path === '/git/ref/heads/main') return { object: { type: 'commit', sha: currentMainSha } };
+      if (path === `/compare/${mergeSha}...${currentMainSha}`) return protectedMainComparison();
       if (path.startsWith('/pulls/')) {
         return {
           number: 400,
@@ -943,6 +1013,7 @@ test('trusted verification accepts a bound low-risk review only when program evi
   const env = {
     GITHUB_ACTIONS: 'true',
     GITHUB_WORKFLOW: 'Codex Auto-Merge',
+    GITHUB_WORKFLOW_SHA: mergeSha,
     GITHUB_REPOSITORY: 'JueZ/api',
     GITHUB_RUN_ID: '900',
   };

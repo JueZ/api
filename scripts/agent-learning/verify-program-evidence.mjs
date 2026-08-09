@@ -12,6 +12,12 @@ import { REPOSITORY_ROOT } from './validate-artifacts.mjs';
 
 export const PROGRAM_PATH = 'docs/agent-learning/program.md';
 export const PHASE_2_EVIDENCE_PATH = 'docs/agent-learning/evidence/phase-2-versioned-artifacts.json';
+export const OPEN_PR_LEDGER_PATHS = Object.freeze([
+  PROGRAM_PATH,
+  'docs/project-memory/current-state.md',
+  'docs/project-memory/known-issues.md',
+  'docs/project-memory/next-steps.md',
+]);
 export const PROGRAM_EVIDENCE = Object.freeze({
   1: 'docs/agent-learning/evidence/branch-protection-aggregation.json',
   2: PHASE_2_EVIDENCE_PATH,
@@ -178,6 +184,24 @@ export function acceptedPhaseEvidenceFindings(programText, pathExists = existsSy
       `accepted phase ${phase} does not reference ${evidencePath}`,
     );
     addFinding(findings, pathExists(evidencePath), `accepted phase ${phase} evidence is missing: ${evidencePath}`);
+  }
+  return findings;
+}
+
+export function openPullRequestLedgerFindings(records, options) {
+  const findings = [];
+  const prNumber = Number(options?.prNumber);
+  if (!exactPositiveInteger(prNumber)) return ['open pull-request ledger PR number is invalid'];
+  const ambiguousClaim = new RegExp(
+    `\\bPR\\s+#${prNumber}\\b[^\\n]*(?:final\\s+(?:reviewed\\s+)?head|final\\s+repair)[^\\n]*\\b[0-9a-f]{40}\\b`,
+    'i',
+  );
+  for (const [path, text] of Object.entries(isRecord(records) ? records : {})) {
+    addFinding(
+      findings,
+      typeof text === 'string' && !ambiguousClaim.test(text),
+      `${path} cannot call an in-PR implementation commit the final repair or final reviewed head`,
+    );
   }
   return findings;
 }
@@ -1051,10 +1075,58 @@ export function trustedControllerFindings(options, runtime = {}) {
     'trusted verification run ID does not match',
   );
   addFinding(findings, EXACT_SHA.test(options.controllerSha), 'trusted controller SHA must be exact');
+  addFinding(findings, EXACT_SHA.test(env.GITHUB_WORKFLOW_SHA || ''), 'runtime workflow SHA must be exact');
+  addFinding(
+    findings,
+    env.GITHUB_WORKFLOW_SHA === options.controllerSha,
+    'trusted controller option does not match the runtime workflow SHA',
+  );
   addFinding(
     findings,
     runtime.checkoutSha === options.controllerSha,
     'trusted controller checkout does not match workflow SHA',
+  );
+  addFinding(
+    findings,
+    runtime.checkoutSha === env.GITHUB_WORKFLOW_SHA,
+    'trusted controller checkout does not match the runtime workflow SHA',
+  );
+  return findings;
+}
+
+export function protectedMainControllerFindings(mainBefore, mainAfter, comparison, options) {
+  const findings = [];
+  const beforeSha = mainBefore?.object?.sha;
+  const afterSha = mainAfter?.object?.sha;
+  addFinding(findings, mainBefore?.object?.type === 'commit', 'protected main ref is not a commit');
+  addFinding(findings, mainAfter?.object?.type === 'commit', 'final protected main ref is not a commit');
+  addFinding(findings, EXACT_SHA.test(beforeSha || ''), 'protected main SHA is invalid');
+  addFinding(findings, afterSha === beforeSha, 'protected main changed during controller authentication');
+  addFinding(
+    findings,
+    comparison?.base_commit?.sha === options.controllerSha,
+    'controller comparison base is not the runtime workflow SHA',
+  );
+  addFinding(
+    findings,
+    comparison?.merge_base_commit?.sha === options.controllerSha,
+    'runtime workflow SHA is not an ancestor of protected main',
+  );
+  addFinding(
+    findings,
+    comparison?.status === 'ahead' || comparison?.status === 'identical',
+    'protected main does not descend from the runtime workflow SHA',
+  );
+  addFinding(findings, comparison?.behind_by === 0, 'protected main comparison is behind the controller SHA');
+  addFinding(
+    findings,
+    Number.isSafeInteger(comparison?.ahead_by) && comparison.ahead_by >= 0,
+    'protected main comparison distance is invalid',
+  );
+  addFinding(
+    findings,
+    comparison?.url === `https://api.github.com/repos/JueZ/api/compare/${options.controllerSha}...${beforeSha}`,
+    'controller comparison URL does not bind the runtime workflow SHA to protected main',
   );
   return findings;
 }
@@ -1135,7 +1207,7 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
   }
 
   function getFile(path, ref) {
-    return getBoundFile(path, ref, [PROGRAM_PATH, PHASE_2_EVIDENCE_PATH], 'candidate file');
+    return getBoundFile(path, ref, [...OPEN_PR_LEDGER_PATHS, PHASE_2_EVIDENCE_PATH], 'candidate file');
   }
 
   async function getWorkflowFileDigest(path, ref) {
@@ -1483,6 +1555,22 @@ export async function verifyTrustedPullRequest(options, dependencies = {}) {
   const client =
     dependencies.client ||
     createTrustedGithubClient({ repository: options.repository, token: (runtime.env ?? process.env).GH_TOKEN });
+  const protectedMainBefore = await client.getJson('/git/ref/heads/main');
+  const protectedMainSha = protectedMainBefore?.object?.sha;
+  if (!EXACT_SHA.test(protectedMainSha || '')) {
+    throw new Error('trusted controller protected-main authentication failed: protected main SHA is invalid');
+  }
+  const controllerComparison = await client.getJson(`/compare/${options.controllerSha}...${protectedMainSha}`);
+  const protectedMainAfter = await client.getJson('/git/ref/heads/main');
+  const protectedMainFindings = protectedMainControllerFindings(
+    protectedMainBefore,
+    protectedMainAfter,
+    controllerComparison,
+    options,
+  );
+  if (protectedMainFindings.length > 0) {
+    throw new Error(`trusted controller protected-main authentication failed: ${protectedMainFindings.join('; ')}`);
+  }
   const [pullRequest, controllerRun, changedFiles, review] = await Promise.all([
     client.getJson(`/pulls/${options.prNumber}`),
     client.getJson(`/actions/runs/${options.controllerRunId}`),
@@ -1510,7 +1598,15 @@ export async function verifyTrustedPullRequest(options, dependencies = {}) {
   if (changedPaths.some((path) => typeof path !== 'string' || path.length === 0)) {
     throw new Error('candidate changed-file list is invalid');
   }
-  const currentProgramText = await client.getFile(PROGRAM_PATH, options.headSha);
+  const changedLedgerPaths = OPEN_PR_LEDGER_PATHS.filter((path) => changedPaths.includes(path));
+  const changedLedgerRecords = Object.fromEntries(
+    await Promise.all(changedLedgerPaths.map(async (path) => [path, await client.getFile(path, options.headSha)])),
+  );
+  const ledgerFindings = openPullRequestLedgerFindings(changedLedgerRecords, options);
+  if (ledgerFindings.length > 0)
+    throw new Error(`open pull-request ledger identity failed: ${ledgerFindings.join('; ')}`);
+  const currentProgramText =
+    changedLedgerRecords[PROGRAM_PATH] ?? (await client.getFile(PROGRAM_PATH, options.headSha));
   const previousProgramText = await client.getFile(PROGRAM_PATH, pullRequest.base.sha);
   const verifyPhase2 = phaseEvidenceNeedsLiveVerification({
     phase: 2,
