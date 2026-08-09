@@ -4,9 +4,9 @@ version: 1
 # requires an independently reviewed update to this canonical manifest.
 trustedWorkflowSha256:
   bring-readonly-canary.yml: 9cd2cd547a3b36b1c1de1769730883e613dc370493d978c356d37d90f1e08898
-  ci.yml: efeb30eb91562a8a3248117520fe7719034d22a5f448721fc570d599bc674cba
+  ci.yml: 5245d8c298efd2f439b9630c034eedff8dc7631dbe08fd23744451a57a785771
   codeql.yml: 8220b94fdc56f9b33d7db4111fd41e60beb814ef3f2fc99611a09dd71e910590
-  codex-automerge.yml: 76b217b5dfa539616ee3844c1776e05e7886f1bb6a0e47c04bf4e0a950a52380
+  codex-automerge.yml: 25d5bccc3fd4339deb373908273f0224cbb5d843c5645b8992d7ed90a9b5e464
   codex-main-delivery.yml: 6d9510c8ca610bad996c1310d4a31fc7abb77738402fe57fb510e01b1f4c6b03
   deploy-environment.yml: cd36744ebf07c466d407ca4ecd83751e2f6445263a7bab90145c69326d844be9
   deploy-test.yml: be874930e0d375765afe67d50429744f5f629d129b944cae601e915ea16c7275
