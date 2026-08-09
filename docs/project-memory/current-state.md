@@ -1,11 +1,17 @@
 # Current state
 
+## 2026-08-09 Historical lineage merged; post-merge artifact contract repair started
+
+- PR #386 exact head `af3c3131d7dd9cb842c273e9e4bef4582bb33f5f` passed CI `31329560162`, Policy Check `31329560166`, CodeQL `31329560180`, and deterministic governance `31329560170`, then merged through the exact-head controller as `a56a932393a885976ad85f56df6cf3ba0f142e1b`.
+- Main Delivery `31329669160` failed before main CI or deployment because the consumer still requested `autonomous-review-*`, `autonomous-review.json`, and `reviewedHeadSha`, while the exact trusted run published `autonomous-governance-<head>`, `autonomous-governance.json`, and `verifiedHeadSha`. No model call occurred.
+- Issue #387 and artifact `model-free-delivery-artifact-contract` record the executable-prevention disposition. Branch `codex/fix-model-free-delivery-artifact` owns only that contract repair and regression. A merged PR alone is not runtime evidence; PR #386 has no Deploy Test, Promote Production, smoke, telemetry, ledger, or runtime acceptance.
+
 ## 2026-08-09 Model-free governance delivered; historical lineage repair started
 
 - PR #384 final head `780ed310e10bdf58398e6edd87af3c1fe6a5f50b` passed CI `31328232675`, Policy Check `31328232650`, CodeQL `31328232653`, and the authorized temporary deterministic architecture aggregate after one policy repair. GitHub merged it through ordinary protected squash as `2a966e193072036c65b3c412aeffec60d91ca9a8`; no direct main push or admin bypass occurred.
 - The active `Codex Auto-Merge` workflow no longer receives `OPENAI_API_KEY` or invokes a model. `Autonomous review complete` is deterministic protected exact-head governance with immutable workflow checks, permission/secret policy, applicable Phase 2 evidence verification, complete latest-rollup enforcement, and exact-head merge intact. Provider inference is limited to bounded repairable-error diagnostics pinned to `gpt-5.6-luna` with high reasoning.
 - Main CI `31328333417`, Policy Check `31328333414`, CodeQL `31328333432`, Main Delivery `31328416228`, Deploy Test `31328428553`, and Promote Production `31328600923` passed. Test and production passed exact-generation, public and authenticated smoke, telemetry correlation, and release-ledger publication. Live read-back found the workflow active and strict protection restored to exactly the four stable aggregates with every other inspected protection setting preserved.
-- Evidence PR #385 repair head `b88703cfa0ecb2c7d512c0030a4ebc4ad073a19b` passed CI `31329140944`, Policy Check `31329140963`, and CodeQL `31329140977`, then protected controller `31329139128` failed closed because unrelated-trigger Main Delivery runs sharing the historical merge SHA were treated as superseding exact accepted lineage `31279667347`. It closed unmerged after one formatting repair. Branch `codex/fix-historical-delivery-lineage` implements the narrow regression and artifact; Phase 2 remains `in_progress`. A merged PR alone is not runtime evidence.
+- Evidence PR #385 repair head `b88703cfa0ecb2c7d512c0030a4ebc4ad073a19b` passed CI `31329140944`, Policy Check `31329140963`, and CodeQL `31329140977`, then protected controller `31329139128` failed closed because unrelated-trigger Main Delivery runs sharing the historical merge SHA were treated as superseding exact accepted lineage `31279667347`. It closed unmerged after one formatting repair. PR #386 subsequently merged the narrow lineage regression; its post-merge delivery blocker is recorded above. Phase 2 remains `in_progress`. A merged PR alone is not runtime evidence.
 
 ## 2026-08-09 Phase 2 evidence aggregate-boundary repair delivered
 
