@@ -68,16 +68,12 @@ function validEvidence() {
         mainCi: { workflowRunId: 302, sourceSha: mergeSha, conclusion: 'success' },
         deployTest: deploymentEvidence({
           workflowRunId: 303,
-          deploymentId: 501,
-          deploymentStatusId: 601,
           deploymentJobId: 401,
           artifactId: 701,
           correlation: 'test-correlation-1234',
         }),
         promoteProduction: deploymentEvidence({
           workflowRunId: 304,
-          deploymentId: 502,
-          deploymentStatusId: 602,
           deploymentJobId: 402,
           artifactId: 702,
           correlation: 'prod-correlation-1234',
@@ -87,18 +83,9 @@ function validEvidence() {
   };
 }
 
-function deploymentEvidence({
-  workflowRunId,
-  deploymentId,
-  deploymentStatusId,
-  deploymentJobId,
-  artifactId,
-  correlation,
-}) {
+function deploymentEvidence({ workflowRunId, deploymentJobId, artifactId, correlation }) {
   return {
     workflowRunId,
-    deploymentId,
-    deploymentStatusId,
     deploymentJobId,
     sourceSha: mergeSha,
     deliveryCorrelation: correlation,
@@ -143,11 +130,11 @@ function programText(phase2Status = 'in_progress', phase2Evidence = 'None') {
 `;
 }
 
-function releaseLedger(environment, record) {
+function releaseLedger(environment, record, sourceSha = mergeSha) {
   return {
     environment,
-    deployedCommit: mergeSha,
-    sourceRef: mergeSha,
+    deployedCommit: sourceSha,
+    sourceRef: sourceSha,
     workflowRunId: String(record.workflowRunId),
     deliveryCorrelation: record.deliveryCorrelation,
     functionAppName: `safe-${environment}`,
@@ -161,27 +148,35 @@ function releaseLedger(environment, record) {
     smokeResults: { status: 'passed' },
     authenticatedSmokeResults: { status: 'passed' },
     telemetryCheckResult: { status: 'passed' },
-    verifiedAt: '2026-08-08T21:47:22.736Z',
+    verifiedAt: sourceSha === currentMainSha ? '2026-08-09T09:39:36Z' : '2026-08-08T21:41:16Z',
+  };
+}
+
+function workflowFiles(environment, ref) {
+  return {
+    entry: {
+      path: environment === 'test' ? '.github/workflows/deploy-test.yml' : '.github/workflows/promote-production.yml',
+      ref,
+      sha256:
+        environment === 'test'
+          ? 'be874930e0d375765afe67d50429744f5f629d129b944cae601e915ea16c7275'
+          : 'eb87a6f7fd479226a68e0edd7f9867ce9b6c3bac853ffae0ed687734e0944387',
+    },
+    shared: {
+      path: '.github/workflows/deploy-environment.yml',
+      ref,
+      sha256: 'cd36744ebf07c466d407ca4ecd83751e2f6445263a7bab90145c69326d844be9',
+    },
   };
 }
 
 function observedEnvironment(environment, record) {
-  const expectedEnvironment = environment === 'test' ? 'test' : 'production';
   const workflowName =
     environment === 'test'
       ? `Deploy Test ${record.sourceSha} ${record.deliveryCorrelation}`
       : `Promote Production ${record.sourceSha} ${record.deliveryCorrelation}`;
   const jobUrl = `https://github.com/JueZ/api/actions/runs/${record.workflowRunId}/job/${record.deploymentJobId}`;
   const ledger = releaseLedger(environment, record);
-  const deployment = {
-    id: record.deploymentId,
-    sha: mergeSha,
-    ref: 'main',
-    environment: expectedEnvironment,
-    task: 'deploy',
-    created_at: '2026-08-08T21:37:26Z',
-    creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
-  };
   return {
     artifactList: {
       artifacts: [
@@ -190,32 +185,14 @@ function observedEnvironment(environment, record) {
           name: `release-ledger-${environment}-${record.sourceSha}-${record.deliveryCorrelation}`,
           expired: false,
           digest: artifactDigest,
+          created_at: '2026-08-08T21:41:17Z',
+          updated_at: '2026-08-08T21:41:17Z',
           workflow_run: { id: record.workflowRunId, head_sha: mergeSha, head_branch: 'main' },
         },
       ],
     },
     ledger,
-    deployment,
-    deploymentHistory: [deployment],
-    deploymentStatuses: [
-      {
-        id: record.deploymentStatusId + 1000,
-        state: 'inactive',
-        environment: expectedEnvironment,
-        environment_url: '',
-        log_url: jobUrl,
-        creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
-      },
-      {
-        id: record.deploymentStatusId,
-        state: 'success',
-        environment: expectedEnvironment,
-        environment_url: ledger.apiBaseUrl,
-        log_url: jobUrl,
-        created_at: '2026-08-08T21:41:21Z',
-        creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
-      },
-    ],
+    workflowFiles: workflowFiles(environment, mergeSha),
     deploymentJob: {
       id: record.deploymentJobId,
       run_id: record.workflowRunId,
@@ -232,69 +209,96 @@ function observedEnvironment(environment, record) {
       runner_group_name: 'GitHub Actions',
       html_url: jobUrl,
       steps: [
-        { name: 'Write release ledger', status: 'completed', conclusion: 'success' },
-        { name: 'Upload release ledger', status: 'completed', conclusion: 'success' },
+        {
+          name: 'Write release ledger',
+          status: 'completed',
+          conclusion: 'success',
+          started_at: '2026-08-08T21:41:16Z',
+          completed_at: '2026-08-08T21:41:16Z',
+        },
+        {
+          name: 'Upload release ledger',
+          status: 'completed',
+          conclusion: 'success',
+          started_at: '2026-08-08T21:41:16Z',
+          completed_at: '2026-08-08T21:41:17Z',
+        },
       ],
     },
   };
 }
 
-function currentObservedEnvironment(environment, deploymentId, statusId, runId) {
-  const expectedEnvironment = environment === 'test' ? 'test' : 'production';
-  const jobId = deploymentId + 5000;
+function currentObservedEnvironment(environment, runId) {
+  const jobId = runId + 5000;
+  const correlation = 'current-correlation';
   const jobUrl = `https://github.com/JueZ/api/actions/runs/${runId}/job/${jobId}`;
-  const workflowTitle = `${environment === 'test' ? 'Deploy Test' : 'Promote Production'} ${currentMainSha} current-correlation`;
-  const deployment = {
-    id: deploymentId,
-    sha: currentMainSha,
-    ref: 'main',
-    environment: expectedEnvironment,
-    task: 'deploy',
-    created_at: '2026-08-09T09:35:48Z',
-    creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
+  const workflowTitle = `${environment === 'test' ? 'Deploy Test' : 'Promote Production'} ${currentMainSha} ${correlation}`;
+  const run = workflowRun(
+    runId,
+    environment === 'test' ? '.github/workflows/deploy-test.yml' : '.github/workflows/promote-production.yml',
+    'repository_dispatch',
+    currentMainSha,
+    {
+      head_branch: 'main',
+      head_repository: { full_name: 'JueZ/api' },
+      html_url: `https://github.com/JueZ/api/actions/runs/${runId}`,
+      display_title: workflowTitle,
+    },
+  );
+  const record = { workflowRunId: runId, deliveryCorrelation: correlation };
+  const ledger = releaseLedger(environment, record, currentMainSha);
+  const artifact = {
+    id: runId + 7000,
+    name: `release-ledger-${environment}-${currentMainSha}-${correlation}`,
+    expired: false,
+    digest: artifactDigest,
+    created_at: '2026-08-09T09:39:37Z',
+    updated_at: '2026-08-09T09:39:37Z',
+    workflow_run: { id: runId, head_sha: currentMainSha, head_branch: 'main' },
   };
-  return {
-    deployments: [deployment],
-    deployment,
-    deploymentStatuses: [
+  const deploymentJob = {
+    id: jobId,
+    run_id: runId,
+    workflow_name: workflowTitle,
+    name: environment === 'test' ? 'deploy test / deploy test' : 'promote production / deploy prod',
+    head_sha: currentMainSha,
+    head_branch: 'main',
+    status: 'completed',
+    conclusion: 'success',
+    run_attempt: 1,
+    created_at: '2026-08-09T09:35:48Z',
+    started_at: '2026-08-09T09:35:51Z',
+    completed_at: '2026-08-09T09:39:38Z',
+    runner_group_name: 'GitHub Actions',
+    html_url: jobUrl,
+    steps: [
       {
-        id: statusId,
-        state: 'success',
-        environment: expectedEnvironment,
-        environment_url: `https://${ACCEPTANCE_RUNTIME_HOSTS[environment]}`,
-        log_url: jobUrl,
-        created_at: '2026-08-09T09:39:39Z',
-        creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
+        name: 'Write release ledger',
+        status: 'completed',
+        conclusion: 'success',
+        started_at: '2026-08-09T09:39:36Z',
+        completed_at: '2026-08-09T09:39:36Z',
+      },
+      {
+        name: 'Upload release ledger',
+        status: 'completed',
+        conclusion: 'success',
+        started_at: '2026-08-09T09:39:36Z',
+        completed_at: '2026-08-09T09:39:37Z',
       },
     ],
-    workflowRun: workflowRun(
-      runId,
-      environment === 'test' ? '.github/workflows/deploy-test.yml' : '.github/workflows/promote-production.yml',
-      'repository_dispatch',
-      currentMainSha,
-      {
-        head_branch: 'main',
-        head_repository: { full_name: 'JueZ/api' },
-        html_url: `https://github.com/JueZ/api/actions/runs/${runId}`,
-        display_title: workflowTitle,
-      },
-    ),
-    deploymentJob: {
-      id: jobId,
-      run_id: runId,
-      workflow_name: workflowTitle,
-      name: environment === 'test' ? 'deploy test / deploy test' : 'promote production / deploy prod',
-      head_sha: currentMainSha,
-      head_branch: 'main',
-      status: 'completed',
-      conclusion: 'success',
-      run_attempt: 1,
-      created_at: '2026-08-09T09:35:48Z',
-      started_at: '2026-08-09T09:35:51Z',
-      completed_at: '2026-08-09T09:39:38Z',
-      runner_group_name: 'GitHub Actions',
-      html_url: jobUrl,
-    },
+  };
+  return {
+    workflowRuns: [run],
+    workflowRun: run,
+    deliveryCorrelation: correlation,
+    deploymentJobs: [deploymentJob],
+    deploymentJob,
+    artifactList: { artifacts: [artifact] },
+    ledgerArtifacts: [artifact],
+    artifact,
+    ledger,
+    workflowFiles: workflowFiles(environment, currentMainSha),
     liveHealth: {
       status: 'ok',
       environmentName: environment,
@@ -392,8 +396,8 @@ function validObserved(evidence) {
       mainBefore: { object: { type: 'commit', sha: currentMainSha } },
       mainAfter: { object: { type: 'commit', sha: currentMainSha } },
       environments: {
-        test: currentObservedEnvironment('test', 8001, 9001, 10001),
-        prod: currentObservedEnvironment('prod', 8002, 9002, 10002),
+        test: currentObservedEnvironment('test', 10001),
+        prod: currentObservedEnvironment('prod', 10002),
       },
     },
   };
@@ -416,9 +420,11 @@ test('Phase 2 evidence schema is strict and rejects malformed or secret-shaped f
   const evidence = validEvidence();
   assert.deepEqual(phase2EvidenceShapeFindings(evidence), []);
   evidence.rawLog = 'untrusted';
+  evidence.implementation.postMergeDelivery.deployTest.deploymentId = 123;
   evidence.implementation.postMergeDelivery.deployTest.deliveryCorrelation = 'Authorization: Bearer unsafe-token-value';
   const findings = phase2EvidenceShapeFindings(evidence);
   assert.ok(findings.some((finding) => finding.includes('rawLog is not allowed')));
+  assert.ok(findings.some((finding) => finding.includes('deploymentId is not allowed')));
   assert.ok(findings.some((finding) => finding.includes('secret-shaped')));
 });
 
@@ -469,18 +475,26 @@ test('Phase 2 evidence is pinned to the reviewed implementation identity', () =>
   }
 });
 
-test('live Phase 2 verification binds distinct GitHub environments, jobs, ledgers, and health', () => {
+test('live Phase 2 verification binds reviewed workflows, exact jobs, ledgers, and health', () => {
   const evidence = validEvidence();
   const observed = validObserved(evidence);
   assert.deepEqual(phase2EvidenceFindings(evidence, observed), []);
 
-  observed.environments.test.deployment.environment = 'production';
-  observed.environments.test.deployment.created_at = '2026-08-08T21:38:00Z';
+  observed.environments.test.workflowFiles.entry.sha256 = '0'.repeat(64);
+  observed.environments.test.artifactList.artifacts[0].created_at = '2026-08-08T21:42:00Z';
   observed.environments.test.ledger.apiBaseUrl = observed.environments.prod.ledger.apiBaseUrl;
   const findings = phase2EvidenceFindings(evidence, observed);
-  assert.ok(findings.some((finding) => finding.includes('test GitHub environment does not match')));
+  assert.ok(findings.some((finding) => finding.includes('test historical entry workflow content')));
   assert.ok(findings.some((finding) => finding.includes('test ledger runtime origin is not allowlisted')));
-  assert.ok(findings.some((finding) => finding.includes('test historical deployment was not created')));
+  assert.ok(findings.some((finding) => finding.includes('test historical release ledger is not bounded')));
+
+  const wrongRun = validObserved(validEvidence());
+  wrongRun.environments.test.artifactList.artifacts[0].workflow_run.id = 999;
+  assert.ok(
+    phase2EvidenceFindings(validEvidence(), wrongRun).some((finding) =>
+      finding.includes('test ledger artifact run does not match'),
+    ),
+  );
 });
 
 test('historical check rollup rejects unrelated and aggregate superseding failures', () => {
@@ -517,7 +531,7 @@ test('historical check rollup rejects unrelated and aggregate superseding failur
   );
 });
 
-test('canonical workflow and deployment histories reject later failed records', () => {
+test('canonical workflow histories and authenticated artifacts reject later or duplicate records', () => {
   const evidence = validEvidence();
   const observed = validObserved(evidence);
   const recordedDeploy = observed.workflowRuns['303'];
@@ -550,35 +564,40 @@ test('canonical workflow and deployment histories reject later failed records', 
     conclusion: 'failure',
     display_title: 'Deliver trigger 999 attempt 1',
   });
-  observed.environments.test.deploymentStatuses.push({
-    ...observed.environments.test.deploymentStatuses[0],
+  observed.environments.test.artifactList.artifacts.push({
+    ...observed.environments.test.artifactList.artifacts[0],
     id: 5400,
-    state: 'failure',
   });
   const findings = phase2EvidenceFindings(evidence, observed);
   assert.ok(findings.some((finding) => finding.includes('deployTest workflow run is not the canonical latest')));
   assert.ok(findings.some((finding) => finding.includes('mainDelivery workflow run is not the canonical latest')));
-  assert.ok(findings.some((finding) => finding.includes('test deployment has a later non-supersession status')));
+  assert.ok(findings.some((finding) => finding.includes('test ledger artifact name is not unique')));
 });
 
-test('historical supersession requires authenticated exact-current-main deployment provenance', () => {
+test('current runtime requires the latest reviewed workflow run, its ledger artifact, and exact health', () => {
   const evidence = validEvidence();
   const observed = validObserved(evidence);
   assert.deepEqual(currentRuntimeFindings(observed.currentRuntime), []);
   assert.notEqual(observed.currentRuntime.mainBefore.object.sha, mergeSha);
 
-  observed.currentRuntime.environments.prod.deploymentStatuses[0].state = 'in_progress';
+  observed.currentRuntime.environments.prod.workflowRuns.push({
+    ...observed.currentRuntime.environments.prod.workflowRun,
+    id: 20002,
+    conclusion: 'failure',
+  });
   observed.currentRuntime.environments.test.liveHealth.deployedCommitSha = mergeSha;
   observed.currentRuntime.environments.test.workflowRun.path = '.github/workflows/repair-triage.yml';
   observed.currentRuntime.environments.test.deploymentJob.name = 'unrelated job';
-  observed.currentRuntime.environments.test.deployment.created_at = '2026-08-09T09:39:40Z';
+  observed.currentRuntime.environments.test.artifact.created_at = '2026-08-09T09:40:40Z';
   observed.currentRuntime.mainAfter.object.sha = 'f'.repeat(40);
   const findings = currentRuntimeFindings(observed.currentRuntime);
-  assert.ok(findings.some((finding) => finding.includes('prod current deployment did not succeed')));
+  assert.ok(
+    findings.some((finding) => finding.includes('prod current deployment workflow is not the canonical latest')),
+  );
   assert.ok(findings.some((finding) => finding.includes('test current live health commit is not exact main')));
   assert.ok(findings.some((finding) => finding.includes('test current deployment workflow immutable workflow path')));
-  assert.ok(findings.some((finding) => finding.includes('test current deployment job name')));
-  assert.ok(findings.some((finding) => finding.includes('test current deployment was not created')));
+  assert.ok(findings.some((finding) => finding.includes('test job name does not match')));
+  assert.ok(findings.some((finding) => finding.includes('test current release ledger is not bounded')));
   assert.ok(findings.some((finding) => finding.includes('current main changed')));
 });
 
@@ -697,6 +716,37 @@ test('trusted GitHub check history pagination is complete and exact-SHA bound', 
   assert.ok(requests.every((request) => request.url.includes(`/commits/${headSha}/check-runs?filter=all`)));
   await assert.rejects(client.getCheckRuns('main'), /SHA must be exact/);
   assert.equal(requests.length, 2);
+});
+
+test('trusted workflow content is fixed-path, exact-ref, and digest-bound', async () => {
+  const content = Buffer.from('reviewed workflow bytes\n');
+  const requests = [];
+  const client = createTrustedGithubClient({
+    repository: 'JueZ/api',
+    token: 'test-token-placeholder',
+    fetchImpl: async (url, init) => {
+      requests.push({ url, init });
+      return new Response(
+        JSON.stringify({
+          type: 'file',
+          path: '.github/workflows/deploy-test.yml',
+          encoding: 'base64',
+          size: content.length,
+          content: content.toString('base64'),
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    },
+  });
+  assert.deepEqual(await client.getWorkflowFileDigest('.github/workflows/deploy-test.yml', headSha), {
+    path: '.github/workflows/deploy-test.yml',
+    ref: headSha,
+    sha256: createHash('sha256').update(content).digest('hex'),
+  });
+  assert.equal(requests[0].init.redirect, 'error');
+  await assert.rejects(client.getWorkflowFileDigest('.github/workflows/ci.yml', headSha), /not allowlisted/);
+  await assert.rejects(client.getWorkflowFileDigest('.github/workflows/deploy-test.yml', 'main'), /exact SHA/);
+  assert.equal(requests.length, 1);
 });
 
 test('artifact archive proof requires the authenticated and recorded digest to match the exact bytes', () => {
