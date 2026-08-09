@@ -4,7 +4,7 @@
 
 - PR #371 exact head `db51f0374aa21c4a5555621688c4e3fcf023607b` passed CI `31316360899`, Policy Check `31316360920`, CodeQL `31316360918`, and autonomous review/controller `31316360856`, then merged as `8f71efebfa317853a89970eec4527bde696e277a` with no repair.
 - Main Delivery `31316505347`, exact-main CI `31316519451`, Deploy Test `31316596882`, and Promote Production `31316759228` passed. Fresh runtime truth at `2026-08-09T13:53:03.878Z` and `2026-08-09T13:53:03.882Z` verified exact test/production commit and run identity, public and authenticated smoke, telemetry, and both release ledgers.
-- The current Phase 2 acceptance branch adds the public-safe implementation evidence record and changes the authoritative status to `accepted`. The protected-main verifier must execute its full live mode on this exact candidate before merge; a local schema pass, this status assertion, or a merged PR alone is not acceptance/runtime evidence.
+- The current Phase 2 evidence branch adds the public-safe implementation evidence record while keeping the authoritative status `in_progress`. The protected-main verifier must execute its full live mode on this exact candidate before merge. Only a later protected ledger PR may set `accepted` after this evidence PR also has terminal post-merge delivery/runtime proof; issue #373 records the autonomous-review correction.
 
 ## 2026-08-09 Phase 2 orchestration PR #369 delivered; controller wiring started
 
