@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import process from 'node:process';
 import { parseDocument } from 'yaml';
 
 export const TRUSTED_EVIDENCE_REPOSITORY = 'JueZ/api';
@@ -15,6 +14,7 @@ export const TRUSTED_RUNTIME_HOSTS = Object.freeze({
 const EXACT_SHA = /^[0-9a-f]{40}$/;
 const EXACT_DIGEST = /^sha256:[0-9a-f]{64}$/;
 const SAFE_ARCHIVE_ENTRY = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}\.json$/;
+const TRUSTED_ARTIFACT_DOWNLOAD_HOST = /^productionresultssa[0-9]+\.blob\.core\.windows\.net$/;
 const MAX_GITHUB_JSON_BYTES = 10 * 1024 * 1024;
 const MAX_REPOSITORY_FILE_BYTES = 512 * 1024;
 const MAX_ARTIFACT_ARCHIVE_BYTES = 2 * 1024 * 1024;
@@ -75,6 +75,10 @@ export function parseStrictJson(source, label = 'JSON document') {
 }
 
 export async function readBoundedResponseText(response, maximumBytes, label) {
+  return (await readBoundedResponseBuffer(response, maximumBytes, label)).toString('utf8');
+}
+
+export async function readBoundedResponseBuffer(response, maximumBytes, label) {
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
     throw new Error(`${label} byte limit is invalid`);
   }
@@ -85,9 +89,9 @@ export async function readBoundedResponseText(response, maximumBytes, label) {
     if (declared > maximumBytes) throw new Error(`${label} exceeds the byte limit`);
   }
   if (!response.body?.getReader) {
-    const text = await response.text();
-    if (Buffer.byteLength(text) > maximumBytes) throw new Error(`${label} exceeds the byte limit`);
-    return text;
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > maximumBytes) throw new Error(`${label} exceeds the byte limit`);
+    return buffer;
   }
 
   const reader = response.body.getReader();
@@ -105,10 +109,10 @@ export async function readBoundedResponseText(response, maximumBytes, label) {
     await reader.cancel().catch(() => undefined);
     throw error;
   }
-  return Buffer.concat(chunks, received).toString('utf8');
+  return Buffer.concat(chunks, received);
 }
 
-export function createTrustedGithubClient({ repository, token, fetchImpl = fetch, spawn = spawnSync } = {}) {
+export function createTrustedGithubClient({ repository, token, fetchImpl = fetch } = {}) {
   if (repository !== TRUSTED_EVIDENCE_REPOSITORY) {
     throw new Error(`trusted evidence reads are repository-bound to ${TRUSTED_EVIDENCE_REPOSITORY}`);
   }
@@ -139,16 +143,39 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
 
   async function getPaginatedCollection(path, key, label) {
     const records = [];
+    const recordIds = new Set();
+    let countMode;
+    let declaredTotal;
     for (let page = 1; page <= 100; page += 1) {
       const separator = path.includes('?') ? '&' : '?';
       const response = await getJson(`${path}${separator}per_page=100&page=${page}`);
       const rows = key ? response?.[key] : response;
       if (!Array.isArray(rows)) throw new Error(`${label} response is invalid`);
-      records.push(...rows);
-      if (
-        rows.length < 100 ||
-        (exactPositiveInteger(response?.total_count) && records.length >= response.total_count)
-      ) {
+
+      const hasTotal = key !== undefined && Object.hasOwn(response, 'total_count');
+      if (page === 1) countMode = hasTotal;
+      if (hasTotal !== countMode) throw new Error(`${label} total-count presence changed during pagination`);
+      if (hasTotal) {
+        const total = response.total_count;
+        if (!Number.isSafeInteger(total) || total < 0 || total > 10_000) {
+          throw new Error(`${label} total count is invalid`);
+        }
+        if (declaredTotal === undefined) declaredTotal = total;
+        if (total !== declaredTotal) throw new Error(`${label} total count changed during pagination`);
+      }
+
+      for (const row of rows) {
+        if (!exactPositiveInteger(row?.id)) throw new Error(`${label} contains a record without an exact ID`);
+        if (recordIds.has(row.id)) throw new Error(`${label} contains a duplicate record ID`);
+        recordIds.add(row.id);
+        records.push(row);
+      }
+
+      if (countMode) {
+        if (records.length > declaredTotal) throw new Error(`${label} contains more records than its total count`);
+        if (records.length === declaredTotal) return records;
+        if (rows.length < 100) throw new Error(`${label} ended before its declared total count`);
+      } else if (rows.length < 100) {
         return records;
       }
     }
@@ -174,26 +201,62 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
 
   async function getPullRequestFiles(number) {
     requireExactPositiveInteger(number, 'pull-request number');
+    const pullRequest = await getJson(`/pulls/${number}`);
+    if (pullRequest?.number !== number || !Number.isSafeInteger(pullRequest?.changed_files)) {
+      throw new Error('pull-request file count is invalid');
+    }
+    if (pullRequest.changed_files < 0 || pullRequest.changed_files > 3000) {
+      throw new Error('pull request contains more than 3000 changed files');
+    }
     const files = [];
+    const fileNames = new Set();
+    if (pullRequest.changed_files === 0) return files;
     for (let page = 1; page <= 30; page += 1) {
       const rows = await getJson(`/pulls/${number}/files?per_page=100&page=${page}`);
       if (!Array.isArray(rows)) throw new Error('pull-request file response is invalid');
-      files.push(...rows);
-      if (rows.length < 100) return files;
+      for (const row of rows) {
+        if (typeof row?.filename !== 'string' || row.filename.length === 0) {
+          throw new Error('pull-request file response contains an invalid filename');
+        }
+        if (fileNames.has(row.filename)) throw new Error('pull-request file response contains a duplicate filename');
+        fileNames.add(row.filename);
+        files.push(row);
+      }
+      if (files.length > pullRequest.changed_files) {
+        throw new Error('pull-request file response exceeds the authenticated file count');
+      }
+      if (files.length === pullRequest.changed_files) return files;
+      if (rows.length < 100) throw new Error('pull-request file response ended before the authenticated file count');
     }
-    throw new Error('pull request contains more than 3000 changed files');
+    throw new Error('pull-request file response did not satisfy the authenticated file count');
   }
 
   async function getPullRequestCommits(number) {
     requireExactPositiveInteger(number, 'pull-request number');
+    const pullRequest = await getJson(`/pulls/${number}`);
+    if (pullRequest?.number !== number || !exactPositiveInteger(pullRequest?.commits)) {
+      throw new Error('pull-request commit count is invalid');
+    }
+    if (pullRequest.commits > 299) throw new Error('pull request contains more than 299 commits');
     const commits = [];
+    const commitShas = new Set();
     for (let page = 1; page <= 3; page += 1) {
       const rows = await getJson(`/pulls/${number}/commits?per_page=100&page=${page}`);
       if (!Array.isArray(rows)) throw new Error('pull-request commit response is invalid');
-      commits.push(...rows);
-      if (rows.length < 100) return commits;
+      for (const row of rows) {
+        if (!EXACT_SHA.test(row?.sha || '')) throw new Error('pull-request commit response contains an invalid SHA');
+        if (commitShas.has(row.sha)) throw new Error('pull-request commit response contains a duplicate SHA');
+        commitShas.add(row.sha);
+        commits.push(row);
+      }
+      if (commits.length > pullRequest.commits) {
+        throw new Error('pull-request commit response exceeds the authenticated commit count');
+      }
+      if (commits.length === pullRequest.commits) return commits;
+      if (rows.length < 100)
+        throw new Error('pull-request commit response ended before the authenticated commit count');
     }
-    throw new Error('pull request contains more than 299 commits');
+    throw new Error('pull-request commit response did not satisfy the authenticated commit count');
   }
 
   function getPullRequest(number) {
@@ -259,32 +322,44 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     };
   }
 
-  function downloadArtifact(artifactId) {
+  async function downloadArtifact(artifactId) {
     requireExactPositiveInteger(artifactId, 'artifact ID');
-    const childEnvironment = Object.fromEntries(
-      Object.entries({
-        GH_TOKEN: token,
-        GH_HOST: 'github.com',
-        HOME: process.env.HOME,
-        LANG: process.env.LANG,
-        PATH: process.env.PATH,
-        TMPDIR: process.env.TMPDIR,
-        XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
-      }).filter(([, value]) => typeof value === 'string' && value.length > 0),
-    );
-    const completed = spawn('gh', ['api', `repos/${repository}/actions/artifacts/${artifactId}/zip`], {
-      encoding: null,
-      env: childEnvironment,
-      maxBuffer: MAX_ARTIFACT_ARCHIVE_BYTES + 1,
-      timeout: 30_000,
+    const redirect = await fetchImpl(`${base}/actions/artifacts/${artifactId}/zip`, {
+      headers,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(20_000),
     });
-    if (completed.error || completed.signal || completed.status !== 0 || !Buffer.isBuffer(completed.stdout)) {
-      throw new Error('authenticated artifact download failed');
+    if (redirect.status !== 302 || redirect.redirected) {
+      throw new Error(`authenticated artifact redirect failed with HTTP ${redirect.status}`);
     }
-    if (completed.stdout.length < 1 || completed.stdout.length > MAX_ARTIFACT_ARCHIVE_BYTES) {
-      throw new Error('authenticated artifact archive size is invalid');
+    const location = redirect.headers.get('location');
+    let downloadUrl;
+    try {
+      downloadUrl = new URL(location || '');
+    } catch {
+      throw new Error('authenticated artifact redirect location is invalid');
     }
-    return completed.stdout;
+    if (
+      downloadUrl.protocol !== 'https:' ||
+      !TRUSTED_ARTIFACT_DOWNLOAD_HOST.test(downloadUrl.hostname) ||
+      downloadUrl.port ||
+      downloadUrl.username ||
+      downloadUrl.password ||
+      !downloadUrl.pathname.startsWith('/actions-results/') ||
+      !downloadUrl.search ||
+      downloadUrl.hash
+    ) {
+      throw new Error('authenticated artifact redirect location is not allowlisted');
+    }
+    const response = await fetchImpl(downloadUrl, {
+      headers: { Accept: 'application/zip' },
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) throw new Error(`artifact archive download failed with HTTP ${response.status}`);
+    const archive = await readBoundedResponseBuffer(response, MAX_ARTIFACT_ARCHIVE_BYTES, 'artifact archive');
+    if (archive.length < 1) throw new Error('artifact archive is empty');
+    return archive;
   }
 
   return Object.freeze({

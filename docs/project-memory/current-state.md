@@ -4,7 +4,7 @@
 
 - PR #366 head `d0b207a02613f8158eb4000d49a45307b8ebac0d` passed exact-head CI `31312566426`, Policy Check `31312566479`, CodeQL `31312566424`, and autonomous review `31312566497`, then merged as `98d99ef0743c680e65d8a7786fb98055068070b4`.
 - Main Delivery `31312675597`, exact-main CI `31312691374`, Deploy Test `31312767644`, and Promote Production `31312931025` passed. Fresh live-plus-ledger runtime truth at `2026-08-09T12:23:13Z` and `2026-08-09T12:23:15Z` verified exact test/production commit and run identity, public and authenticated smoke, telemetry, and release ledgers. This accepted the ledger update, not Phase 2.
-- Phase 2 remains `in_progress`. The current branch is limited to trusted repository/GitHub/runtime/artifact primitives and deterministic security tests; schema/collection/orchestration, controller wiring, and exercised acceptance evidence remain separate protected slices. A merged PR alone is not runtime evidence.
+- Phase 2 remains `in_progress`. The current branch is limited to trusted repository/GitHub/runtime/artifact primitives and deterministic security tests; schema/collection/orchestration, controller wiring, and exercised acceptance evidence remain separate protected slices. Issue #368 tracks explicit credential-free artifact redirect binding, and #359 now includes count-consistent pagination recurrence. A merged PR alone is not runtime evidence.
 
 ## 2026-08-09 Phase 2 library PR #364 closed; modular successor required
 

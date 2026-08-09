@@ -31,7 +31,6 @@ function trustedClient(overrides = {}) {
     repository: TRUSTED_EVIDENCE_REPOSITORY,
     token: TOKEN_FIXTURE,
     fetchImpl: async () => jsonResponse({}),
-    spawn: () => ({ status: 0, stdout: Buffer.from('zip') }),
     ...overrides,
   });
 }
@@ -165,11 +164,47 @@ test('complete GitHub histories paginate and remain exact-SHA bound', async () =
   assert.throws(() => client.getWorkflowRuns(`${SHA_A.toUpperCase()}`), /must be an exact lowercase SHA/);
 });
 
+test('paginated histories reject short counts, count drift, duplicates, and service-side caps', async () => {
+  const firstPage = Array.from({ length: 100 }, (_, index) => ({ id: index + 1 }));
+  await assert.rejects(
+    trustedClient({
+      fetchImpl: async () => jsonResponse({ total_count: 101, check_runs: [{ id: 1 }] }),
+    }).getCheckRuns(SHA_A),
+    /ended before its declared total count/,
+  );
+  await assert.rejects(
+    trustedClient({
+      fetchImpl: async (url) =>
+        url.endsWith('&page=1')
+          ? jsonResponse({ total_count: 101, check_runs: firstPage })
+          : jsonResponse({ total_count: 102, check_runs: [{ id: 101 }] }),
+    }).getCheckRuns(SHA_A),
+    /total count changed during pagination/,
+  );
+  await assert.rejects(
+    trustedClient({
+      fetchImpl: async (url) =>
+        url.endsWith('&page=1')
+          ? jsonResponse({ total_count: 101, check_runs: firstPage })
+          : jsonResponse({ total_count: 101, check_runs: [{ id: 100 }] }),
+    }).getCheckRuns(SHA_A),
+    /duplicate record ID/,
+  );
+  await assert.rejects(
+    trustedClient({
+      fetchImpl: async () => jsonResponse({ total_count: 10_001, check_runs: [] }),
+    }).getCheckRuns(SHA_A),
+    /total count is invalid/,
+  );
+});
+
 test('trusted GitHub client exposes only validated evidence endpoints', async () => {
   const requests = [];
   const fetchImpl = async (url) => {
     requests.push(url);
-    if (url.includes('/files?') || url.includes('/commits?')) return jsonResponse([]);
+    if (url.endsWith('/pulls/7')) return jsonResponse({ number: 7, changed_files: 1, commits: 1 });
+    if (url.includes('/files?')) return jsonResponse([{ filename: 'reviewed.mjs' }]);
+    if (url.includes('/pulls/7/commits?')) return jsonResponse([{ sha: SHA_A }]);
     if (url.includes('/check-runs?')) return jsonResponse({ check_runs: [] });
     if (url.includes('/statuses?')) return jsonResponse([]);
     if (url.includes('/actions/runs?')) return jsonResponse({ workflow_runs: [] });
@@ -191,7 +226,9 @@ test('trusted GitHub client exposes only validated evidence endpoints', async ()
   await client.compareControllerToMain(SHA_A, SHA_B);
 
   assert.deepEqual(requests, [
+    'https://api.github.com/repos/JueZ/api/pulls/7',
     'https://api.github.com/repos/JueZ/api/pulls/7/files?per_page=100&page=1',
+    'https://api.github.com/repos/JueZ/api/pulls/7',
     'https://api.github.com/repos/JueZ/api/pulls/7/commits?per_page=100&page=1',
     'https://api.github.com/repos/JueZ/api/check-runs/7',
     `https://api.github.com/repos/JueZ/api/commits/${SHA_A}/check-runs?filter=all&per_page=100&page=1`,
@@ -203,33 +240,114 @@ test('trusted GitHub client exposes only validated evidence endpoints', async ()
     'https://api.github.com/repos/JueZ/api/git/ref/heads/main',
     `https://api.github.com/repos/JueZ/api/compare/${SHA_A}...${SHA_B}`,
   ]);
-  for (const method of ['getPullRequest', 'getCheckRun', 'getWorkflowRun', 'getWorkflowJobs', 'downloadArtifact']) {
+  for (const method of ['getPullRequest', 'getCheckRun', 'getWorkflowRun', 'getWorkflowJobs']) {
     assert.throws(() => client[method](0), /positive integer/);
   }
+  await assert.rejects(client.downloadArtifact(0), /positive integer/);
 });
 
-test('artifact downloads pass only an explicit environment allowlist and enforce byte bounds', () => {
-  let invocation;
+test('pull-request file and commit histories must satisfy authenticated PR counts', async () => {
+  await assert.rejects(
+    trustedClient({
+      fetchImpl: async (url) =>
+        url.endsWith('/pulls/9')
+          ? jsonResponse({ number: 9, changed_files: 2, commits: 1 })
+          : jsonResponse([{ filename: 'only-one.mjs' }]),
+    }).getPullRequestFiles(9),
+    /ended before the authenticated file count/,
+  );
+  await assert.rejects(
+    trustedClient({
+      fetchImpl: async (url) =>
+        url.endsWith('/pulls/9')
+          ? jsonResponse({ number: 9, changed_files: 1, commits: 2 })
+          : jsonResponse([{ sha: SHA_A }]),
+    }).getPullRequestCommits(9),
+    /ended before the authenticated commit count/,
+  );
+  await assert.rejects(
+    trustedClient({
+      fetchImpl: async (url) =>
+        url.endsWith('/pulls/9')
+          ? jsonResponse({ number: 9, changed_files: 2, commits: 1 })
+          : jsonResponse([{ filename: 'duplicate.mjs' }, { filename: 'duplicate.mjs' }]),
+    }).getPullRequestFiles(9),
+    /duplicate filename/,
+  );
+});
+
+test('artifact downloads validate one redirect and never forward GitHub credentials', async () => {
+  const requests = [];
+  const signedUrl =
+    'https://productionresultssa0.blob.core.windows.net/actions-results/run/artifact.zip?signature=fixture';
   const client = trustedClient({
-    spawn: (...args) => {
-      invocation = args;
-      return { status: 0, signal: null, stdout: Buffer.from('trusted archive') };
+    fetchImpl: async (url, options) => {
+      requests.push({ url: String(url), options });
+      if (requests.length === 1) {
+        return new Response(null, { status: 302, headers: { location: signedUrl } });
+      }
+      return new Response('trusted archive');
     },
   });
-  assert.equal(client.downloadArtifact(73).toString('utf8'), 'trusted archive');
-  assert.deepEqual(invocation[0], 'gh');
-  assert.deepEqual(invocation[1], ['api', 'repos/JueZ/api/actions/artifacts/73/zip']);
-  assert.equal(invocation[2].encoding, null);
-  assert.equal(invocation[2].env.GH_TOKEN, TOKEN_FIXTURE);
-  const allowedEnvironmentKeys = new Set(['GH_HOST', 'GH_TOKEN', 'HOME', 'LANG', 'PATH', 'TMPDIR', 'XDG_CONFIG_HOME']);
-  assert.ok(Object.keys(invocation[2].env).every((key) => allowedEnvironmentKeys.has(key)));
+  assert.equal((await client.downloadArtifact(73)).toString('utf8'), 'trusted archive');
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].url, 'https://api.github.com/repos/JueZ/api/actions/artifacts/73/zip');
+  assert.equal(requests[0].options.redirect, 'manual');
+  assert.equal(requests[0].options.headers.Authorization, `Bearer ${TOKEN_FIXTURE}`);
+  assert.equal(requests[1].url, signedUrl);
+  assert.equal(requests[1].options.redirect, 'error');
+  assert.deepEqual(requests[1].options.headers, { Accept: 'application/zip' });
+  assert.equal(Object.hasOwn(requests[1].options.headers, 'Authorization'), false);
+});
 
-  const failed = trustedClient({ spawn: () => ({ status: 1, signal: null, stdout: Buffer.alloc(0) }) });
-  assert.throws(() => failed.downloadArtifact(73), /authenticated artifact download failed/);
-  const oversized = trustedClient({
-    spawn: () => ({ status: 0, signal: null, stdout: Buffer.alloc(2 * 1024 * 1024 + 1) }),
-  });
-  assert.throws(() => oversized.downloadArtifact(73), /archive size is invalid/);
+test('artifact downloads reject wrong redirect status, origins, chains, empty files, and overflow', async () => {
+  await assert.rejects(
+    trustedClient({ fetchImpl: async () => new Response('{}') }).downloadArtifact(73),
+    /artifact redirect failed with HTTP 200/,
+  );
+  for (const location of [
+    'https://attacker.example/actions-results/run/artifact.zip?signature=fixture',
+    'http://productionresultssa0.blob.core.windows.net/actions-results/run/artifact.zip?signature=fixture',
+    'https://productionresultssa0.blob.core.windows.net/other/artifact.zip?signature=fixture',
+    'https://productionresultssa0.blob.core.windows.net/actions-results/run/artifact.zip',
+  ]) {
+    await assert.rejects(
+      trustedClient({
+        fetchImpl: async () => new Response(null, { status: 302, headers: { location } }),
+      }).downloadArtifact(73),
+      /redirect location is not allowlisted/,
+    );
+  }
+
+  const redirectLocation =
+    'https://productionresultssa1.blob.core.windows.net/actions-results/run/artifact.zip?signature=fixture';
+  await assert.rejects(
+    trustedClient({
+      fetchImpl: async (url) =>
+        String(url).startsWith('https://api.github.com/')
+          ? new Response(null, { status: 302, headers: { location: redirectLocation } })
+          : new Response(null, { status: 302, headers: { location: 'https://attacker.example' } }),
+    }).downloadArtifact(73),
+    /archive download failed with HTTP 302/,
+  );
+  await assert.rejects(
+    trustedClient({
+      fetchImpl: async (url) =>
+        String(url).startsWith('https://api.github.com/')
+          ? new Response(null, { status: 302, headers: { location: redirectLocation } })
+          : new Response(''),
+    }).downloadArtifact(73),
+    /artifact archive is empty/,
+  );
+  await assert.rejects(
+    trustedClient({
+      fetchImpl: async (url) =>
+        String(url).startsWith('https://api.github.com/')
+          ? new Response(null, { status: 302, headers: { location: redirectLocation } })
+          : new Response('x'.repeat(2 * 1024 * 1024 + 1)),
+    }).downloadArtifact(73),
+    /artifact archive exceeds the byte limit/,
+  );
 });
 
 test('runtime origins are fixed and reject credentials, paths, query data, ports, and aliases', () => {
