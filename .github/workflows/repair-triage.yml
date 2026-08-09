@@ -3,6 +3,29 @@ name: Repair Issue Triage
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: Normal rollout-bounded triage or an exact-range historical backfill.
+        required: true
+        default: triage
+        type: choice
+        options:
+          - triage
+          - backfill
+      dry_run:
+        description: Report intended mutations without creating labels, comments, candidates, or closures.
+        required: true
+        default: true
+        type: boolean
+      backfill_start:
+        description: First exact issue number for backfill mode (required only for backfill).
+        required: false
+        default: ''
+        type: string
+      backfill_end:
+        description: Last exact issue number for backfill mode (required only for backfill).
+        required: false
+        default: ''
+        type: string
       close_resolved:
         description: Close codex-repair issues only when evidence proves they are resolved.
         required: false
@@ -41,8 +64,13 @@ jobs:
       - name: Triage repair issues
         env:
           GH_TOKEN: ${{ github.token }}
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && 'false' || 'true' }}
+          # Scheduled triage can create/update idempotent learning candidates but
+          # cannot close repairs because close_resolved is always false on schedule.
+          DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dry_run }}
           REPAIR_TRIAGE_CLOSE_RESOLVED: ${{ github.event_name == 'workflow_dispatch' && inputs.close_resolved || 'false' }}
           REPAIR_TRIAGE_REQUIRE_LEDGER_FOR_PROD: 'true'
+          AGENT_LEARNING_BACKFILL: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'backfill' && 'true' || 'false' }}
+          AGENT_LEARNING_BACKFILL_START: ${{ inputs.backfill_start || '' }}
+          AGENT_LEARNING_BACKFILL_END: ${{ inputs.backfill_end || '' }}
           API_BASE_URL: ${{ inputs.api_base_url || '' }}
         run: node scripts/triage-repair-issues.mjs

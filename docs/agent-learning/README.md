@@ -16,6 +16,14 @@ Supported states are:
 
 Update or supersede an existing matching fingerprint instead of creating a duplicate. A second recurrence should produce executable prevention through a regression test, agent-task evaluation, or skill update unless a protected PR approves a valid waiver.
 
+## Automatic candidates
+
+The existing repair-triage controller converts a significant resolved `codex-repair` issue into a sanitized `agent-learning` issue. It uses fixed HTML markers, a normalized mechanism fingerprint, and unique source markers so scheduled reruns are idempotent and a later source increments recurrence instead of creating a duplicate. Candidate bodies contain only trusted classification metadata and stable repository issue links; source titles, bodies, comments, logs, prompts, patches, credentials, and provider content are never copied.
+
+Normal scheduled processing is bounded by the immutable rollout timestamp in `.github/autonomous-policy.yml`, so pre-rollout issues do not create a historical flood. Historical processing requires a manually dispatched exact inclusive issue range, is limited to 100 numbers, and defaults to dry run. The schedule may create labels and create, link, or update candidates, but cannot close a repair issue. Closure additionally requires the existing explicit closure flag and either a linked candidate or a strict trusted `external-transient`/`no-durable-artifact` disposition with rationale, owner, current review date or expiry, and the exact recurrence fingerprint.
+
+Learning issues are candidates, not automatic repository modifications. They close only through an ordinary protected PR containing the versioned artifact, referenced durable prevention, counterfactual proof, and `Closes #<learning-issue>`.
+
 ## Schema
 
 Every `artifacts/<id>.yml` file requires:

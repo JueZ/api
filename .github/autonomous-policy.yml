@@ -14,7 +14,7 @@ trustedWorkflowSha256:
   policy-check.yml: 553f5783cfbdb4dda498809b74265a9a247e5644663b74bacd1dd66c17fe23b2
   prepare-production-private-storage.yml: 62b7d4a413ea2ed57f5ebeb63b54adfb46e42abcf825e94be3f2f049f501277e
   promote-production.yml: eb87a6f7fd479226a68e0edd7f9867ce9b6c3bac853ffae0ed687734e0944387
-  repair-triage.yml: c1384abfdf12c6b8f171e50534ee6c13bc98e321e0e31e91ab69c3dcf7e1c6d3
+  repair-triage.yml: b799572fb5a4aee67a39d6e8bf8d31bb9963337abc308895cc505afff9c9fd58
   rollback-production.yml: 2aae30732058ba956f52a0fc5151e5ee236856464bb961dac576c9a033e49635
   verify-azure-oidc.yml: 8f98932d92d84740df6573397fa2ad29678fd09f1c3fe44fd8a9910bfee424d7
 
@@ -31,6 +31,11 @@ requiredChecks:
     appSlug: github-actions
   - name: Autonomous review complete
     appSlug: github-actions
+
+agentLearning:
+  # Only normal codex-repair issues created at or after this immutable rollout
+  # boundary participate automatically. Earlier issues require exact-range backfill.
+  rolloutTimestamp: '2026-08-09T20:24:47Z'
 
 highRiskPaths:
   # These files can redefine, exclude, or replace code executed by required

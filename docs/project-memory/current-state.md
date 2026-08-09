@@ -1,10 +1,16 @@
 # Current state
 
+## 2026-08-09 Phase 3 failure-to-learning conversion in progress
+
+- Branch `codex/agent-learning-phase-3-triage` starts from protected-main SHA `0a85184c866fbea789b320e9559fe276c072fffa` and extends the existing repair triage rather than introducing a competing system.
+- The active slice adds deterministic significant-failure classification, normalized mechanism fingerprints, stable candidate/source/link markers, sanitized candidate bodies, source deduplication, recurrence escalation, strict owned/dated no-artifact dispositions, an immutable rollout boundary, exact-range dry-run backfill, and write-enabled scheduled candidate reconciliation. Raw issue text, logs, prompts, patches, credentials, and provider content are not copied or executed; no model is invoked.
+- Operational recovery remains independently evidence-gated. Repair closure additionally requires a linked candidate or valid explicit disposition, and the schedule cannot close repairs because its closure flag remains false. Phase 3 remains `in_progress` until protected PR, exact-main CI, runtime-neutral delivery decision, and exercised idempotent GitHub issue evidence exist. A merged PR alone is not runtime evidence.
+
 ## 2026-08-09 Runtime-neutral delivery optimization authorized
 
 - PR #391 changed only two project-memory Markdown files, yet its successful protected merge still caused exact-main CI, Deploy Test `31332383421`, and Promote Production `31332564172`. An operator cancellation stopped parent Main Delivery `31332272018` only after the production child had already dispatched; both environment runs completed successfully rather than being interrupted during Azure mutation.
-- The operator authorized automatic environment-deployment omission for changes that provably cannot affect deployed code. Issue #392 tracks a protected exact-file-list classifier with executable regression coverage. Exact-main CI and every PR/security/provenance control remain mandatory; ambiguous or mixed changes still deploy.
-- This entry records the correction and safe boundary, not acceptance of the pending implementation. A merge alone will not prove the live controller behavior.
+- PR #393 exact head `21fdb9ddbd23adad2257230022b90ea86d148434` delivered the protected exact-file-list classifier as merge `0a85184c866fbea789b320e9559fe276c072fffa`. Exact-head CI `31333114336`, Policy Check `31333114357`, CodeQL `31333114338`, and deterministic governance `31333114358` passed with zero repair pushes and no model call.
+- Because PR #393 changed the delivery controller itself, it correctly failed closed to full delivery: Main Delivery `31333240845`, exact-main CI `31333255194`, Deploy Test `31333348155`, and Promote Production `31333503474` passed with public/authenticated smoke, telemetry, provenance, and ledgers. Future strictly allowlisted Markdown-only PRs can omit environment deployment after exact-main CI; ambiguous, mixed, renamed-from-code, or deployment-impacting changes still deploy. Issue #392 is closed. A merge alone was not treated as runtime evidence.
 
 ## 2026-08-09 Phase 2 accepted after protected historical-evidence verification
 

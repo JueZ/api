@@ -1,5 +1,11 @@
 # Known issues and unresolved risks
 
+## Phase 3 automatic learning rollout is not yet accepted
+
+- Branch `codex/agent-learning-phase-3-triage` implements the rollout-bounded extension to repair triage, but no protected PR, merge, exact-main CI, scheduled write, or idempotent live candidate evidence exists yet.
+- Until that evidence is accepted, significant post-rollout repair issues are not proven to create or update learning candidates automatically. Do not backfill historical issues without an exact manually dispatched range; backfill defaults to dry run and is bounded to 100 issue numbers.
+- Repository tests are evidence of deterministic behavior only. They do not prove GitHub label permissions, issue-marker persistence, candidate linking, scheduled rerun idempotency, or closure behavior on the live repository.
+
 ## Main Delivery artifact contract incident is resolved
 
 - PR #386 merged exact head `af3c3131d7dd9cb842c273e9e4bef4582bb33f5f` as `a56a932393a885976ad85f56df6cf3ba0f142e1b` after all four protected aggregates passed. Main Delivery `31329669160` then failed before main CI because the post-merge consumer requested the removed `autonomous-review-*` artifact contract.
