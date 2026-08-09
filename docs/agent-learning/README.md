@@ -51,6 +51,10 @@ npm run agent:learning:status
 
 The generated index contains no timestamp, so repeated generation from the same artifacts is byte-for-byte reproducible. CI invokes schema validation, trusted historical scoring, live GitHub provenance validation, and the index checker by fixed script path inside the existing `architecture and agent validation` job; learning validation does not create a protected-branch status context.
 
+Program-phase acceptance uses a separate fail-closed boundary. Ordinary pull-request CI runs `scripts/agent-learning/verify-program-evidence.mjs offline` without repository or deployment credentials and checks that every accepted phase names its registered public-safe evidence file. After the independent exact-head review succeeds, the protected-main `Codex Auto-Merge` controller may run `trusted-pr` with the built-in read-only GitHub token. That trusted checkout reads only `program.md` and the registered Phase 2 evidence file from the candidate head and base as inert, size-bounded data; candidate code is never loaded or executed.
+
+The trusted verifier binds the open PR, exact head, first-attempt controller run, newly consumed review claim, four exact-head aggregates, implementation merge, first-attempt delivery runs, GitHub deployments and jobs, and release-ledger artifacts. Artifact bytes must match both authenticated GitHub metadata and the recorded SHA-256 digest before the single canonical ledger entry is parsed. Live health reads use the exact repository-owned test and production Function hosts, reject aliases, credentials, ports, paths, queries, and fragments, and disable redirects. The verifier emits only a sanitized result artifact. Phase acceptance still requires an ordinary protected evidence PR; the verifier cannot rewrite the program or learning controls.
+
 `npm run eval:agents` remains the deterministic agent-policy evaluation command, and `npm run eval:agent-policy` is its clearer alias. The general task-evaluation aliases are reserved now but deliberately fail closed until the Phase 4 harness exists; an unavailable adapter or harness is not a pass.
 
 ## Public-safe evidence

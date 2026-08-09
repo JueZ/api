@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-09 Trusted Phase 2 acceptance verifier foundation prepared
+
+- Work is isolated on `codex/agent-learning-trusted-verifier` from exact protected-main baseline `74f09b72789ad3acc5c2ce82747298b4bd8264be`. Ordinary PR CI remains tokenless and now checks accepted-phase evidence registration by a fixed script path inside the existing architecture aggregate.
+- The protected-main auto-merge controller adds a post-review, read-only verifier. It checks out only `github.workflow_sha`, binds the exact PR/review claim/controller run, reads only fixed candidate program/evidence paths as inert bytes, verifies authenticated GitHub run/deployment/artifact evidence and raw artifact digests, and fetches bounded health JSON only from the exact test/production Function origins with redirects disabled.
+- Focused local verifier tests pass. No exact-head CI, Policy Check, CodeQL, independent review, merge, main delivery, deployment, smoke, telemetry, ledger, or runtime evidence exists for this foundation yet. Phase 2 remains `in_progress`; the foundation must not close issue #351 or claim Phase 2 acceptance.
+
 ## 2026-08-09 Phase 2 implementation merged; acceptance verifier remains in progress
 
 - PR #349 head `7188188cc0b3fd1a58a5ee14ae5335158294135c` merged as `9310c94f97541e57f83b186af2cacf989d6f5330`. Exact-head gates and Main Delivery `31279667347`, exact-main CI `31279682790`, Deploy Test `31279752243`, and Promote Production `31279913572` passed with smoke, telemetry, ledgers, and runtime truth. The strict artifact lifecycle, three verified historical artifacts, reproducible index, fixed-path validation, and closed-loop skill are on main.
