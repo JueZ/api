@@ -2,7 +2,7 @@
 
 ## 2026-08-09 Trusted Phase 2 acceptance verifier foundation prepared
 
-- Work is isolated on `codex/agent-learning-trusted-verifier` from exact protected-main baseline `74f09b72789ad3acc5c2ce82747298b4bd8264be`. Ordinary PR CI remains tokenless and now checks accepted-phase evidence registration by a fixed script path inside the existing architecture aggregate.
+- Draft PR #354 contains implementation commit `12cc58a7bafd30e2e33ee29bdfc42eae6bbb0f58` on `codex/agent-learning-trusted-verifier` from exact protected-main baseline `74f09b72789ad3acc5c2ce82747298b4bd8264be`. Ordinary PR CI remains tokenless and now checks accepted-phase evidence registration by a fixed script path inside the existing architecture aggregate.
 - The protected-main auto-merge controller adds a post-review, read-only verifier. It checks out only `github.workflow_sha`, binds the exact PR/review claim/controller run, reads only fixed candidate program/evidence paths as inert bytes, verifies authenticated GitHub run/deployment/artifact evidence and raw artifact digests, and fetches bounded health JSON only from the exact test/production Function origins with redirects disabled.
 - Focused local verifier tests pass. No exact-head CI, Policy Check, CodeQL, independent review, merge, main delivery, deployment, smoke, telemetry, ledger, or runtime evidence exists for this foundation yet. Phase 2 remains `in_progress`; the foundation must not close issue #351 or claim Phase 2 acceptance.
 
