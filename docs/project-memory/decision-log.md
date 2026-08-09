@@ -2,8 +2,8 @@
 
 ## 2026-08-09 — Derive runtime evidence identity from GitHub deployments
 
-- Decision: Treat the authenticated GitHub deployment object and its exact successful status as the independent authority for acceptance-evidence environment name, workflow run/job, and runtime origin. Require the test and production origins to differ and require live `/health` to agree on environment, deployment run, and merge SHA.
-- Root cause: Rejected PR #350 head `b928577c9a88218dcdacc7293f6264196837a80e` downloaded exact ledgers but still selected the live runtime origin from ledger content, so a false ledger could alias test and production.
+- Decision: Treat the authenticated successful Actions job plus unique exact-run release-ledger artifact metadata/content as the run-bound deployment attestation. GitHub exposes no immutable deployment-to-job field, so deployment status `log_url` is corroboration only; authenticated deployment/status records instead authorize the expected environment name and runtime origin. Require the test and production origins to differ and require live `/health` to agree on environment, attested run, and merge SHA. For `pull_request_target`, validate the Actions REST source head/branch separately from the authenticated PR base/head and custom review-check external identity.
+- Root cause: Rejected PR #350 head `b928577c9a88218dcdacc7293f6264196837a80e` downloaded exact ledgers but still selected the live runtime origin from ledger content, so a false ledger could alias test and production. Review run `31300174096` on PR #352 then exposed that a status URL alone was not immutable job provenance and that source-head versus runner base-context SHA semantics needed to be explicit.
 - Learning disposition: `regression-test` under fingerprint `agent-learning.runtime-evidence.environment-alias`, tracked by issue #351 and versioned as `runtime-evidence-environment-binding`.
 - Safety boundary: The CI job gains only read-only deployment metadata access. It never queries Azure credentials, accepts evidence-authored runtime URLs, or weakens workflow, smoke, telemetry, ledger, provenance, or branch-protection gates.
 

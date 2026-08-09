@@ -42,6 +42,7 @@ function validPhase2Observed(evidence) {
     artifacts: {},
     deployments: {},
     deploymentStatuses: {},
+    deploymentJobs: {},
     ledgers: {},
     liveHealth: {},
   };
@@ -76,6 +77,8 @@ function validPhase2Observed(evidence) {
       status: 'completed',
       conclusion: 'success',
       head_sha: implementation.headSha,
+      head_branch: implementation.branch,
+      head_repository: { full_name: 'JueZ/api' },
     };
   }
   const deliveryWorkflows = {
@@ -94,6 +97,8 @@ function validPhase2Observed(evidence) {
       status: 'completed',
       conclusion: 'success',
       head_sha: implementation.mergeSha,
+      head_branch: 'main',
+      head_repository: { full_name: 'JueZ/api' },
       display_title:
         key === 'deployTest'
           ? `Deploy Test ${record.sourceSha} ${record.deliveryCorrelation}`
@@ -113,6 +118,11 @@ function validPhase2Observed(evidence) {
           id: record.releaseLedgerArtifactId,
           name: `release-ledger-${environment}-${record.sourceSha}-${record.deliveryCorrelation}`,
           expired: false,
+          workflow_run: {
+            id: record.workflowRunId,
+            head_sha: implementation.mergeSha,
+            head_branch: 'main',
+          },
         },
       ],
     };
@@ -142,7 +152,24 @@ function validPhase2Observed(evidence) {
       ref: 'main',
       environment: githubEnvironment,
       task: 'deploy',
-      creator: { login: 'github-actions[bot]', type: 'Bot' },
+      creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
+    };
+    const workflowName =
+      environment === 'test'
+        ? `Deploy Test ${record.sourceSha} ${record.deliveryCorrelation}`
+        : `Promote Production ${record.sourceSha} ${record.deliveryCorrelation}`;
+    const jobName = environment === 'test' ? 'deploy test / deploy test' : 'promote production / deploy prod';
+    observed.deploymentJobs[environment] = {
+      id: record.deploymentJobId,
+      run_id: record.workflowRunId,
+      workflow_name: workflowName,
+      name: jobName,
+      head_sha: implementation.mergeSha,
+      head_branch: 'main',
+      status: 'completed',
+      conclusion: 'success',
+      runner_group_name: 'GitHub Actions',
+      html_url: `https://github.com/JueZ/api/actions/runs/${record.workflowRunId}/job/${record.deploymentJobId}`,
     };
     observed.deploymentStatuses[environment] = [
       {
@@ -151,7 +178,7 @@ function validPhase2Observed(evidence) {
         environment: githubEnvironment,
         environment_url: `https://${environment}.example.invalid`,
         log_url: `https://github.com/JueZ/api/actions/runs/${record.workflowRunId}/job/${record.deploymentJobId}`,
-        creator: { login: 'github-actions[bot]', type: 'Bot' },
+        creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
       },
     ];
     observed.liveHealth[environment] = {
@@ -522,6 +549,7 @@ test('Phase 2 runtime evidence is independently bound to distinct GitHub deploym
       observed.ledgers.test,
       observed.deployments.test,
       observed.deploymentStatuses.test,
+      observed.deploymentJobs.test,
       observed.liveHealth.test,
       'test',
       evidence,
@@ -537,6 +565,35 @@ test('Phase 2 runtime evidence is independently bound to distinct GitHub deploym
   assert.ok(findings.some((finding) => finding.includes('prod deployment is not bound')));
   assert.ok(findings.some((finding) => finding.includes('prod deployment status is not bound')));
   assert.ok(findings.some((finding) => finding.includes('distinct GitHub deployment environment URLs')));
+});
+
+test('Phase 2 deployment provenance requires an authenticated exact-run job and run-bound ledger artifact', () => {
+  const evidence = JSON.parse(
+    readFileSync(join(REPOSITORY_ROOT, 'docs/agent-learning/evidence/phase-2-versioned-artifacts.json'), 'utf8'),
+  );
+  const observed = validPhase2Observed(evidence);
+  const testRecord = evidence.implementation.postMergeDelivery.deployTest;
+
+  observed.deploymentJobs.test.run_id += 1;
+  observed.artifacts[String(testRecord.workflowRunId)].artifacts[0].workflow_run.id += 1;
+  const findings = phase2EvidenceFindings(evidence, observed);
+  assert.ok(findings.some((finding) => finding.includes('test deployment job run does not match')));
+  assert.ok(findings.some((finding) => finding.includes('test release-ledger artifact is not bound')));
+});
+
+test('Phase 2 pull-request-target proof distinguishes REST source head from the protected base', () => {
+  const evidence = JSON.parse(
+    readFileSync(join(REPOSITORY_ROOT, 'docs/agent-learning/evidence/phase-2-versioned-artifacts.json'), 'utf8'),
+  );
+  const observed = validPhase2Observed(evidence);
+  const reviewRecord = evidence.implementation.exactHeadAggregates.find(
+    (record) => record.context === 'Autonomous review complete',
+  );
+  observed.workflowRuns[String(reviewRecord.workflowRunId)].head_sha = evidence.implementation.baselineMainSha;
+  observed.workflowRuns[String(reviewRecord.workflowRunId)].head_branch = 'main';
+  const findings = phase2EvidenceFindings(evidence, observed);
+  assert.ok(findings.some((finding) => finding.includes('Autonomous review complete workflow run head SHA')));
+  assert.ok(findings.some((finding) => finding.includes('Autonomous review complete workflow run head branch')));
 });
 
 test('Phase 2 live health requests derive only from a public GitHub deployment origin', () => {

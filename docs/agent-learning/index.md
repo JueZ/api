@@ -32,7 +32,7 @@ Artifacts: 4. candidate: 0; implemented: 1; verified: 3; waived: 0; superseded: 
 ## [runtime-evidence-environment-binding](artifacts/runtime-evidence-environment-binding.yml)
 
 - Title: Bind runtime evidence to distinct GitHub environments
-- Source: autonomous_review — JueZ/api#350, JueZ/api#351, JueZ/api/actions/runs/31281439847
+- Source: autonomous_review — JueZ/api#350, JueZ/api#351, JueZ/api/actions/runs/31281439847, JueZ/api#352, JueZ/api/actions/runs/31300174096
 - Disposition: regression-test
 - Status: implemented
 - Durable artifacts:

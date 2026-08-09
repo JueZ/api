@@ -41,6 +41,15 @@ const EXPECTED_DEPLOYMENT_ENVIRONMENTS = Object.freeze({
   test: 'test',
   prod: 'production',
 });
+const EXPECTED_DEPLOYMENT_JOBS = Object.freeze({
+  test: 'deploy test / deploy test',
+  prod: 'promote production / deploy prod',
+});
+const GITHUB_ACTIONS_BOT = Object.freeze({
+  id: 41_898_282,
+  login: 'github-actions[bot]',
+  type: 'Bot',
+});
 
 function addFinding(findings, condition, message) {
   if (!condition) findings.push(message);
@@ -145,6 +154,16 @@ export function workflowRunFindings(run, expected, label = 'workflow run') {
   addFinding(findings, run?.status === 'completed', `${label} is not completed`);
   addFinding(findings, run?.conclusion === 'success', `${label} did not conclude successfully`);
   addFinding(findings, run?.head_sha === expected.headSha, `${label} head SHA does not match`);
+  if (expected.headBranch) {
+    addFinding(findings, run?.head_branch === expected.headBranch, `${label} head branch does not match`);
+  }
+  if (expected.headRepository) {
+    addFinding(
+      findings,
+      run?.head_repository?.full_name === expected.headRepository,
+      `${label} head repository does not match`,
+    );
+  }
   if (expected.displayTitle) {
     addFinding(findings, run?.display_title === expected.displayTitle, `${label} display title does not match`);
   }
@@ -183,6 +202,10 @@ export function aggregateCheckFindings(record, checkRun, workflowRun, implementa
     );
   }
   if (expectedWorkflow) {
+    // The authenticated Actions REST run resource reports the PR source head for
+    // pull_request_target. That is distinct from the runner's base-context
+    // GITHUB_SHA. The authenticated PR record binds the source head and base;
+    // the custom review check external identity binds this exact workflow run.
     findings.push(
       ...workflowRunFindings(
         workflowRun,
@@ -192,6 +215,8 @@ export function aggregateCheckFindings(record, checkRun, workflowRun, implementa
           path: expectedWorkflow.path,
           event: expectedWorkflow.event,
           headSha: implementation.headSha,
+          headBranch: implementation.branch,
+          headRepository: 'JueZ/api',
         },
         `${record.context} workflow run`,
       ),
@@ -249,11 +274,54 @@ function publicHttpsOrigin(value) {
   }
 }
 
+function githubActionsBot(actor) {
+  return (
+    actor?.id === GITHUB_ACTIONS_BOT.id &&
+    actor?.login === GITHUB_ACTIONS_BOT.login &&
+    actor?.type === GITHUB_ACTIONS_BOT.type
+  );
+}
+
+export function deploymentJobFindings(record, job, environment, evidence) {
+  const findings = [];
+  const expectedName = EXPECTED_DEPLOYMENT_JOBS[environment];
+  const sourceSha = evidence?.implementation?.pullRequest?.mergeSha;
+  const expectedWorkflowName =
+    environment === 'test'
+      ? `Deploy Test ${record.sourceSha} ${record.deliveryCorrelation}`
+      : `Promote Production ${record.sourceSha} ${record.deliveryCorrelation}`;
+  addFinding(findings, Boolean(expectedName), `${environment} is not a supported deployment job environment`);
+  addFinding(findings, job?.id === record.deploymentJobId, `${environment} deployment job ID does not match`);
+  addFinding(findings, job?.run_id === record.workflowRunId, `${environment} deployment job run does not match`);
+  addFinding(
+    findings,
+    job?.workflow_name === expectedWorkflowName,
+    `${environment} deployment workflow name does not match`,
+  );
+  addFinding(findings, job?.name === expectedName, `${environment} deployment job name does not match`);
+  addFinding(findings, job?.head_sha === sourceSha, `${environment} deployment job head SHA does not match`);
+  addFinding(findings, job?.head_branch === 'main', `${environment} deployment job head branch is not main`);
+  addFinding(findings, job?.status === 'completed', `${environment} deployment job is not completed`);
+  addFinding(findings, job?.conclusion === 'success', `${environment} deployment job did not succeed`);
+  addFinding(
+    findings,
+    job?.runner_group_name === 'GitHub Actions',
+    `${environment} deployment job did not run on GitHub Actions`,
+  );
+  addFinding(
+    findings,
+    job?.html_url === `https://github.com/JueZ/api/actions/runs/${record.workflowRunId}/job/${record.deploymentJobId}`,
+    `${environment} deployment job URL does not match`,
+  );
+  return findings;
+}
+
 export function deploymentEnvironmentFindings(
   record,
   ledger,
   deployment,
   deploymentStatuses,
+  deploymentJob,
   liveHealth,
   environment,
   evidence,
@@ -283,9 +351,11 @@ export function deploymentEnvironmentFindings(
   addFinding(findings, deployment?.task === 'deploy', `${environment} deployment task is not deploy`);
   addFinding(
     findings,
-    deployment?.creator?.login === 'github-actions[bot]' && deployment?.creator?.type === 'Bot',
-    `${environment} deployment creator is not GitHub Actions`,
+    githubActionsBot(deployment?.creator),
+    `${environment} deployment creator is not the expected GitHub Actions bot`,
   );
+
+  findings.push(...deploymentJobFindings(record, deploymentJob, environment, evidence));
 
   const statuses = Array.isArray(deploymentStatuses) ? deploymentStatuses : [];
   const status = statuses.find((candidate) => candidate.id === record.deploymentStatusId);
@@ -298,14 +368,16 @@ export function deploymentEnvironmentFindings(
   );
   addFinding(
     findings,
-    status?.creator?.login === 'github-actions[bot]' && status?.creator?.type === 'Bot',
-    `${environment} deployment status creator is not GitHub Actions`,
+    githubActionsBot(status?.creator),
+    `${environment} deployment status creator is not the expected GitHub Actions bot`,
   );
+  // GitHub's deployment schema has no immutable Actions-job relation. The
+  // log URL is corroboration only; provenance comes from the authenticated job
+  // plus the unique exact-run release-ledger artifact validated below.
   addFinding(
     findings,
-    status?.log_url ===
-      `https://github.com/JueZ/api/actions/runs/${record.workflowRunId}/job/${record.deploymentJobId}`,
-    `${environment} deployment status does not bind the exact workflow run and job`,
+    status?.log_url === deploymentJob?.html_url,
+    `${environment} deployment status job URL does not match the authenticated deployment job`,
   );
 
   const deploymentOrigin = publicHttpsOrigin(status?.environment_url);
@@ -336,6 +408,7 @@ function deploymentLedgerFindings(
   artifactList,
   deployment,
   deploymentStatuses,
+  deploymentJob,
   liveHealth,
   environment,
   evidence,
@@ -343,7 +416,16 @@ function deploymentLedgerFindings(
   const findings = [];
   const artifactName = `release-ledger-${environment}-${record.sourceSha}-${record.deliveryCorrelation}`;
   const artifacts = Array.isArray(artifactList?.artifacts) ? artifactList.artifacts : [];
-  const matchingArtifact = artifacts.find((artifact) => artifact.id === record.releaseLedgerArtifactId);
+  // Artifacts are issued within a specific Actions run. Requiring the unique
+  // name, recorded ID, embedded run identity, and downloaded ledger content is
+  // the independently authenticated run-bound attestation.
+  const namedArtifacts = artifacts.filter((artifact) => artifact.name === artifactName);
+  const matchingArtifact = namedArtifacts.find((artifact) => artifact.id === record.releaseLedgerArtifactId);
+  addFinding(
+    findings,
+    namedArtifacts.length === 1,
+    `${environment} release-ledger artifact name is not unique within the exact workflow run`,
+  );
   addFinding(findings, Boolean(matchingArtifact), `${environment} release-ledger artifact ID is unavailable`);
   addFinding(
     findings,
@@ -351,6 +433,21 @@ function deploymentLedgerFindings(
     `${environment} release-ledger artifact name does not match`,
   );
   addFinding(findings, matchingArtifact?.expired === false, `${environment} release-ledger artifact is expired`);
+  addFinding(
+    findings,
+    matchingArtifact?.workflow_run?.id === record.workflowRunId,
+    `${environment} release-ledger artifact is not bound to the exact workflow run`,
+  );
+  addFinding(
+    findings,
+    matchingArtifact?.workflow_run?.head_sha === evidence?.implementation?.pullRequest?.mergeSha,
+    `${environment} release-ledger artifact head SHA does not match the implementation merge`,
+  );
+  addFinding(
+    findings,
+    matchingArtifact?.workflow_run?.head_branch === 'main',
+    `${environment} release-ledger artifact head branch is not main`,
+  );
 
   for (const error of validateReleaseLedger(ledger, { expectedDeliveryCorrelation: record.deliveryCorrelation })) {
     findings.push(`${environment} release ledger: ${error}`);
@@ -409,7 +506,16 @@ function deploymentLedgerFindings(
     `${environment} live /health commit does not match the implementation merge`,
   );
   findings.push(
-    ...deploymentEnvironmentFindings(record, ledger, deployment, deploymentStatuses, liveHealth, environment, evidence),
+    ...deploymentEnvironmentFindings(
+      record,
+      ledger,
+      deployment,
+      deploymentStatuses,
+      deploymentJob,
+      liveHealth,
+      environment,
+      evidence,
+    ),
   );
   return findings;
 }
@@ -474,6 +580,7 @@ export function phase2EvidenceFindings(evidence, observed) {
       observed?.artifacts?.[String(delivery.deployTest?.workflowRunId)],
       observed?.deployments?.test,
       observed?.deploymentStatuses?.test,
+      observed?.deploymentJobs?.test,
       observed?.liveHealth?.test,
       'test',
       evidence,
@@ -486,6 +593,7 @@ export function phase2EvidenceFindings(evidence, observed) {
       observed?.artifacts?.[String(delivery.promoteProduction?.workflowRunId)],
       observed?.deployments?.prod,
       observed?.deploymentStatuses?.prod,
+      observed?.deploymentJobs?.prod,
       observed?.liveHealth?.prod,
       'prod',
       evidence,
@@ -581,6 +689,7 @@ async function collectPhase2Observed(evidence, options = {}) {
     artifacts: {},
     deployments: {},
     deploymentStatuses: {},
+    deploymentJobs: {},
     ledgers: {},
     liveHealth: {},
   };
@@ -610,6 +719,10 @@ async function collectPhase2Observed(evidence, options = {}) {
     );
     observed.deploymentStatuses[environment] = await authenticatedGitHubJson(
       `repos/${repository}/deployments/${record.deploymentId}/statuses?per_page=100`,
+      { token },
+    );
+    observed.deploymentJobs[environment] = await authenticatedGitHubJson(
+      `repos/${repository}/actions/jobs/${record.deploymentJobId}`,
       { token },
     );
     observed.artifacts[String(record.workflowRunId)] = await authenticatedGitHubJson(

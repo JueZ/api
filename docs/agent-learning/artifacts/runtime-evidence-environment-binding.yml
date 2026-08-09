@@ -14,14 +14,20 @@ source:
     - kind: workflow_run
       locator: JueZ/api/actions/runs/31281439847
       url: https://github.com/JueZ/api/actions/runs/31281439847
+    - kind: pull_request
+      locator: JueZ/api#352
+      url: https://github.com/JueZ/api/pull/352
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31300174096
+      url: https://github.com/JueZ/api/actions/runs/31300174096
 classification:
   failureArea: agent-learning-evidence
   severity: high
   symptom: Live health evidence could be queried without independently proving that test and production were different intended environments.
-  rootCause: The verifier trusted the release ledger for the runtime origin instead of deriving the origin and environment identity from authenticated GitHub deployment and status records.
+  rootCause: The verifier first trusted the release ledger for the runtime origin, then overclaimed a deployment status URL as immutable job provenance and left pull-request-target source-head versus runner base-context SHA semantics implicit.
 disposition:
   primary: regression-test
-  rationale: Deterministic tests now reject aliased or wrongly labeled deployments and require live health to use the GitHub-bound environment origin, name, run, and merge SHA.
+  rationale: Deterministic tests reject aliased environments, require an authenticated exact-run job and unique run-bound ledger artifact, and distinguish REST source-head evidence from separately authenticated PR base/head identity.
 artifacts:
   - path: scripts/agent-learning/verify-program-evidence.mjs
     kind: implementation
@@ -30,10 +36,10 @@ artifacts:
   - path: .github/workflows/ci.yml
     kind: workflow
 counterfactual:
-  hypothesis: The rejected verifier accepts an aliased environment origin, while the repaired verifier rejects environment aliasing and derives live health only from authenticated GitHub deployment status.
+  hypothesis: The rejected verifier accepts aliased or status-URL-only evidence, while the repaired verifier requires distinct authenticated environment origins, a successful exact-run job, a unique run-bound ledger artifact, and separate pull-request-target source/base bindings.
   broken:
     commit: b928577c9a88218dcdacc7293f6264196837a80e
-    expectedResult: The environment-alias regression fails because GitHub deployment identity and distinct test and production origins are not required.
+    expectedResult: The provenance regressions fail because distinct deployment origins, exact-run job/artifact binding, and explicit pull-request-target source/base semantics are not required.
   verification:
     commands:
       - node --test scripts/test/agent-learning-artifacts.test.mjs
