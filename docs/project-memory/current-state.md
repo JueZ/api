@@ -1,10 +1,10 @@
 # Current state
 
-## 2026-08-09 Phase 2 evidence aggregate-boundary repair started
+## 2026-08-09 Phase 2 required evidence aggregate delivered; evidence retry started
 
 - Compatibility PR #375 merged as `f7ec8cbb4d9bc44fecd9a833c3d7cc483f6974f2` and completed exact-main CI `31318612977`, Main Delivery `31318690680`, Deploy Test `31318705872`, Promote Production `31318872853`, and fresh test/production runtime truth with public and authenticated smoke, telemetry, and release ledgers.
 - Evidence retry PR #376 exact head `d6f207117e770aabc7b7baa4414c35f4d318072a` passed CI `31319465316`, Policy Check `31319465287`, and CodeQL `31319465282`. Autonomous review run `31319465352` correctly rejected that protected program-evidence verification ran after `Autonomous review complete` was published, leaving ordinary protected merge available if only the later controller job failed. PR #376 closed unmerged with zero repair pushes and no downstream evidence.
-- Issue #377 records recurrence fingerprint `agent-learning.protected-evidence.required-aggregate-boundary`. The current bounded workflow capsule moves the existing verifier into the aggregate-producing review job after independent review and removes the duplicate from the later merge job. It adds no job, model call, credential, or status context and preserves the complete-rollup merge defense. Phase 2 remains `in_progress`; a merged PR alone is not runtime evidence.
+- Required-aggregate PR #378 exact head `e190905af82dcf0c80b148e064ec0b3b96331a2d` passed CI `31320045707`, Policy Check `31320045665`, CodeQL `31320045682`, and autonomous review/controller `31320045830`, then merged as `f56422021640b34be2588c33999f63b59a87399a` with zero repairs. Main Delivery `31320185273`, exact-main CI `31320199555`, Deploy Test `31320281566`, Promote Production `31320447859`, and fresh test/production runtime truth passed. The current evidence retry stages the public-safe record while keeping Phase 2 `in_progress`; only a later ledger PR may mark acceptance after this PR's terminal evidence exists. Issues #374 and #377 remain open until their versioned counterfactual artifacts are delivered. A merged PR alone is not runtime evidence.
 
 ## 2026-08-09 Phase 2 evidence PR exposed identical-compare compatibility defect
 
