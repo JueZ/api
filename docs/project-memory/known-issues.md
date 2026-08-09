@@ -12,12 +12,12 @@
 - PR #385 closed unmerged after one formatting repair; no merge, deployment, model call, or runtime acceptance exists. Issue #359 records recurrence count 6 and artifact `historical-main-delivery-lineage` records the implemented disposition.
 - PR #386 merged the narrow repair selecting canonical Main Delivery records within the independently derived exact trigger title while still rejecting a later duplicate/failure for that same trigger. PR #388 subsequently delivered that code through terminal test and production runtime evidence.
 
-## Phase 2 evidence verification is required but not yet accepted
+## Phase 2 evidence verification is accepted
 
 - PR #376 exact head `d6f207117e770aabc7b7baa4414c35f4d318072a` passed all free aggregates, but autonomous review run `31319465352` rejected the acceptance design because `Autonomous review complete` was published before the protected program-evidence verifier ran in the later merge job.
 - Branch protection intentionally requires exactly four stable aggregates and does not separately require `merge exact PR head`. PR #375's bounded bootstrap merge proved that ordinary protected merge can remain available after the later verifier fails. The verifier therefore must participate in the existing review aggregate rather than relying only on autonomous-controller merge behavior or adding a fifth context.
 - PR #378 delivered the issue #377 aggregate-boundary correction as merge `f56422021640b34be2588c33999f63b59a87399a` with terminal delivery/runtime evidence. PR #385 proved the required deterministic aggregate invokes the verifier and fails closed on invalid canonical history.
-- Phase 2 remains `in_progress` because no evidence retry has passed the repaired historical-lineage rule and completed post-merge delivery. Only a later protected ledger PR may mark acceptance after that proof exists.
+- PR #389 passed the required deterministic historical verifier and merged as `c71db002a86ac82f1076f6e6fe031c4bbc2b91b7`. Main Delivery `31330909296`, exact-main CI `31330924386`, Deploy Test `31331003596`, and Promote Production `31331166859` passed with public/authenticated smoke, telemetry, provenance, and ledgers. Phase 2 is accepted; preserve this section as historical fail-closed evidence.
 
 ## Identical-compare compatibility is delivered; durable learning remains
 
@@ -25,9 +25,9 @@
 - Compatibility PR #375 merged the bounded fix as `f7ec8cbb4d9bc44fecd9a833c3d7cc483f6974f2` and completed exact-main CI, test/production delivery, smoke, telemetry, release-ledger, and fresh runtime verification. Omitted `head_commit` is accepted only for the fully bound identical case; non-identical comparisons retain exact head binding and fail closed.
 - Issue #374 remains open because operational recovery is not a versioned learning artifact. It still requires the recurrence fingerprint, executable regression reference, and exact broken/fixed counterfactual proof through an ordinary protected PR.
 
-## Phase 2 acceptance still lacks exercised required evidence
+## Phase 2 acceptance evidence is delivered
 
-- PR #349 implemented and delivered the versioned-learning system, but its acceptance evidence has not yet exercised the trusted verifier at the required aggregate boundary.
+- PR #349 implemented and delivered the versioned-learning system. PR #389 subsequently exercised the trusted verifier at the required aggregate boundary and completed terminal post-merge runtime delivery. Public-safe evidence is archived at `docs/agent-learning/evidence/phase-2-versioned-artifacts.json`.
 - PR #350 closed after its second repair because environment identity was not independently bound. PR #352 final head `54d76353d72d5342f4b7f3944b58d384a95b7075` passed all free gates, but autonomous review `31301156652` rejected the design because it exported an authenticated Actions/deployment token to scripts from the PR checkout. The same review found that generic HTTPS origins plus default redirects permit SSRF/redirect escape.
 - PR #354 moved authenticated verification into protected-main controller code and repaired the runtime-host, redirect, byte-bound, digest, and candidate/controller identity boundaries. Its final head `0fef86e2de488545970507f362e2abbc974681ca` passed CI `31305790271`, Policy Check `31305790288`, and CodeQL `31305790267`, but autonomous review `31305789487` found that generic authenticated evidence was not pinned to designated Phase 2 implementation PR #349. It closed unmerged after both repairs.
 - PR #358 and library-only successor #362 also closed unmerged after their two-repair limits. PR #362 final exact head `1f53529064742eb7d224eb3362b88aa6e3f52aa7` passed CI `31310187492`, Policy Check `31310187489`, and CodeQL `31310187546`, but autonomous review `31310186793` rejected an ambiguous implementation-commit/final-head claim and controller code checked only against a caller-provided SHA.

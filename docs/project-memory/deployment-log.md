@@ -1,5 +1,11 @@
 # Deployment log
 
+## 2026-08-09 — Phase 2 historical evidence accepted through production
+
+- Source: PR #389 exact head `91f79994c62cdcbe67b489c06629a862aff14ac5` passed CI `31330795938`, Policy Check `31330795948`, CodeQL `31330795967`, and deterministic governance `31330796084`. The required aggregate authenticated the complete historical Phase 2 evidence before merge `c71db002a86ac82f1076f6e6fe031c4bbc2b91b7`.
+- Main delivery: controller `31330909296`, exact-main CI `31330924386`, Deploy Test `31331003596`, and Promote Production `31331166859` passed for the exact merge.
+- Acceptance: both environments passed immutable-source validation, public and authenticated smoke, telemetry correlation, and ledger publication. Test provenance artifact `9042952622` has digest `sha256:646a21b7330c07033e0e9bd5dab2b46996b53da93cf9155d95722779885e4534`; production ledger artifact `9043000601` has digest `sha256:ea6854f93c141f968f8c80b6c2097766bc2fe7aa02c49ac71e1afad1a7f6f834`. Phase 2 is accepted. A merged PR alone was not treated as runtime evidence.
+
 ## 2026-08-09 — Deterministic governance artifact contract accepted through production
 
 - Source: PR #388 exact head `70a9ad451d60385f9f1824df38849702484e54df` passed CI `31329974798`, Policy Check `31329974783`, CodeQL `31329974788`, and deterministic governance `31329974916`, then merged as `2a616bbe76fa2bf972fee68d51714ebacdffc143` with zero remote repair pushes.
