@@ -64,6 +64,7 @@ const MAX_HEALTH_BYTES = 64 * 1024;
 const EXACT_SHA = /^[0-9a-f]{40}$/;
 const EXACT_DIGEST = /^sha256:[0-9a-f]{64}$/;
 const OPAQUE_CORRELATION = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/;
+const PASSING_CHECK_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -75,6 +76,10 @@ function addFinding(findings, condition, message) {
 
 function exactPositiveInteger(value) {
   return Number.isSafeInteger(value) && value > 0;
+}
+
+function latestByNumericId(records) {
+  return [...records].sort((left, right) => Number(right?.id) - Number(left?.id))[0];
 }
 
 function exactKeysFindings(value, requiredKeys, label) {
@@ -384,6 +389,86 @@ export function workflowRunFindings(run, expected, label = 'workflow run') {
   return findings;
 }
 
+export function completeHistoricalCheckRollupFindings(checkRuns, commitStatuses, headSha) {
+  const findings = [];
+  const latestChecks = new Map();
+  for (const checkRun of Array.isArray(checkRuns) ? checkRuns : []) {
+    addFinding(findings, checkRun?.head_sha === headSha, 'historical check rollup contains a wrong-head check');
+    if (checkRun?.head_sha !== headSha) continue;
+    const identity = `${checkRun?.app?.id ?? checkRun?.app?.slug ?? 'unknown'}:${checkRun?.name ?? 'unknown'}`;
+    const previous = latestChecks.get(identity);
+    if (!previous || Number(checkRun.id) > Number(previous.id)) latestChecks.set(identity, checkRun);
+  }
+  addFinding(findings, latestChecks.size > 0, 'historical check rollup is empty');
+  for (const checkRun of latestChecks.values()) {
+    addFinding(findings, checkRun?.status === 'completed', `${checkRun?.name ?? 'historical check'} is not completed`);
+    addFinding(
+      findings,
+      PASSING_CHECK_CONCLUSIONS.has(checkRun?.conclusion),
+      `${checkRun?.name ?? 'historical check'} latest conclusion is not passing`,
+    );
+  }
+
+  const latestStatuses = new Map();
+  for (const status of Array.isArray(commitStatuses) ? commitStatuses : []) {
+    addFinding(findings, status?.sha === headSha, 'historical commit status rollup contains a wrong-head status');
+    if (status?.sha !== headSha) continue;
+    const previous = latestStatuses.get(status.context);
+    if (!previous || Number(status.id) > Number(previous.id)) latestStatuses.set(status.context, status);
+  }
+  for (const status of latestStatuses.values()) {
+    addFinding(
+      findings,
+      status?.state === 'success',
+      `${status?.context ?? 'historical commit status'} latest state is not successful`,
+    );
+  }
+  return findings;
+}
+
+function canonicalAggregateCheckFindings(record, allCheckRuns, implementation) {
+  const findings = [];
+  const named = (Array.isArray(allCheckRuns) ? allCheckRuns : []).filter(
+    (checkRun) => checkRun?.head_sha === implementation.headSha && checkRun?.name === record?.context,
+  );
+  addFinding(
+    findings,
+    named.every((checkRun) => checkRun?.app?.id === GITHUB_ACTIONS_APP.id && checkRun?.app?.slug === record?.appSlug),
+    `${record?.context} rollup contains a wrong-App check`,
+  );
+  const expectedAppRuns = named.filter(
+    (checkRun) => checkRun?.app?.id === GITHUB_ACTIONS_APP.id && checkRun?.app?.slug === record?.appSlug,
+  );
+  const latest = latestByNumericId(expectedAppRuns);
+  addFinding(findings, Boolean(latest), `${record?.context} canonical latest check is missing`);
+  addFinding(findings, latest?.id === record?.checkRunId, `${record?.context} declared check is not canonical latest`);
+  return findings;
+}
+
+function workflowRunMatchesIdentity(run, expected) {
+  return (
+    run?.repository?.full_name === expected.repository &&
+    run?.path === expected.path &&
+    run?.event === expected.event &&
+    run?.head_sha === expected.headSha &&
+    (!expected.headBranch || run?.head_branch === expected.headBranch) &&
+    (!expected.headRepository || run?.head_repository?.full_name === expected.headRepository) &&
+    (!expected.displayTitle || run?.display_title === expected.displayTitle)
+  );
+}
+
+export function canonicalWorkflowRunFindings(recordedRun, workflowRuns, expected, label = 'workflow run') {
+  const findings = [...workflowRunFindings(recordedRun, expected, label)];
+  const applicable = (Array.isArray(workflowRuns) ? workflowRuns : []).filter((run) =>
+    workflowRunMatchesIdentity(run, expected),
+  );
+  const latest = latestByNumericId(applicable);
+  addFinding(findings, Boolean(latest), `${label} canonical history is missing`);
+  addFinding(findings, latest?.id === expected.id, `${label} is not the canonical latest applicable run`);
+  if (latest) findings.push(...workflowRunFindings(latest, expected, `${label} canonical latest record`));
+  return findings;
+}
+
 export function aggregateCheckFindings(record, checkRun, workflowRun, implementation) {
   const findings = [];
   const expectedWorkflow = EXPECTED_AGGREGATES[record?.context];
@@ -499,6 +584,107 @@ export function verifyArtifactArchiveDigest(archive, authenticatedDigest, record
   return computed;
 }
 
+function workflowRunIdFromJobUrl(value) {
+  if (typeof value !== 'string') return undefined;
+  try {
+    const url = new URL(value);
+    const match = url.pathname.match(/^\/JueZ\/api\/actions\/runs\/(\d+)\/job\/\d+\/?$/);
+    if (url.protocol !== 'https:' || url.hostname !== 'github.com' || !match) return undefined;
+    const runId = Number(match[1]);
+    return exactPositiveInteger(runId) ? runId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function deploymentIdentityMatches(deployment, environment, expectedSha) {
+  return (
+    deployment?.sha === expectedSha &&
+    deployment?.ref === 'main' &&
+    deployment?.environment === EXPECTED_DEPLOYMENT_ENVIRONMENTS[environment] &&
+    deployment?.task === 'deploy'
+  );
+}
+
+export function currentRuntimeFindings(currentRuntime) {
+  const findings = [];
+  const beforeSha = currentRuntime?.mainBefore?.object?.sha;
+  const afterSha = currentRuntime?.mainAfter?.object?.sha;
+  addFinding(findings, currentRuntime?.mainBefore?.object?.type === 'commit', 'current main ref is not a commit');
+  addFinding(findings, currentRuntime?.mainAfter?.object?.type === 'commit', 'final main ref is not a commit');
+  addFinding(findings, EXACT_SHA.test(beforeSha || ''), 'current main SHA is invalid');
+  addFinding(findings, afterSha === beforeSha, 'current main changed during trusted runtime verification');
+  for (const environment of ['test', 'prod']) {
+    const observed = currentRuntime?.environments?.[environment];
+    const expectedEnvironment = EXPECTED_DEPLOYMENT_ENVIRONMENTS[environment];
+    const deployments = (Array.isArray(observed?.deployments) ? observed.deployments : []).filter(
+      (deployment) =>
+        deployment?.ref === 'main' && deployment?.environment === expectedEnvironment && deployment?.task === 'deploy',
+    );
+    const latestDeployment = latestByNumericId(deployments);
+    addFinding(findings, Boolean(latestDeployment), `${environment} current deployment is missing`);
+    addFinding(
+      findings,
+      latestDeployment?.id === observed?.deployment?.id,
+      `${environment} current deployment is not canonical latest`,
+    );
+    addFinding(findings, latestDeployment?.sha === beforeSha, `${environment} current deployment is not exact main`);
+    addFinding(
+      findings,
+      githubActionsBot(latestDeployment?.creator),
+      `${environment} current deployment creator is not GitHub Actions`,
+    );
+    const statuses = Array.isArray(observed?.deploymentStatuses) ? observed.deploymentStatuses : [];
+    const latestStatus = latestByNumericId(statuses);
+    addFinding(findings, Boolean(latestStatus), `${environment} current deployment status is missing`);
+    addFinding(findings, latestStatus?.state === 'success', `${environment} current deployment did not succeed`);
+    addFinding(
+      findings,
+      latestStatus?.environment === expectedEnvironment,
+      `${environment} current deployment status environment does not match`,
+    );
+    addFinding(
+      findings,
+      githubActionsBot(latestStatus?.creator),
+      `${environment} current deployment status creator is not GitHub Actions`,
+    );
+    addFinding(
+      findings,
+      allowedRuntimeOrigin(environment, latestStatus?.environment_url) ===
+        `https://${ACCEPTANCE_RUNTIME_HOSTS[environment]}`,
+      `${environment} current deployment runtime origin is not allowlisted`,
+    );
+    const currentRunId = workflowRunIdFromJobUrl(latestStatus?.log_url);
+    addFinding(
+      findings,
+      exactPositiveInteger(currentRunId),
+      `${environment} current deployment run identity is invalid`,
+    );
+    addFinding(findings, observed?.liveHealth?.status === 'ok', `${environment} current live health is not ok`);
+    addFinding(
+      findings,
+      observed?.liveHealth?.environmentName === environment,
+      `${environment} current live health environment does not match`,
+    );
+    addFinding(
+      findings,
+      observed?.liveHealth?.deployedCommitSha === beforeSha,
+      `${environment} current live health commit is not exact main`,
+    );
+    addFinding(
+      findings,
+      observed?.liveHealth?.deployedSourceRef === beforeSha,
+      `${environment} current live health source ref is not exact main`,
+    );
+    addFinding(
+      findings,
+      observed?.liveHealth?.deploymentRunId === String(currentRunId),
+      `${environment} current live health deployment run does not match`,
+    );
+  }
+  return findings;
+}
+
 function deploymentJobFindings(record, job, environment, evidence) {
   const findings = [];
   const expectedName = EXPECTED_DEPLOYMENT_JOBS[environment];
@@ -546,6 +732,16 @@ function deploymentEnvironmentFindings(record, ledger, observed, environment, ev
   const job = observed.deploymentJob;
   const statuses = Array.isArray(observed.deploymentStatuses) ? observed.deploymentStatuses : [];
   const status = statuses.find((candidate) => candidate.id === record.deploymentStatusId);
+  const applicableDeployments = (Array.isArray(observed.deploymentHistory) ? observed.deploymentHistory : []).filter(
+    (candidate) => deploymentIdentityMatches(candidate, environment, evidence.implementation.pullRequest.mergeSha),
+  );
+  const latestDeployment = latestByNumericId(applicableDeployments);
+  addFinding(findings, Boolean(latestDeployment), `${environment} historical deployment history is missing`);
+  addFinding(
+    findings,
+    latestDeployment?.id === record.deploymentId,
+    `${environment} historical deployment is not canonical latest for the implementation commit`,
+  );
   addFinding(findings, deployment?.id === record.deploymentId, `${environment} deployment ID does not match`);
   addFinding(
     findings,
@@ -577,6 +773,34 @@ function deploymentEnvironmentFindings(record, ledger, observed, environment, ev
     `${environment} deployment status creator is not GitHub Actions`,
   );
   addFinding(findings, status?.log_url === job?.html_url, `${environment} deployment status job URL does not match`);
+  const laterStatuses = statuses.filter((candidate) => Number(candidate?.id) > Number(status?.id));
+  for (const laterStatus of laterStatuses) {
+    addFinding(
+      findings,
+      laterStatus?.state === 'inactive',
+      `${environment} deployment has a later non-supersession status`,
+    );
+    addFinding(
+      findings,
+      laterStatus?.environment === expectedEnvironment,
+      `${environment} later deployment status environment does not match`,
+    );
+    addFinding(
+      findings,
+      githubActionsBot(laterStatus?.creator),
+      `${environment} later deployment status creator is not GitHub Actions`,
+    );
+    addFinding(
+      findings,
+      laterStatus?.log_url === job?.html_url,
+      `${environment} later deployment status job URL does not match`,
+    );
+    addFinding(
+      findings,
+      laterStatus?.environment_url === '',
+      `${environment} inactive deployment status must not redirect runtime evidence`,
+    );
+  }
   const expectedOrigin = allowedRuntimeOrigin(environment, ledger?.apiBaseUrl);
   addFinding(findings, Boolean(expectedOrigin), `${environment} ledger runtime origin is not allowlisted`);
   addFinding(
@@ -639,22 +863,6 @@ function deploymentLedgerFindings(record, ledger, observed, environment, evidenc
     `${environment} authenticated smoke did not pass`,
   );
   addFinding(findings, ledger?.telemetryCheckResult?.status === 'passed', `${environment} telemetry did not pass`);
-  addFinding(findings, observed.liveHealth?.status === 'ok', `${environment} live health is not ok`);
-  addFinding(
-    findings,
-    observed.liveHealth?.environmentName === environment,
-    `${environment} live health environment does not match`,
-  );
-  addFinding(
-    findings,
-    observed.liveHealth?.deploymentRunId === String(record.workflowRunId),
-    `${environment} live health deployment run does not match`,
-  );
-  addFinding(
-    findings,
-    observed.liveHealth?.deployedCommitSha === evidence.implementation.pullRequest.mergeSha,
-    `${environment} live health commit does not match`,
-  );
   findings.push(...deploymentEnvironmentFindings(record, ledger, observed, environment, evidence));
   return findings;
 }
@@ -664,7 +872,25 @@ export function phase2EvidenceFindings(evidence, observed) {
   if (findings.length > 0) return findings;
   const implementation = evidence.implementation.pullRequest;
   findings.push(...pullRequestFindings(evidence, observed.pullRequest));
+  findings.push(
+    ...completeHistoricalCheckRollupFindings(
+      observed.checkRollup?.checkRuns,
+      observed.checkRollup?.commitStatuses,
+      implementation.headSha,
+    ),
+  );
   for (const record of evidence.implementation.exactHeadAggregates) {
+    findings.push(...canonicalAggregateCheckFindings(record, observed.checkRollup?.checkRuns, implementation));
+    const expectedWorkflow = EXPECTED_AGGREGATES[record.context];
+    const expected = {
+      id: record.workflowRunId,
+      repository: 'JueZ/api',
+      path: expectedWorkflow.path,
+      event: expectedWorkflow.event,
+      headSha: implementation.headSha,
+      headBranch: implementation.branch,
+      headRepository: 'JueZ/api',
+    };
     findings.push(
       ...aggregateCheckFindings(
         record,
@@ -672,8 +898,17 @@ export function phase2EvidenceFindings(evidence, observed) {
         observed.workflowRuns[String(record.workflowRunId)],
         implementation,
       ),
+      ...canonicalWorkflowRunFindings(
+        observed.workflowRuns[String(record.workflowRunId)],
+        observed.workflowHistories?.implementationHead,
+        expected,
+        `${record.context} workflow run`,
+      ),
     );
   }
+  const autonomousReviewRecord = evidence.implementation.exactHeadAggregates.find(
+    (record) => record.context === 'Autonomous review complete',
+  );
   for (const [key, expectedWorkflow] of Object.entries(EXPECTED_DELIVERY_RUNS)) {
     const record = evidence.implementation.postMergeDelivery[key];
     addFinding(findings, record.sourceSha === implementation.mergeSha, `${key} source SHA does not match the merge`);
@@ -683,13 +918,23 @@ export function phase2EvidenceFindings(evidence, observed) {
       path: expectedWorkflow.path,
       event: expectedWorkflow.event,
       headSha: implementation.mergeSha,
+      headBranch: 'main',
+      headRepository: 'JueZ/api',
     };
+    if (key === 'mainDelivery') {
+      expected.displayTitle = `Deliver trigger ${autonomousReviewRecord.workflowRunId} attempt 1`;
+    }
     if (key === 'deployTest') expected.displayTitle = `Deploy Test ${record.sourceSha} ${record.deliveryCorrelation}`;
     if (key === 'promoteProduction') {
       expected.displayTitle = `Promote Production ${record.sourceSha} ${record.deliveryCorrelation}`;
     }
     findings.push(
-      ...workflowRunFindings(observed.workflowRuns[String(record.workflowRunId)], expected, `${key} workflow run`),
+      ...canonicalWorkflowRunFindings(
+        observed.workflowRuns[String(record.workflowRunId)],
+        observed.workflowHistories?.merge,
+        expected,
+        `${key} workflow run`,
+      ),
     );
   }
   findings.push(
@@ -714,6 +959,7 @@ export function phase2EvidenceFindings(evidence, observed) {
       allowedRuntimeOrigin('prod', observed.environments.prod.ledger.apiBaseUrl),
     'test and production runtime origins must be distinct',
   );
+  findings.push(...currentRuntimeFindings(observed.currentRuntime));
   return findings;
 }
 
@@ -886,6 +1132,59 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     throw new Error('pull request contains more than 3000 changed files');
   }
 
+  async function getPaginatedCollection(path, key, label) {
+    const records = [];
+    for (let page = 1; page <= 100; page += 1) {
+      const separator = path.includes('?') ? '&' : '?';
+      const response = await getJson(`${path}${separator}per_page=100&page=${page}`);
+      const rows = key ? response?.[key] : response;
+      if (!Array.isArray(rows)) throw new Error(`${label} response is invalid`);
+      records.push(...rows);
+      if (
+        rows.length < 100 ||
+        (exactPositiveInteger(response?.total_count) && records.length >= response.total_count)
+      ) {
+        return records;
+      }
+    }
+    throw new Error(`${label} exceeds the 10000-record verification limit`);
+  }
+
+  async function getCheckRuns(headSha) {
+    if (!EXACT_SHA.test(headSha)) throw new Error('historical check-rollup SHA must be exact');
+    return getPaginatedCollection(`/commits/${headSha}/check-runs?filter=all`, 'check_runs', 'check rollup');
+  }
+
+  async function getCommitStatuses(headSha) {
+    if (!EXACT_SHA.test(headSha)) throw new Error('historical status-rollup SHA must be exact');
+    return getPaginatedCollection(`/commits/${headSha}/statuses`, undefined, 'commit status rollup');
+  }
+
+  async function getWorkflowRuns(headSha) {
+    if (!EXACT_SHA.test(headSha)) throw new Error('workflow-history SHA must be exact');
+    return getPaginatedCollection(`/actions/runs?head_sha=${headSha}`, 'workflow_runs', 'workflow history');
+  }
+
+  async function getDeploymentsForSha(headSha) {
+    if (!EXACT_SHA.test(headSha)) throw new Error('deployment-history SHA must be exact');
+    return getPaginatedCollection(`/deployments?sha=${headSha}`, undefined, 'deployment history');
+  }
+
+  async function getDeploymentsForEnvironment(environment) {
+    const expectedEnvironment = EXPECTED_DEPLOYMENT_ENVIRONMENTS[environment];
+    if (!expectedEnvironment) throw new Error('deployment environment is not allowlisted');
+    return getPaginatedCollection(
+      `/deployments?environment=${encodeURIComponent(expectedEnvironment)}`,
+      undefined,
+      `${environment} deployment history`,
+    );
+  }
+
+  async function getDeploymentStatuses(deploymentId) {
+    if (!exactPositiveInteger(deploymentId)) throw new Error('deployment ID must be a positive integer');
+    return getPaginatedCollection(`/deployments/${deploymentId}/statuses`, undefined, 'deployment status history');
+  }
+
   function downloadArtifact(artifactId) {
     if (!exactPositiveInteger(artifactId)) throw new Error('artifact ID must be a positive integer');
     const childEnvironment = Object.fromEntries(
@@ -914,7 +1213,18 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     return completed.stdout;
   }
 
-  return { getJson, getFile, getPullRequestFiles, downloadArtifact };
+  return {
+    getJson,
+    getFile,
+    getPullRequestFiles,
+    getCheckRuns,
+    getCommitStatuses,
+    getWorkflowRuns,
+    getDeploymentsForSha,
+    getDeploymentsForEnvironment,
+    getDeploymentStatuses,
+    downloadArtifact,
+  };
 }
 
 async function readLedgerArchive(archive, environment, spawn = spawnSync) {
@@ -963,11 +1273,31 @@ async function collectPhase2Observed(evidence, client, dependencies = {}) {
   const aggregates = evidence.implementation.exactHeadAggregates;
   const deliveryRecords = Object.values(evidence.implementation.postMergeDelivery);
   const workflowRunIds = [...new Set([...aggregates, ...deliveryRecords].map((record) => record.workflowRunId))];
+  const [
+    pullRequest,
+    checkRuns,
+    commitStatuses,
+    implementationWorkflowRuns,
+    mergeWorkflowRuns,
+    deploymentHistory,
+    mainBefore,
+  ] = await Promise.all([
+    client.getJson(`/pulls/${implementation.number}`),
+    client.getCheckRuns(implementation.headSha),
+    client.getCommitStatuses(implementation.headSha),
+    client.getWorkflowRuns(implementation.headSha),
+    client.getWorkflowRuns(implementation.mergeSha),
+    client.getDeploymentsForSha(implementation.mergeSha),
+    client.getJson('/git/ref/heads/main'),
+  ]);
   const observed = {
-    pullRequest: await client.getJson(`/pulls/${implementation.number}`),
+    pullRequest,
     checkRuns: {},
     workflowRuns: {},
+    checkRollup: { checkRuns, commitStatuses },
+    workflowHistories: { implementationHead: implementationWorkflowRuns, merge: mergeWorkflowRuns },
     environments: {},
+    currentRuntime: { mainBefore, environments: {} },
   };
   await Promise.all(
     aggregates.map(async (record) => {
@@ -991,16 +1321,33 @@ async function collectPhase2Observed(evidence, client, dependencies = {}) {
     const archive = client.downloadArtifact(record.releaseLedgerArtifactId);
     verifyArtifactArchiveDigest(archive, artifact.digest, record.releaseLedgerArtifactDigest, `${environment} ledger`);
     const ledger = await readArchive(archive, environment);
-    const liveHealth = await fetchHealth(environment, ledger.apiBaseUrl);
     observed.environments[environment] = {
       artifactList,
       ledger,
-      liveHealth,
       deployment: await client.getJson(`/deployments/${record.deploymentId}`),
-      deploymentStatuses: await client.getJson(`/deployments/${record.deploymentId}/statuses?per_page=100`),
+      deploymentHistory,
+      deploymentStatuses: await client.getDeploymentStatuses(record.deploymentId),
       deploymentJob: await client.getJson(`/actions/jobs/${record.deploymentJobId}`),
     };
   }
+  for (const environment of ['test', 'prod']) {
+    const deployments = await client.getDeploymentsForEnvironment(environment);
+    const expectedEnvironment = EXPECTED_DEPLOYMENT_ENVIRONMENTS[environment];
+    const deployment = latestByNumericId(
+      deployments.filter(
+        (candidate) =>
+          candidate?.ref === 'main' && candidate?.environment === expectedEnvironment && candidate?.task === 'deploy',
+      ),
+    );
+    if (!deployment) throw new Error(`${environment} current deployment is unavailable`);
+    observed.currentRuntime.environments[environment] = {
+      deployments,
+      deployment,
+      deploymentStatuses: await client.getDeploymentStatuses(deployment.id),
+      liveHealth: await fetchHealth(environment, `https://${ACCEPTANCE_RUNTIME_HOSTS[environment]}`),
+    };
+  }
+  observed.currentRuntime.mainAfter = await client.getJson('/git/ref/heads/main');
   return observed;
 }
 

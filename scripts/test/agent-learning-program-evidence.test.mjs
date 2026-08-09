@@ -11,8 +11,11 @@ import {
   PROGRAM_PATH,
   acceptedPhaseEvidenceFindings,
   allowedRuntimeOrigin,
+  canonicalWorkflowRunFindings,
+  completeHistoricalCheckRollupFindings,
   controllerRunFindings,
   createTrustedGithubClient,
+  currentRuntimeFindings,
   fetchAllowedRuntimeHealth,
   lowRiskReviewEvidenceFindings,
   phase2EvidenceFindings,
@@ -29,6 +32,7 @@ import {
 const baselineSha = PHASE_2_IMPLEMENTATION_IDENTITY.baselineMainSha;
 const headSha = PHASE_2_IMPLEMENTATION_IDENTITY.headSha;
 const mergeSha = PHASE_2_IMPLEMENTATION_IDENTITY.mergeSha;
+const currentMainSha = 'e'.repeat(40);
 const artifactDigest = `sha256:${'d'.repeat(64)}`;
 const branch = 'codex/agent-learning-phase-2-artifacts';
 
@@ -158,6 +162,14 @@ function observedEnvironment(environment, record) {
       : `Promote Production ${record.sourceSha} ${record.deliveryCorrelation}`;
   const jobUrl = `https://github.com/JueZ/api/actions/runs/${record.workflowRunId}/job/${record.deploymentJobId}`;
   const ledger = releaseLedger(environment, record);
+  const deployment = {
+    id: record.deploymentId,
+    sha: mergeSha,
+    ref: 'main',
+    environment: expectedEnvironment,
+    task: 'deploy',
+    creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
+  };
   return {
     artifactList: {
       artifacts: [
@@ -171,21 +183,17 @@ function observedEnvironment(environment, record) {
       ],
     },
     ledger,
-    liveHealth: {
-      status: 'ok',
-      environmentName: environment,
-      deploymentRunId: String(record.workflowRunId),
-      deployedCommitSha: mergeSha,
-    },
-    deployment: {
-      id: record.deploymentId,
-      sha: mergeSha,
-      ref: 'main',
-      environment: expectedEnvironment,
-      task: 'deploy',
-      creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
-    },
+    deployment,
+    deploymentHistory: [deployment],
     deploymentStatuses: [
+      {
+        id: record.deploymentStatusId + 1000,
+        state: 'inactive',
+        environment: expectedEnvironment,
+        environment_url: '',
+        log_url: jobUrl,
+        creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
+      },
       {
         id: record.deploymentStatusId,
         state: 'success',
@@ -211,6 +219,39 @@ function observedEnvironment(environment, record) {
         { name: 'Write release ledger', status: 'completed', conclusion: 'success' },
         { name: 'Upload release ledger', status: 'completed', conclusion: 'success' },
       ],
+    },
+  };
+}
+
+function currentObservedEnvironment(environment, deploymentId, statusId, runId) {
+  const expectedEnvironment = environment === 'test' ? 'test' : 'production';
+  const deployment = {
+    id: deploymentId,
+    sha: currentMainSha,
+    ref: 'main',
+    environment: expectedEnvironment,
+    task: 'deploy',
+    creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
+  };
+  return {
+    deployments: [deployment],
+    deployment,
+    deploymentStatuses: [
+      {
+        id: statusId,
+        state: 'success',
+        environment: expectedEnvironment,
+        environment_url: `https://${ACCEPTANCE_RUNTIME_HOSTS[environment]}`,
+        log_url: `https://github.com/JueZ/api/actions/runs/${runId}/job/${deploymentId + 5000}`,
+        creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
+      },
+    ],
+    liveHealth: {
+      status: 'ok',
+      environmentName: environment,
+      deploymentRunId: String(runId),
+      deployedCommitSha: currentMainSha,
+      deployedSourceRef: currentMainSha,
     },
   };
 }
@@ -253,13 +294,27 @@ function validObserved(evidence) {
     ]),
   );
   const delivery = evidence.implementation.postMergeDelivery;
+  const autonomousReviewRunId = evidence.implementation.exactHeadAggregates.find(
+    (record) => record.context === 'Autonomous review complete',
+  ).workflowRunId;
   const deliveryRuns = {
-    301: workflowRun(301, '.github/workflows/codex-main-delivery.yml', 'workflow_run', mergeSha),
-    302: workflowRun(302, '.github/workflows/ci.yml', 'workflow_dispatch', mergeSha),
+    301: workflowRun(301, '.github/workflows/codex-main-delivery.yml', 'workflow_run', mergeSha, {
+      head_branch: 'main',
+      head_repository: { full_name: 'JueZ/api' },
+      display_title: `Deliver trigger ${autonomousReviewRunId} attempt 1`,
+    }),
+    302: workflowRun(302, '.github/workflows/ci.yml', 'workflow_dispatch', mergeSha, {
+      head_branch: 'main',
+      head_repository: { full_name: 'JueZ/api' },
+    }),
     303: workflowRun(303, '.github/workflows/deploy-test.yml', 'repository_dispatch', mergeSha, {
+      head_branch: 'main',
+      head_repository: { full_name: 'JueZ/api' },
       display_title: `Deploy Test ${mergeSha} ${delivery.deployTest.deliveryCorrelation}`,
     }),
     304: workflowRun(304, '.github/workflows/promote-production.yml', 'repository_dispatch', mergeSha, {
+      head_branch: 'main',
+      head_repository: { full_name: 'JueZ/api' },
       display_title: `Promote Production ${mergeSha} ${delivery.promoteProduction.deliveryCorrelation}`,
     }),
   };
@@ -275,9 +330,22 @@ function validObserved(evidence) {
     },
     checkRuns,
     workflowRuns: { ...aggregateRuns, ...deliveryRuns },
+    checkRollup: { checkRuns: Object.values(checkRuns), commitStatuses: [] },
+    workflowHistories: {
+      implementationHead: Object.values(aggregateRuns),
+      merge: Object.values(deliveryRuns),
+    },
     environments: {
       test: observedEnvironment('test', delivery.deployTest),
       prod: observedEnvironment('prod', delivery.promoteProduction),
+    },
+    currentRuntime: {
+      mainBefore: { object: { type: 'commit', sha: currentMainSha } },
+      mainAfter: { object: { type: 'commit', sha: currentMainSha } },
+      environments: {
+        test: currentObservedEnvironment('test', 8001, 9001, 10001),
+        prod: currentObservedEnvironment('prod', 8002, 9002, 10002),
+      },
     },
   };
 }
@@ -362,6 +430,87 @@ test('live Phase 2 verification binds distinct GitHub environments, jobs, ledger
   const findings = phase2EvidenceFindings(evidence, observed);
   assert.ok(findings.some((finding) => finding.includes('test GitHub environment does not match')));
   assert.ok(findings.some((finding) => finding.includes('test ledger runtime origin is not allowlisted')));
+});
+
+test('historical check rollup rejects unrelated and aggregate superseding failures', () => {
+  const evidence = validEvidence();
+  const unrelated = validObserved(evidence);
+  unrelated.checkRollup.checkRuns.push({
+    id: 5000,
+    name: 'later unrelated security check',
+    head_sha: headSha,
+    status: 'completed',
+    conclusion: 'failure',
+    app: { id: 15_368, slug: 'github-actions' },
+  });
+  let findings = phase2EvidenceFindings(evidence, unrelated);
+  assert.ok(findings.some((finding) => finding.includes('later unrelated security check latest conclusion')));
+
+  const supersededAggregate = validObserved(evidence);
+  supersededAggregate.checkRollup.checkRuns.push({
+    ...supersededAggregate.checkRuns['101'],
+    id: 5100,
+    status: 'in_progress',
+    conclusion: null,
+  });
+  findings = phase2EvidenceFindings(evidence, supersededAggregate);
+  assert.ok(findings.some((finding) => finding.includes('CI complete declared check is not canonical latest')));
+  assert.ok(findings.some((finding) => finding.includes('CI complete is not completed')));
+
+  assert.ok(
+    completeHistoricalCheckRollupFindings(
+      [],
+      [{ id: 1, context: 'legacy-policy', sha: headSha, state: 'pending' }],
+      headSha,
+    ).some((finding) => finding.includes('legacy-policy latest state')),
+  );
+});
+
+test('canonical workflow and deployment histories reject later failed records', () => {
+  const evidence = validEvidence();
+  const observed = validObserved(evidence);
+  const recordedDeploy = observed.workflowRuns['303'];
+  const expectedDeploy = {
+    id: 303,
+    repository: 'JueZ/api',
+    path: '.github/workflows/deploy-test.yml',
+    event: 'repository_dispatch',
+    headSha: mergeSha,
+    headBranch: 'main',
+    headRepository: 'JueZ/api',
+    displayTitle: recordedDeploy.display_title,
+  };
+  const laterFailedRun = { ...recordedDeploy, id: 5300, conclusion: 'failure' };
+  assert.ok(
+    canonicalWorkflowRunFindings(recordedDeploy, [recordedDeploy, laterFailedRun], expectedDeploy, 'deployTest').some(
+      (finding) => finding.includes('not the canonical latest applicable run'),
+    ),
+  );
+
+  observed.workflowHistories.merge.push(laterFailedRun);
+  observed.environments.test.deploymentStatuses.push({
+    ...observed.environments.test.deploymentStatuses[0],
+    id: 5400,
+    state: 'failure',
+  });
+  const findings = phase2EvidenceFindings(evidence, observed);
+  assert.ok(findings.some((finding) => finding.includes('deployTest workflow run is not the canonical latest')));
+  assert.ok(findings.some((finding) => finding.includes('test deployment has a later non-supersession status')));
+});
+
+test('historical inactive supersession requires healthy exact-current-main runtime', () => {
+  const evidence = validEvidence();
+  const observed = validObserved(evidence);
+  assert.deepEqual(currentRuntimeFindings(observed.currentRuntime), []);
+  assert.notEqual(observed.currentRuntime.mainBefore.object.sha, mergeSha);
+
+  observed.currentRuntime.environments.prod.deploymentStatuses[0].state = 'in_progress';
+  observed.currentRuntime.environments.test.liveHealth.deployedCommitSha = mergeSha;
+  observed.currentRuntime.mainAfter.object.sha = 'f'.repeat(40);
+  const findings = currentRuntimeFindings(observed.currentRuntime);
+  assert.ok(findings.some((finding) => finding.includes('prod current deployment did not succeed')));
+  assert.ok(findings.some((finding) => finding.includes('test current live health commit is not exact main')));
+  assert.ok(findings.some((finding) => finding.includes('current main changed')));
 });
 
 test('runtime origins are fixed per environment and reject credentials, query data, and aliases', () => {
@@ -452,6 +601,33 @@ test('trusted GitHub reads are repository-bound, fixed-path, exact-ref, and no-r
     () => createTrustedGithubClient({ repository: 'attacker/repository', token: 'test-token-placeholder' }),
     /repository-bound/,
   );
+});
+
+test('trusted GitHub check history pagination is complete and exact-SHA bound', async () => {
+  const requests = [];
+  const client = createTrustedGithubClient({
+    repository: 'JueZ/api',
+    token: 'test-token-placeholder',
+    fetchImpl: async (url, init) => {
+      requests.push({ url, init });
+      const page = Number(new URL(url).searchParams.get('page'));
+      const count = page === 1 ? 100 : 1;
+      return new Response(
+        JSON.stringify({
+          total_count: 101,
+          check_runs: Array.from({ length: count }, (_, index) => ({ id: page * 1000 + index })),
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    },
+  });
+  const checkRuns = await client.getCheckRuns(headSha);
+  assert.equal(checkRuns.length, 101);
+  assert.equal(requests.length, 2);
+  assert.ok(requests.every((request) => request.init.redirect === 'error'));
+  assert.ok(requests.every((request) => request.url.includes(`/commits/${headSha}/check-runs?filter=all`)));
+  await assert.rejects(client.getCheckRuns('main'), /SHA must be exact/);
+  assert.equal(requests.length, 2);
 });
 
 test('artifact archive proof requires the authenticated and recorded digest to match the exact bytes', () => {
