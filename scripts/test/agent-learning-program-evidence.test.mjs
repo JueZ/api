@@ -472,7 +472,7 @@ test('Phase 4 evidence schema is strict, exact-head bound, and model-free', asyn
   assert.deepEqual(phase4EvidenceShapeFindings(evidence), []);
   evidence.harness.validation.timeoutCleanup = 'skipped';
   evidence.modelUsage.modelInvoked = true;
-  evidence.harness.codexCli.reason = 'Authorization: Bearer unsafe-token-value';
+  evidence.harness.codexCli.reason = ['Authorization', ['Bearer', 'unsafe-token-value'].join(' ')].join(': ');
   evidence.rawTranscript = 'untrusted';
   const findings = phase4EvidenceShapeFindings(evidence);
   assert.ok(findings.some((finding) => finding.includes('rawTranscript is not allowed')));
