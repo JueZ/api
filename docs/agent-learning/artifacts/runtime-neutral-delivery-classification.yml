@@ -1,0 +1,43 @@
+version: 1
+id: runtime-neutral-delivery-classification
+title: Skip environment deployment only for proven runtime-neutral changes
+fingerprint: delivery.runtime-neutral-change-unnecessary-environment-promotion
+source:
+  type: user_correction
+  references:
+    - kind: issue
+      locator: JueZ/api#392
+      url: https://github.com/JueZ/api/issues/392
+    - kind: pull_request
+      locator: JueZ/api#391
+      url: https://github.com/JueZ/api/pull/391
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31332272018
+      url: https://github.com/JueZ/api/actions/runs/31332272018
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31332564172
+      url: https://github.com/JueZ/api/actions/runs/31332564172
+classification:
+  failureArea: post-merge-delivery-efficiency
+  severity: medium
+  symptom: A project-memory-only merge rebuilt and redeployed unchanged application code through test and production.
+  rootCause: The protected delivery controller recognized only explicit skip markers and did not classify deployment impact from the authenticated complete pull-request file list.
+disposition:
+  primary: regression-test
+  rationale: Protected-main code now validates the exact runtime-neutral allowlist, authenticates and counts the complete paginated PR file list, considers both sides of renames, and fails closed to full delivery for every ambiguous or deployment-impacting change.
+artifacts:
+  - path: scripts/lib/autonomous-policy.mjs
+    kind: implementation
+  - path: scripts/classify-deployment-impact.mjs
+    kind: implementation
+  - path: scripts/test/deployment-impact.test.mjs
+    kind: regression-test
+  - path: scripts/test/autonomous-policy.test.mjs
+    kind: regression-test
+  - path: .github/workflows/codex-main-delivery.yml
+    kind: workflow
+  - path: .github/autonomous-policy.yml
+    kind: policy
+counterfactual:
+  hypothesis: Project-memory-only and other allowlisted documentation changes skip environment deployment after exact-main CI, while mixed, malformed, traversing, incomplete, renamed-from-code, or deployment-impacting changes still require full delivery.
+status: implemented

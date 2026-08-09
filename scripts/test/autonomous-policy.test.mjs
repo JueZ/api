@@ -364,9 +364,28 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
   assert.match(mainDeliveryWorkflow, /\.path == "\.github\/workflows\/codex-automerge\.yml"/);
   assert.match(mainDeliveryWorkflow, /client_payload\[ci_run_id\]=\$CI_RUN_ID/);
   assert.match(mainDeliveryWorkflow, /client_payload\[ci_delivery_correlation\]=\$CI_DELIVERY_CORRELATION/);
+  assert.match(mainDeliveryWorkflow, /pulls\/\$associated_pr_number\/files\?per_page=100/);
+  assert.match(mainDeliveryWorkflow, /if gh api --paginate --slurp/);
+  assert.match(mainDeliveryWorkflow, /actual_changed_files.*expected_changed_files/);
+  assert.match(mainDeliveryWorkflow, /node scripts\/classify-deployment-impact\.mjs/);
+  assert.match(mainDeliveryWorkflow, /trusted runtime-neutral path classification/);
+  assert.match(mainDeliveryWorkflow, /Environment deployment remains required/);
+  assert.match(mainDeliveryWorkflow, /changed-file-count-mismatch/);
+  assert.match(mainDeliveryWorkflow, /changed-file-list-unavailable/);
+  assert.match(mainDeliveryWorkflow, /malformed-classifier-result/);
+  assert.match(mainDeliveryWorkflow, /deploymentRequired == false/);
+  assert.match(mainDeliveryWorkflow, /impactPathCount == 0/);
   assert.match(mainDeliveryWorkflow, /Pinned Deploy Test run did not emit matching successful provenance/);
   assert.match(mainDeliveryWorkflow, /Pinned production run did not emit matching successful runtime-truth evidence/);
   assert.equal(mainDeliveryWorkflow.match(/^\s+assert_current_main$/gm)?.length, 4);
+  assert.ok(
+    mainDeliveryWorkflow.indexOf('wait_for_dispatch ci.yml') <
+      mainDeliveryWorkflow.indexOf('node scripts/classify-deployment-impact.mjs'),
+  );
+  assert.ok(
+    mainDeliveryWorkflow.indexOf('node scripts/classify-deployment-impact.mjs') <
+      mainDeliveryWorkflow.indexOf('event_type=deploy-test'),
+  );
 });
 
 test('privileged manual entry points execute only default-branch repository-dispatch workflows', () => {

@@ -7,7 +7,7 @@ trustedWorkflowSha256:
   ci.yml: 5245d8c298efd2f439b9630c034eedff8dc7631dbe08fd23744451a57a785771
   codeql.yml: 8220b94fdc56f9b33d7db4111fd41e60beb814ef3f2fc99611a09dd71e910590
   codex-automerge.yml: 2effc1d073bc1d47fd53e2d97a83f034cacb9fc74c5d6ce6834562382992a5da
-  codex-main-delivery.yml: 4e6c999bf18f563a1e2ffe95955dbc1a2fdfa9f4f24b888e247f7872c39be77b
+  codex-main-delivery.yml: 9b72f84a2639d5fd5c55f82f700174d910fc4c5772e90c74ae7f09bba3f6c9c6
   deploy-environment.yml: cd36744ebf07c466d407ca4ecd83751e2f6445263a7bab90145c69326d844be9
   deploy-test.yml: be874930e0d375765afe67d50429744f5f629d129b944cae601e915ea16c7275
   migrate-private-storage.yml: c5e8ba9e1379179ec4f1f3a6abcfaa7eb712b468e3f43e9c4606157a7ba8d31b
@@ -146,6 +146,14 @@ deployment:
   buildOnce: true
   requireExactArtifactDigest: true
   productionEnabledByDefault: false
+  # These paths can affect repository operation and therefore retain every PR
+  # and exact-main validation, but they do not alter deployed application,
+  # infrastructure, contract, or runtime configuration bytes.
+  runtimeNeutralPaths:
+    - '*.md'
+    - docs/**
+    - .github/**/*.md
+    - .agents/skills/**/*.md
 
 authorization:
   permissions:

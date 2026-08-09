@@ -43,6 +43,8 @@ The package scripts remain developer conveniences only. They are not the securit
 
 Checks must never be removed, bypassed, reclassified as optional, or made non-blocking to pass a change.
 
+Environment deployment may be omitted after successful exact-main CI only when protected-main code authenticates the merged PR, retrieves its complete paginated file list, matches the exact GitHub changed-file count, and proves every current and previous rename path belongs to the fixed runtime-neutral allowlist. A missing PR, malformed or duplicate path, path traversal, count mismatch, mixed change, or any application, workflow, policy, package, script, contract, infrastructure, or runtime path remains deployment-required. Explicit operator skip markers remain supported. No classifier result weakens PR aggregates, exact-main CI, security scans, provenance construction, or complete-rollup enforcement.
+
 ## Security invariants
 
 - Protected APIs keep JWT issuer/JWKS/audience/time/tenant/client/user validation and granular operation permission.

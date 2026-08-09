@@ -9,6 +9,13 @@ export const STABLE_REQUIRED_CHECKS = Object.freeze([
   Object.freeze({ name: 'CodeQL complete', appSlug: 'github-actions' }),
   Object.freeze({ name: 'Autonomous review complete', appSlug: 'github-actions' }),
 ]);
+export const RUNTIME_NEUTRAL_DEPLOYMENT_PATHS = Object.freeze([
+  '*.md',
+  'docs/**',
+  '.github/**/*.md',
+  '.agents/skills/**/*.md',
+]);
+const GITHUB_FILE_STATUSES = new Set(['added', 'changed', 'copied', 'modified', 'removed', 'renamed', 'unchanged']);
 const REQUIRED_EXECUTABLE_HIGH_RISK_PATTERNS = Object.freeze([
   'package.json',
   'package-lock.json',
@@ -125,6 +132,16 @@ export function validateAutonomousPolicy(policy) {
   if (policy.deployment?.productionEnabledByDefault !== false) {
     errors.push('deployment.productionEnabledByDefault must be false');
   }
+  validateStringArray(policy.deployment?.runtimeNeutralPaths, 'deployment.runtimeNeutralPaths', errors);
+  if (
+    !Array.isArray(policy.deployment?.runtimeNeutralPaths) ||
+    policy.deployment.runtimeNeutralPaths.length !== RUNTIME_NEUTRAL_DEPLOYMENT_PATHS.length ||
+    RUNTIME_NEUTRAL_DEPLOYMENT_PATHS.some(
+      (expected, index) => policy.deployment.runtimeNeutralPaths[index] !== expected,
+    )
+  ) {
+    errors.push(`deployment.runtimeNeutralPaths must contain exactly: ${RUNTIME_NEUTRAL_DEPLOYMENT_PATHS.join(', ')}`);
+  }
 
   const permissions = new Set(policy.authorization?.permissions ?? []);
   for (const permission of policy.authorization?.serviceTokenDeniedPermissions ?? []) {
@@ -158,6 +175,49 @@ export function classifyRisk(paths, policy = loadAutonomousPolicy()) {
     highRiskPaths,
     classes,
   };
+}
+
+export function classifyDeploymentImpact(files, policy = loadAutonomousPolicy()) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return deploymentImpactResult({ valid: false, reason: 'missing-changed-files' });
+  }
+
+  const paths = [];
+  for (const file of files) {
+    if (!isRecord(file) || !GITHUB_FILE_STATUSES.has(file.status)) {
+      return deploymentImpactResult({ valid: false, reason: 'invalid-changed-file-metadata' });
+    }
+    const filename = strictRepositoryPath(file.filename);
+    if (!filename) {
+      return deploymentImpactResult({ valid: false, reason: 'invalid-changed-file-path' });
+    }
+    paths.push(filename);
+
+    if (file.status === 'renamed') {
+      const previousFilename = strictRepositoryPath(file.previous_filename);
+      if (!previousFilename) {
+        return deploymentImpactResult({ valid: false, reason: 'invalid-renamed-file-path' });
+      }
+      paths.push(previousFilename);
+    } else if (file.previous_filename !== undefined) {
+      return deploymentImpactResult({ valid: false, reason: 'unexpected-previous-file-path' });
+    }
+  }
+
+  if (new Set(paths).size !== paths.length) {
+    return deploymentImpactResult({ valid: false, reason: 'duplicate-changed-file-path' });
+  }
+
+  const impactPaths = paths.filter(
+    (path) => !policy.deployment.runtimeNeutralPaths.some((pattern) => matchesPolicyGlob(path, pattern)),
+  );
+  return deploymentImpactResult({
+    valid: true,
+    reason: impactPaths.length === 0 ? 'runtime-neutral-only' : 'deployment-impacting-paths',
+    fileCount: files.length,
+    pathCount: paths.length,
+    impactPathCount: impactPaths.length,
+  });
 }
 
 export function isAutomergeCandidate(pullRequest, policy = loadAutonomousPolicy()) {
@@ -196,6 +256,25 @@ function globToRegExp(pattern) {
 
 function normalizePath(path) {
   return String(path).replaceAll('\\', '/').replace(/^\.\//, '');
+}
+
+function strictRepositoryPath(path) {
+  if (typeof path !== 'string' || path.length === 0 || path !== path.trim() || path.includes('\\')) return '';
+  if (path.startsWith('/') || path.startsWith('./') || /^[A-Za-z]:/.test(path)) return '';
+  const segments = path.split('/');
+  if (segments.some((segment) => segment.length === 0 || segment === '.' || segment === '..')) return '';
+  return path;
+}
+
+function deploymentImpactResult({ valid, reason, fileCount = 0, pathCount = 0, impactPathCount = 0 }) {
+  return {
+    valid,
+    deploymentRequired: !valid || impactPathCount > 0,
+    reason,
+    fileCount,
+    pathCount,
+    impactPathCount,
+  };
 }
 
 function escapeRegExp(value) {
