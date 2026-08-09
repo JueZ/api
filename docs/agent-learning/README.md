@@ -51,6 +51,8 @@ npm run agent:learning:status
 
 The generated index contains no timestamp, so repeated generation from the same artifacts is byte-for-byte reproducible. CI invokes schema validation, trusted historical scoring, live GitHub provenance validation, and the index checker by fixed script path inside the existing `architecture and agent validation` job; learning validation does not create a protected-branch status context.
 
+Phase 2 acceptance verification is intentionally separated from candidate-controlled evidence. `scripts/agent-learning/trusted-evidence-primitives.mjs` provides the protected-controller foundation: repository-bound authenticated GitHub reads, exact immutable refs, complete bounded pagination, fixed runtime origins, disabled redirects, byte-limited responses and artifact downloads, exact artifact-digest proof, single-entry JSON archive extraction, and protected-main ancestry validation. This library does not itself accept a phase and is not yet wired to the autonomous controller; schema, evidence collection, orchestration, controller wiring, and exercised acceptance evidence remain separate protected slices.
+
 `npm run eval:agents` remains the deterministic agent-policy evaluation command, and `npm run eval:agent-policy` is its clearer alias. The general task-evaluation aliases are reserved now but deliberately fail closed until the Phase 4 harness exists; an unavailable adapter or harness is not a pass.
 
 ## Public-safe evidence
