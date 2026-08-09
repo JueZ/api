@@ -1,10 +1,16 @@
 # Current state
 
+## 2026-08-09 Post-merge artifact contract repaired; Phase 2 evidence retry started
+
+- PR #388 exact head `70a9ad451d60385f9f1824df38849702484e54df` passed CI `31329974798`, Policy Check `31329974783`, CodeQL `31329974788`, and deterministic governance `31329974916`, then merged through the exact-head controller as `2a616bbe76fa2bf972fee68d51714ebacdffc143` with zero remote repair pushes.
+- Main Delivery `31330087561`, exact-main CI `31330102189`, Deploy Test `31330187457`, and Promote Production `31330356402` passed. Test and production passed exact-generation validation, public and authenticated smoke, telemetry correlation, and release-ledger publication. Issue #387 is closed with the protected PR and runtime evidence; no model call occurred.
+- Branch `codex/phase-2-evidence-retry` archives only public-safe Phase 2 and model-free migration evidence and keeps Phase 2 `in_progress`. Its protected deterministic aggregate must verify the complete historical evidence before merge; only a later protected ledger PR may mark acceptance. A merged PR alone is not runtime evidence.
+
 ## 2026-08-09 Historical lineage merged; post-merge artifact contract repair started
 
 - PR #386 exact head `af3c3131d7dd9cb842c273e9e4bef4582bb33f5f` passed CI `31329560162`, Policy Check `31329560166`, CodeQL `31329560180`, and deterministic governance `31329560170`, then merged through the exact-head controller as `a56a932393a885976ad85f56df6cf3ba0f142e1b`.
 - Main Delivery `31329669160` failed before main CI or deployment because the consumer still requested `autonomous-review-*`, `autonomous-review.json`, and `reviewedHeadSha`, while the exact trusted run published `autonomous-governance-<head>`, `autonomous-governance.json`, and `verifiedHeadSha`. No model call occurred.
-- Issue #387 and artifact `model-free-delivery-artifact-contract` record the executable-prevention disposition. Branch `codex/fix-model-free-delivery-artifact` owns only that contract repair and regression. A merged PR alone is not runtime evidence; PR #386 has no Deploy Test, Promote Production, smoke, telemetry, ledger, or runtime acceptance.
+- Issue #387 and artifact `model-free-delivery-artifact-contract` record the executable-prevention disposition. PR #388 delivered the contract repair and terminal runtime proof recorded above. PR #386 itself still has no independent Deploy Test, Promote Production, smoke, telemetry, ledger, or runtime acceptance; the later exact main generation supersedes it.
 
 ## 2026-08-09 Model-free governance delivered; historical lineage repair started
 
