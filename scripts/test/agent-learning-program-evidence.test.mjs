@@ -9,6 +9,7 @@ import {
   PHASE_2_IMPLEMENTATION_IDENTITY,
   PHASE_2_EVIDENCE_PATH,
   PHASE_3_EVIDENCE_PATH,
+  PHASE_4_EVIDENCE_PATH,
   PROGRAM_PATH,
   acceptedPhaseEvidenceFindings,
   canonicalWorkflowRunFindings,
@@ -1111,5 +1112,17 @@ test('accepted-phase registration helper rejects missing paths without interpret
   );
   assert.ok(
     acceptedPhaseEvidenceFindings(program, () => false).some((finding) => finding.includes('evidence is missing')),
+  );
+});
+
+test('future Phase 4 acceptance uses a protected-main evidence registration', () => {
+  const program = programText().replace(
+    '| 4 | Evaluations | `not_started` | None | None | pending |',
+    `| 4 | Evaluations | \`accepted\` | PR | ${PHASE_4_EVIDENCE_PATH} | none |`,
+  );
+
+  assert.deepEqual(
+    acceptedPhaseEvidenceFindings(program, () => true),
+    [],
   );
 });

@@ -22,6 +22,7 @@ export { ACCEPTANCE_RUNTIME_HOSTS, protectedMainControllerFindings };
 export const PROGRAM_PATH = 'docs/agent-learning/program.md';
 export const PHASE_2_EVIDENCE_PATH = 'docs/agent-learning/evidence/phase-2-versioned-artifacts.json';
 export const PHASE_3_EVIDENCE_PATH = 'docs/agent-learning/evidence/phase-3-failure-conversion.json';
+export const PHASE_4_EVIDENCE_PATH = 'docs/agent-learning/evidence/phase-4-agent-task-evaluations.json';
 export const OPEN_PR_LEDGER_PATHS = Object.freeze([
   PROGRAM_PATH,
   'docs/project-memory/current-state.md',
@@ -32,6 +33,7 @@ export const PROGRAM_EVIDENCE = Object.freeze({
   1: 'docs/agent-learning/evidence/branch-protection-aggregation.json',
   2: PHASE_2_EVIDENCE_PATH,
   3: PHASE_3_EVIDENCE_PATH,
+  4: PHASE_4_EVIDENCE_PATH,
 });
 export const PHASE_2_IMPLEMENTATION_IDENTITY = Object.freeze({
   pullRequestNumber: 349,

@@ -2,7 +2,7 @@
 
 ## First genuine post-rollout learning candidate has not occurred
 
-- Phase 3 is accepted from protected PR #394, exact-main CI, one exact-range dry run, and two idempotent write-enabled rollout runs. The six labels exist and the rollout timestamp prevented a historical flood.
+- Phase 3 operational evidence exists from protected PR #394, exact-main CI, one exact-range dry run, and two idempotent write-enabled rollout runs. The six labels exist and the rollout timestamp prevented a historical flood. Ledger status remains `in_progress` until a later protected PR accepts the newly registered evidence class from trusted `main`; the implementation PR cannot self-approve that registration.
 - No significant `codex-repair` issue has been created after the rollout timestamp, so live candidate creation, same-fingerprint recurrence, and link persistence await the first genuine event. Deterministic tests and the protected dry-run proposal cover those paths; do not manufacture an incident or treat the absence of a real source as a failure.
 - Historical backfill remains manually dispatched, exact-range, bounded to 100 issue numbers, and dry-run by default. Scheduled triage cannot close repairs.
 
