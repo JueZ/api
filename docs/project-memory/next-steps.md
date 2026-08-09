@@ -4,7 +4,7 @@
 
 - `docs/agent-learning/program.md` is authoritative. Phase 1 is accepted at implementation merge `da8459aec5756f684b27d692dd838b0135c7fe9f`; live protection and negative-canary evidence is archived under `docs/agent-learning/evidence/`.
 - Phase 2 implementation PR #349 merged as `9310c94f97541e57f83b186af2cacf989d6f5330` and completed delivery/runtime verification, but Phase 2 remains `in_progress`. Evidence PRs #350 and #352 and verifier PR #354 closed after their repair limits; issues #351, #355, and #356 record durable follow-up.
-- PR #358 closed unmerged after final review `31308451194`; issue #361 records the deployment-provenance gap. Push PR #362 repair `7d35de3dfb586ac235e9dcf47112ef5b7d46e59c`, which closes the two initial-review findings with executable history and lifecycle regressions, then monitor exact-head review and delivery.
+- PR #358 closed unmerged after final review `31308451194`; issue #361 records the deployment-provenance gap. Push PR #362 final repair `739cc1d622d2df1446d3a11b594d08d3d268230d`, which replaces spoofable Deployment API correlation with reviewed workflow bytes and a server-bound workflow-run artifact/ledger/runtime chain, then monitor exact-head review and delivery. Close unmerged on rejection because both repair attempts are consumed.
 - After that library is accepted, use one small protected PR to wire its `trusted-pr` mode into the protected-main controller, then one evidence-only PR to exercise it and add verified artifacts for #351, #355, #356, #359, #360, and #361. Keep task-evaluation aliases fail closed until Phase 4 and add no new protected context. A merged PR alone remains insufficient runtime evidence.
 
 ## Quality 10 program

@@ -53,6 +53,8 @@ The generated index contains no timestamp, so repeated generation from the same 
 
 Ordinary pull-request CI runs `scripts/agent-learning/verify-program-evidence.mjs offline` without credentials and rejects malformed phase tables or accepted phases without their registered public-safe evidence file. Its tested `trusted-pr` mode is staged as protected-controller code but is not a live merge gate until a later protected wiring PR is accepted; Phase 2 therefore remains `in_progress`.
 
+Deployment API records are public corroboration, not causal proof: their creator, `log_url`, environment URL, and timestamps can be supplied by another token-bearing workflow. Trusted acceptance therefore does not use those fields as passing evidence. It authenticates the immutable entry and reusable workflow bytes at the exact protected-main SHA, the canonical first-attempt workflow run and unique successful deployment job, the server-bound release-ledger artifact and digest from that run, the bounded ledger-write/upload lifecycle, and live `/health` agreement on the exact run and source SHA. A missing or mismatched link blocks acceptance.
+
 `npm run eval:agents` remains the deterministic agent-policy evaluation command, and `npm run eval:agent-policy` is its clearer alias. The general task-evaluation aliases are reserved now but deliberately fail closed until the Phase 4 harness exists; an unavailable adapter or harness is not a pass.
 
 ## Public-safe evidence
