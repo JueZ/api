@@ -154,8 +154,8 @@ The repository must be configured so that:
 - Pull requests are required before merging to `main`.
 - Required status checks must pass before merge.
 - PRs use squash merge or linear history.
-- Routine human review is not required for low-risk autonomous changes when all required automated checks pass.
-- High-risk paths may require review or stronger policy if the repository owner chooses that gate.
+- Routine human review is not required when all required automated checks pass.
+- High-risk paths retain deterministic classification, additional validation, and protected delivery; do not invoke a second model to review work produced by the active Codex session.
 
 Codex must not weaken these settings to make delivery easier.
 
@@ -170,7 +170,7 @@ Protected `main` must require exactly these stable GitHub Actions contexts:
 
 Those stable branch-required contexts aggregate mandatory internal jobs; they do not replace or make those jobs optional. `CI complete` must use `if: always()` and explicitly require every merge-relevant CI job: install, lint, type check, unit and API tests, Angular and Azure Functions builds, OpenAPI and Bicep validation, workflow/ShellCheck validation, architecture/skill/eval/generated-doc validation, Trivy, Gitleaks, dependency audit, and immutable release artifacts. The main-only provenance-attestation job remains mandatory on applicable main runs but is intentionally not a pull-request dependency. `Policy complete` must similarly cover cost policy, guardrail policy, and dependency-lock policy, while `CodeQL complete` must cover every CodeQL matrix analysis.
 
-`Autonomous review complete` must be published as successful only after the exact-head independent review and the protected-main agent-learning program-evidence verifier both succeed. Applicable malformed, unavailable, stale, or unauthenticated program evidence must therefore fail the existing required aggregate; it must not be deferred solely to the later merge job or exposed as a fifth protected context.
+`Autonomous review complete` is a legacy stable context name. It must be published as successful only after the trusted controller verifies exact-head identity, eligibility, workflow integrity, every free required aggregate, deterministic risk classification, and the protected-main agent-learning program-evidence verifier. It must not invoke an API-backed model or receive `OPENAI_API_KEY`. Applicable malformed, unavailable, stale, or unauthenticated program evidence must fail the existing aggregate; it must not be deferred solely to the later merge job or exposed as a fifth context.
 
 The autonomous controller must still inspect the complete latest exact-head check-run and legacy-status rollup at the final merge boundary. Any unrelated failing or pending latest result blocks merge even when the four configured aggregates pass. The only permitted explanation for GitHub aggregate `unstable` is the current trusted `merge exact PR head` job itself.
 

@@ -15,33 +15,18 @@ import {
   validateAutonomousPolicy,
 } from '../lib/autonomous-policy.mjs';
 import {
-  buildReviewDiffCapsule,
-  calculateReviewBudget,
-  claimAutonomousReview,
   evaluateCompleteCheckRollup,
   evaluatePullRequestState,
   evaluateRequiredChecks,
   exclusiveWorkflowCheckWriteFindings,
   mergeGateDecision,
-  reviewClaimExternalId,
-  reviewClaimName,
-  reviewRequestIdempotencyKey,
+  runGovernance,
   runRequiredCheckPreflight,
-  runReview,
   trustedWorkflowHashFindings,
-  validateAutonomousReview,
+  validateAutonomousGovernance,
 } from '../autonomous-merge-controller.mjs';
 
 const headSha = 'a'.repeat(40);
-const highRiskDiff = `diff --git a/.github/workflows/example.yml b/.github/workflows/example.yml
-index 1111111..2222222 100644
---- a/.github/workflows/example.yml
-+++ b/.github/workflows/example.yml
-@@ -1,2 +1,2 @@
--permissions: write-all
-+permissions:
-   contents: read
-`;
 const policy = loadAutonomousPolicy();
 const mainDeliveryWorkflow = readFileSync(
   new URL('../../.github/workflows/codex-main-delivery.yml', import.meta.url),
@@ -156,7 +141,7 @@ function successfulChecks() {
 }
 
 function successfulFreeChecks() {
-  return successfulChecks().filter((check) => check.name !== policy.autonomousReview.checkName);
+  return successfulChecks().filter((check) => check.name !== policy.autonomousGovernance.checkName);
 }
 
 function currentControllerMergeCheck(runId = 1234, overrides = {}) {
@@ -172,127 +157,70 @@ function currentControllerMergeCheck(runId = 1234, overrides = {}) {
   };
 }
 
-function withFreeChecks(github) {
-  let claimMarker;
-  return {
-    ...github,
-    async getCheckRuns() {
-      return [...successfulFreeChecks(), ...(claimMarker ? [claimMarker] : [])];
-    },
-    async createReviewClaim(claim) {
-      claimMarker = {
-        id: 777,
-        name: claim.name,
-        head_sha: claim.headSha,
-        external_id: claim.externalId,
-        details_url: 'https://github.com/JueZ/api/runs/777',
-        status: 'completed',
-        conclusion: 'neutral',
-        app: { slug: 'github-actions' },
-      };
-      return claimMarker;
-    },
-  };
-}
-
-function withInputTokenCounter(client, { inputTokens = 1_000, requests = [] } = {}) {
-  return {
-    ...client,
-    responses: {
-      ...client.responses,
-      inputTokens: {
-        async count(request) {
-          requests.push(request);
-          return { object: 'response.input_tokens', input_tokens: inputTokens };
-        },
-      },
-    },
-  };
-}
-
-test('canonical autonomous policy is internally valid', () => {
+test('canonical autonomous policy is internally valid and model-free', () => {
   assert.deepEqual(validateAutonomousPolicy(policy), []);
   assert.deepEqual(policy.requiredChecks, STABLE_REQUIRED_CHECKS);
   assert.equal(policy.merge.allowAdminBypass, false);
-  assert.equal(policy.autonomousReview.humanApprovalRequired, false);
-  assert.equal(policy.autonomousReview.model, 'gpt-5.6-sol');
-  assert.equal(policy.autonomousReview.reasoningEffort, 'medium');
-  assert.equal(policy.autonomousReview.maxDiffBytes, 200_000);
-  assert.equal(policy.autonomousReview.maxOutputTokens, 2_900);
-  assert.equal(policy.autonomousReview.maxEstimatedCostUsd, 0.31);
+  assert.equal(policy.autonomousGovernance.checkName, 'Autonomous review complete');
+  assert.equal(policy.autonomousGovernance.evaluator, 'deterministic-protected-controller-v1');
+  assert.equal(policy.autonomousGovernance.humanApprovalRequired, false);
   assert.match(codexAutomergeWorkflow, /Wait for free deterministic exact-head checks/);
-  assert.match(codexAutomergeWorkflow, /AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'/);
-  assert.match(codexAutomergeWorkflow, /ready_for_review, labeled, unlabeled/);
-  assert.match(codexAutomergeWorkflow, /cancel-in-progress: false/);
-  assert.match(
+  assert.match(codexAutomergeWorkflow, /Verify exact-head deterministic governance/);
+  assert.equal(codexAutomergeWorkflow.match(/autonomous-merge-controller\.mjs governance/g)?.length, 1);
+  assert.doesNotMatch(
     codexAutomergeWorkflow,
-    /group: codex-automerge-\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.client_payload\.pr_number \}\}/,
+    /OPENAI_API_KEY|AUTONOMOUS_REVIEW_LIVE_API_ENABLED|responses\.create|inputTokens|gpt-5/,
   );
-  assert.match(codexAutomergeWorkflow, /Claim exact head and run deterministic classification/);
-  assert.doesNotMatch(codexAutomergeWorkflow, /autonomous-merge-controller\.mjs claim/);
-  assert.equal(codexAutomergeWorkflow.match(/autonomous-merge-controller\.mjs review/g)?.length, 1);
-  assert.match(
-    codexAutomergeWorkflow,
-    /claim_state_valid=false[\s\S]*gh api[\s\S]*if \[ "\$conclusion" != "success" \]/,
+  assert.doesNotMatch(
+    autonomousControllerSource,
+    /from ['"]openai['"]|responses\.create|inputTokens\.count|reviewClaim|modelInvoked/,
   );
-  assert.ok(
-    autonomousControllerSource.indexOf('const reviewClaim = await claimAutonomousReview') <
-      autonomousControllerSource.indexOf('response = await client.responses.create'),
-  );
-  assert.ok(
-    autonomousControllerSource.indexOf(
-      "assertReviewClaimOwnership(options, github, reviewClaim, 'paid-call boundary')",
-    ) < autonomousControllerSource.indexOf('response = await client.responses.create'),
-  );
-  assert.ok(
-    autonomousControllerSource.indexOf('await client.responses.inputTokens.count') <
-      autonomousControllerSource.indexOf('response = await client.responses.create'),
-  );
-  assert.ok(
-    autonomousControllerSource.indexOf(
-      "assertReviewClaimOwnership(options, github, reviewClaim, 'generation boundary')",
-    ) < autonomousControllerSource.indexOf('response = await client.responses.create'),
-  );
-  assert.match(autonomousControllerSource, /enforceGitHubActions: !openAIClient/);
-  assert.match(autonomousControllerSource, /maxRetries: 0/);
   assert.match(codexAutomergeWorkflow, /ref: \$\{\{ github\.workflow_sha \}\}/);
   assert.match(codexAutomergeWorkflow, /Verify agent-learning program evidence/);
   assert.match(codexAutomergeWorkflow, /verify-program-evidence\.mjs trusted-pr/);
   assert.match(codexAutomergeWorkflow, /--controller-run-id "\$\{\{ github\.run_id \}\}"/);
   assert.match(codexAutomergeWorkflow, /--controller-sha "\$\{\{ github\.workflow_sha \}\}"/);
-  assert.match(codexAutomergeWorkflow, /--review-file "\$RUNNER_TEMP\/autonomous-review\/autonomous-review\.json"/);
+  assert.match(
+    codexAutomergeWorkflow,
+    /--governance-file "\$RUNNER_TEMP\/autonomous-governance\/autonomous-governance\.json"/,
+  );
   assert.match(codexAutomergeWorkflow, /Upload sanitized agent-learning program verification/);
   assert.match(codexAutomergeWorkflow, /if-no-files-found: error/);
   assert.ok(
     codexAutomergeWorkflow.indexOf('Verify agent-learning program evidence') <
-      codexAutomergeWorkflow.indexOf('Wait for required checks and merge the exact reviewed head'),
+      codexAutomergeWorkflow.indexOf('Wait for required checks and merge the exact governed head'),
   );
-  assert.doesNotMatch(codexAutomergeWorkflow, /source-run-id|Reuse approved exact-head review evidence/);
-  assert.doesNotMatch(autonomousControllerSource, /releaseReviewClaim|method: 'PATCH'[\s\S]*check-runs/);
 });
 
-test('protected program evidence is part of the required autonomous review aggregate', () => {
-  const reviewJob = codexAutomergeDefinition.jobs['autonomous-review'];
-  const reviewStepIndex = reviewJob.steps.findIndex(
-    (step) => step.name === 'Claim exact head and run deterministic classification and independent review',
+test('protected program evidence is part of the stable autonomous governance aggregate', () => {
+  const governanceJob = codexAutomergeDefinition.jobs['autonomous-governance'];
+  assert.equal(governanceJob.permissions.checks, 'read');
+  const governanceStepIndex = governanceJob.steps.findIndex(
+    (step) => step.name === 'Verify exact-head deterministic governance',
   );
-  const evidenceStepIndex = reviewJob.steps.findIndex((step) => step.name === 'Verify agent-learning program evidence');
-  const evidenceUploadIndex = reviewJob.steps.findIndex(
+  const evidenceStepIndex = governanceJob.steps.findIndex(
+    (step) => step.name === 'Verify agent-learning program evidence',
+  );
+  const evidenceUploadIndex = governanceJob.steps.findIndex(
     (step) => step.name === 'Upload sanitized agent-learning program verification',
   );
 
-  assert.notEqual(reviewStepIndex, -1);
-  assert.ok(evidenceStepIndex > reviewStepIndex);
+  assert.notEqual(governanceStepIndex, -1);
+  assert.ok(evidenceStepIndex > governanceStepIndex);
   assert.ok(evidenceUploadIndex > evidenceStepIndex);
   assert.equal(codexAutomergeWorkflow.match(/verify-program-evidence\.mjs trusted-pr/g)?.length, 1);
-  const evidenceStep = reviewJob.steps[evidenceStepIndex];
-  assert.match(evidenceStep.run, /--review-file "\$RUNNER_TEMP\/autonomous-review\.json"/);
-  assert.equal(reviewJob.steps[evidenceUploadIndex].if, "always() && steps.review.outcome == 'success'");
+  assert.match(
+    governanceJob.steps[evidenceStepIndex].run,
+    /--governance-file "\$RUNNER_TEMP\/autonomous-governance\.json"/,
+  );
+  assert.equal(governanceJob.steps[evidenceUploadIndex].if, "always() && steps.governance.outcome == 'success'");
 
-  const publishJob = codexAutomergeDefinition.jobs['publish-review-check'];
-  assert.deepEqual(normalizedNeeds(publishJob), ['resolve', 'autonomous-review']);
-  const publishScript = publishJob.steps.find((step) => step.name === 'Complete exact-head review check')?.run;
-  assert.match(publishScript, /\[ "\$REVIEW_RESULT" = "success" \]/);
+  const publishJob = codexAutomergeDefinition.jobs['publish-governance-check'];
+  assert.equal(publishJob.permissions.checks, 'write');
+  assert.deepEqual(normalizedNeeds(publishJob), ['resolve', 'autonomous-governance']);
+  const publishScript = publishJob.steps.find((step) => step.name === 'Complete exact-head governance check')?.run;
+  assert.match(publishScript, /\[ "\$GOVERNANCE_RESULT" = "success" \]/);
+  assert.match(publishScript, /deterministic-protected-controller-v1/);
 
   const exactHeadGate = codexAutomergeDefinition.jobs['exact-head-gate'];
   const exactHeadScripts = exactHeadGate.steps.map((step) => step.run ?? '').join('\n');
@@ -852,7 +780,7 @@ test('agent-governance classifier roots cannot be removed', () => {
   }
 });
 
-test('package scripts, build controls, and executable code always require independent review', () => {
+test('package scripts, build controls, and executable code retain high-risk governance classification', () => {
   const paths = [
     'package.json',
     'package-lock.json',
@@ -1025,827 +953,112 @@ test('complete check rollup permits only the current trusted merge job to remain
   assert.deepEqual(staleDuplicateController.pending, [{ check: 'merge exact PR head', reason: 'in_progress' }]);
 });
 
-test('autonomous review is bound to the exact head and rejects blocking findings', () => {
-  const approved = { decision: 'approve', reviewedHeadSha: headSha, summary: 'Approved.', findings: [] };
-  assert.equal(validateAutonomousReview(approved, headSha, policy).ok, true);
-  assert.equal(validateAutonomousReview({ ...approved, reviewedHeadSha: 'b'.repeat(40) }, headSha, policy).ok, false);
+test('autonomous governance evidence is exact-head bound and rejects provider-shaped fields', () => {
+  const approved = {
+    decision: 'approve',
+    verifiedHeadSha: headSha,
+    summary: 'Deterministic governance passed.',
+    findings: [],
+    risk: { highRisk: true, highRiskPaths: ['scripts/example.mjs'], classes: { supplyChain: ['scripts/example.mjs'] } },
+    evaluator: 'deterministic-protected-controller-v1',
+  };
+  assert.equal(validateAutonomousGovernance(approved, headSha, policy).ok, true);
   assert.equal(
-    validateAutonomousReview(
-      {
-        ...approved,
-        findings: [{ severity: 'high', title: 'Blocked', evidence: 'Unsafe.', remediation: 'Repair it.' }],
-      },
-      headSha,
-      policy,
-    ).ok,
+    validateAutonomousGovernance({ ...approved, verifiedHeadSha: 'b'.repeat(40) }, headSha, policy).ok,
     false,
   );
+  assert.equal(validateAutonomousGovernance({ ...approved, modelInvoked: false }, headSha, policy).ok, false);
+  assert.equal(validateAutonomousGovernance({ ...approved, reviewClaim: {} }, headSha, policy).ok, false);
 });
 
-test('autonomous review rechecks the mutable pull-request head after loading files', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-race-'));
+test('autonomous governance rechecks the mutable pull-request head after loading files', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-governance-race-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   let pullRequestRead = 0;
   const github = {
     async getPullRequest() {
       pullRequestRead += 1;
-      return pullRequest(pullRequestRead === 1 ? {} : { head: { ...pullRequest().head, sha: 'b'.repeat(40) } });
+      return pullRequestRead === 1
+        ? pullRequest()
+        : pullRequest({ head: { ...pullRequest().head, sha: 'b'.repeat(40) } });
     },
     async getPullRequestFiles() {
-      return [{ filename: 'README.md' }];
+      return [{ filename: 'scripts/example.mjs' }];
     },
   };
-
   await assert.rejects(
-    runReview(
+    runGovernance(
       {
         repository: 'JueZ/api',
-        prNumber: 1,
+        prNumber: 42,
         headSha,
-        reviewFile: join(directory, 'review.json'),
+        runId: 1234,
+        governanceFile: join(directory, 'governance.json'),
       },
       policy,
       github,
+      { enforceGitHubActions: false, workflowCheckWriteFindings: async () => [] },
     ),
     /Pull request head changed/,
   );
 });
 
-test('high-risk autonomous review uses one cost-bounded generation and records sanitized usage', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-bounded-'));
+test('autonomous governance produces sanitized deterministic evidence without provider state', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'autonomous-governance-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
-  const requests = [];
-  const requestOptions = [];
-  const github = withFreeChecks({
-    async getPullRequest() {
-      return {
-        ...pullRequest({ mergeable_state: 'blocked' }),
-        title: 'High-risk change',
-        body: 'Review this change.',
-      };
-    },
-    async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
-    },
-    async getPullRequestDiff() {
-      return highRiskDiff;
-    },
-  });
-  const tokenCountRequests = [];
-  const client = withInputTokenCounter(
-    {
-      responses: {
-        async create(request, options) {
-          requests.push(request);
-          requestOptions.push(options);
-          return {
-            id: 'resp_complete',
-            status: 'completed',
-            usage: {
-              input_tokens: 750,
-              input_tokens_details: { cached_tokens: 100 },
-              output_tokens: 250,
-              output_tokens_details: { reasoning_tokens: 100 },
-              total_tokens: 1000,
-            },
-            output_text: JSON.stringify({
-              decision: 'approve',
-              reviewedHeadSha: headSha,
-              summary: 'No blocking findings.',
-              findings: [],
-            }),
-          };
-        },
-      },
-    },
-    { inputTokens: 1_250, requests: tokenCountRequests },
-  );
-
-  const review = await runReview(
-    {
-      repository: 'JueZ/api',
-      prNumber: 1,
-      headSha,
-      runId: 12345,
-      reviewFile: join(directory, 'review.json'),
-    },
-    policy,
-    github,
-    client,
-  );
-
-  assert.equal(review.decision, 'approve');
-  assert.equal(review.responseId, 'resp_complete');
-  assert.deepEqual(review.reviewClaim, { status: 'new', checkRunId: 777, runId: 12345 });
-  assert.equal(requests.length, 1);
-  assert.equal(tokenCountRequests.length, 1);
-  assert.deepEqual(tokenCountRequests[0], {
-    model: 'gpt-5.6-sol',
-    reasoning: { effort: 'medium' },
-    text: requests[0].text,
-    input: requests[0].input,
-  });
-  assert.equal(requests[0].model, 'gpt-5.6-sol');
-  assert.deepEqual(requests[0].reasoning, { effort: 'medium' });
-  assert.equal(requests[0].text.verbosity, 'low');
-  assert.equal(requests[0].max_output_tokens, 2_900);
-  assert.match(requests[0].input[0].content, /reserve at least 512 output tokens/);
-  assert.doesNotMatch(JSON.stringify(requests[0].input), /Review this change\./);
-  const reviewPayload = JSON.parse(requests[0].input[1].content);
-  assert.deepEqual(reviewPayload.changedFiles, [{ filename: '.github/workflows/example.yml', status: 'modified' }]);
-  assert.equal(reviewPayload.risk.highRisk, true);
-  assert.equal(reviewPayload.policy.highRiskPaths, undefined);
-  assert.ok(reviewPayload.policy.authorization);
-  assert.ok(reviewPayload.policy.merge);
-  assert.equal(typeof reviewPayload.untrustedReviewDiff, 'string');
-  assert.equal(reviewPayload.untrustedNonDocumentationDiff, undefined);
-  const expectedIdempotencyKey = reviewRequestIdempotencyKey('JueZ/api', 1, headSha);
-  assert.equal(requestOptions[0].idempotencyKey, expectedIdempotencyKey);
-  assert.equal(requestOptions[0].headers['Idempotency-Key'], expectedIdempotencyKey);
-  assert.equal(expectedIdempotencyKey, reviewRequestIdempotencyKey('JueZ/api', 1, headSha));
-  assert.notEqual(expectedIdempotencyKey, reviewRequestIdempotencyKey('JueZ/api', 2, headSha));
-  assert.equal(review.reviewBudget.exactInputTokens, 1_250);
-  assert.equal(review.reviewBudget.inputTokenCountRequestLimit, 1);
-  assert.equal(review.reviewBudget.modelGenerationRequestLimit, 1);
-  assert.equal(review.reviewBudget.totalOpenAIRequestLimit, 2);
-  assert.ok(review.reviewBudget.estimatedMaximumCostUsd <= policy.autonomousReview.maxEstimatedCostUsd);
-  assert.deepEqual(review.modelUsage, {
-    inputTokens: 750,
-    cachedInputTokens: 100,
-    outputTokens: 250,
-    reasoningTokens: 100,
-    totalTokens: 1000,
-    estimatedUpperBoundCostUsd: 0.01125,
-  });
-});
-
-test('high-risk autonomous review does not retry or accept an incomplete response', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-incomplete-'));
-  context.after(() => rm(directory, { recursive: true, force: true }));
-  const requests = [];
-  const approvedOutput = JSON.stringify({
-    decision: 'approve',
-    reviewedHeadSha: headSha,
-    summary: 'No blocking findings.',
-    findings: [],
-  });
-  const github = withFreeChecks({
-    async getPullRequest() {
-      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
-    },
-    async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
-    },
-    async getPullRequestDiff() {
-      return highRiskDiff;
-    },
-  });
-  const client = withInputTokenCounter({
-    responses: {
-      async create(request) {
-        requests.push(request);
-        return {
-          id: 'resp_incomplete',
-          status: 'incomplete',
-          incomplete_details: { reason: 'max_output_tokens' },
-          output_text: approvedOutput,
-        };
-      },
-    },
-  });
-
-  await assert.rejects(
-    runReview(
-      {
-        repository: 'JueZ/api',
-        prNumber: 1,
-        headSha,
-        runId: 12345,
-        reviewFile: join(directory, 'review.json'),
-      },
-      policy,
-      github,
-      client,
-    ),
-    /Autonomous review unavailable: incomplete_response/,
-  );
-
-  assert.equal(requests.length, 1);
-});
-
-test('high-risk autonomous review fails closed after one structurally invalid decision', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-invalid-'));
-  context.after(() => rm(directory, { recursive: true, force: true }));
-  let attempts = 0;
-  const github = withFreeChecks({
-    async getPullRequest() {
-      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
-    },
-    async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
-    },
-    async getPullRequestDiff() {
-      return highRiskDiff;
-    },
-  });
-  const client = withInputTokenCounter({
-    responses: {
-      async create() {
-        attempts += 1;
-        return {
-          id: `resp_${attempts}`,
-          status: 'completed',
-          output_text: JSON.stringify({
-            decision: 'approve',
-            reviewedHeadSha: headSha,
-            summary: 'Review result.',
-            findings: [{ severity: 'high', title: 'Blocked', evidence: 'Unsafe.', remediation: 'Repair it.' }],
-          }),
-        };
-      },
-    },
-  });
-
-  await assert.rejects(
-    runReview(
-      {
-        repository: 'JueZ/api',
-        prNumber: 1,
-        headSha,
-        runId: 12345,
-        reviewFile: join(directory, 'review.json'),
-      },
-      policy,
-      github,
-      client,
-    ),
-    /Autonomous review unavailable: invalid_review_decision/,
-  );
-
-  assert.equal(attempts, 1);
-});
-
-test('persistent empty model output fails closed with sanitized review evidence', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-empty-'));
-  context.after(() => rm(directory, { recursive: true, force: true }));
-  const reviewFile = join(directory, 'review.json');
-  const github = withFreeChecks({
-    async getPullRequest() {
-      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
-    },
-    async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
-    },
-    async getPullRequestDiff() {
-      return highRiskDiff;
-    },
-  });
-  const client = withInputTokenCounter({
-    responses: {
-      async create() {
-        return {
-          id: 'resp_incomplete',
-          status: 'incomplete',
-          incomplete_details: { reason: 'max_output_tokens' },
-          output_text: '',
-        };
-      },
-    },
-  });
-
-  await assert.rejects(
-    runReview(
-      {
-        repository: 'JueZ/api',
-        prNumber: 1,
-        headSha,
-        runId: 12345,
-        reviewFile,
-      },
-      policy,
-      github,
-      client,
-    ),
-    /Autonomous review unavailable: empty_output/,
-  );
-
-  const review = JSON.parse(await readFile(reviewFile, 'utf8'));
-  assert.equal(review.decision, 'reject');
-  assert.equal(review.reviewedHeadSha, headSha);
-  assert.equal(review.modelFailure.kind, 'empty_output');
-  assert.equal(review.modelFailure.attempts, 1);
-  assert.equal(review.modelFailure.incompleteReason, 'max_output_tokens');
-  assert.equal(review.findings[0].severity, 'high');
-});
-
-test('autonomous review cost ceiling blocks after exact counting and before model generation', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-cost-'));
-  context.after(() => rm(directory, { recursive: true, force: true }));
-  const reviewFile = join(directory, 'review.json');
-  let attempts = 0;
-  const github = withFreeChecks({
-    async getPullRequest() {
-      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
-    },
-    async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
-    },
-    async getPullRequestDiff() {
-      return highRiskDiff;
-    },
-  });
-  const tokenCountRequests = [];
-  const client = withInputTokenCounter(
-    {
-      responses: {
-        async create() {
-          attempts += 1;
-        },
-      },
-    },
-    { requests: tokenCountRequests },
-  );
-  const strictCostPolicy = {
-    ...policy,
-    autonomousReview: { ...policy.autonomousReview, maxEstimatedCostUsd: 0.000001 },
-  };
-
-  await assert.rejects(
-    runReview(
-      { repository: 'JueZ/api', prNumber: 1, headSha, runId: 12345, reviewFile },
-      strictCostPolicy,
-      github,
-      client,
-    ),
-    /cost_ceiling_exceeded/,
-  );
-
-  const review = JSON.parse(await readFile(reviewFile, 'utf8'));
-  assert.equal(attempts, 0);
-  assert.equal(tokenCountRequests.length, 1);
-  assert.equal(review.modelInvoked, false);
-  assert.equal(review.tokenCountInvoked, true);
-  assert.equal(review.reviewBudget.status, 'blocked_before_generation');
-  assert.equal(review.reviewClaim.status, 'new');
-});
-
-test('autonomous review fails closed without generation when exact token counting is unavailable', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-token-count-'));
-  context.after(() => rm(directory, { recursive: true, force: true }));
-  const reviewFile = join(directory, 'review.json');
-  let generationAttempts = 0;
-  let tokenCountAttempts = 0;
-  const github = withFreeChecks({
-    async getPullRequest() {
-      return { ...pullRequest(), title: 'High-risk change' };
-    },
-    async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified' }];
-    },
-    async getPullRequestDiff() {
-      return highRiskDiff;
-    },
-  });
-  const client = {
-    responses: {
-      inputTokens: {
-        async count() {
-          tokenCountAttempts += 1;
-          throw new Error('untrusted provider detail');
-        },
-      },
-      async create() {
-        generationAttempts += 1;
-      },
-    },
-  };
-
-  await assert.rejects(
-    runReview({ repository: 'JueZ/api', prNumber: 1, headSha, runId: 12345, reviewFile }, policy, github, client),
-    /input_token_count_unavailable/,
-  );
-
-  const review = JSON.parse(await readFile(reviewFile, 'utf8'));
-  assert.equal(tokenCountAttempts, 1);
-  assert.equal(generationAttempts, 0);
-  assert.equal(review.modelInvoked, false);
-  assert.equal(review.tokenCountInvoked, true);
-  assert.equal(review.modelFailure.kind, 'input_token_count_unavailable');
-  assert.doesNotMatch(JSON.stringify(review), /untrusted provider detail/);
-  assert.equal(review.reviewClaim.status, 'new');
-});
-
-test('paid review revalidates every free check after token counting and immediately before generation', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-boundary-'));
-  context.after(() => rm(directory, { recursive: true, force: true }));
-  let attempts = 0;
-  let marker;
-  let checkReads = 0;
+  const governanceFile = join(directory, 'governance.json');
   const github = {
     async getPullRequest() {
-      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
+      return pullRequest({ mergeable_state: 'blocked' });
     },
     async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
-    },
-    async getPullRequestDiff() {
-      return highRiskDiff;
-    },
-    async getCheckRuns() {
-      checkReads += 1;
-      const freeChecks = successfulFreeChecks().map((check) =>
-        checkReads >= 5 && check.name === 'CI complete' ? { ...check, conclusion: 'failure' } : check,
-      );
-      return [...freeChecks, ...(marker ? [marker] : [])];
-    },
-    async createReviewClaim(claim) {
-      marker = {
-        id: 77,
-        name: claim.name,
-        head_sha: claim.headSha,
-        external_id: claim.externalId,
-        details_url: 'https://github.com/JueZ/api/runs/77',
-        status: 'completed',
-        conclusion: 'neutral',
-        app: { slug: 'github-actions' },
-      };
-      return marker;
-    },
-  };
-  const tokenCountRequests = [];
-  const client = withInputTokenCounter(
-    {
-      responses: {
-        async create() {
-          attempts += 1;
-        },
-      },
-    },
-    { requests: tokenCountRequests },
-  );
-
-  await assert.rejects(
-    runReview(
-      {
-        repository: 'JueZ/api',
-        prNumber: 1,
-        headSha,
-        runId: 12345,
-        reviewFile: join(directory, 'review.json'),
-      },
-      policy,
-      github,
-      client,
-    ),
-    /generation boundary: CI complete: failure/,
-  );
-  assert.equal(attempts, 0);
-  assert.equal(tokenCountRequests.length, 1);
-});
-
-test('paid review cannot invoke the API unless its exact run owns one canonical claim', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-claim-boundary-'));
-  context.after(() => rm(directory, { recursive: true, force: true }));
-  let attempts = 0;
-  const github = {
-    async getPullRequest() {
-      return { ...pullRequest(), title: 'High-risk change', body: 'Review this change.' };
-    },
-    async getPullRequestFiles() {
-      return [{ filename: '.github/workflows/example.yml', status: 'modified', additions: 1, deletions: 0 }];
-    },
-    async getPullRequestDiff() {
-      return highRiskDiff;
+      return [{ filename: 'scripts/example.mjs' }];
     },
     async getCheckRuns() {
       return successfulFreeChecks();
     },
-    async createReviewClaim() {
-      return { id: 77 };
-    },
   };
-  const client = {
-    responses: {
-      async create() {
-        attempts += 1;
-      },
-    },
-  };
-
-  await assert.rejects(
-    runReview(
-      {
-        repository: 'JueZ/api',
-        prNumber: 1,
-        headSha,
-        runId: 12345,
-        reviewFile: join(directory, 'review.json'),
-      },
-      policy,
-      github,
-      client,
-    ),
-    /claim ownership failed at post-create claim verification/,
+  const evidence = await runGovernance(
+    { repository: 'JueZ/api', prNumber: 42, headSha, runId: 1234, governanceFile },
+    policy,
+    github,
+    { enforceGitHubActions: false, workflowCheckWriteFindings: async () => [] },
   );
-  assert.equal(attempts, 0);
+  assert.equal(evidence.decision, 'approve');
+  assert.equal(evidence.verifiedHeadSha, headSha);
+  assert.equal(evidence.risk.highRisk, true);
+  assert.equal(evidence.evaluator, 'deterministic-protected-controller-v1');
+  assert.equal(Object.hasOwn(evidence, 'modelInvoked'), false);
+  assert.equal(Object.hasOwn(evidence, 'reviewClaim'), false);
+  assert.deepEqual(JSON.parse(await readFile(governanceFile, 'utf8')), evidence);
 });
 
-test('paid review preflight excludes its own check and requires every free exact-head check', async () => {
-  const requiredWithoutReview = policy.requiredChecks.filter(
-    (required) => required.name !== policy.autonomousReview.checkName,
-  );
+test('governance preflight excludes its own aggregate and requires every free exact-head check', async () => {
   const github = {
     async getPullRequest() {
       return pullRequest({ mergeable_state: 'blocked' });
     },
     async getCheckRuns() {
-      return successfulChecks().filter((check) => check.name !== policy.autonomousReview.checkName);
+      return successfulFreeChecks();
     },
   };
-
   const result = await runRequiredCheckPreflight(
-    { prNumber: 1, headSha, waitSeconds: 0, pollSeconds: 0 },
+    { prNumber: 42, headSha, waitSeconds: 0, pollSeconds: 0 },
     policy,
     github,
   );
   assert.equal(result.ok, true);
-  assert.equal(result.passed.length, requiredWithoutReview.length);
 
-  github.getCheckRuns = async () =>
-    successfulChecks()
-      .filter((check) => check.name !== policy.autonomousReview.checkName)
-      .map((check) => (check.name === 'CI complete' ? { ...check, conclusion: 'failure' } : check));
-  await assert.rejects(
-    runRequiredCheckPreflight({ prNumber: 1, headSha, waitSeconds: 0, pollSeconds: 0 }, policy, github),
-    /CI complete: failure/,
-  );
-});
-
-test('permanent exact-head marker is created once and any existing marker consumes the paid call', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'autonomous-review-claim-'));
-  context.after(() => rm(directory, { recursive: true, force: true }));
-  const reviewFile = join(directory, 'review.json');
-  const createdClaims = [];
-  const decisionChecks = [];
-  let marker;
-  const github = {
-    async getPullRequest() {
-      return pullRequest();
-    },
+  const missing = {
+    ...github,
     async getCheckRuns() {
-      return [...successfulFreeChecks(), ...(marker ? [marker] : [])];
-    },
-    async createReviewClaim(claim) {
-      createdClaims.push(claim);
-      marker = {
-        id: 77,
-        name: claim.name,
-        head_sha: claim.headSha,
-        external_id: claim.externalId,
-        details_url: 'https://github.com/JueZ/api/runs/77',
-        status: 'completed',
-        conclusion: 'neutral',
-        app: { slug: 'github-actions' },
-      };
-      return marker;
-    },
-    async createReviewDecisionCheck(check) {
-      decisionChecks.push(check);
-      return { id: 88 };
+      return successfulFreeChecks().filter((check) => check.name !== 'CodeQL complete');
     },
   };
-  const options = {
-    repository: 'JueZ/api',
-    prNumber: 42,
-    headSha,
-    runId: 12345,
-    reviewFile,
-  };
-
-  const testRuntime = { enforceGitHubActions: false };
-  const created = await claimAutonomousReview(options, policy, github, testRuntime);
-  assert.deepEqual(created, { status: 'new', checkRunId: 77, runId: 12345 });
-  assert.equal(createdClaims.length, 1);
-  assert.equal(createdClaims[0].name, reviewClaimName(42));
-  assert.equal(createdClaims[0].externalId, reviewClaimExternalId('JueZ/api', 42, headSha, 12345));
-  assert.equal(createdClaims[0].detailsUrl, 'https://github.com/JueZ/api/actions/runs/12345');
-
-  const alreadyConsumed = await claimAutonomousReview(options, policy, github, testRuntime);
-  assert.equal(alreadyConsumed.status, 'consumed');
-  assert.equal(alreadyConsumed.reason, 'exact_head_claim_exists');
-
-  marker = { ...marker, details_url: 'https://example.com/runs/77' };
-  const consumed = await claimAutonomousReview(options, policy, github, testRuntime);
-  assert.equal(consumed.status, 'consumed');
-  assert.equal(consumed.checkRunId, 77);
-  assert.equal(consumed.decisionCheckRunId, 88);
-  assert.equal(consumed.reason, 'invalid_or_multiple_exact_head_claims');
-
-  marker = {
-    ...marker,
-    details_url: 'https://github.com/JueZ/api/runs/77',
-    external_id: 'fields-may-change-without-restoring-the-paid-call',
-  };
-  const consumedExternalId = await claimAutonomousReview(options, policy, github, testRuntime);
-  assert.equal(consumedExternalId.status, 'consumed');
-  assert.equal(consumedExternalId.reason, 'invalid_or_multiple_exact_head_claims');
-  assert.equal(createdClaims.length, 1);
-  assert.equal(decisionChecks.length, 3);
-  assert.equal(decisionChecks.at(-1).conclusion, 'failure');
-  const rejection = JSON.parse(await readFile(reviewFile, 'utf8'));
-  assert.equal(rejection.decision, 'reject');
-  assert.equal(rejection.modelInvoked, false);
-  assert.equal(rejection.reviewClaim.reason, 'invalid_or_multiple_exact_head_claims');
-});
-
-test('review claims enforce trusted GitHub Actions identity by default', async () => {
-  const originalGitHubActions = process.env.GITHUB_ACTIONS;
-  process.env.GITHUB_ACTIONS = 'false';
-
-  try {
-    await assert.rejects(
-      claimAutonomousReview(
-        {
-          repository: 'JueZ/api',
-          prNumber: 42,
-          headSha,
-          runId: 12345,
-        },
-        policy,
-        {},
-      ),
-      /must execute in the trusted GitHub Actions workflow/,
-    );
-  } finally {
-    if (originalGitHubActions === undefined) delete process.env.GITHUB_ACTIONS;
-    else process.env.GITHUB_ACTIONS = originalGitHubActions;
-  }
-});
-
-test('review budget uses the exact count and caps counting and generation to one request each', () => {
-  const budget = calculateReviewBudget(
-    { input: [{ role: 'user', content: 'small diff' }], text: { verbosity: 'low' } },
-    policy,
-    1_234,
+  await assert.rejects(
+    runRequiredCheckPreflight({ prNumber: 42, headSha, waitSeconds: 0, pollSeconds: 0 }, policy, missing),
+    /CodeQL complete: missing/,
   );
-  assert.equal(budget.exactInputTokens, 1_234);
-  assert.equal(budget.inputTokenCountRequestLimit, 1);
-  assert.equal(budget.modelGenerationRequestLimit, 1);
-  assert.equal(budget.totalOpenAIRequestLimit, 2);
-  assert.equal(budget.maximumOutputTokens, 2_900);
-  assert.ok(budget.estimatedMaximumCostUsd < 0.31);
-  const completeDiffBudget = calculateReviewBudget(
-    { input: [{ role: 'user', content: 'complete diff' }], text: { verbosity: 'low' } },
-    policy,
-    32_304,
-  );
-  assert.equal(completeDiffBudget.estimatedMaximumCostUsd, 0.24852);
-  assert.throws(
-    () => calculateReviewBudget({ input: [], text: {} }, policy),
-    /exact positive input-token count is required/,
-  );
-});
-
-test('review capsule includes all high-risk changed paths including documentation', () => {
-  const policyHelperDiff = `diff --git a/scripts/lib/policy-helper.mjs b/scripts/lib/policy-helper.mjs
-index 5555555..6666666 100644
---- a/scripts/lib/policy-helper.mjs
-+++ b/scripts/lib/policy-helper.mjs
-@@ -1,2 +1,2 @@
- const trustedContext = true;
--export const enabled = false;
-+export const enabled = trustedContext;
-`;
-  const sourceDiff = `${highRiskDiff}${policyHelperDiff}diff --git a/docs/security/example.md b/docs/security/example.md
-index 3333333..4444444 100644
---- a/docs/security/example.md
-+++ b/docs/security/example.md
-@@ -1 +1 @@
--Old documentation.
-+New documentation.
-diff --git a/docs/reference.md b/docs/reference.md
-index 7777777..8888888 100644
---- a/docs/reference.md
-+++ b/docs/reference.md
-@@ -1 +1 @@
--Old reference.
-+New reference.
-`;
-  const capsule = buildReviewDiffCapsule(
-    sourceDiff,
-    {
-      highRiskPaths: ['.github/workflows/example.yml', 'docs/security/example.md'],
-    },
-    ['.github/workflows/example.yml', 'scripts/lib/policy-helper.mjs', 'docs/security/example.md', 'docs/reference.md'],
-  );
-  assert.deepEqual(capsule.reviewedPaths, [
-    '.github/workflows/example.yml',
-    'scripts/lib/policy-helper.mjs',
-    'docs/security/example.md',
-    'docs/reference.md',
-  ]);
-  assert.deepEqual(capsule.omittedDocumentationPaths, []);
-  assert.match(capsule.diff, /\+permissions:/);
-  assert.match(capsule.diff, /^ {3}contents: read$/m);
-  assert.match(capsule.diff, /scripts\/lib\/policy-helper\.mjs/);
-  assert.match(capsule.diff, /^ const trustedContext = true;$/m);
-  assert.match(capsule.diff, /New documentation/);
-  assert.match(capsule.diff, /New reference/);
-});
-
-test('review capsule keeps test file changes when executable high-risk paths are present', () => {
-  const sourceDiff = `diff --git a/apps/api/src/shared/bridge.ts b/apps/api/src/shared/bridge.ts
-index 1111111..2222222 100644
---- a/apps/api/src/shared/bridge.ts
-+++ b/apps/api/src/shared/bridge.ts
-@@ -1 +1 @@
--old
-+new
-diff --git a/apps/api/test/bridge.test.mjs b/apps/api/test/bridge.test.mjs
-index 3333333..4444444 100644
---- a/apps/api/test/bridge.test.mjs
-+++ b/apps/api/test/bridge.test.mjs
-@@ -1 +1 @@
--old-test
-+new-test
-`;
-  const capsule = buildReviewDiffCapsule(
-    sourceDiff,
-    { highRiskPaths: ['apps/api/src/shared/bridge.ts', 'apps/api/test/bridge.test.mjs'] },
-    ['apps/api/src/shared/bridge.ts', 'apps/api/test/bridge.test.mjs'],
-  );
-  assert.deepEqual(capsule.reviewedPaths, ['apps/api/src/shared/bridge.ts', 'apps/api/test/bridge.test.mjs']);
-  assert.deepEqual(capsule.omittedDocumentationPaths, []);
-  assert.match(capsule.diff, /src\/shared\/bridge.ts/);
-  assert.match(capsule.diff, /apps\/api\/test\/bridge\.test\.mjs/);
-  assert.match(capsule.diff, /new-test/);
-});
-
-test('review capsule includes documentation when it is the only change and fails on missing paths', () => {
-  const documentationDiff = `diff --git a/docs/security/example.md b/docs/security/example.md
---- a/docs/security/example.md
-+++ b/docs/security/example.md
-@@ -1 +1 @@
--Old documentation.
-+New documentation.
-`;
-  const capsule = buildReviewDiffCapsule(
-    documentationDiff,
-    {
-      highRiskPaths: ['docs/security/example.md'],
-    },
-    ['docs/security/example.md'],
-  );
-  assert.deepEqual(capsule.reviewedPaths, ['docs/security/example.md']);
-  assert.deepEqual(capsule.omittedDocumentationPaths, []);
-  assert.match(capsule.diff, /\+New documentation\./);
-  assert.throws(
-    () =>
-      buildReviewDiffCapsule(documentationDiff, { highRiskPaths: ['docs/security/example.md'] }, [
-        'docs/security/example.md',
-        'scripts/missing.mjs',
-      ]),
-    /missing changed paths/,
-  );
-  assert.throws(
-    () =>
-      buildReviewDiffCapsule(documentationDiff, { highRiskPaths: ['docs/security/example.md'] }, [
-        'docs/security/example.md',
-        'docs/security/example.md',
-      ]),
-    /contains duplicates/,
-  );
-  assert.throws(
-    () =>
-      buildReviewDiffCapsule(documentationDiff, { highRiskPaths: ['docs/security/missing.md'] }, [
-        'docs/security/example.md',
-      ]),
-    /classifier returned unlisted paths/,
-  );
-  assert.throws(
-    () =>
-      buildReviewDiffCapsule(`${documentationDiff}${highRiskDiff}`, { highRiskPaths: ['docs/security/example.md'] }, [
-        'docs/security/example.md',
-      ]),
-    /diff section count 2 does not match changed-path count 1/,
-  );
-});
-
-test('review capsule includes deleted executable files from the authoritative changed-path list', () => {
-  const deletedDiff = `diff --git a/scripts/deprecated.sh b/scripts/deprecated.sh
-deleted file mode 100755
-index 1111111..0000000
---- a/scripts/deprecated.sh
-+++ /dev/null
-@@ -1 +0,0 @@
--echo deprecated
-`;
-  const capsule = buildReviewDiffCapsule(deletedDiff, { highRiskPaths: ['scripts/deprecated.sh'] }, [
-    'scripts/deprecated.sh',
-  ]);
-  assert.deepEqual(capsule.reviewedPaths, ['scripts/deprecated.sh']);
-  assert.match(capsule.diff, /deleted file mode 100755/);
-  assert.match(capsule.diff, /-echo deprecated/);
 });
 
 test('pull request state rejects forks, stale heads, and behind branches', () => {
@@ -1883,15 +1096,22 @@ test('pull request state rejects forks, stale heads, and behind branches', () =>
   assert.equal(evaluatePullRequestState(pullRequest({ mergeable: false }), headSha, policy).ok, false);
 });
 
-test('merge decision requires pull request state, checks, and review to all pass', () => {
+test('merge decision requires pull request state, checks, and governance to all pass', () => {
   const checkEvaluation = evaluateRequiredChecks(successfulChecks(), headSha, policy.requiredChecks);
-  const review = { decision: 'approve', reviewedHeadSha: headSha, summary: 'Approved.', findings: [] };
+  const governance = {
+    decision: 'approve',
+    verifiedHeadSha: headSha,
+    summary: 'Deterministic governance passed.',
+    findings: [],
+    risk: { highRisk: true, highRiskPaths: ['scripts/example.mjs'], classes: { supplyChain: ['scripts/example.mjs'] } },
+    evaluator: 'deterministic-protected-controller-v1',
+  };
   assert.equal(
     mergeGateDecision({
       pullRequest: pullRequest({ mergeable_state: 'unstable' }),
       expectedHeadSha: headSha,
       checkEvaluation,
-      review,
+      governance,
       policy,
     }).ok,
     false,
@@ -1911,7 +1131,7 @@ test('merge decision requires pull request state, checks, and review to all pass
       expectedHeadSha: headSha,
       checkEvaluation,
       aggregateCheckEvaluation,
-      review,
+      governance,
       policy,
     }).ok,
     true,
@@ -1922,7 +1142,7 @@ test('merge decision requires pull request state, checks, and review to all pass
       pullRequest: pullRequest({ mergeable_state: 'blocked' }),
       expectedHeadSha: headSha,
       checkEvaluation,
-      review,
+      governance,
       policy,
     }).ok,
     false,
@@ -1933,7 +1153,7 @@ test('merge decision requires pull request state, checks, and review to all pass
       pullRequest: pullRequest(),
       expectedHeadSha: headSha,
       checkEvaluation,
-      review,
+      governance,
       policy,
     }).ok,
     true,
@@ -1944,7 +1164,7 @@ test('merge decision requires pull request state, checks, and review to all pass
       pullRequest: pullRequest(),
       expectedHeadSha: headSha,
       checkEvaluation: { ...checkEvaluation, pending: [{ check: 'CI complete', reason: 'missing' }], ok: false },
-      review,
+      governance,
       policy,
     }).ok,
     false,
@@ -1960,7 +1180,7 @@ test('merge decision requires pull request state, checks, and review to all pass
         ok: false,
         pending: [{ check: 'unlisted pending check', reason: 'in_progress' }],
       },
-      review,
+      governance,
       policy,
     }).ok,
     false,

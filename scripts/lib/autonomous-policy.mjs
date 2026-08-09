@@ -3,12 +3,6 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 
 export const DEFAULT_POLICY_PATH = fileURLToPath(new URL('../../.github/autonomous-policy.yml', import.meta.url));
-export const AUTONOMOUS_REVIEW_MODEL_PRICING = Object.freeze({
-  'gpt-5.6-sol': Object.freeze({
-    inputUsdPerMillionTokens: 5,
-    outputUsdPerMillionTokens: 30,
-  }),
-});
 export const STABLE_REQUIRED_CHECKS = Object.freeze([
   Object.freeze({ name: 'CI complete', appSlug: 'github-actions' }),
   Object.freeze({ name: 'Policy complete', appSlug: 'github-actions' }),
@@ -115,45 +109,14 @@ export function validateAutonomousPolicy(policy) {
     errors,
   );
 
-  if (policy.autonomousReview?.checkName !== 'Autonomous review complete') {
-    errors.push('autonomousReview.checkName must be "Autonomous review complete"');
+  if (policy.autonomousGovernance?.checkName !== 'Autonomous review complete') {
+    errors.push('autonomousGovernance.checkName must be "Autonomous review complete"');
   }
-  if (!Object.hasOwn(AUTONOMOUS_REVIEW_MODEL_PRICING, policy.autonomousReview?.model)) {
-    errors.push('autonomousReview.model must use an approved cost-bounded model');
+  if (policy.autonomousGovernance?.evaluator !== 'deterministic-protected-controller-v1') {
+    errors.push('autonomousGovernance.evaluator must be "deterministic-protected-controller-v1"');
   }
-  if (policy.autonomousReview?.reasoningEffort !== 'medium') {
-    errors.push('autonomousReview.reasoningEffort must be medium');
-  }
-  if (
-    !Number.isInteger(policy.autonomousReview?.maxDiffBytes) ||
-    policy.autonomousReview.maxDiffBytes < 1 ||
-    policy.autonomousReview.maxDiffBytes > 200_000
-  ) {
-    errors.push('autonomousReview.maxDiffBytes must be an integer from 1 to 200000');
-  }
-  if (
-    !Number.isInteger(policy.autonomousReview?.maxOutputTokens) ||
-    policy.autonomousReview.maxOutputTokens < 200 ||
-    policy.autonomousReview.maxOutputTokens > 3_500
-  ) {
-    errors.push('autonomousReview.maxOutputTokens must be an integer from 200 to 3500');
-  }
-  if (
-    typeof policy.autonomousReview?.maxEstimatedCostUsd !== 'number' ||
-    !Number.isFinite(policy.autonomousReview.maxEstimatedCostUsd) ||
-    policy.autonomousReview.maxEstimatedCostUsd <= 0 ||
-    policy.autonomousReview.maxEstimatedCostUsd > 0.31
-  ) {
-    errors.push('autonomousReview.maxEstimatedCostUsd must be greater than 0 and no more than 0.31');
-  }
-  if (policy.autonomousReview?.requiredForHighRisk !== true) {
-    errors.push('autonomousReview.requiredForHighRisk must be true');
-  }
-  if (policy.autonomousReview?.store !== false) {
-    errors.push('autonomousReview.store must be false');
-  }
-  if (policy.autonomousReview?.humanApprovalRequired !== false) {
-    errors.push('autonomousReview.humanApprovalRequired must be false for the selected autonomous policy');
+  if (policy.autonomousGovernance?.humanApprovalRequired !== false) {
+    errors.push('autonomousGovernance.humanApprovalRequired must be false for the selected autonomous policy');
   }
   if (policy.merge?.exactHeadSha !== true) errors.push('merge.exactHeadSha must be true');
   if (policy.merge?.requireUpToDate !== true) errors.push('merge.requireUpToDate must be true');

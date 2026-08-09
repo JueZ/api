@@ -81,8 +81,7 @@ const DEPLOYMENT_WORKFLOW_PATHS = Object.freeze(
 const GITHUB_ACTIONS_APP = Object.freeze({ id: 15_368, slug: 'github-actions' });
 const CONTROLLER_WORKFLOW = 'Codex Auto-Merge';
 const CONTROLLER_WORKFLOW_PATH = '.github/workflows/codex-automerge.yml';
-const REVIEW_CLAIM_VERSION = 'v4';
-const MAX_REVIEW_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_GOVERNANCE_FILE_BYTES = 2 * 1024 * 1024;
 const EXACT_SHA = /^[0-9a-f]{40}$/;
 const EXACT_DIGEST = /^sha256:[0-9a-f]{64}$/;
 const OPAQUE_CORRELATION = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/;
@@ -1053,60 +1052,24 @@ export function phase2EvidenceFindings(evidence, observed) {
   return findings;
 }
 
-export function reviewEvidenceFindings(review, options, claimMarker) {
+export function governanceEvidenceFindings(evidence, options) {
   const findings = [];
-  addFinding(findings, isRecord(review), 'trusted review evidence must be an object');
-  addFinding(findings, review?.decision === 'approve', 'trusted review did not approve');
-  addFinding(findings, review?.reviewedHeadSha === options.headSha, 'trusted review head does not match');
-  addFinding(findings, review?.risk?.highRisk === true, 'program evidence must receive high-risk review');
-  addFinding(findings, review?.modelInvoked === true, 'program evidence must receive independent model review');
-  addFinding(findings, review?.reviewClaim?.status === 'new', 'trusted review claim was not newly consumed');
+  addFinding(findings, isRecord(evidence), 'trusted governance evidence must be an object');
+  addFinding(findings, evidence?.decision === 'approve', 'trusted governance did not approve');
+  addFinding(findings, evidence?.verifiedHeadSha === options.headSha, 'trusted governance head does not match');
   addFinding(
     findings,
-    review?.reviewClaim?.runId === options.controllerRunId,
-    'trusted review claim run does not match',
+    evidence?.evaluator === 'deterministic-protected-controller-v1',
+    'trusted governance evaluator does not match',
   );
+  addFinding(findings, typeof evidence?.risk?.highRisk === 'boolean', 'governance risk classification is invalid');
   addFinding(
     findings,
-    exactPositiveInteger(review?.reviewClaim?.checkRunId),
-    'trusted review claim check ID is invalid',
+    Array.isArray(evidence?.findings) && evidence.findings.length === 0,
+    'governance findings are invalid',
   );
-  const expectedClaimName = `Autonomous review paid-call claim ${REVIEW_CLAIM_VERSION} PR #${options.prNumber}`;
-  const expectedExternalId = `juez-autonomous-review:${REVIEW_CLAIM_VERSION}:${options.repository}:pull:${options.prNumber}:head:${options.headSha}:workflow:codex-automerge.yml:run:${options.controllerRunId}`;
-  addFinding(
-    findings,
-    claimMarker?.id === review?.reviewClaim?.checkRunId,
-    'trusted review claim marker ID does not match',
-  );
-  addFinding(findings, claimMarker?.name === expectedClaimName, 'trusted review claim marker name does not match');
-  addFinding(findings, claimMarker?.head_sha === options.headSha, 'trusted review claim marker head does not match');
-  addFinding(
-    findings,
-    claimMarker?.external_id === expectedExternalId,
-    'trusted review claim marker identity does not match',
-  );
-  const expectedRunUrl = `https://github.com/${options.repository}/actions/runs/${options.controllerRunId}`;
-  const expectedCheckUrl = `https://github.com/${options.repository}/runs/${review?.reviewClaim?.checkRunId}`;
-  addFinding(
-    findings,
-    [expectedRunUrl, expectedCheckUrl].includes(claimMarker?.details_url),
-    'trusted review claim details URL does not match',
-  );
-  addFinding(findings, claimMarker?.app?.slug === GITHUB_ACTIONS_APP.slug, 'trusted review claim app does not match');
-  addFinding(findings, claimMarker?.app?.id === GITHUB_ACTIONS_APP.id, 'trusted review claim app ID does not match');
-  addFinding(findings, claimMarker?.status === 'completed', 'trusted review claim is not completed');
-  addFinding(findings, claimMarker?.conclusion === 'neutral', 'trusted review claim conclusion is not neutral');
-  return findings;
-}
-
-export function lowRiskReviewEvidenceFindings(review, options) {
-  const findings = [];
-  addFinding(findings, isRecord(review), 'trusted review evidence must be an object');
-  addFinding(findings, review?.decision === 'approve', 'trusted review did not approve');
-  addFinding(findings, review?.reviewedHeadSha === options.headSha, 'trusted review head does not match');
-  addFinding(findings, review?.risk?.highRisk === false, 'low-risk review classification does not match');
-  addFinding(findings, review?.modelInvoked === false, 'low-risk review must not invoke the model');
-  addFinding(findings, review?.reviewClaim === undefined, 'low-risk review must not carry a paid-review claim');
+  addFinding(findings, evidence?.modelInvoked === undefined, 'governance evidence must not contain model state');
+  addFinding(findings, evidence?.reviewClaim === undefined, 'governance evidence must not contain a paid claim');
   return findings;
 }
 
@@ -1317,12 +1280,12 @@ export async function collectPhase2Observed(evidence, client, dependencies = {})
   return observed;
 }
 
-async function readBoundedReviewFile(path) {
+async function readBoundedGovernanceFile(path) {
   const stats = await lstat(path);
-  if (!stats.isFile() || stats.isSymbolicLink() || stats.size < 1 || stats.size > MAX_REVIEW_FILE_BYTES) {
-    throw new Error('trusted review evidence file is invalid');
+  if (!stats.isFile() || stats.isSymbolicLink() || stats.size < 1 || stats.size > MAX_GOVERNANCE_FILE_BYTES) {
+    throw new Error('trusted governance evidence file is invalid');
   }
-  return parseStrictJson(await readFile(path, 'utf8'), 'trusted review evidence');
+  return parseStrictJson(await readFile(path, 'utf8'), 'trusted governance evidence');
 }
 
 function pullRequestIdentityFindings(pullRequest, options) {
@@ -1436,27 +1399,20 @@ export async function verifyTrustedPullRequest(options, dependencies = {}) {
   if (protectedMainFindings.length > 0) {
     throw new Error(`trusted controller protected-main authentication failed: ${protectedMainFindings.join('; ')}`);
   }
-  const [pullRequest, controllerRun, review] = await Promise.all([
+  const [pullRequest, controllerRun, governance] = await Promise.all([
     client.getPullRequest(options.prNumber),
     client.getWorkflowRun(options.controllerRunId),
-    readBoundedReviewFile(options.reviewFile),
+    readBoundedGovernanceFile(options.governanceFile),
   ]);
   const identityFindings = [
     ...pullRequestIdentityFindings(pullRequest, options),
     ...controllerRunFindings(controllerRun, options),
   ];
   if (identityFindings.length > 0) throw new Error(`candidate identity failed: ${identityFindings.join('; ')}`);
-  let reviewFindings;
-  if (review?.risk?.highRisk === true) {
-    if (!isRecord(review) || !exactPositiveInteger(review?.reviewClaim?.checkRunId)) {
-      throw new Error('review binding failed: trusted review evidence or claim check ID is invalid');
-    }
-    const claimMarker = await client.getCheckRun(review.reviewClaim.checkRunId);
-    reviewFindings = reviewEvidenceFindings(review, options, claimMarker);
-  } else {
-    reviewFindings = lowRiskReviewEvidenceFindings(review, options);
+  const governanceFindings = governanceEvidenceFindings(governance, options);
+  if (governanceFindings.length > 0) {
+    throw new Error(`governance binding failed: ${governanceFindings.join('; ')}`);
   }
-  if (reviewFindings.length > 0) throw new Error(`review binding failed: ${reviewFindings.join('; ')}`);
 
   const changedFiles = await client.getPullRequestFiles(options.prNumber, options.headSha, pullRequest.base.sha);
   const changedPaths = changedFiles.map((file) => file.filename);
@@ -1485,8 +1441,8 @@ export async function verifyTrustedPullRequest(options, dependencies = {}) {
     previousProgramText,
     currentProgramText,
   });
-  if (verifyPhase2 && review.risk.highRisk !== true) {
-    throw new Error('review binding failed: Phase 2 program evidence requires an independent high-risk review');
+  if (verifyPhase2 && governance.risk.highRisk !== true) {
+    throw new Error('governance binding failed: Phase 2 program evidence must retain high-risk classification');
   }
   if (!verifyPhase2) {
     await requireStableFinalCandidate(client, pullRequest, options);
@@ -1548,16 +1504,16 @@ function parseOptions(argv) {
   const headSha = String(values.get('--head-sha') || '').toLowerCase();
   const controllerRunId = Number(values.get('--controller-run-id'));
   const controllerSha = String(values.get('--controller-sha') || '').toLowerCase();
-  const reviewFile = values.get('--review-file');
+  const governanceFile = values.get('--governance-file');
   const outputFile = values.get('--output-file');
   if (repository !== 'JueZ/api') throw new Error('--repository must be JueZ/api');
   if (!exactPositiveInteger(prNumber)) throw new Error('--pr must be a positive integer');
   if (!EXACT_SHA.test(headSha)) throw new Error('--head-sha must be an exact lowercase SHA');
   if (!exactPositiveInteger(controllerRunId)) throw new Error('--controller-run-id must be a positive integer');
   if (!EXACT_SHA.test(controllerSha)) throw new Error('--controller-sha must be an exact lowercase SHA');
-  if (!reviewFile) throw new Error('--review-file is required');
+  if (!governanceFile) throw new Error('--governance-file is required');
   if (!outputFile) throw new Error('--output-file is required');
-  return { command, repository, prNumber, headSha, controllerRunId, controllerSha, reviewFile, outputFile };
+  return { command, repository, prNumber, headSha, controllerRunId, controllerSha, governanceFile, outputFile };
 }
 
 async function runCli() {

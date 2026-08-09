@@ -1,0 +1,37 @@
+version: 1
+id: autonomous-review-model-redundancy
+title: Restrict API-backed model use to repairable-error diagnostics
+fingerprint: agent-governance.review.same-agent-model-redundancy
+source:
+  type: user_correction
+  references:
+    - kind: user_correction
+      locator: 2026-08-09-remove-independent-model-review
+classification:
+  failureArea: agent-governance
+  severity: high
+  symptom: High-risk pull requests required a second API-backed model pass even though the active Codex session already implemented and reviewed the change, while the only intended provider use was repairable-error diagnostics.
+  rootCause: Repository governance treated a same-family model call as independent assurance and coupled protected delivery to provider credits, token counting, and permanent paid-call claims instead of enforcing a single Luna/high runtime boundary.
+disposition:
+  primary: regression-test
+  rationale: The controller now emits deterministic exact-head governance evidence, policy tests forbid provider credentials or model invocation in the auto-merge workflow, and the sole permitted runtime analyzer is pinned to Luna/high with bounded input, output, timeout, sampling, no retries, and deterministic fallback.
+artifacts:
+  - path: .github/workflows/codex-automerge.yml
+    kind: workflow
+  - path: .github/autonomous-policy.yml
+    kind: policy
+  - path: scripts/autonomous-merge-controller.mjs
+    kind: implementation
+  - path: scripts/test/autonomous-policy.test.mjs
+    kind: regression-test
+  - path: apps/api/src/shared/errors/llmDiagnosticAnalyzer.ts
+    kind: implementation
+  - path: scripts/test/architecture-and-governance.test.mjs
+    kind: regression-test
+  - path: AGENTS.md
+    kind: instruction
+  - path: docs/adr/0001-autonomous-high-risk-review.md
+    kind: architecture-documentation
+counterfactual:
+  hypothesis: The regressions fail while auto-merge can receive an OpenAI credential or invoke a model, or while the runtime analyzer is not pinned to Luna/high; they pass only when the stable aggregate is deterministic and the bounded repairable-error analyzer is the sole provider-backed path.
+status: implemented

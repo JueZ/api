@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-09 API-backed PR reviewer removal prepared locally
+
+- The repository owner explicitly superseded the independent API-backed high-risk reviewer as redundant with the active Codex session. Branch `codex/remove-independent-model-review` is based on protected main `f56422021640b34be2588c33999f63b59a87399a`.
+- The local capsule removes the OpenAI credential from `Codex Auto-Merge`, deletes provider generation, token counting, cost ceilings, and paid-call claims, and retains the legacy `Autonomous review complete` name as deterministic exact-head governance. The only permitted provider-backed path is the bounded repairable-error analyzer, pinned to `gpt-5.6-luna` with high reasoning while retaining input/output/timeout/sampling/no-retry limits and deterministic fallback. All free aggregates, immutable workflow hashes, permission/secret checks, protected Phase 2 evidence verification, final complete-rollup defense, and exact-head squash merge remain.
+- This is local implementation evidence only. The branch is not pushed, no PR exists, and no merge, deployment, smoke, telemetry, release-ledger, or runtime evidence exists. Protected main still runs the old reviewer until a compliant migration is accepted.
+
 ## 2026-08-09 Phase 2 evidence aggregate-boundary repair started
 
 - Compatibility PR #375 merged as `f7ec8cbb4d9bc44fecd9a833c3d7cc483f6974f2` and completed exact-main CI `31318612977`, Main Delivery `31318690680`, Deploy Test `31318705872`, Promote Production `31318872853`, and fresh test/production runtime truth with public and authenticated smoke, telemetry, and release ledgers.

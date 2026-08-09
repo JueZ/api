@@ -1,14 +1,19 @@
-# ADR 0001: Autonomous high-risk review
+# ADR 0001: Deterministic autonomous governance
 
-- Status: accepted locally; not yet deployed
-- Date: 2026-07-30
+- Status: superseded in part; deterministic governance accepted as the current decision when delivered
+- Date: 2026-08-09
+- Supersedes: the API-backed independent-review portion of this ADR's 2026-07-30 decision
 
 ## Decision
 
-Routine and high-risk delivery remains fully autonomous. High-risk paths require deterministic guardrail classification plus an independent structured AI review on the exact PR head. No human approval is required by policy. Critical or high findings block merge.
+Routine and high-risk delivery remains autonomous. High-risk paths retain deterministic classification, proportional validation, exact-head binding, protected merge, and complete check-rollup enforcement. The custom independent model reviewer is removed because it repeats reasoning already performed by the Codex session that implements and validates the change.
 
-The trusted controller runs from the immutable `github.workflow_sha`, never executes PR code under `pull_request_target`, verifies required checks by exact name, SHA, and GitHub App, and merges only the reviewed SHA. Paid review starts only after all free deterministic checks pass. Those checks and the mutable PR state are revalidated before a permanent paid-call marker is created, before exact input-token counting, and immediately before model generation. Serialized controller runs execute claim and review in one command. That command creates one completed neutral marker whose name binds the PR and whose external identity binds repository, PR, exact head, controller workflow, and workflow run; it re-reads and verifies the marker after creation and at both OpenAI boundaries. The marker is never patched or released; any existing marker permanently consumes that head's review opportunity, even if generation never starts or later fails. Approval is never reused. Repository policy and runtime validation require an explicit top-level permission map in every workflow, calculate effective job permissions, limit `checks: write` to the three approved controller jobs, exact-name allowlist workflow secrets, and reject dynamic/inherited secrets, alternate GitHub credentials, token minting, or non-controller raw check-run access. The repository default remains read-only, but isolation does not rely on an omitted-permission default. Live review additionally requires the exact trusted GitHub Actions workflow identity. The controller retains the approved high-assurance model with medium reasoning, supplies the complete contextual diff for every non-documentation change and every high-risk document, reserves capacity for the final structured decision, and permits one exact token-count request plus at most one 3,500-token generation under the conservative per-head cost ceiling.
+The stable branch-required context remains named `Autonomous review complete` for branch-protection compatibility, but it is now a deterministic governance aggregate. The trusted default-branch controller publishes it only after free exact-head CI, Policy Check, and CodeQL aggregates pass; workflow permissions and immutable workflow hashes validate; pull-request eligibility and head identity remain current; and applicable protected-main agent-learning evidence verification succeeds. The controller never exposes `OPENAI_API_KEY`, counts provider tokens, creates a paid-call claim, or invokes a model.
+
+The controller continues to execute only immutable trusted code under `pull_request_target`, never executes candidate code with write credentials, limits `checks: write` to the eligibility resolver and aggregate publisher, rejects alternate GitHub credentials and dynamic secret access, verifies expected GitHub App identity, evaluates every latest exact-head check and legacy status at the final boundary, and squash-merges only the verified head.
 
 ## Consequences
 
-This avoids a standing human bottleneck while adding a second reasoning gate for workflows, infrastructure, auth, Bring, contracts, and agent governance. Oversized reviews fail closed and must reduce review payload without splitting the single bundled MCP server. Bootstrap remains sensitive: the default-branch controller, repository `OPENAI_API_KEY`, required checks, and branch rules must be configured before autonomous merge is safe.
+Repository delivery no longer spends OpenAI API credits on PR review or blocks on provider capacity. Codex performs implementation review and validation within the active ChatGPT-authenticated session; GitHub protection relies on executable tests, scanners, policy, workflow integrity, program-evidence verification, exact-head provenance, and complete-rollup enforcement rather than a second pass by the same model family.
+
+The repository `OPENAI_API_KEY` remains available only to deployed repairable-error classification. It must not be injected into repository governance, general task evaluation, or pull-request automation.

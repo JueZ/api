@@ -15,14 +15,13 @@ import {
   controllerRunFindings,
   currentRuntimeFindings,
   historyStabilityFindings,
-  lowRiskReviewEvidenceFindings,
   openPullRequestLedgerFindings,
   phase2EvidenceFindings,
   phase2EvidenceShapeFindings,
   phase2ImplementationIdentityFindings,
   phaseEvidenceNeedsLiveVerification,
   protectedMainControllerFindings,
-  reviewEvidenceFindings,
+  governanceEvidenceFindings,
   trustedControllerFindings,
   verifyOfflineProgramEvidence,
   verifyTrustedPullRequest,
@@ -687,47 +686,21 @@ test('current runtime requires the latest reviewed workflow run, its ledger arti
   assert.ok(findings.some((finding) => finding.includes('current main changed')));
 });
 
-test('trusted review evidence binds the exact reviewed head, claim, and controller run', () => {
-  const options = {
-    repository: 'JueZ/api',
-    prNumber: 400,
-    headSha,
-    controllerRunId: 900,
-  };
-  const review = {
-    decision: 'approve',
-    reviewedHeadSha: headSha,
-    risk: { highRisk: true },
-    modelInvoked: true,
-    reviewClaim: { status: 'new', runId: 900, checkRunId: 901 },
-  };
-  const claim = {
-    id: 901,
-    name: 'Autonomous review paid-call claim v4 PR #400',
-    head_sha: headSha,
-    external_id: `juez-autonomous-review:v4:JueZ/api:pull:400:head:${headSha}:workflow:codex-automerge.yml:run:900`,
-    details_url: 'https://github.com/JueZ/api/runs/901',
-    app: { id: 15_368, slug: 'github-actions' },
-    status: 'completed',
-    conclusion: 'neutral',
-  };
-  assert.deepEqual(reviewEvidenceFindings(review, options, claim), []);
-  assert.ok(reviewEvidenceFindings({ ...review, reviewedHeadSha: mergeSha }, options, claim).length > 0);
-  assert.ok(reviewEvidenceFindings({ ...review, decision: 'reject' }, options, claim).length > 0);
-  assert.ok(reviewEvidenceFindings(review, options, { ...claim, external_id: 'stale' }).length > 0);
-});
-
-test('low-risk review evidence is exact-head bound and cannot carry a paid claim', () => {
+test('trusted governance evidence binds the exact head and rejects provider-shaped state', () => {
   const options = { headSha };
-  const review = {
+  const evidence = {
     decision: 'approve',
-    reviewedHeadSha: headSha,
-    risk: { highRisk: false },
-    modelInvoked: false,
+    verifiedHeadSha: headSha,
+    summary: 'Deterministic governance passed.',
+    findings: [],
+    risk: { highRisk: true },
+    evaluator: 'deterministic-protected-controller-v1',
   };
-  assert.deepEqual(lowRiskReviewEvidenceFindings(review, options), []);
-  assert.ok(lowRiskReviewEvidenceFindings({ ...review, modelInvoked: true }, options).length > 0);
-  assert.ok(lowRiskReviewEvidenceFindings({ ...review, reviewClaim: { status: 'new' } }, options).length > 0);
+  assert.deepEqual(governanceEvidenceFindings(evidence, options), []);
+  assert.ok(governanceEvidenceFindings({ ...evidence, verifiedHeadSha: mergeSha }, options).length > 0);
+  assert.ok(governanceEvidenceFindings({ ...evidence, decision: 'reject' }, options).length > 0);
+  assert.ok(governanceEvidenceFindings({ ...evidence, modelInvoked: false }, options).length > 0);
+  assert.ok(governanceEvidenceFindings({ ...evidence, reviewClaim: {} }, options).length > 0);
 });
 
 test('trusted controller identity rejects the wrong workflow, run, repository, or checkout SHA', () => {
@@ -840,18 +813,20 @@ test('pull_request_target REST head binds the candidate while trusted checkout b
   assert.ok(controllerRunFindings({ ...dispatchRun, head_sha: headSha }, dispatchOptions).length > 0);
 });
 
-test('trusted verification rejects an invalid review claim before querying a check run', async (context) => {
-  const root = await mkdtemp(join(tmpdir(), 'program-evidence-review-'));
+test('trusted verification rejects provider-shaped governance evidence before candidate collection', async (context) => {
+  const root = await mkdtemp(join(tmpdir(), 'program-evidence-governance-'));
   context.after(() => rm(root, { recursive: true, force: true }));
-  const reviewFile = join(root, 'review.json');
+  const governanceFile = join(root, 'governance.json');
   await writeFile(
-    reviewFile,
+    governanceFile,
     JSON.stringify({
       decision: 'approve',
-      reviewedHeadSha: headSha,
+      verifiedHeadSha: headSha,
+      summary: 'Deterministic governance passed.',
+      findings: [],
       risk: { highRisk: true },
-      modelInvoked: true,
-      reviewClaim: { status: 'new', runId: 900, checkRunId: 0 },
+      evaluator: 'deterministic-protected-controller-v1',
+      modelInvoked: false,
     }),
   );
   const requests = [];
@@ -877,9 +852,6 @@ test('trusted verification rejects an invalid review claim before querying a che
       requests.push('/actions/runs/900');
       return workflowRun(900, '.github/workflows/codex-automerge.yml', 'pull_request_target', headSha);
     },
-    async getPullRequestFiles() {
-      return [{ filename: PROGRAM_PATH }];
-    },
   };
   const options = {
     repository: 'JueZ/api',
@@ -887,7 +859,7 @@ test('trusted verification rejects an invalid review claim before querying a che
     headSha,
     controllerRunId: 900,
     controllerSha: mergeSha,
-    reviewFile,
+    governanceFile,
   };
   const env = {
     GITHUB_ACTIONS: 'true',
@@ -898,25 +870,27 @@ test('trusted verification rejects an invalid review claim before querying a che
   };
   await assert.rejects(
     verifyTrustedPullRequest(options, { client, runtime: { env, checkoutSha: mergeSha } }),
-    /claim check ID is invalid/,
+    /governance evidence must not contain model state/,
   );
   assert.equal(
-    requests.some((path) => path.startsWith('/check-runs/')),
+    requests.some((path) => path.startsWith('/pulls/400/files')),
     false,
   );
 });
 
-test('trusted verification accepts a bound low-risk review only when program evidence is not applicable', async (context) => {
+test('trusted verification accepts deterministic governance when program evidence is not applicable', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'program-evidence-low-risk-'));
   context.after(() => rm(root, { recursive: true, force: true }));
-  const reviewFile = join(root, 'review.json');
+  const governanceFile = join(root, 'governance.json');
   await writeFile(
-    reviewFile,
+    governanceFile,
     JSON.stringify({
       decision: 'approve',
-      reviewedHeadSha: headSha,
+      verifiedHeadSha: headSha,
+      summary: 'Deterministic governance passed.',
+      findings: [],
       risk: { highRisk: false },
-      modelInvoked: false,
+      evaluator: 'deterministic-protected-controller-v1',
     }),
   );
   const requests = [];
@@ -965,7 +939,7 @@ test('trusted verification accepts a bound low-risk review only when program evi
     headSha,
     controllerRunId: 900,
     controllerSha: mergeSha,
-    reviewFile,
+    governanceFile,
   };
   const env = {
     GITHUB_ACTIONS: 'true',
@@ -996,7 +970,7 @@ test('trusted verification accepts a bound low-risk review only when program evi
   };
   await assert.rejects(
     verifyTrustedPullRequest(options, { client, runtime: { env, checkoutSha: mergeSha } }),
-    /requires an independent high-risk review/,
+    /must retain high-risk classification/,
   );
 });
 

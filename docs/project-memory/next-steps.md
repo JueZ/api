@@ -2,6 +2,8 @@
 
 ## Closed-loop agent-learning program
 
+- Complete local validation for `codex/remove-independent-model-review`, record its exact commits, and keep it unpushed until there is a protected bootstrap that neither invokes the removed API reviewer nor weakens branch protection. Do not set review-capacity variables, change credentials, or manufacture a low-risk classification for the migration.
+
 - `docs/agent-learning/program.md` is authoritative. Phase 1 is accepted at implementation merge `da8459aec5756f684b27d692dd838b0135c7fe9f`; live protection and negative-canary evidence is archived under `docs/agent-learning/evidence/`.
 - Phase 2 implementation PR #349 merged as `9310c94f97541e57f83b186af2cacf989d6f5330`; trusted-primitives PR #367 merged as `697cf2065666c0b384b13ea166ea57933b13bc03`; orchestration PR #369 merged as `8e1ab87efbedbc02075e820a13b98721423be710`; controller wiring PR #371 merged as `8f71efebfa317853a89970eec4527bde696e277a`. Each completed its recorded terminal delivery/runtime evidence, but Phase 2 remains `in_progress`.
 - Evidence PR #372 final head `ea32247e769c8a3e92b083a052e8b0d975894ba6` passed all four exact-head aggregates and independent review, then the protected verifier failed closed because GitHub omitted `head_commit` for an exact identical controller/protected-main comparison. It closed unmerged after two repairs; issues #373 and #374 record the status-ordering and response-shape learnings.

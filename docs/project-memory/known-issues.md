@@ -1,5 +1,11 @@
 # Known issues and unresolved risks
 
+## Model-free governance migration has a protected bootstrap dependency
+
+- The repository owner directed removal of the API-backed high-risk reviewer and restricted OpenAI API use to runtime repairable-error classification.
+- The replacement is complete locally on `codex/remove-independent-model-review`: `Autonomous review complete` remains the stable required context but becomes deterministic exact-head governance with the protected program-evidence verifier and complete-rollup merge defense intact.
+- Live protected main still contains the old provider-backed controller. Pushing this high-risk migration would cause that old controller to request the now-forbidden review, while changing protection or bypassing it would weaken the live gate. No passing migration evidence exists yet.
+
 ## Phase 2 evidence verification is not yet part of the required aggregate
 
 - PR #376 exact head `d6f207117e770aabc7b7baa4414c35f4d318072a` passed all free aggregates, but autonomous review run `31319465352` rejected the acceptance design because `Autonomous review complete` was published before the protected program-evidence verifier ran in the later merge job.

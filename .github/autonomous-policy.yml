@@ -1,12 +1,12 @@
 version: 1
 
 # Exact content allowlist for the trusted workflow set. Any workflow byte change
-# requires an independently reviewed update to this canonical manifest.
+# requires a protected update to this canonical manifest.
 trustedWorkflowSha256:
   bring-readonly-canary.yml: 9cd2cd547a3b36b1c1de1769730883e613dc370493d978c356d37d90f1e08898
   ci.yml: 5245d8c298efd2f439b9630c034eedff8dc7631dbe08fd23744451a57a785771
   codeql.yml: 8220b94fdc56f9b33d7db4111fd41e60beb814ef3f2fc99611a09dd71e910590
-  codex-automerge.yml: 720bf0cd875ab851a9be30876518d9b678d917c534218a95d8a3a7d8d8aa0971
+  codex-automerge.yml: 2effc1d073bc1d47fd53e2d97a83f034cacb9fc74c5d6ce6834562382992a5da
   codex-main-delivery.yml: 6d9510c8ca610bad996c1310d4a31fc7abb77738402fe57fb510e01b1f4c6b03
   deploy-environment.yml: cd36744ebf07c466d407ca4ecd83751e2f6445263a7bab90145c69326d844be9
   deploy-test.yml: be874930e0d375765afe67d50429744f5f629d129b944cae601e915ea16c7275
@@ -19,7 +19,7 @@ trustedWorkflowSha256:
   verify-azure-oidc.yml: 8f98932d92d84740df6573397fa2ad29678fd09f1c3fe44fd8a9910bfee424d7
 
 # This file is the canonical repository policy consumed by CI, the autonomous
-# review workflow, documentation generation, and agent-instruction validation.
+# governance workflow, documentation generation, and agent-instruction validation.
 # requiredChecks intentionally contains only stable protected-branch aggregates;
 # each owning workflow keeps its complete internal validation graph mandatory.
 requiredChecks:
@@ -117,19 +117,10 @@ riskClasses:
     - scripts/agent-learning/**
     - scripts/agent-task-evals/**
 
-autonomousReview:
+autonomousGovernance:
   checkName: Autonomous review complete
-  requiredForHighRisk: true
-  model: gpt-5.6-sol
-  reasoningEffort: medium
-  maxDiffBytes: 200000
-  maxOutputTokens: 2900
-  maxEstimatedCostUsd: 0.31
-  store: false
+  evaluator: deterministic-protected-controller-v1
   humanApprovalRequired: false
-  rejectSeverities:
-    - critical
-    - high
 
 merge:
   method: squash

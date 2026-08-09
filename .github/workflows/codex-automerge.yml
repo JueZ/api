@@ -80,30 +80,29 @@ jobs:
               -f head_sha="$head_sha" \
               -f status='completed' \
               -f conclusion='failure' \
-              -f external_id="juez-autonomous-review-eligibility:v1:$REPOSITORY:pull:$pr_number:head:$head_sha:run:${{ github.run_id }}" \
+              -f external_id="juez-autonomous-governance-eligibility:v1:$REPOSITORY:pull:$pr_number:head:$head_sha:run:${{ github.run_id }}" \
               -f details_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-              -f 'output[title]=Autonomous review ineligible' \
+              -f 'output[title]=Autonomous governance ineligible' \
               -f 'output[summary]=The pull request is draft, forked, outside the allowed branch/label policy, or carries a blocking label.' \
               >/dev/null
           fi
 
-  autonomous-review:
-    name: perform autonomous review
+  autonomous-governance:
+    name: verify autonomous governance
     needs: resolve
     if: needs.resolve.outputs.eligible == 'true'
     timeout-minutes: 75
     runs-on: ubuntu-latest
     permissions:
       actions: read
-      checks: write
+      checks: read
       contents: read
       pull-requests: read
     outputs:
-      decision: ${{ steps.review.outputs.decision }}
-      reviewed_head_sha: ${{ steps.review.outputs.reviewed_head_sha }}
-      high_risk: ${{ steps.review.outputs.high_risk }}
-      model_invoked: ${{ steps.review.outputs.model_invoked }}
-      claim_status: ${{ steps.review.outputs.claim_status }}
+      decision: ${{ steps.governance.outputs.decision }}
+      verified_head_sha: ${{ steps.governance.outputs.verified_head_sha }}
+      high_risk: ${{ steps.governance.outputs.high_risk }}
+      evaluator: ${{ steps.governance.outputs.evaluator }}
     steps:
       - name: Checkout trusted controller
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
@@ -131,21 +130,19 @@ jobs:
             --head-sha "${{ needs.resolve.outputs.head_sha }}" \
             --wait-seconds 3600 \
             --poll-seconds 15
-      - name: Claim exact head and run deterministic classification and independent review
-        id: review
+      - name: Verify exact-head deterministic governance
+        id: governance
         env:
           GH_TOKEN: ${{ github.token }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          AUTONOMOUS_REVIEW_LIVE_API_ENABLED: 'true'
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/autonomous-merge-controller.mjs review \
+          node scripts/autonomous-merge-controller.mjs governance \
             --repository "${{ github.repository }}" \
             --pr "${{ needs.resolve.outputs.pr_number }}" \
             --head-sha "${{ needs.resolve.outputs.head_sha }}" \
             --run-id "${{ github.run_id }}" \
-            --review-file "$RUNNER_TEMP/autonomous-review.json"
+            --governance-file "$RUNNER_TEMP/autonomous-governance.json"
       - name: Verify agent-learning program evidence
         id: program_evidence
         env:
@@ -159,29 +156,29 @@ jobs:
             --head-sha "${{ needs.resolve.outputs.head_sha }}" \
             --controller-run-id "${{ github.run_id }}" \
             --controller-sha "${{ github.workflow_sha }}" \
-            --review-file "$RUNNER_TEMP/autonomous-review.json" \
+            --governance-file "$RUNNER_TEMP/autonomous-governance.json" \
             --output-file "$RUNNER_TEMP/agent-learning-program-verification.json"
       - name: Upload sanitized agent-learning program verification
-        if: always() && steps.review.outcome == 'success'
+        if: always() && steps.governance.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: agent-learning-program-verification-${{ needs.resolve.outputs.head_sha }}
           path: ${{ runner.temp }}/agent-learning-program-verification.json
           if-no-files-found: error
           retention-days: 365
-      - name: Upload sanitized review evidence
-        id: review_artifact
+      - name: Upload sanitized governance evidence
+        id: governance_artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
-          name: autonomous-review-${{ needs.resolve.outputs.head_sha }}
-          path: ${{ runner.temp }}/autonomous-review.json
+          name: autonomous-governance-${{ needs.resolve.outputs.head_sha }}
+          path: ${{ runner.temp }}/autonomous-governance.json
           if-no-files-found: error
           retention-days: 365
 
-  publish-review-check:
-    name: publish autonomous review check
-    needs: [resolve, autonomous-review]
+  publish-governance-check:
+    name: publish autonomous governance check
+    needs: [resolve, autonomous-governance]
     if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.eligible == 'true'
     timeout-minutes: 5
     runs-on: ubuntu-latest
@@ -189,38 +186,31 @@ jobs:
       checks: write
       contents: read
     steps:
-      - name: Complete exact-head review check
+      - name: Complete exact-head governance check
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          CLAIM_STATUS: ${{ needs.autonomous-review.outputs.claim_status }}
-          REVIEW_RESULT: ${{ needs.autonomous-review.result }}
-          REVIEW_DECISION: ${{ needs.autonomous-review.outputs.decision }}
-          REVIEWED_HEAD_SHA: ${{ needs.autonomous-review.outputs.reviewed_head_sha }}
+          GOVERNANCE_RESULT: ${{ needs.autonomous-governance.result }}
+          GOVERNANCE_DECISION: ${{ needs.autonomous-governance.outputs.decision }}
+          VERIFIED_HEAD_SHA: ${{ needs.autonomous-governance.outputs.verified_head_sha }}
           EXPECTED_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
-          HIGH_RISK: ${{ needs.autonomous-review.outputs.high_risk }}
-          MODEL_INVOKED: ${{ needs.autonomous-review.outputs.model_invoked }}
+          HIGH_RISK: ${{ needs.autonomous-governance.outputs.high_risk }}
+          EVALUATOR: ${{ needs.autonomous-governance.outputs.evaluator }}
           PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
           RUN_ID: ${{ github.run_id }}
         shell: bash
         run: |
           set -euo pipefail
-          claim_state_valid=true
-          if { [ "$HIGH_RISK" = "true" ] && [ "$CLAIM_STATUS" != "new" ]; } ||
-             { [ "$HIGH_RISK" != "true" ] && [ "$CLAIM_STATUS" != "not_required" ]; }; then
-            echo "Exact-head review claim state does not match the review path." >&2
-            claim_state_valid=false
-          fi
           conclusion=failure
-          title='Autonomous review failed'
-          summary='The review workflow did not approve this exact pull-request head.'
-          if [ "$claim_state_valid" = "true" ] &&
-             [ "$REVIEW_RESULT" = "success" ] &&
-             [ "$REVIEW_DECISION" = "approve" ] &&
-             [ "$REVIEWED_HEAD_SHA" = "$EXPECTED_HEAD_SHA" ]; then
+          title='Autonomous governance failed'
+          summary='The protected controller did not verify this exact pull-request head.'
+          if [ "$GOVERNANCE_RESULT" = "success" ] &&
+             [ "$GOVERNANCE_DECISION" = "approve" ] &&
+             [ "$VERIFIED_HEAD_SHA" = "$EXPECTED_HEAD_SHA" ] &&
+             [ "$EVALUATOR" = "deterministic-protected-controller-v1" ]; then
             conclusion=success
-            title='Autonomous review approved'
-            summary="Exact head $EXPECTED_HEAD_SHA passed autonomous review (high-risk: ${HIGH_RISK:-unknown}, model invoked: ${MODEL_INVOKED:-unknown})."
+            title='Autonomous governance verified'
+            summary="Exact head $EXPECTED_HEAD_SHA passed deterministic protected governance (high-risk classification: ${HIGH_RISK:-unknown}); no model was invoked."
           fi
 
           gh api \
@@ -230,7 +220,7 @@ jobs:
             -f head_sha="$EXPECTED_HEAD_SHA" \
             -f status=completed \
             -f conclusion="$conclusion" \
-            -f external_id="juez-autonomous-review-decision:v1:$REPOSITORY:pull:$PR_NUMBER:head:$EXPECTED_HEAD_SHA:run:$RUN_ID" \
+            -f external_id="juez-autonomous-governance-decision:v1:$REPOSITORY:pull:$PR_NUMBER:head:$EXPECTED_HEAD_SHA:run:$RUN_ID" \
             -f details_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             -f "output[title]=$title" \
             -f "output[summary]=$summary" \
@@ -242,12 +232,12 @@ jobs:
 
   exact-head-gate:
     name: merge exact PR head
-    needs: [resolve, autonomous-review, publish-review-check]
+    needs: [resolve, autonomous-governance, publish-governance-check]
     if: >-
       ${{
         needs.resolve.outputs.eligible == 'true' &&
-        needs.autonomous-review.result == 'success' &&
-        needs.publish-review-check.result == 'success'
+        needs.autonomous-governance.result == 'success' &&
+        needs.publish-governance-check.result == 'success'
       }}
     timeout-minutes: 70
     runs-on: ubuntu-latest
@@ -271,12 +261,12 @@ jobs:
       - name: Install trusted controller dependencies
         shell: bash
         run: npm ci --ignore-scripts
-      - name: Download exact-head review evidence
+      - name: Download exact-head governance evidence
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
         with:
-          name: autonomous-review-${{ needs.resolve.outputs.head_sha }}
-          path: ${{ runner.temp }}/autonomous-review
-      - name: Wait for required checks and merge the exact reviewed head
+          name: autonomous-governance-${{ needs.resolve.outputs.head_sha }}
+          path: ${{ runner.temp }}/autonomous-governance
+      - name: Wait for required checks and merge the exact governed head
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -286,7 +276,7 @@ jobs:
             --repository "${{ github.repository }}" \
             --pr "${{ needs.resolve.outputs.pr_number }}" \
             --head-sha "${{ needs.resolve.outputs.head_sha }}" \
-            --review-file "$RUNNER_TEMP/autonomous-review/autonomous-review.json" \
+            --governance-file "$RUNNER_TEMP/autonomous-governance/autonomous-governance.json" \
             --wait-seconds 3600 \
             --poll-seconds 15 \
             --merge true
