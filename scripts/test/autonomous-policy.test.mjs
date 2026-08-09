@@ -54,6 +54,7 @@ const codexAutomergeWorkflow = readFileSync(
   new URL('../../.github/workflows/codex-automerge.yml', import.meta.url),
   'utf8',
 );
+const codexAutomergeDefinition = parseYaml(codexAutomergeWorkflow);
 const autonomousControllerSource = readFileSync(new URL('../autonomous-merge-controller.mjs', import.meta.url), 'utf8');
 const deployEnvironmentWorkflow = readFileSync(
   new URL('../../.github/workflows/deploy-environment.yml', import.meta.url),
@@ -263,15 +264,39 @@ test('canonical autonomous policy is internally valid', () => {
   assert.match(codexAutomergeWorkflow, /Upload sanitized agent-learning program verification/);
   assert.match(codexAutomergeWorkflow, /if-no-files-found: error/);
   assert.ok(
-    codexAutomergeWorkflow.indexOf('Download exact-head review evidence') <
-      codexAutomergeWorkflow.indexOf('Verify agent-learning program evidence'),
-  );
-  assert.ok(
     codexAutomergeWorkflow.indexOf('Verify agent-learning program evidence') <
       codexAutomergeWorkflow.indexOf('Wait for required checks and merge the exact reviewed head'),
   );
   assert.doesNotMatch(codexAutomergeWorkflow, /source-run-id|Reuse approved exact-head review evidence/);
   assert.doesNotMatch(autonomousControllerSource, /releaseReviewClaim|method: 'PATCH'[\s\S]*check-runs/);
+});
+
+test('protected program evidence is part of the required autonomous review aggregate', () => {
+  const reviewJob = codexAutomergeDefinition.jobs['autonomous-review'];
+  const reviewStepIndex = reviewJob.steps.findIndex(
+    (step) => step.name === 'Claim exact head and run deterministic classification and independent review',
+  );
+  const evidenceStepIndex = reviewJob.steps.findIndex((step) => step.name === 'Verify agent-learning program evidence');
+  const evidenceUploadIndex = reviewJob.steps.findIndex(
+    (step) => step.name === 'Upload sanitized agent-learning program verification',
+  );
+
+  assert.notEqual(reviewStepIndex, -1);
+  assert.ok(evidenceStepIndex > reviewStepIndex);
+  assert.ok(evidenceUploadIndex > evidenceStepIndex);
+  assert.equal(codexAutomergeWorkflow.match(/verify-program-evidence\.mjs trusted-pr/g)?.length, 1);
+  const evidenceStep = reviewJob.steps[evidenceStepIndex];
+  assert.match(evidenceStep.run, /--review-file "\$RUNNER_TEMP\/autonomous-review\.json"/);
+  assert.equal(reviewJob.steps[evidenceUploadIndex].if, "always() && steps.review.outcome == 'success'");
+
+  const publishJob = codexAutomergeDefinition.jobs['publish-review-check'];
+  assert.deepEqual(normalizedNeeds(publishJob), ['resolve', 'autonomous-review']);
+  const publishScript = publishJob.steps.find((step) => step.name === 'Complete exact-head review check')?.run;
+  assert.match(publishScript, /\[ "\$REVIEW_RESULT" = "success" \]/);
+
+  const exactHeadGate = codexAutomergeDefinition.jobs['exact-head-gate'];
+  const exactHeadScripts = exactHeadGate.steps.map((step) => step.run ?? '').join('\n');
+  assert.doesNotMatch(exactHeadScripts, /verify-program-evidence\.mjs/);
 });
 
 test('stable aggregate jobs cover every merge-relevant internal validation and fail closed', () => {
