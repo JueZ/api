@@ -272,6 +272,7 @@ jobs:
           node scripts/agent-learning/validate-artifacts.mjs
           node scripts/agent-learning/verify-artifacts.mjs --github
           node scripts/agent-learning/generate-index.mjs --check
+          node scripts/agent-learning/verify-program-evidence.mjs offline
       - name: Run deterministic agent safety evals
         run: |
           ./node_modules/.bin/tsc -p apps/api/tsconfig.json
