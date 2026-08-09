@@ -46,13 +46,25 @@ const EXPECTED_DELIVERY_RUNS = Object.freeze({
     event: 'repository_dispatch',
   }),
 });
-const EXPECTED_DEPLOYMENT_ENVIRONMENTS = Object.freeze({ test: 'test', prod: 'production' });
 const EXPECTED_DEPLOYMENT_JOBS = Object.freeze({
   test: 'deploy test / deploy test',
   prod: 'promote production / deploy prod',
 });
+const EXPECTED_DEPLOYMENT_WORKFLOW_FILES = Object.freeze({
+  shared: Object.freeze({
+    path: '.github/workflows/deploy-environment.yml',
+    sha256: 'cd36744ebf07c466d407ca4ecd83751e2f6445263a7bab90145c69326d844be9',
+  }),
+  test: Object.freeze({
+    path: '.github/workflows/deploy-test.yml',
+    sha256: 'be874930e0d375765afe67d50429744f5f629d129b944cae601e915ea16c7275',
+  }),
+  prod: Object.freeze({
+    path: '.github/workflows/promote-production.yml',
+    sha256: 'eb87a6f7fd479226a68e0edd7f9867ce9b6c3bac853ffae0ed687734e0944387',
+  }),
+});
 const GITHUB_ACTIONS_APP = Object.freeze({ id: 15_368, slug: 'github-actions' });
-const GITHUB_ACTIONS_BOT = Object.freeze({ id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' });
 const CONTROLLER_WORKFLOW = 'Codex Auto-Merge';
 const CONTROLLER_WORKFLOW_PATH = '.github/workflows/codex-automerge.yml';
 const REVIEW_CLAIM_VERSION = 'v4';
@@ -342,8 +354,6 @@ export function phase2EvidenceShapeFindings(evidence) {
           record,
           [
             'workflowRunId',
-            'deploymentId',
-            'deploymentStatusId',
             'deploymentJobId',
             'sourceSha',
             'deliveryCorrelation',
@@ -360,13 +370,7 @@ export function phase2EvidenceShapeFindings(evidence) {
         ),
       );
       if (!isRecord(record)) continue;
-      for (const field of [
-        'workflowRunId',
-        'deploymentId',
-        'deploymentStatusId',
-        'deploymentJobId',
-        'releaseLedgerArtifactId',
-      ]) {
+      for (const field of ['workflowRunId', 'deploymentJobId', 'releaseLedgerArtifactId']) {
         addFinding(findings, exactPositiveInteger(record[field]), `${label}.${field} is invalid`);
       }
       addFinding(findings, EXACT_SHA.test(record.sourceSha), `${label}.sourceSha must be exact`);
@@ -601,14 +605,6 @@ function pullRequestFindings(evidence, pullRequest) {
   return findings;
 }
 
-function githubActionsBot(actor) {
-  return (
-    actor?.id === GITHUB_ACTIONS_BOT.id &&
-    actor?.login === GITHUB_ACTIONS_BOT.login &&
-    actor?.type === GITHUB_ACTIONS_BOT.type
-  );
-}
-
 export function allowedRuntimeOrigin(environment, value) {
   const expectedHost = ACCEPTANCE_RUNTIME_HOSTS[environment];
   if (!expectedHost) return '';
@@ -640,209 +636,25 @@ export function verifyArtifactArchiveDigest(archive, authenticatedDigest, record
   return computed;
 }
 
-function workflowJobIdentityFromUrl(value) {
-  if (typeof value !== 'string') return undefined;
-  try {
-    const url = new URL(value);
-    const match = url.pathname.match(/^\/JueZ\/api\/actions\/runs\/(\d+)\/job\/(\d+)\/?$/);
-    if (url.protocol !== 'https:' || url.hostname !== 'github.com' || !match) return undefined;
-    const runId = Number(match[1]);
-    const jobId = Number(match[2]);
-    return exactPositiveInteger(runId) && exactPositiveInteger(jobId) ? { runId, jobId } : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function deploymentIdentityMatches(deployment, environment, expectedSha) {
-  return (
-    deployment?.sha === expectedSha &&
-    deployment?.ref === 'main' &&
-    deployment?.environment === EXPECTED_DEPLOYMENT_ENVIRONMENTS[environment] &&
-    deployment?.task === 'deploy'
-  );
-}
-
-function deploymentTimelineFindings(deployment, statuses, status, job, environment, scope) {
+function trustedWorkflowFileFindings(files, environment, expectedSha, scope) {
   const findings = [];
-  const deploymentCreated = Date.parse(deployment?.created_at);
-  const jobCreated = Date.parse(job?.created_at);
-  const jobStarted = Date.parse(job?.started_at);
-  const jobCompleted = Date.parse(job?.completed_at);
-  const statusCreated = Date.parse(status?.created_at);
-  addFinding(
-    findings,
-    [deploymentCreated, jobCreated, jobStarted, jobCompleted, statusCreated].every(Number.isFinite),
-    `${environment} ${scope} deployment provenance timestamps are invalid`,
-  );
-  addFinding(
-    findings,
-    deploymentCreated >= jobCreated && deploymentCreated <= jobStarted,
-    `${environment} ${scope} deployment was not created by the authenticated job`,
-  );
-  addFinding(
-    findings,
-    statusCreated >= jobStarted && statusCreated <= jobCompleted + 5_000,
-    `${environment} ${scope} deployment status was not completed by the authenticated job`,
-  );
-  const relevant = statuses.filter((candidate) => Number(candidate?.id) <= Number(status?.id));
-  addFinding(
-    findings,
-    relevant.length > 0 &&
-      relevant.every((candidate) => {
-        const created = Date.parse(candidate?.created_at);
-        return (
-          Number.isFinite(created) &&
-          created >= deploymentCreated &&
-          created <= jobCompleted + 5_000 &&
-          candidate?.log_url === job?.html_url &&
-          candidate?.environment === EXPECTED_DEPLOYMENT_ENVIRONMENTS[environment] &&
-          githubActionsBot(candidate?.creator)
-        );
-      }),
-    `${environment} ${scope} deployment status history is not bound to the authenticated job`,
-  );
-  return findings;
-}
-
-export function currentRuntimeFindings(currentRuntime) {
-  const findings = [];
-  const beforeSha = currentRuntime?.mainBefore?.object?.sha;
-  const afterSha = currentRuntime?.mainAfter?.object?.sha;
-  addFinding(findings, currentRuntime?.mainBefore?.object?.type === 'commit', 'current main ref is not a commit');
-  addFinding(findings, currentRuntime?.mainAfter?.object?.type === 'commit', 'final main ref is not a commit');
-  addFinding(findings, EXACT_SHA.test(beforeSha || ''), 'current main SHA is invalid');
-  addFinding(findings, afterSha === beforeSha, 'current main changed during trusted runtime verification');
-  for (const environment of ['test', 'prod']) {
-    const observed = currentRuntime?.environments?.[environment];
-    const expectedEnvironment = EXPECTED_DEPLOYMENT_ENVIRONMENTS[environment];
-    const deployments = (Array.isArray(observed?.deployments) ? observed.deployments : []).filter(
-      (deployment) =>
-        deployment?.ref === 'main' && deployment?.environment === expectedEnvironment && deployment?.task === 'deploy',
-    );
-    const latestDeployment = latestByNumericId(deployments);
-    addFinding(findings, Boolean(latestDeployment), `${environment} current deployment is missing`);
+  for (const [key, expected] of [
+    ['entry', EXPECTED_DEPLOYMENT_WORKFLOW_FILES[environment]],
+    ['shared', EXPECTED_DEPLOYMENT_WORKFLOW_FILES.shared],
+  ]) {
+    const observed = files?.[key];
+    addFinding(findings, observed?.path === expected.path, `${environment} ${scope} ${key} workflow path is invalid`);
+    addFinding(findings, observed?.ref === expectedSha, `${environment} ${scope} ${key} workflow ref is not exact`);
     addFinding(
       findings,
-      latestDeployment?.id === observed?.deployment?.id,
-      `${environment} current deployment is not canonical latest`,
-    );
-    addFinding(findings, latestDeployment?.sha === beforeSha, `${environment} current deployment is not exact main`);
-    addFinding(
-      findings,
-      githubActionsBot(latestDeployment?.creator),
-      `${environment} current deployment creator is not GitHub Actions`,
-    );
-    const statuses = Array.isArray(observed?.deploymentStatuses) ? observed.deploymentStatuses : [];
-    const latestStatus = latestByNumericId(statuses);
-    addFinding(findings, Boolean(latestStatus), `${environment} current deployment status is missing`);
-    addFinding(findings, latestStatus?.state === 'success', `${environment} current deployment did not succeed`);
-    addFinding(
-      findings,
-      latestStatus?.environment === expectedEnvironment,
-      `${environment} current deployment status environment does not match`,
-    );
-    addFinding(
-      findings,
-      githubActionsBot(latestStatus?.creator),
-      `${environment} current deployment status creator is not GitHub Actions`,
-    );
-    addFinding(
-      findings,
-      allowedRuntimeOrigin(environment, latestStatus?.environment_url) ===
-        `https://${ACCEPTANCE_RUNTIME_HOSTS[environment]}`,
-      `${environment} current deployment runtime origin is not allowlisted`,
-    );
-    const execution = workflowJobIdentityFromUrl(latestStatus?.log_url);
-    addFinding(findings, Boolean(execution), `${environment} current deployment run identity is invalid`);
-    findings.push(
-      ...workflowRunFindings(
-        observed?.workflowRun,
-        {
-          id: execution?.runId,
-          repository: 'JueZ/api',
-          path:
-            environment === 'test'
-              ? EXPECTED_DELIVERY_RUNS.deployTest.path
-              : EXPECTED_DELIVERY_RUNS.promoteProduction.path,
-          event: 'repository_dispatch',
-          headSha: beforeSha,
-          headBranch: 'main',
-          headRepository: 'JueZ/api',
-        },
-        `${environment} current deployment workflow`,
-      ),
-    );
-    const job = observed?.deploymentJob;
-    const workflowTitlePrefix =
-      environment === 'test' ? `Deploy Test ${beforeSha} ` : `Promote Production ${beforeSha} `;
-    addFinding(
-      findings,
-      observed?.workflowRun?.display_title?.startsWith(workflowTitlePrefix),
-      `${environment} current deployment workflow title does not match`,
-    );
-    addFinding(findings, job?.id === execution?.jobId, `${environment} current deployment job ID does not match`);
-    addFinding(findings, job?.run_id === execution?.runId, `${environment} current deployment job run does not match`);
-    addFinding(
-      findings,
-      job?.workflow_name?.startsWith(workflowTitlePrefix),
-      `${environment} current deployment job workflow does not match`,
-    );
-    addFinding(
-      findings,
-      job?.name === EXPECTED_DEPLOYMENT_JOBS[environment],
-      `${environment} current deployment job name does not match`,
-    );
-    addFinding(findings, job?.head_sha === beforeSha, `${environment} current deployment job is not exact main`);
-    addFinding(findings, job?.head_branch === 'main', `${environment} current deployment job branch is not main`);
-    addFinding(
-      findings,
-      job?.status === 'completed' && job?.conclusion === 'success',
-      `${environment} current deployment job did not succeed`,
-    );
-    addFinding(findings, job?.run_attempt === 1, `${environment} current deployment job must be the first attempt`);
-    addFinding(
-      findings,
-      job?.runner_group_name === 'GitHub Actions',
-      `${environment} current deployment job runner is invalid`,
-    );
-    addFinding(
-      findings,
-      job?.html_url === latestStatus?.log_url,
-      `${environment} current deployment job URL does not match`,
-    );
-    addFinding(
-      findings,
-      observed?.workflowRun?.html_url === `https://github.com/JueZ/api/actions/runs/${execution?.runId}`,
-      `${environment} current deployment workflow URL does not match`,
-    );
-    findings.push(...deploymentTimelineFindings(latestDeployment, statuses, latestStatus, job, environment, 'current'));
-    addFinding(findings, observed?.liveHealth?.status === 'ok', `${environment} current live health is not ok`);
-    addFinding(
-      findings,
-      observed?.liveHealth?.environmentName === environment,
-      `${environment} current live health environment does not match`,
-    );
-    addFinding(
-      findings,
-      observed?.liveHealth?.deployedCommitSha === beforeSha,
-      `${environment} current live health commit is not exact main`,
-    );
-    addFinding(
-      findings,
-      observed?.liveHealth?.deployedSourceRef === beforeSha,
-      `${environment} current live health source ref is not exact main`,
-    );
-    addFinding(
-      findings,
-      observed?.liveHealth?.deploymentRunId === String(execution?.runId),
-      `${environment} current live health deployment run does not match`,
+      observed?.sha256 === expected.sha256,
+      `${environment} ${scope} ${key} workflow content is not the reviewed generation`,
     );
   }
   return findings;
 }
 
-function deploymentJobFindings(record, job, environment, evidence) {
+function deploymentJobFindings(record, job, environment, expectedSha) {
   const findings = [];
   const expectedName = EXPECTED_DEPLOYMENT_JOBS[environment];
   const expectedWorkflowName =
@@ -853,11 +665,7 @@ function deploymentJobFindings(record, job, environment, evidence) {
   addFinding(findings, job?.run_id === record.workflowRunId, `${environment} job run does not match`);
   addFinding(findings, job?.workflow_name === expectedWorkflowName, `${environment} workflow name does not match`);
   addFinding(findings, job?.name === expectedName, `${environment} job name does not match`);
-  addFinding(
-    findings,
-    job?.head_sha === evidence.implementation.pullRequest.mergeSha,
-    `${environment} job head does not match`,
-  );
+  addFinding(findings, job?.head_sha === expectedSha, `${environment} job head does not match`);
   addFinding(findings, job?.head_branch === 'main', `${environment} job branch is not main`);
   addFinding(
     findings,
@@ -882,95 +690,48 @@ function deploymentJobFindings(record, job, environment, evidence) {
   return findings;
 }
 
-function deploymentEnvironmentFindings(record, ledger, observed, environment, evidence) {
+function releaseLedgerTimelineFindings(artifact, ledger, job, environment, scope) {
   const findings = [];
-  const expectedEnvironment = EXPECTED_DEPLOYMENT_ENVIRONMENTS[environment];
-  const deployment = observed.deployment;
-  const job = observed.deploymentJob;
-  const statuses = Array.isArray(observed.deploymentStatuses) ? observed.deploymentStatuses : [];
-  const status = statuses.find((candidate) => candidate.id === record.deploymentStatusId);
-  const applicableDeployments = (Array.isArray(observed.deploymentHistory) ? observed.deploymentHistory : []).filter(
-    (candidate) => deploymentIdentityMatches(candidate, environment, evidence.implementation.pullRequest.mergeSha),
+  const writeSteps = (Array.isArray(job?.steps) ? job.steps : []).filter(
+    (step) => step.name === 'Write release ledger',
   );
-  const latestDeployment = latestByNumericId(applicableDeployments);
-  addFinding(findings, Boolean(latestDeployment), `${environment} historical deployment history is missing`);
+  const uploadSteps = (Array.isArray(job?.steps) ? job.steps : []).filter(
+    (step) => step.name === 'Upload release ledger',
+  );
+  const write = writeSteps[0];
+  const upload = uploadSteps[0];
+  const timestamps = {
+    jobStarted: Date.parse(job?.started_at),
+    jobCompleted: Date.parse(job?.completed_at),
+    writeStarted: Date.parse(write?.started_at),
+    writeCompleted: Date.parse(write?.completed_at),
+    uploadStarted: Date.parse(upload?.started_at),
+    uploadCompleted: Date.parse(upload?.completed_at),
+    ledgerVerified: Date.parse(ledger?.verifiedAt),
+    artifactCreated: Date.parse(artifact?.created_at),
+    artifactUpdated: Date.parse(artifact?.updated_at),
+  };
   addFinding(
     findings,
-    latestDeployment?.id === record.deploymentId,
-    `${environment} historical deployment is not canonical latest for the implementation commit`,
-  );
-  addFinding(findings, deployment?.id === record.deploymentId, `${environment} deployment ID does not match`);
-  addFinding(
-    findings,
-    deployment?.sha === evidence.implementation.pullRequest.mergeSha,
-    `${environment} deployment SHA does not match`,
-  );
-  addFinding(findings, deployment?.ref === 'main', `${environment} deployment ref is not main`);
-  addFinding(
-    findings,
-    deployment?.environment === expectedEnvironment,
-    `${environment} GitHub environment does not match`,
-  );
-  addFinding(findings, deployment?.task === 'deploy', `${environment} deployment task is not deploy`);
-  addFinding(
-    findings,
-    githubActionsBot(deployment?.creator),
-    `${environment} deployment creator is not GitHub Actions`,
-  );
-  addFinding(findings, Boolean(status), `${environment} successful deployment status is unavailable`);
-  addFinding(findings, status?.state === 'success', `${environment} deployment status is not successful`);
-  addFinding(
-    findings,
-    status?.environment === expectedEnvironment,
-    `${environment} deployment status environment does not match`,
+    Object.values(timestamps).every(Number.isFinite),
+    `${environment} ${scope} release-ledger lifecycle timestamps are invalid`,
   );
   addFinding(
     findings,
-    githubActionsBot(status?.creator),
-    `${environment} deployment status creator is not GitHub Actions`,
+    timestamps.jobStarted <= timestamps.writeStarted &&
+      timestamps.writeStarted <= timestamps.ledgerVerified &&
+      timestamps.ledgerVerified <= timestamps.writeCompleted + 5_000 &&
+      timestamps.writeCompleted <= timestamps.uploadCompleted &&
+      timestamps.uploadStarted <= timestamps.artifactCreated &&
+      timestamps.artifactCreated <= timestamps.uploadCompleted + 5_000 &&
+      timestamps.artifactUpdated >= timestamps.artifactCreated &&
+      timestamps.artifactUpdated <= timestamps.jobCompleted + 5_000,
+    `${environment} ${scope} release ledger is not bounded to the authenticated job lifecycle`,
   );
-  addFinding(findings, status?.log_url === job?.html_url, `${environment} deployment status job URL does not match`);
-  const laterStatuses = statuses.filter((candidate) => Number(candidate?.id) > Number(status?.id));
-  for (const laterStatus of laterStatuses) {
-    addFinding(
-      findings,
-      laterStatus?.state === 'inactive',
-      `${environment} deployment has a later non-supersession status`,
-    );
-    addFinding(
-      findings,
-      laterStatus?.environment === expectedEnvironment,
-      `${environment} later deployment status environment does not match`,
-    );
-    addFinding(
-      findings,
-      githubActionsBot(laterStatus?.creator),
-      `${environment} later deployment status creator is not GitHub Actions`,
-    );
-    addFinding(
-      findings,
-      laterStatus?.log_url === job?.html_url,
-      `${environment} later deployment status job URL does not match`,
-    );
-    addFinding(
-      findings,
-      laterStatus?.environment_url === '',
-      `${environment} inactive deployment status must not redirect runtime evidence`,
-    );
-  }
-  const expectedOrigin = allowedRuntimeOrigin(environment, ledger?.apiBaseUrl);
-  addFinding(findings, Boolean(expectedOrigin), `${environment} ledger runtime origin is not allowlisted`);
-  addFinding(
-    findings,
-    Boolean(expectedOrigin) && allowedRuntimeOrigin(environment, status?.environment_url) === expectedOrigin,
-    `${environment} deployment runtime origin does not match the allowlist and ledger`,
-  );
-  findings.push(...deploymentTimelineFindings(deployment, statuses, status, job, environment, 'historical'));
-  findings.push(...deploymentJobFindings(record, job, environment, evidence));
   return findings;
 }
 
-function deploymentLedgerFindings(record, ledger, observed, environment, evidence) {
+function deploymentLedgerFindings(record, ledger, observed, environment, expectedSha, scope) {
   const findings = [];
   const artifactName = `release-ledger-${environment}-${record.sourceSha}-${record.deliveryCorrelation}`;
   const artifacts = Array.isArray(observed.artifactList?.artifacts) ? observed.artifactList.artifacts : [];
@@ -991,7 +752,7 @@ function deploymentLedgerFindings(record, ledger, observed, environment, evidenc
   );
   addFinding(
     findings,
-    artifact?.workflow_run?.head_sha === evidence.implementation.pullRequest.mergeSha,
+    artifact?.workflow_run?.head_sha === expectedSha,
     `${environment} ledger artifact head does not match`,
   );
   addFinding(
@@ -1021,7 +782,99 @@ function deploymentLedgerFindings(record, ledger, observed, environment, evidenc
     `${environment} authenticated smoke did not pass`,
   );
   addFinding(findings, ledger?.telemetryCheckResult?.status === 'passed', `${environment} telemetry did not pass`);
-  findings.push(...deploymentEnvironmentFindings(record, ledger, observed, environment, evidence));
+  addFinding(
+    findings,
+    allowedRuntimeOrigin(environment, ledger?.apiBaseUrl) === `https://${ACCEPTANCE_RUNTIME_HOSTS[environment]}`,
+    `${environment} ledger runtime origin is not allowlisted`,
+  );
+  findings.push(...trustedWorkflowFileFindings(observed.workflowFiles, environment, expectedSha, scope));
+  findings.push(...deploymentJobFindings(record, observed.deploymentJob, environment, expectedSha));
+  findings.push(...releaseLedgerTimelineFindings(artifact, ledger, observed.deploymentJob, environment, scope));
+  return findings;
+}
+
+export function currentRuntimeFindings(currentRuntime) {
+  const findings = [];
+  const beforeSha = currentRuntime?.mainBefore?.object?.sha;
+  const afterSha = currentRuntime?.mainAfter?.object?.sha;
+  addFinding(findings, currentRuntime?.mainBefore?.object?.type === 'commit', 'current main ref is not a commit');
+  addFinding(findings, currentRuntime?.mainAfter?.object?.type === 'commit', 'final main ref is not a commit');
+  addFinding(findings, EXACT_SHA.test(beforeSha || ''), 'current main SHA is invalid');
+  addFinding(findings, afterSha === beforeSha, 'current main changed during trusted runtime verification');
+  for (const environment of ['test', 'prod']) {
+    const observed = currentRuntime?.environments?.[environment];
+    const run = observed?.workflowRun;
+    const correlation = observed?.deliveryCorrelation;
+    const expectedWorkflow =
+      environment === 'test' ? EXPECTED_DELIVERY_RUNS.deployTest : EXPECTED_DELIVERY_RUNS.promoteProduction;
+    const expectedTitle = `${environment === 'test' ? 'Deploy Test' : 'Promote Production'} ${beforeSha} ${correlation}`;
+    const expected = {
+      id: run?.id,
+      repository: 'JueZ/api',
+      path: expectedWorkflow.path,
+      event: expectedWorkflow.event,
+      headSha: beforeSha,
+      headBranch: 'main',
+      headRepository: 'JueZ/api',
+      displayTitle: expectedTitle,
+    };
+    addFinding(findings, OPAQUE_CORRELATION.test(correlation || ''), `${environment} current correlation is invalid`);
+    findings.push(
+      ...canonicalWorkflowRunFindings(
+        run,
+        observed?.workflowRuns,
+        expected,
+        `${environment} current deployment workflow`,
+      ),
+    );
+    addFinding(
+      findings,
+      Array.isArray(observed?.deploymentJobs) && observed.deploymentJobs.length === 1,
+      `${environment} current deployment job is not unique`,
+    );
+    const artifact = observed?.artifact;
+    addFinding(
+      findings,
+      Array.isArray(observed?.ledgerArtifacts) && observed.ledgerArtifacts.length === 1,
+      `${environment} current release-ledger artifact is not unique`,
+    );
+    const record = {
+      workflowRunId: run?.id,
+      deploymentJobId: observed?.deploymentJob?.id,
+      sourceSha: beforeSha,
+      deliveryCorrelation: correlation,
+      releaseLedgerArtifactId: artifact?.id,
+      releaseLedgerArtifactDigest: artifact?.digest,
+    };
+    findings.push(...deploymentLedgerFindings(record, observed?.ledger, observed, environment, beforeSha, 'current'));
+    addFinding(findings, observed?.liveHealth?.status === 'ok', `${environment} current live health is not ok`);
+    addFinding(
+      findings,
+      observed?.liveHealth?.environmentName === environment,
+      `${environment} current live health environment does not match`,
+    );
+    addFinding(
+      findings,
+      observed?.liveHealth?.deployedCommitSha === beforeSha,
+      `${environment} current live health commit is not exact main`,
+    );
+    addFinding(
+      findings,
+      observed?.liveHealth?.deployedSourceRef === beforeSha,
+      `${environment} current live health source ref is not exact main`,
+    );
+    addFinding(
+      findings,
+      observed?.liveHealth?.deploymentRunId === String(run?.id),
+      `${environment} current live health deployment run does not match`,
+    );
+  }
+  addFinding(
+    findings,
+    allowedRuntimeOrigin('test', currentRuntime?.environments?.test?.ledger?.apiBaseUrl) !==
+      allowedRuntimeOrigin('prod', currentRuntime?.environments?.prod?.ledger?.apiBaseUrl),
+    'current test and production runtime origins must be distinct',
+  );
   return findings;
 }
 
@@ -1103,14 +956,16 @@ export function phase2EvidenceFindings(evidence, observed) {
       observed.environments.test.ledger,
       observed.environments.test,
       'test',
-      evidence,
+      implementation.mergeSha,
+      'historical',
     ),
     ...deploymentLedgerFindings(
       evidence.implementation.postMergeDelivery.promoteProduction,
       observed.environments.prod.ledger,
       observed.environments.prod,
       'prod',
-      evidence,
+      implementation.mergeSha,
+      'historical',
     ),
   );
   addFinding(
@@ -1262,11 +1117,9 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     return JSON.parse(await responseText(response, MAX_GITHUB_JSON_BYTES, 'GitHub response'));
   }
 
-  async function getFile(path, ref) {
-    if (![PROGRAM_PATH, PHASE_2_EVIDENCE_PATH].includes(path)) {
-      throw new Error('candidate file path is not allowlisted for trusted verification');
-    }
-    if (!EXACT_SHA.test(ref)) throw new Error('candidate file ref must be an exact SHA');
+  async function getBoundFile(path, ref, allowedPaths, label) {
+    if (!allowedPaths.includes(path)) throw new Error(`${label} path is not allowlisted for trusted verification`);
+    if (!EXACT_SHA.test(ref)) throw new Error(`${label} ref must be an exact SHA`);
     const record = await getJson(`/contents/${encodedRepositoryPath(path)}?ref=${ref}`);
     if (record?.type !== 'file' || record?.path !== path || record?.encoding !== 'base64') {
       throw new Error(`candidate file identity is invalid: ${path}`);
@@ -1279,6 +1132,16 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
       throw new Error(`candidate file content size does not match: ${path}`);
     }
     return content.toString('utf8');
+  }
+
+  function getFile(path, ref) {
+    return getBoundFile(path, ref, [PROGRAM_PATH, PHASE_2_EVIDENCE_PATH], 'candidate file');
+  }
+
+  async function getWorkflowFileDigest(path, ref) {
+    const allowedPaths = Object.values(EXPECTED_DEPLOYMENT_WORKFLOW_FILES).map((record) => record.path);
+    const content = await getBoundFile(path, ref, allowedPaths, 'deployment workflow');
+    return { path, ref, sha256: createHash('sha256').update(content).digest('hex') };
   }
 
   async function getPullRequestFiles(prNumber) {
@@ -1325,24 +1188,14 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     return getPaginatedCollection(`/actions/runs?head_sha=${headSha}`, 'workflow_runs', 'workflow history');
   }
 
-  async function getDeploymentsForSha(headSha) {
-    if (!EXACT_SHA.test(headSha)) throw new Error('deployment-history SHA must be exact');
-    return getPaginatedCollection(`/deployments?sha=${headSha}`, undefined, 'deployment history');
+  async function getWorkflowJobs(runId) {
+    if (!exactPositiveInteger(runId)) throw new Error('workflow run ID must be a positive integer');
+    return getPaginatedCollection(`/actions/runs/${runId}/jobs?filter=all`, 'jobs', 'workflow job history');
   }
 
-  async function getDeploymentsForEnvironment(environment) {
-    const expectedEnvironment = EXPECTED_DEPLOYMENT_ENVIRONMENTS[environment];
-    if (!expectedEnvironment) throw new Error('deployment environment is not allowlisted');
-    return getPaginatedCollection(
-      `/deployments?environment=${encodeURIComponent(expectedEnvironment)}`,
-      undefined,
-      `${environment} deployment history`,
-    );
-  }
-
-  async function getDeploymentStatuses(deploymentId) {
-    if (!exactPositiveInteger(deploymentId)) throw new Error('deployment ID must be a positive integer');
-    return getPaginatedCollection(`/deployments/${deploymentId}/statuses`, undefined, 'deployment status history');
+  async function getWorkflowArtifacts(runId) {
+    if (!exactPositiveInteger(runId)) throw new Error('workflow run ID must be a positive integer');
+    return getPaginatedCollection(`/actions/runs/${runId}/artifacts`, 'artifacts', 'workflow artifact history');
   }
 
   function downloadArtifact(artifactId) {
@@ -1380,9 +1233,9 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     getCheckRuns,
     getCommitStatuses,
     getWorkflowRuns,
-    getDeploymentsForSha,
-    getDeploymentsForEnvironment,
-    getDeploymentStatuses,
+    getWorkflowJobs,
+    getWorkflowArtifacts,
+    getWorkflowFileDigest,
     downloadArtifact,
   };
 }
@@ -1433,23 +1286,15 @@ async function collectPhase2Observed(evidence, client, dependencies = {}) {
   const aggregates = evidence.implementation.exactHeadAggregates;
   const deliveryRecords = Object.values(evidence.implementation.postMergeDelivery);
   const workflowRunIds = [...new Set([...aggregates, ...deliveryRecords].map((record) => record.workflowRunId))];
-  const [
-    pullRequest,
-    checkRuns,
-    commitStatuses,
-    implementationWorkflowRuns,
-    mergeWorkflowRuns,
-    deploymentHistory,
-    mainBefore,
-  ] = await Promise.all([
-    client.getJson(`/pulls/${implementation.number}`),
-    client.getCheckRuns(implementation.headSha),
-    client.getCommitStatuses(implementation.headSha),
-    client.getWorkflowRuns(implementation.headSha),
-    client.getWorkflowRuns(implementation.mergeSha),
-    client.getDeploymentsForSha(implementation.mergeSha),
-    client.getJson('/git/ref/heads/main'),
-  ]);
+  const [pullRequest, checkRuns, commitStatuses, implementationWorkflowRuns, mergeWorkflowRuns, mainBefore] =
+    await Promise.all([
+      client.getJson(`/pulls/${implementation.number}`),
+      client.getCheckRuns(implementation.headSha),
+      client.getCommitStatuses(implementation.headSha),
+      client.getWorkflowRuns(implementation.headSha),
+      client.getWorkflowRuns(implementation.mergeSha),
+      client.getJson('/git/ref/heads/main'),
+    ]);
   const observed = {
     pullRequest,
     checkRuns: {},
@@ -1473,10 +1318,9 @@ async function collectPhase2Observed(evidence, client, dependencies = {}) {
     ['test', evidence.implementation.postMergeDelivery.deployTest],
     ['prod', evidence.implementation.postMergeDelivery.promoteProduction],
   ]) {
-    const artifactList = await client.getJson(`/actions/runs/${record.workflowRunId}/artifacts?per_page=100`);
-    const artifact = (artifactList.artifacts || []).find(
-      (candidate) => candidate.id === record.releaseLedgerArtifactId,
-    );
+    const artifacts = await client.getWorkflowArtifacts(record.workflowRunId);
+    const artifactList = { artifacts };
+    const artifact = artifacts.find((candidate) => candidate.id === record.releaseLedgerArtifactId);
     if (!artifact) throw new Error(`${environment} ledger artifact is unavailable`);
     const archive = client.downloadArtifact(record.releaseLedgerArtifactId);
     verifyArtifactArchiveDigest(archive, artifact.digest, record.releaseLedgerArtifactDigest, `${environment} ledger`);
@@ -1484,30 +1328,70 @@ async function collectPhase2Observed(evidence, client, dependencies = {}) {
     observed.environments[environment] = {
       artifactList,
       ledger,
-      deployment: await client.getJson(`/deployments/${record.deploymentId}`),
-      deploymentHistory,
-      deploymentStatuses: await client.getDeploymentStatuses(record.deploymentId),
       deploymentJob: await client.getJson(`/actions/jobs/${record.deploymentJobId}`),
+      workflowFiles: {
+        entry: await client.getWorkflowFileDigest(
+          EXPECTED_DEPLOYMENT_WORKFLOW_FILES[environment].path,
+          implementation.mergeSha,
+        ),
+        shared: await client.getWorkflowFileDigest(
+          EXPECTED_DEPLOYMENT_WORKFLOW_FILES.shared.path,
+          implementation.mergeSha,
+        ),
+      },
     };
   }
+  const currentMainSha = mainBefore?.object?.sha;
+  if (!EXACT_SHA.test(currentMainSha || '')) throw new Error('current main ref did not resolve to an exact SHA');
+  const currentWorkflowRuns = await client.getWorkflowRuns(currentMainSha);
   for (const environment of ['test', 'prod']) {
-    const deployments = await client.getDeploymentsForEnvironment(environment);
-    const expectedEnvironment = EXPECTED_DEPLOYMENT_ENVIRONMENTS[environment];
-    const deployment = latestByNumericId(
-      deployments.filter(
-        (candidate) =>
-          candidate?.ref === 'main' && candidate?.environment === expectedEnvironment && candidate?.task === 'deploy',
-      ),
+    const expectedWorkflow =
+      environment === 'test' ? EXPECTED_DELIVERY_RUNS.deployTest : EXPECTED_DELIVERY_RUNS.promoteProduction;
+    const applicableRuns = currentWorkflowRuns.filter((run) =>
+      workflowRunMatchesIdentity(run, {
+        repository: 'JueZ/api',
+        path: expectedWorkflow.path,
+        event: expectedWorkflow.event,
+        headSha: currentMainSha,
+        headBranch: 'main',
+        headRepository: 'JueZ/api',
+      }),
     );
-    if (!deployment) throw new Error(`${environment} current deployment is unavailable`);
-    const deploymentStatuses = await client.getDeploymentStatuses(deployment.id);
-    const execution = workflowJobIdentityFromUrl(latestByNumericId(deploymentStatuses)?.log_url);
+    const historyRun = latestByNumericId(applicableRuns);
+    if (!historyRun) throw new Error(`${environment} current deployment workflow is unavailable`);
+    const workflowRun = await client.getJson(`/actions/runs/${historyRun.id}`);
+    const titlePrefix = `${environment === 'test' ? 'Deploy Test' : 'Promote Production'} ${currentMainSha} `;
+    const deliveryCorrelation = workflowRun?.display_title?.startsWith(titlePrefix)
+      ? workflowRun.display_title.slice(titlePrefix.length)
+      : '';
+    if (!OPAQUE_CORRELATION.test(deliveryCorrelation)) {
+      throw new Error(`${environment} current delivery correlation is invalid`);
+    }
+    const jobs = await client.getWorkflowJobs(workflowRun.id);
+    const deploymentJobs = jobs.filter((job) => job?.name === EXPECTED_DEPLOYMENT_JOBS[environment]);
+    if (deploymentJobs.length !== 1) throw new Error(`${environment} current deployment job is not unique`);
+    const deploymentJob = deploymentJobs[0];
+    const artifacts = await client.getWorkflowArtifacts(workflowRun.id);
+    const artifactName = `release-ledger-${environment}-${currentMainSha}-${deliveryCorrelation}`;
+    const ledgerArtifacts = artifacts.filter((artifact) => artifact?.name === artifactName);
+    if (ledgerArtifacts.length !== 1) throw new Error(`${environment} current release-ledger artifact is not unique`);
+    const artifact = ledgerArtifacts[0];
+    const archive = client.downloadArtifact(artifact.id);
+    verifyArtifactArchiveDigest(archive, artifact.digest, artifact.digest, `${environment} current ledger`);
     observed.currentRuntime.environments[environment] = {
-      deployments,
-      deployment,
-      deploymentStatuses,
-      workflowRun: execution ? await client.getJson(`/actions/runs/${execution.runId}`) : undefined,
-      deploymentJob: execution ? await client.getJson(`/actions/jobs/${execution.jobId}`) : undefined,
+      workflowRuns: currentWorkflowRuns,
+      workflowRun,
+      deliveryCorrelation,
+      deploymentJobs,
+      deploymentJob,
+      artifactList: { artifacts },
+      ledgerArtifacts,
+      artifact,
+      ledger: await readArchive(archive, environment),
+      workflowFiles: {
+        entry: await client.getWorkflowFileDigest(EXPECTED_DEPLOYMENT_WORKFLOW_FILES[environment].path, currentMainSha),
+        shared: await client.getWorkflowFileDigest(EXPECTED_DEPLOYMENT_WORKFLOW_FILES.shared.path, currentMainSha),
+      },
       liveHealth: await fetchHealth(environment, `https://${ACCEPTANCE_RUNTIME_HOSTS[environment]}`),
     };
   }
