@@ -531,6 +531,75 @@ export function completeHistoricalCheckRollupFindings(checkRuns, commitStatuses,
   return findings;
 }
 
+function normalizedHistoryRecords(records, kind) {
+  if (!Array.isArray(records)) return undefined;
+  const project =
+    kind === 'check'
+      ? (record) => ({
+          id: record?.id,
+          name: record?.name,
+          headSha: record?.head_sha,
+          status: record?.status,
+          conclusion: record?.conclusion,
+          appId: record?.app?.id,
+          appSlug: record?.app?.slug,
+          detailsUrl: record?.details_url,
+          externalId: record?.external_id,
+        })
+      : kind === 'status'
+        ? (record) => ({
+            id: record?.id,
+            sha: record?.sha,
+            context: record?.context,
+            state: record?.state,
+            targetUrl: record?.target_url,
+            creatorId: record?.creator?.id,
+            creatorLogin: record?.creator?.login,
+          })
+        : (record) => ({
+            id: record?.id,
+            repository: record?.repository?.full_name,
+            path: record?.path,
+            event: record?.event,
+            runAttempt: record?.run_attempt,
+            status: record?.status,
+            conclusion: record?.conclusion,
+            headSha: record?.head_sha,
+            headBranch: record?.head_branch,
+            headRepository: record?.head_repository?.full_name,
+            displayTitle: record?.display_title,
+            htmlUrl: record?.html_url,
+            createdAt: record?.created_at,
+            updatedAt: record?.updated_at,
+            runStartedAt: record?.run_started_at,
+          });
+  return records
+    .map(project)
+    .sort(
+      (left, right) => Number(left.id) - Number(right.id) || JSON.stringify(left).localeCompare(JSON.stringify(right)),
+    );
+}
+
+export function historyStabilityFindings(initial, final) {
+  const findings = [];
+  for (const [key, kind, label] of [
+    ['checkRuns', 'check', 'historical check-run history'],
+    ['commitStatuses', 'status', 'historical commit-status history'],
+    ['implementationWorkflowRuns', 'workflow', 'implementation workflow history'],
+    ['mergeWorkflowRuns', 'workflow', 'merge workflow history'],
+    ['currentWorkflowRuns', 'workflow', 'current-main workflow history'],
+  ]) {
+    const before = normalizedHistoryRecords(initial?.[key], kind);
+    const after = normalizedHistoryRecords(final?.[key], kind);
+    addFinding(findings, Boolean(before), `${label} initial snapshot is invalid`);
+    addFinding(findings, Boolean(after), `${label} final snapshot is invalid`);
+    if (before && after) {
+      addFinding(findings, JSON.stringify(before) === JSON.stringify(after), `${label} changed during verification`);
+    }
+  }
+  return findings;
+}
+
 function canonicalAggregateCheckFindings(record, allCheckRuns, implementation) {
   const findings = [];
   const named = (Array.isArray(allCheckRuns) ? allCheckRuns : []).filter(
@@ -925,6 +994,7 @@ export function currentRuntimeFindings(currentRuntime) {
 export function phase2EvidenceFindings(evidence, observed) {
   const findings = [...phase2EvidenceShapeFindings(evidence)];
   if (findings.length > 0) return findings;
+  findings.push(...historyStabilityFindings(observed?.historyStability?.initial, observed?.historyStability?.final));
   const implementation = evidence.implementation.pullRequest;
   findings.push(...pullRequestFindings(evidence, observed.pullRequest));
   findings.push(
@@ -1407,6 +1477,14 @@ async function collectPhase2Observed(evidence, client, dependencies = {}) {
     workflowHistories: { implementationHead: implementationWorkflowRuns, merge: mergeWorkflowRuns },
     environments: {},
     currentRuntime: { mainBefore, environments: {} },
+    historyStability: {
+      initial: {
+        checkRuns,
+        commitStatuses,
+        implementationWorkflowRuns,
+        mergeWorkflowRuns,
+      },
+    },
   };
   await Promise.all(
     aggregates.map(async (record) => {
@@ -1499,7 +1577,38 @@ async function collectPhase2Observed(evidence, client, dependencies = {}) {
       liveHealth: await fetchHealth(environment, `https://${ACCEPTANCE_RUNTIME_HOSTS[environment]}`),
     };
   }
-  observed.currentRuntime.mainAfter = await client.getJson('/git/ref/heads/main');
+  const [
+    finalCheckRuns,
+    finalCommitStatuses,
+    finalImplementationWorkflowRuns,
+    finalMergeWorkflowRuns,
+    finalCurrentWorkflowRuns,
+    mainAfter,
+  ] = await Promise.all([
+    client.getCheckRuns(implementation.headSha),
+    client.getCommitStatuses(implementation.headSha),
+    client.getWorkflowRuns(implementation.headSha),
+    client.getWorkflowRuns(implementation.mergeSha),
+    client.getWorkflowRuns(currentMainSha),
+    client.getJson('/git/ref/heads/main'),
+  ]);
+  observed.historyStability.initial.currentWorkflowRuns = currentWorkflowRuns;
+  observed.historyStability.final = {
+    checkRuns: finalCheckRuns,
+    commitStatuses: finalCommitStatuses,
+    implementationWorkflowRuns: finalImplementationWorkflowRuns,
+    mergeWorkflowRuns: finalMergeWorkflowRuns,
+    currentWorkflowRuns: finalCurrentWorkflowRuns,
+  };
+  observed.checkRollup = { checkRuns: finalCheckRuns, commitStatuses: finalCommitStatuses };
+  observed.workflowHistories = {
+    implementationHead: finalImplementationWorkflowRuns,
+    merge: finalMergeWorkflowRuns,
+  };
+  for (const environment of ['test', 'prod']) {
+    observed.currentRuntime.environments[environment].workflowRuns = finalCurrentWorkflowRuns;
+  }
+  observed.currentRuntime.mainAfter = mainAfter;
   return observed;
 }
 

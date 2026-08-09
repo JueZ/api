@@ -18,6 +18,7 @@ import {
   createTrustedGithubClient,
   currentRuntimeFindings,
   fetchAllowedRuntimeHealth,
+  historyStabilityFindings,
   lowRiskReviewEvidenceFindings,
   openPullRequestLedgerFindings,
   phase2EvidenceFindings,
@@ -385,7 +386,7 @@ function validObserved(evidence) {
       display_title: `Promote Production ${mergeSha} ${delivery.promoteProduction.deliveryCorrelation}`,
     }),
   };
-  return {
+  const observed = {
     pullRequest: {
       number: 349,
       html_url: 'https://github.com/JueZ/api/pull/349',
@@ -415,6 +416,21 @@ function validObserved(evidence) {
       },
     },
   };
+  const historySnapshot = {
+    checkRuns: observed.checkRollup.checkRuns,
+    commitStatuses: observed.checkRollup.commitStatuses,
+    implementationWorkflowRuns: observed.workflowHistories.implementationHead,
+    mergeWorkflowRuns: observed.workflowHistories.merge,
+    currentWorkflowRuns: [
+      ...observed.currentRuntime.environments.test.workflowRuns,
+      ...observed.currentRuntime.environments.prod.workflowRuns,
+    ],
+  };
+  observed.historyStability = {
+    initial: structuredClone(historySnapshot),
+    final: structuredClone(historySnapshot),
+  };
+  return observed;
 }
 
 test('offline program validation requires registered evidence for every accepted phase', async (context) => {
@@ -542,6 +558,66 @@ test('historical check rollup rejects unrelated and aggregate superseding failur
       [{ id: 1, context: 'legacy-policy', sha: headSha, state: 'pending' }],
       headSha,
     ).some((finding) => finding.includes('legacy-policy latest state')),
+  );
+});
+
+test('final acceptance rejects check, status, and workflow histories that change during verification', () => {
+  const observed = validObserved(validEvidence());
+  const initial = observed.historyStability.initial;
+  assert.deepEqual(historyStabilityFindings(initial, structuredClone(initial)), []);
+
+  for (const [key, record, label] of [
+    [
+      'checkRuns',
+      {
+        id: 999001,
+        name: 'late security check',
+        head_sha: headSha,
+        status: 'in_progress',
+        conclusion: null,
+        app: { id: 15_368, slug: 'github-actions' },
+      },
+      'historical check-run history changed',
+    ],
+    [
+      'commitStatuses',
+      { id: 999002, sha: headSha, context: 'late-status', state: 'pending' },
+      'historical commit-status history changed',
+    ],
+    [
+      'implementationWorkflowRuns',
+      workflowRun(999003, '.github/workflows/ci.yml', 'pull_request', headSha),
+      'implementation workflow history changed',
+    ],
+    [
+      'mergeWorkflowRuns',
+      workflowRun(999004, '.github/workflows/deploy-test.yml', 'repository_dispatch', mergeSha),
+      'merge workflow history changed',
+    ],
+    [
+      'currentWorkflowRuns',
+      workflowRun(999005, '.github/workflows/promote-production.yml', 'repository_dispatch', currentMainSha),
+      'current-main workflow history changed',
+    ],
+  ]) {
+    const final = structuredClone(initial);
+    final[key].push(record);
+    assert.ok(historyStabilityFindings(initial, final).some((finding) => finding.includes(label)));
+  }
+
+  const raced = validObserved(validEvidence());
+  raced.historyStability.final.checkRuns.push({
+    id: 999006,
+    name: 'late failing check',
+    head_sha: headSha,
+    status: 'completed',
+    conclusion: 'failure',
+    app: { id: 15_368, slug: 'github-actions' },
+  });
+  assert.ok(
+    phase2EvidenceFindings(validEvidence(), raced).some((finding) =>
+      finding.includes('historical check-run history changed'),
+    ),
   );
 });
 
