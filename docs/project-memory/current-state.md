@@ -1,10 +1,16 @@
 # Current state
 
+## 2026-08-09 Phase 2 verifier compatibility delivered; evidence retry started
+
+- Compatibility PR #375 final head `8f89c7665a19ab90fdaee0c3d5861311cdf9eaca` passed exact-head CI `31318287565`, Policy Check `31318287562`, CodeQL `31318287564`, and independent autonomous review in controller run `31318286758`. GitHub then merged it through ordinary strict branch protection as `f7ec8cbb4d9bc44fecd9a833c3d7cc483f6974f2`; no admin bypass or protection setting changed.
+- Exact-main CI `31318612977`, Main Delivery `31318690680`, Deploy Test `31318705872`, and Promote Production `31318872853` passed. Fresh test and production runtime truth at `2026-08-09T14:41:24.312Z` and `2026-08-09T14:41:20.020Z` verified the exact merge and run identity, public and authenticated smoke, telemetry, and both release ledgers.
+- The current branch stages the public-safe Phase 2 implementation evidence and keeps Phase 2 `in_progress`. It changes no workflow or policy. After this evidence PR obtains terminal protected and post-merge proof, one small ledger PR may mark Phase 2 `accepted`; Phase 3 begins only after that. Issue #374 remains open until its versioned learning artifact and counterfactual proof are delivered. A merged PR alone is not runtime evidence.
+
 ## 2026-08-09 Phase 2 evidence PR exposed identical-compare compatibility defect
 
 - Controller-wiring PR #371 merged as `8f71efebfa317853a89970eec4527bde696e277a` after exact-head CI `31316360899`, Policy Check `31316360920`, CodeQL `31316360918`, and autonomous review/controller `31316360856`. Main Delivery `31316505347`, main CI `31316519451`, Deploy Test `31316596882`, Promote Production `31316759228`, and fresh test/production runtime truth all passed.
 - Evidence PR #372 final head `ea32247e769c8a3e92b083a052e8b0d975894ba6` passed exact-head CI `31317696391`, Policy Check `31317696352`, CodeQL `31317696353`, and independent review in controller run `31317695730`, then failed closed in protected verifier job `93255754296`. GitHub's identical compare omitted `head_commit`; protected main and controller were both exact `8f71efebfa317853a89970eec4527bde696e277a` and all other comparison identities agreed.
-- PR #372 closed unmerged after two repairs, so no main delivery or runtime acceptance exists for it. Phase 2 remains `in_progress`. Issue #373 records the premature phase-status transition; issue #374 records the identical-compare regression. The current branch is the bounded compatibility fix, not an acceptance retry.
+- PR #372 closed unmerged after two repairs, so no main delivery or runtime acceptance exists for it. Phase 2 remains `in_progress`. Issue #373 records the premature phase-status transition; issue #374 records the identical-compare regression that PR #375 subsequently repaired.
 
 ## 2026-08-09 Phase 2 orchestration PR #369 delivered; controller wiring started
 
