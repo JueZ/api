@@ -107,6 +107,13 @@ const PHASE_3_IMPLEMENTATION_IDENTITY = Object.freeze({
   headSha: 'b5bbb0926282ca4a45fd93551d4ef47538f82f2b',
   mergeSha: '5f874d8bdbe51d7e69b2155e4b4aac977085bfcd',
 });
+const PHASE_4_IMPLEMENTATION_IDENTITY = Object.freeze({
+  baseSha: '5f874d8bdbe51d7e69b2155e4b4aac977085bfcd',
+  branch: 'codex/agent-task-evals-phase-4',
+  pullRequest: 395,
+  headSha: '7f922c45c5ed81d0091c4d840f6054fc73efc27b',
+  mergeSha: 'efc0793657d6d5bb5f86375fad67ca0ce67c1c07',
+});
 const PHASE_3_LABELS = Object.freeze([
   'agent-learning',
   'learning-regression',
@@ -115,6 +122,40 @@ const PHASE_3_LABELS = Object.freeze([
   'learning-task-eval',
   'learning-waived',
 ]);
+const PHASE_4_TASKS = Object.freeze([
+  Object.freeze({
+    id: 'bring-singular-add-item',
+    historicalBaseSha: '0cb159d8c05248de2e6decbd80d8325bd38d6623',
+    sourcePr: 344,
+    scorerId: 'bring-singular-add-item',
+  }),
+  Object.freeze({
+    id: 'ci-script-indirection',
+    historicalBaseSha: 'b9ea568fffa0f51aa0be8c5d4dc73a6c3884c005',
+    sourcePr: 324,
+    scorerId: 'ci-script-indirection',
+  }),
+  Object.freeze({
+    id: 'delivery-evidence-truthfulness',
+    historicalBaseSha: '8f71efebfa317853a89970eec4527bde696e277a',
+    sourcePr: 372,
+    scorerId: 'delivery-evidence-truthfulness',
+  }),
+  Object.freeze({
+    id: 'workflow-run-identity',
+    historicalBaseSha: 'd24fe187ce5b3aeaf238e5b66e0339c5ccc7afbd',
+    sourcePr: 321,
+    scorerId: 'workflow-run-identity',
+  }),
+]);
+const PHASE_4_RUNS = Object.freeze({
+  'CI complete': 31_338_455_257,
+  'Policy complete': 31_338_455_252,
+  'CodeQL complete': 31_338_455_278,
+  'Autonomous review complete': 31_338_454_226,
+  mainDelivery: 31_338_579_706,
+  exactMainCi: 31_338_595_876,
+});
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -707,6 +748,299 @@ export function phase3EvidenceShapeFindings(evidence) {
       modelUsage.paidAgentTaskEvaluationInvoked === false,
       'Phase 3 evidence reports a paid task evaluation',
     );
+  }
+  return findings;
+}
+
+export function phase4EvidenceShapeFindings(evidence) {
+  const findings = [];
+  findings.push(
+    ...exactKeysFindings(
+      evidence,
+      [
+        'schemaVersion',
+        'phase',
+        'status',
+        'observedAt',
+        'implementation',
+        'exactHeadChecks',
+        'postMerge',
+        'harness',
+        'modelUsage',
+        'evidenceBoundary',
+      ],
+      'phase4Evidence',
+    ),
+  );
+  if (!isRecord(evidence)) return findings;
+  addFinding(findings, evidence.schemaVersion === 1, 'phase4Evidence.schemaVersion must be 1');
+  addFinding(findings, evidence.phase === 4, 'phase4Evidence.phase must be 4');
+  addFinding(findings, evidence.status === 'accepted', 'phase4Evidence.status must be accepted');
+  addFinding(findings, !Number.isNaN(Date.parse(evidence.observedAt)), 'phase4Evidence.observedAt is invalid');
+  addFinding(
+    findings,
+    typeof evidence.evidenceBoundary === 'string' &&
+      evidence.evidenceBoundary.includes('not deployed') &&
+      evidence.evidenceBoundary.includes('blocked'),
+    'phase4Evidence must state the non-runtime and blocked optional-run boundaries',
+  );
+
+  const implementation = evidence.implementation;
+  findings.push(
+    ...exactKeysFindings(
+      implementation,
+      ['baseSha', 'branch', 'pullRequest', 'pullRequestUrl', 'headSha', 'mergeSha', 'mergedAt'],
+      'phase4Evidence.implementation',
+    ),
+  );
+  if (isRecord(implementation)) {
+    for (const key of ['baseSha', 'branch', 'pullRequest', 'headSha', 'mergeSha']) {
+      addFinding(
+        findings,
+        implementation[key] === PHASE_4_IMPLEMENTATION_IDENTITY[key],
+        `phase4Evidence.implementation.${key} does not match the immutable Phase 4 identity`,
+      );
+    }
+    addFinding(
+      findings,
+      publicPullRequestUrl(implementation.pullRequestUrl, implementation.pullRequest),
+      'phase4Evidence implementation PR URL is not canonical',
+    );
+    addFinding(findings, !Number.isNaN(Date.parse(implementation.mergedAt)), 'phase4Evidence merge time is invalid');
+  }
+
+  const checks = evidence.exactHeadChecks;
+  addFinding(
+    findings,
+    Array.isArray(checks) && checks.length === 4,
+    'phase4Evidence must contain four exact-head checks',
+  );
+  if (Array.isArray(checks)) {
+    const contexts = new Set();
+    const runIds = new Set();
+    checks.forEach((record, index) => {
+      const label = `phase4Evidence.exactHeadChecks[${index}]`;
+      const keys =
+        record?.context === 'Autonomous review complete'
+          ? ['context', 'workflowRun', 'url', 'conclusion', 'evaluator']
+          : ['context', 'workflowRun', 'url', 'conclusion'];
+      findings.push(...exactKeysFindings(record, keys, label));
+      if (!isRecord(record)) return;
+      contexts.add(record.context);
+      runIds.add(record.workflowRun);
+      addFinding(findings, Object.hasOwn(EXPECTED_AGGREGATES, record.context), `${label}.context is unsupported`);
+      addFinding(
+        findings,
+        record.workflowRun === PHASE_4_RUNS[record.context],
+        `${label}.workflowRun does not match the accepted exact-head run`,
+      );
+      addFinding(
+        findings,
+        record.url === `https://github.com/JueZ/api/actions/runs/${record.workflowRun}`,
+        `${label}.url is not canonical`,
+      );
+      addFinding(findings, record.conclusion === 'success', `${label}.conclusion must be success`);
+      if (record.context === 'Autonomous review complete') {
+        addFinding(
+          findings,
+          record.evaluator === 'deterministic-protected-controller-v1',
+          `${label}.evaluator is invalid`,
+        );
+      }
+    });
+    addFinding(findings, contexts.size === 4, 'phase4Evidence aggregate contexts are not unique');
+    addFinding(findings, runIds.size === 4, 'phase4Evidence aggregate workflow runs are not unique');
+    for (const context of Object.keys(EXPECTED_AGGREGATES)) {
+      addFinding(findings, contexts.has(context), `phase4Evidence is missing ${context}`);
+    }
+  }
+
+  const postMerge = evidence.postMerge;
+  findings.push(
+    ...exactKeysFindings(
+      postMerge,
+      [
+        'mainDeliveryRun',
+        'mainDeliveryUrl',
+        'mainDeliveryConclusion',
+        'exactMainCiRun',
+        'exactMainCiUrl',
+        'exactMainCiHeadSha',
+        'exactMainCiConclusion',
+        'environmentDeployment',
+      ],
+      'phase4Evidence.postMerge',
+    ),
+  );
+  if (isRecord(postMerge)) {
+    for (const [runKey, urlKey, expectedRun] of [
+      ['mainDeliveryRun', 'mainDeliveryUrl', PHASE_4_RUNS.mainDelivery],
+      ['exactMainCiRun', 'exactMainCiUrl', PHASE_4_RUNS.exactMainCi],
+    ]) {
+      addFinding(
+        findings,
+        postMerge[runKey] === expectedRun,
+        `phase4Evidence.postMerge.${runKey} does not match the accepted run`,
+      );
+      addFinding(
+        findings,
+        postMerge[urlKey] === `https://github.com/JueZ/api/actions/runs/${postMerge[runKey]}`,
+        `phase4Evidence.postMerge.${urlKey} is not canonical`,
+      );
+    }
+    addFinding(findings, postMerge.mainDeliveryConclusion === 'success', 'Phase 4 Main Delivery did not succeed');
+    addFinding(findings, postMerge.exactMainCiConclusion === 'success', 'Phase 4 exact-main CI did not succeed');
+    addFinding(
+      findings,
+      postMerge.exactMainCiHeadSha === PHASE_4_IMPLEMENTATION_IDENTITY.mergeSha,
+      'Phase 4 exact-main CI does not bind the merge SHA',
+    );
+    const deployment = postMerge.environmentDeployment;
+    findings.push(
+      ...exactKeysFindings(
+        deployment,
+        [
+          'decision',
+          'reason',
+          'deployTest',
+          'promoteProduction',
+          'smoke',
+          'telemetry',
+          'releaseLedger',
+          'runtimeTruth',
+        ],
+        'phase4Evidence.postMerge.environmentDeployment',
+      ),
+    );
+    if (isRecord(deployment)) {
+      addFinding(findings, deployment.decision === 'skipped', 'Phase 4 deployment decision must be skipped');
+      for (const key of ['deployTest', 'promoteProduction']) {
+        addFinding(findings, deployment[key] === 'not_started', `Phase 4 ${key} must be not_started`);
+      }
+      for (const key of ['smoke', 'telemetry', 'releaseLedger', 'runtimeTruth']) {
+        addFinding(findings, deployment[key] === 'not_applicable', `Phase 4 ${key} must be not_applicable`);
+      }
+    }
+  }
+
+  const harness = evidence.harness;
+  findings.push(
+    ...exactKeysFindings(
+      harness,
+      ['taskDefinitions', 'contextVariants', 'validation', 'codexCli'],
+      'phase4Evidence.harness',
+    ),
+  );
+  if (isRecord(harness)) {
+    if (Array.isArray(harness.taskDefinitions)) {
+      harness.taskDefinitions.forEach((record, index) => {
+        findings.push(
+          ...exactKeysFindings(
+            record,
+            ['id', 'historicalBaseSha', 'sourcePr', 'scorerId'],
+            `phase4Evidence.harness.taskDefinitions[${index}]`,
+          ),
+        );
+      });
+    }
+    addFinding(
+      findings,
+      JSON.stringify(harness.taskDefinitions) === JSON.stringify(PHASE_4_TASKS),
+      'Phase 4 task definitions do not match the accepted exact historical set',
+    );
+    addFinding(
+      findings,
+      JSON.stringify(harness.contextVariants) ===
+        JSON.stringify(['historical', 'current-agent-context', 'current-without-skills']),
+      'Phase 4 context variants are not exact',
+    );
+
+    const validation = harness.validation;
+    const validationFields = [
+      'taskSchema',
+      'trustedScorers',
+      'fakeAdapterIntegration',
+      'timeoutCleanup',
+      'contextOverlay',
+      'pathCommandInjection',
+      'environmentIsolation',
+      'reportSanitization',
+      'architectureCiJob',
+      'architectureCiWorkflowRun',
+      'fakeAdapterTests',
+    ];
+    findings.push(...exactKeysFindings(validation, validationFields, 'phase4Evidence.harness.validation'));
+    if (isRecord(validation)) {
+      for (const key of validationFields.slice(0, 8)) {
+        addFinding(findings, validation[key] === 'passed', `Phase 4 ${key} validation did not pass`);
+      }
+      addFinding(
+        findings,
+        validation.architectureCiJob === 'architecture and agent validation',
+        'Phase 4 architecture CI job is invalid',
+      );
+      addFinding(
+        findings,
+        validation.architectureCiWorkflowRun === PHASE_4_RUNS['CI complete'],
+        'Phase 4 architecture CI run does not bind the exact implementation head',
+      );
+      addFinding(findings, validation.fakeAdapterTests === 12, 'Phase 4 fake-adapter test count is invalid');
+    }
+
+    const codexCli = harness.codexCli;
+    findings.push(
+      ...exactKeysFindings(
+        codexCli,
+        ['version', 'helpInspected', 'realExecution', 'reason'],
+        'phase4Evidence.harness.codexCli',
+      ),
+    );
+    if (isRecord(codexCli)) {
+      addFinding(
+        findings,
+        codexCli.version === 'codex-cli 0.147.0-alpha.6.5',
+        'Phase 4 Codex CLI version is not the inspected version',
+      );
+      addFinding(findings, codexCli.helpInspected === true, 'Phase 4 Codex CLI help was not inspected');
+      addFinding(
+        findings,
+        codexCli.realExecution === 'blocked_operator_restriction',
+        'Phase 4 real Codex execution must remain explicitly blocked',
+      );
+      addFinding(
+        findings,
+        typeof codexCli.reason === 'string' && codexCli.reason.includes('operator'),
+        'Phase 4 blocked execution reason is missing',
+      );
+    }
+  }
+
+  const modelUsage = evidence.modelUsage;
+  findings.push(
+    ...exactKeysFindings(
+      modelUsage,
+      ['modelInvoked', 'paidAgentTaskEvaluationInvoked', 'transcriptsArchived'],
+      'phase4Evidence.modelUsage',
+    ),
+  );
+  if (isRecord(modelUsage)) {
+    addFinding(findings, modelUsage.modelInvoked === false, 'Phase 4 evidence reports model invocation');
+    addFinding(
+      findings,
+      modelUsage.paidAgentTaskEvaluationInvoked === false,
+      'Phase 4 evidence reports a paid task evaluation',
+    );
+    addFinding(findings, modelUsage.transcriptsArchived === false, 'Phase 4 evidence reports archived transcripts');
+  }
+
+  const serialized = JSON.stringify(evidence);
+  for (const pattern of [
+    /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/i,
+    /\b(?:gh[pousr]_|github_pat_|sk-(?:proj-)?)[A-Za-z0-9_-]{16,}\b/,
+    /(?:sig|se|sp)=[^&\s]+/i,
+    /(?:authorization|client_secret|connection_string|accountkey)\s*[:=]/i,
+  ]) {
+    addFinding(findings, !pattern.test(serialized), 'phase4Evidence contains a secret-shaped value');
   }
   return findings;
 }
@@ -1737,6 +2071,7 @@ export async function verifyOfflineProgramEvidence({ repositoryRoot = REPOSITORY
   for (const [evidencePath, shapeFindings] of [
     [PHASE_2_EVIDENCE_PATH, phase2EvidenceShapeFindings],
     [PHASE_3_EVIDENCE_PATH, phase3EvidenceShapeFindings],
+    [PHASE_4_EVIDENCE_PATH, phase4EvidenceShapeFindings],
   ]) {
     const absoluteEvidencePath = join(repositoryRoot, evidencePath);
     if (!existsSync(absoluteEvidencePath)) continue;

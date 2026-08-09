@@ -81,6 +81,43 @@ const HISTORICAL_SCORERS = Object.freeze({
       ]);
     },
   }),
+  'historical.proportional-program-gating': Object.freeze({
+    artifactId: 'proportional-program-gating',
+    paths: Object.freeze([
+      'scripts/agent-learning/verify-program-evidence.mjs',
+      '.agents/skills/autonomous-pr-delivery/SKILL.md',
+    ]),
+    evaluate(readAt, brokenCommit, fixedCommit) {
+      const brokenVerifier = readAt(brokenCommit, this.paths[0]);
+      const fixedVerifier = readAt(fixedCommit, this.paths[0]);
+      const brokenSkill = readAt(brokenCommit, this.paths[1]);
+      const fixedSkill = readAt(fixedCommit, this.paths[1]);
+      return invariantFindings([
+        [
+          brokenVerifier.includes("changedPaths.includes(PROGRAM_PATH) && current.status === 'accepted'"),
+          'broken verifier must re-run accepted-phase live verification for any program ledger edit',
+        ],
+        [
+          !fixedVerifier.includes("changedPaths.includes(PROGRAM_PATH) && current.status === 'accepted'"),
+          'fixed verifier must remove the whole-ledger accepted-phase trigger',
+        ],
+        [
+          fixedVerifier.includes('if (!changedPaths.includes(PROGRAM_PATH)) return false;') &&
+            fixedVerifier.includes('return previous.line !== current.line;'),
+          'fixed verifier must bind live verification to the selected phase row',
+        ],
+        [
+          !brokenSkill.includes('Run one complete local set selected from the protected-base diff'),
+          'broken delivery skill must lack the protected-base proportional validation rule',
+        ],
+        [
+          fixedSkill.includes('Run one complete local set selected from the protected-base diff') &&
+            fixedSkill.includes('Do not repeat dependency installation, unchanged application builds'),
+          'fixed delivery skill must require proportional validation and deny unexplained repetition',
+        ],
+      ]);
+    },
+  }),
 });
 
 function invariantFindings(assertions) {
