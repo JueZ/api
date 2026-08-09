@@ -199,10 +199,17 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     return content;
   }
 
-  async function getPullRequestFiles(number) {
+  async function getPullRequestFiles(number, headSha, baseSha) {
     requireExactPositiveInteger(number, 'pull-request number');
+    requireExactSha(headSha, 'pull-request file-history SHA');
+    requireExactSha(baseSha, 'pull-request file-history base SHA');
     const pullRequest = await getJson(`/pulls/${number}`);
-    if (pullRequest?.number !== number || !Number.isSafeInteger(pullRequest?.changed_files)) {
+    if (
+      pullRequest?.number !== number ||
+      pullRequest?.head?.sha !== headSha ||
+      pullRequest?.base?.sha !== baseSha ||
+      !Number.isSafeInteger(pullRequest?.changed_files)
+    ) {
       throw new Error('pull-request file count is invalid');
     }
     if (pullRequest.changed_files < 0 || pullRequest.changed_files > 3000) {
@@ -210,7 +217,19 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     }
     const files = [];
     const fileNames = new Set();
-    if (pullRequest.changed_files === 0) return files;
+    const finish = async () => {
+      const finalPullRequest = await getJson(`/pulls/${number}`);
+      if (
+        finalPullRequest?.number !== number ||
+        finalPullRequest?.head?.sha !== headSha ||
+        finalPullRequest?.base?.sha !== baseSha ||
+        finalPullRequest?.changed_files !== pullRequest.changed_files
+      ) {
+        throw new Error('pull-request file history changed during collection');
+      }
+      return files;
+    };
+    if (pullRequest.changed_files === 0) return finish();
     for (let page = 1; page <= 30; page += 1) {
       const rows = await getJson(`/pulls/${number}/files?per_page=100&page=${page}`);
       if (!Array.isArray(rows)) throw new Error('pull-request file response is invalid');
@@ -225,7 +244,7 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
       if (files.length > pullRequest.changed_files) {
         throw new Error('pull-request file response exceeds the authenticated file count');
       }
-      if (files.length === pullRequest.changed_files) return files;
+      if (files.length === pullRequest.changed_files) return finish();
       if (rows.length < 100) throw new Error('pull-request file response ended before the authenticated file count');
     }
     throw new Error('pull-request file response did not satisfy the authenticated file count');
@@ -282,6 +301,11 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
   function getWorkflowRun(id) {
     requireExactPositiveInteger(id, 'workflow run ID');
     return getJson(`/actions/runs/${id}`);
+  }
+
+  function getWorkflowJob(id) {
+    requireExactPositiveInteger(id, 'workflow job ID');
+    return getJson(`/actions/jobs/${id}`);
   }
 
   function getWorkflowRuns(headSha) {
@@ -370,6 +394,7 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     getCheckRuns,
     getCommitStatuses,
     getWorkflowRun,
+    getWorkflowJob,
     getWorkflowRuns,
     getWorkflowJobs,
     getWorkflowArtifacts,

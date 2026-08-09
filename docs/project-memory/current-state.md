@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-09 Phase 2 trusted-primitives PR #367 delivered; orchestration slice started
+
+- PR #367 final head `4438256d035ac12ee384b86c7176dc733230e8b9` passed exact-head CI `31313942311`, Policy Check `31313942312`, CodeQL `31313942345`, and autonomous review/controller `31313941531`, then merged as `697cf2065666c0b384b13ea166ea57933b13bc03` after one repair.
+- Main Delivery `31314094517`, exact-main CI `31314108595`, Deploy Test `31314185849`, and Promote Production `31314329472` passed. Fresh runtime truth at `2026-08-09T12:56:02.899Z` and `2026-08-09T12:56:05.269Z` verified exact test/production commit and run identity, public and authenticated smoke, telemetry, and release ledgers. This accepted the primitives slice, not Phase 2.
+- Phase 2 remains `in_progress`. The current branch adds the strict evidence schema and orchestration over merged primitives, with fixed-path offline CI validation but no controller credentials or acceptance claim. Controller wiring and exercised evidence/artifacts remain separate protected slices. A merged PR alone is not runtime evidence.
+
 ## 2026-08-09 Phase 2 ledger PR #366 delivered; trusted-primitives slice started
 
 - PR #366 head `d0b207a02613f8158eb4000d49a45307b8ebac0d` passed exact-head CI `31312566426`, Policy Check `31312566479`, CodeQL `31312566424`, and autonomous review `31312566497`, then merged as `98d99ef0743c680e65d8a7786fb98055068070b4`.
