@@ -983,7 +983,7 @@ function pullRequestIdentityFindings(pullRequest, options) {
   return findings;
 }
 
-function controllerRunFindings(run, options) {
+export function controllerRunFindings(run, options) {
   const findings = [];
   addFinding(findings, run?.id === options.controllerRunId, 'controller run ID does not match');
   addFinding(findings, run?.repository?.full_name === options.repository, 'controller run repository does not match');
@@ -995,6 +995,10 @@ function controllerRunFindings(run, options) {
   );
   addFinding(findings, run?.run_attempt === 1, 'controller run must be the first attempt');
   addFinding(findings, ['in_progress', 'completed'].includes(run?.status), 'controller run status is invalid');
+  // GitHub exposes two different identities for pull_request_target: trusted
+  // workflow code comes from github.workflow_sha, while the REST workflow-run
+  // record is associated with the candidate pull request head. Bind both
+  // independently instead of treating the REST head_sha as executable code.
   const expectedRunHead = run?.event === 'repository_dispatch' ? options.controllerSha : options.headSha;
   addFinding(
     findings,

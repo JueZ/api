@@ -10,6 +10,7 @@ import {
   PROGRAM_PATH,
   acceptedPhaseEvidenceFindings,
   allowedRuntimeOrigin,
+  controllerRunFindings,
   createTrustedGithubClient,
   fetchAllowedRuntimeHealth,
   lowRiskReviewEvidenceFindings,
@@ -471,6 +472,23 @@ test('trusted controller identity rejects the wrong workflow, run, repository, o
     trustedControllerFindings(options, { env: { ...env, GITHUB_WORKFLOW: 'CI' }, checkoutSha: mergeSha }).length > 0,
   );
   assert.ok(trustedControllerFindings(options, { env, checkoutSha: headSha }).length > 0);
+});
+
+test('pull_request_target REST head binds the candidate while trusted checkout binds workflow SHA', () => {
+  const targetOptions = {
+    repository: 'JueZ/api',
+    controllerRunId: 900,
+    controllerSha: mergeSha,
+    headSha,
+  };
+  const targetRun = workflowRun(900, '.github/workflows/codex-automerge.yml', 'pull_request_target', headSha);
+  assert.deepEqual(controllerRunFindings(targetRun, targetOptions), []);
+  assert.ok(controllerRunFindings({ ...targetRun, head_sha: mergeSha }, targetOptions).length > 0);
+
+  const dispatchOptions = { ...targetOptions, controllerRunId: 901 };
+  const dispatchRun = workflowRun(901, '.github/workflows/codex-automerge.yml', 'repository_dispatch', mergeSha);
+  assert.deepEqual(controllerRunFindings(dispatchRun, dispatchOptions), []);
+  assert.ok(controllerRunFindings({ ...dispatchRun, head_sha: headSha }, dispatchOptions).length > 0);
 });
 
 test('trusted verification rejects an invalid review claim before querying a check run', async (context) => {
