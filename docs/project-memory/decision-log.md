@@ -1,11 +1,18 @@
 # Decision log
 
+## 2026-08-09 — Derive runtime evidence identity from GitHub deployments
+
+- Decision: Treat the authenticated GitHub deployment object and its exact successful status as the independent authority for acceptance-evidence environment name, workflow run/job, and runtime origin. Require the test and production origins to differ and require live `/health` to agree on environment, deployment run, and merge SHA.
+- Root cause: Rejected PR #350 head `b928577c9a88218dcdacc7293f6264196837a80e` downloaded exact ledgers but still selected the live runtime origin from ledger content, so a false ledger could alias test and production.
+- Learning disposition: `regression-test` under fingerprint `agent-learning.runtime-evidence.environment-alias`, tracked by issue #351 and versioned as `runtime-evidence-environment-binding`.
+- Safety boundary: The CI job gains only read-only deployment metadata access. It never queries Azure credentials, accepts evidence-authored runtime URLs, or weakens workflow, smoke, telemetry, ledger, provenance, or branch-protection gates.
+
 ## 2026-08-08 — Version repository learning as strict counterfactual artifacts
 
 - Decision: Store each durable learning in its own strict versioned YAML file under `docs/agent-learning/artifacts/`, deduplicate active records by normalized recurrence fingerprint, and require explicit bidirectional supersession instead of a conflict-prone central editable ledger.
 - Decision: Count a learning as `verified` only with exact distinct broken/fixed commits, expected results, trusted verification, implementation PR, and existing repository-contained artifact paths. Waived, external-transient, and no-artifact dispositions require an owned current exception and never count as passing proof.
 - Decision: Treat instructions, skills, learning records, task definitions, and validator/scorer paths as high-risk agent governance. Failure evidence may become a candidate, but cannot rewrite those controls automatically; changes and waivers use ordinary protected delivery and independent review.
-- Decision: A program ledger cannot promote a phase to `accepted` from self-authored identifiers alone. Changed acceptance evidence must be verified by the fixed protected-CI entry point against authenticated exact-head checks, immutable workflow paths and runs, authenticated release-ledger artifacts, and live runtime identity before the transition is accepted.
+- Decision: A program ledger cannot promote a phase to `accepted` from self-authored identifiers alone. Changed acceptance evidence must be verified by the fixed protected-CI entry point against authenticated exact-head checks, immutable workflow paths and runs, authenticated release-ledger artifacts, GitHub deployment/status records for distinct expected environments, and matching live runtime identity before the transition is accepted.
 - Rationale: A closed learning loop must prevent recurrence without letting untrusted issue/log/model content self-authorize repository policy changes. Strict records, secret-shaped-content rejection, deterministic indexes, fixed-path CI validation, and executable-prevention preference provide a reviewable and reproducible boundary.
 - Status: Accepted through PR #349 head `7188188cc0b3fd1a58a5ee14ae5335158294135c`, merge `9310c94f97541e57f83b186af2cacf989d6f5330`, exact-head protected checks, trusted historical proof, full staged delivery, and protected-CI verification of the exact remote and runtime evidence.
 

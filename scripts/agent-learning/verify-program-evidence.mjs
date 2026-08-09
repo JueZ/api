@@ -37,6 +37,10 @@ const EXPECTED_DELIVERY_RUNS = Object.freeze({
     event: 'repository_dispatch',
   }),
 });
+const EXPECTED_DEPLOYMENT_ENVIRONMENTS = Object.freeze({
+  test: 'test',
+  prod: 'production',
+});
 
 function addFinding(findings, condition, message) {
   if (!condition) findings.push(message);
@@ -226,7 +230,116 @@ function pullRequestFindings(evidence, pullRequest) {
   return findings;
 }
 
-function deploymentLedgerFindings(record, ledger, artifactList, liveHealth, environment, evidence) {
+function publicHttpsOrigin(value) {
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== 'https:' ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      (url.pathname !== '' && url.pathname !== '/')
+    ) {
+      return '';
+    }
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
+export function deploymentEnvironmentFindings(
+  record,
+  ledger,
+  deployment,
+  deploymentStatuses,
+  liveHealth,
+  environment,
+  evidence,
+) {
+  const findings = [];
+  const expectedEnvironment = EXPECTED_DEPLOYMENT_ENVIRONMENTS[environment];
+  addFinding(findings, Boolean(expectedEnvironment), `${environment} is not a supported deployment environment`);
+  addFinding(findings, exactPositiveInteger(record.deploymentId), `${environment} deployment ID is invalid`);
+  addFinding(
+    findings,
+    exactPositiveInteger(record.deploymentStatusId),
+    `${environment} deployment status ID is invalid`,
+  );
+  addFinding(findings, exactPositiveInteger(record.deploymentJobId), `${environment} deployment job ID is invalid`);
+  addFinding(findings, deployment?.id === record.deploymentId, `${environment} deployment ID does not match`);
+  addFinding(
+    findings,
+    deployment?.sha === evidence?.implementation?.pullRequest?.mergeSha,
+    `${environment} deployment SHA does not match the implementation merge`,
+  );
+  addFinding(findings, deployment?.ref === 'main', `${environment} deployment ref is not main`);
+  addFinding(
+    findings,
+    deployment?.environment === expectedEnvironment,
+    `${environment} deployment is not bound to the expected GitHub environment`,
+  );
+  addFinding(findings, deployment?.task === 'deploy', `${environment} deployment task is not deploy`);
+  addFinding(
+    findings,
+    deployment?.creator?.login === 'github-actions[bot]' && deployment?.creator?.type === 'Bot',
+    `${environment} deployment creator is not GitHub Actions`,
+  );
+
+  const statuses = Array.isArray(deploymentStatuses) ? deploymentStatuses : [];
+  const status = statuses.find((candidate) => candidate.id === record.deploymentStatusId);
+  addFinding(findings, Boolean(status), `${environment} successful deployment status ID is unavailable`);
+  addFinding(findings, status?.state === 'success', `${environment} deployment status is not successful`);
+  addFinding(
+    findings,
+    status?.environment === expectedEnvironment,
+    `${environment} deployment status is not bound to the expected GitHub environment`,
+  );
+  addFinding(
+    findings,
+    status?.creator?.login === 'github-actions[bot]' && status?.creator?.type === 'Bot',
+    `${environment} deployment status creator is not GitHub Actions`,
+  );
+  addFinding(
+    findings,
+    status?.log_url ===
+      `https://github.com/JueZ/api/actions/runs/${record.workflowRunId}/job/${record.deploymentJobId}`,
+    `${environment} deployment status does not bind the exact workflow run and job`,
+  );
+
+  const deploymentOrigin = publicHttpsOrigin(status?.environment_url);
+  const ledgerOrigin = publicHttpsOrigin(ledger?.apiBaseUrl);
+  addFinding(findings, Boolean(deploymentOrigin), `${environment} deployment environment URL is not public HTTPS`);
+  addFinding(findings, Boolean(ledgerOrigin), `${environment} ledger API URL is not public HTTPS`);
+  addFinding(
+    findings,
+    Boolean(deploymentOrigin) && deploymentOrigin === ledgerOrigin,
+    `${environment} ledger API URL does not match the GitHub deployment environment URL`,
+  );
+  addFinding(
+    findings,
+    liveHealth?.environmentName === environment,
+    `${environment} live /health environment does not match`,
+  );
+  addFinding(
+    findings,
+    liveHealth?.deploymentRunId === String(record.workflowRunId),
+    `${environment} live /health deployment run does not match`,
+  );
+  return findings;
+}
+
+function deploymentLedgerFindings(
+  record,
+  ledger,
+  artifactList,
+  deployment,
+  deploymentStatuses,
+  liveHealth,
+  environment,
+  evidence,
+) {
   const findings = [];
   const artifactName = `release-ledger-${environment}-${record.sourceSha}-${record.deliveryCorrelation}`;
   const artifacts = Array.isArray(artifactList?.artifacts) ? artifactList.artifacts : [];
@@ -295,6 +408,9 @@ function deploymentLedgerFindings(record, ledger, artifactList, liveHealth, envi
     liveHealth?.deployedCommitSha === evidence.implementation.pullRequest.mergeSha,
     `${environment} live /health commit does not match the implementation merge`,
   );
+  findings.push(
+    ...deploymentEnvironmentFindings(record, ledger, deployment, deploymentStatuses, liveHealth, environment, evidence),
+  );
   return findings;
 }
 
@@ -356,6 +472,8 @@ export function phase2EvidenceFindings(evidence, observed) {
       delivery.deployTest ?? {},
       observed?.ledgers?.test,
       observed?.artifacts?.[String(delivery.deployTest?.workflowRunId)],
+      observed?.deployments?.test,
+      observed?.deploymentStatuses?.test,
       observed?.liveHealth?.test,
       'test',
       evidence,
@@ -366,10 +484,25 @@ export function phase2EvidenceFindings(evidence, observed) {
       delivery.promoteProduction ?? {},
       observed?.ledgers?.prod,
       observed?.artifacts?.[String(delivery.promoteProduction?.workflowRunId)],
+      observed?.deployments?.prod,
+      observed?.deploymentStatuses?.prod,
       observed?.liveHealth?.prod,
       'prod',
       evidence,
     ),
+  );
+  const testStatus = observed?.deploymentStatuses?.test?.find(
+    (status) => status.id === delivery.deployTest?.deploymentStatusId,
+  );
+  const productionStatus = observed?.deploymentStatuses?.prod?.find(
+    (status) => status.id === delivery.promoteProduction?.deploymentStatusId,
+  );
+  const testOrigin = publicHttpsOrigin(testStatus?.environment_url);
+  const productionOrigin = publicHttpsOrigin(productionStatus?.environment_url);
+  addFinding(
+    findings,
+    Boolean(testOrigin) && Boolean(productionOrigin) && testOrigin !== productionOrigin,
+    'test and production must resolve to distinct GitHub deployment environment URLs',
   );
   return findings;
 }
@@ -419,9 +552,14 @@ async function downloadLedger(repository, record, environment, options = {}) {
   }
 }
 
-async function fetchLiveHealth(ledger) {
-  const baseUrl = new URL(ledger.apiBaseUrl);
-  const response = await fetch(new URL(`${baseUrl.pathname.replace(/\/$/, '')}/health`, baseUrl), {
+export function deploymentHealthUrl(environmentUrl) {
+  const origin = publicHttpsOrigin(environmentUrl);
+  if (!origin) throw new Error('GitHub deployment environment URL is not a public HTTPS origin');
+  return new URL('/health', origin).toString();
+}
+
+async function fetchLiveHealth(environmentUrl) {
+  const response = await fetch(deploymentHealthUrl(environmentUrl), {
     headers: { Accept: 'application/json', 'User-Agent': 'JueZ-api-agent-learning-evidence-validator' },
     signal: AbortSignal.timeout(20_000),
   });
@@ -441,6 +579,8 @@ async function collectPhase2Observed(evidence, options = {}) {
     checkRuns: {},
     workflowRuns: {},
     artifacts: {},
+    deployments: {},
+    deploymentStatuses: {},
     ledgers: {},
     liveHealth: {},
   };
@@ -464,12 +604,24 @@ async function collectPhase2Observed(evidence, options = {}) {
     ['test', evidence.implementation.postMergeDelivery.deployTest],
     ['prod', evidence.implementation.postMergeDelivery.promoteProduction],
   ]) {
+    observed.deployments[environment] = await authenticatedGitHubJson(
+      `repos/${repository}/deployments/${record.deploymentId}`,
+      { token },
+    );
+    observed.deploymentStatuses[environment] = await authenticatedGitHubJson(
+      `repos/${repository}/deployments/${record.deploymentId}/statuses?per_page=100`,
+      { token },
+    );
     observed.artifacts[String(record.workflowRunId)] = await authenticatedGitHubJson(
       `repos/${repository}/actions/runs/${record.workflowRunId}/artifacts?per_page=100`,
       { token },
     );
     observed.ledgers[environment] = await downloadLedger(repository, record, environment, { ...options, token });
-    observed.liveHealth[environment] = await fetchLiveHealth(observed.ledgers[environment]);
+    const deploymentStatus = observed.deploymentStatuses[environment].find(
+      (status) => status.id === record.deploymentStatusId,
+    );
+    if (!deploymentStatus) throw new Error(`${environment} successful deployment status ID is unavailable`);
+    observed.liveHealth[environment] = await fetchLiveHealth(deploymentStatus.environment_url);
   }
   return observed;
 }

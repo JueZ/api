@@ -62,6 +62,9 @@
       },
       "deployTest": {
         "workflowRunId": 31279752243,
+        "deploymentId": 5812922784,
+        "deploymentStatusId": 16557822266,
+        "deploymentJobId": 93159053054,
         "sourceSha": "9310c94f97541e57f83b186af2cacf989d6f5330",
         "deliveryCorrelation": "3224b951116e313a443c8bb6ae041c095491c217579afdae",
         "conclusion": "success",
@@ -79,6 +82,9 @@
       },
       "promoteProduction": {
         "workflowRunId": 31279913572,
+        "deploymentId": 5812950507,
+        "deploymentStatusId": 16557892647,
+        "deploymentJobId": 93159446477,
         "sourceSha": "9310c94f97541e57f83b186af2cacf989d6f5330",
         "deliveryCorrelation": "00f6c049f7dd7607007131dae4b30541daedc184cc483a0f",
         "conclusion": "success",

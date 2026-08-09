@@ -15,6 +15,8 @@ import {
 import { historicalScorerFindings, pullRequestProvenanceFindings } from '../agent-learning/verify-artifacts.mjs';
 import {
   acceptedPhaseEvidenceFindings,
+  deploymentEnvironmentFindings,
+  deploymentHealthUrl,
   phase2EvidenceFindings,
   phaseEvidenceNeedsLiveVerification,
 } from '../agent-learning/verify-program-evidence.mjs';
@@ -38,6 +40,8 @@ function validPhase2Observed(evidence) {
     checkRuns: {},
     workflowRuns: {},
     artifacts: {},
+    deployments: {},
+    deploymentStatuses: {},
     ledgers: {},
     liveHealth: {},
   };
@@ -119,7 +123,7 @@ function validPhase2Observed(evidence) {
       workflowRunId: String(record.workflowRunId),
       deliveryCorrelation: record.deliveryCorrelation,
       functionAppName: `fixture-${environment}`,
-      apiBaseUrl: `https://example.invalid/${environment}`,
+      apiBaseUrl: `https://${environment}.example.invalid`,
       artifacts: {
         functionappSha256: 'a'.repeat(64),
         frontendSha256: 'b'.repeat(64),
@@ -131,7 +135,31 @@ function validPhase2Observed(evidence) {
       telemetryCheckResult: { status: 'passed' },
       verifiedAt: '2026-08-08T21:00:00Z',
     };
-    observed.liveHealth[environment] = { status: 'ok', deployedCommitSha: implementation.mergeSha };
+    const githubEnvironment = environment === 'prod' ? 'production' : environment;
+    observed.deployments[environment] = {
+      id: record.deploymentId,
+      sha: implementation.mergeSha,
+      ref: 'main',
+      environment: githubEnvironment,
+      task: 'deploy',
+      creator: { login: 'github-actions[bot]', type: 'Bot' },
+    };
+    observed.deploymentStatuses[environment] = [
+      {
+        id: record.deploymentStatusId,
+        state: 'success',
+        environment: githubEnvironment,
+        environment_url: `https://${environment}.example.invalid`,
+        log_url: `https://github.com/JueZ/api/actions/runs/${record.workflowRunId}/job/${record.deploymentJobId}`,
+        creator: { login: 'github-actions[bot]', type: 'Bot' },
+      },
+    ];
+    observed.liveHealth[environment] = {
+      status: 'ok',
+      deployedCommitSha: implementation.mergeSha,
+      environmentName: environment,
+      deploymentRunId: String(record.workflowRunId),
+    };
   }
   return observed;
 }
@@ -480,6 +508,44 @@ test('Phase 2 acceptance evidence rejects stale or mismatched remote proof', () 
   assert.ok(findings.some((finding) => finding.includes('CI complete head SHA')));
   assert.ok(findings.some((finding) => finding.includes('prod ledger deployed commit')));
   assert.ok(findings.some((finding) => finding.includes('test live /health commit')));
+});
+
+test('Phase 2 runtime evidence is independently bound to distinct GitHub deployment environments', () => {
+  const evidence = JSON.parse(
+    readFileSync(join(REPOSITORY_ROOT, 'docs/agent-learning/evidence/phase-2-versioned-artifacts.json'), 'utf8'),
+  );
+  const observed = validPhase2Observed(evidence);
+  const testRecord = evidence.implementation.postMergeDelivery.deployTest;
+  assert.deepEqual(
+    deploymentEnvironmentFindings(
+      testRecord,
+      observed.ledgers.test,
+      observed.deployments.test,
+      observed.deploymentStatuses.test,
+      observed.liveHealth.test,
+      'test',
+      evidence,
+    ),
+    [],
+  );
+
+  observed.deployments.prod.environment = 'test';
+  observed.deploymentStatuses.prod[0].environment = 'test';
+  observed.deploymentStatuses.prod[0].environment_url = observed.deploymentStatuses.test[0].environment_url;
+  observed.ledgers.prod.apiBaseUrl = observed.ledgers.test.apiBaseUrl;
+  const findings = phase2EvidenceFindings(evidence, observed);
+  assert.ok(findings.some((finding) => finding.includes('prod deployment is not bound')));
+  assert.ok(findings.some((finding) => finding.includes('prod deployment status is not bound')));
+  assert.ok(findings.some((finding) => finding.includes('distinct GitHub deployment environment URLs')));
+});
+
+test('Phase 2 live health requests derive only from a public GitHub deployment origin', () => {
+  assert.equal(deploymentHealthUrl('https://test.example.invalid'), 'https://test.example.invalid/health');
+  assert.throws(
+    () => deploymentHealthUrl('https://test.example.invalid/evidence-controlled-path'),
+    /not a public HTTPS origin/,
+  );
+  assert.throws(() => deploymentHealthUrl('http://test.example.invalid'), /not a public HTTPS origin/);
 });
 
 test('accepted program phases fail closed when registered evidence is deleted', () => {

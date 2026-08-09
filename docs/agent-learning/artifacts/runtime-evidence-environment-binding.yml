@@ -1,0 +1,41 @@
+version: 1
+id: runtime-evidence-environment-binding
+title: Bind runtime evidence to distinct GitHub environments
+fingerprint: agent-learning.runtime-evidence.environment-alias
+source:
+  type: autonomous_review
+  references:
+    - kind: pull_request
+      locator: JueZ/api#350
+      url: https://github.com/JueZ/api/pull/350
+    - kind: issue
+      locator: JueZ/api#351
+      url: https://github.com/JueZ/api/issues/351
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31281439847
+      url: https://github.com/JueZ/api/actions/runs/31281439847
+classification:
+  failureArea: agent-learning-evidence
+  severity: high
+  symptom: Live health evidence could be queried without independently proving that test and production were different intended environments.
+  rootCause: The verifier trusted the release ledger for the runtime origin instead of deriving the origin and environment identity from authenticated GitHub deployment and status records.
+disposition:
+  primary: regression-test
+  rationale: Deterministic tests now reject aliased or wrongly labeled deployments and require live health to use the GitHub-bound environment origin, name, run, and merge SHA.
+artifacts:
+  - path: scripts/agent-learning/verify-program-evidence.mjs
+    kind: implementation
+  - path: scripts/test/agent-learning-artifacts.test.mjs
+    kind: regression-test
+  - path: .github/workflows/ci.yml
+    kind: workflow
+counterfactual:
+  hypothesis: The rejected verifier accepts an aliased environment origin, while the repaired verifier rejects environment aliasing and derives live health only from authenticated GitHub deployment status.
+  broken:
+    commit: b928577c9a88218dcdacc7293f6264196837a80e
+    expectedResult: The environment-alias regression fails because GitHub deployment identity and distinct test and production origins are not required.
+  verification:
+    commands:
+      - node --test scripts/test/agent-learning-artifacts.test.mjs
+      - node scripts/agent-learning/verify-artifacts.mjs --github
+status: implemented

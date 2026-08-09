@@ -348,6 +348,7 @@ test('program evidence verification uses the fixed validator with least-privileg
     actions: 'read',
     checks: 'read',
     contents: 'read',
+    deployments: 'read',
     'pull-requests': 'read',
   });
   const step = job.steps.find((candidate) => candidate.name === 'Validate versioned agent learning');
