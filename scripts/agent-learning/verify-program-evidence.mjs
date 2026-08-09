@@ -65,6 +65,16 @@ const EXACT_SHA = /^[0-9a-f]{40}$/;
 const EXACT_DIGEST = /^sha256:[0-9a-f]{64}$/;
 const OPAQUE_CORRELATION = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/;
 const PASSING_CHECK_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
+const PROGRAM_PHASES = Object.freeze([1, 2, 3, 4, 5]);
+const PROGRAM_STATUSES = new Set(['not_started', 'in_progress', 'accepted', 'blocked', 'superseded']);
+const PROGRAM_TABLE_HEADER = Object.freeze([
+  'Phase',
+  'Scope',
+  'Status',
+  'PR and exact commit references',
+  'Accepted evidence',
+  'Remaining risk',
+]);
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -91,26 +101,70 @@ function exactKeysFindings(value, requiredKeys, label) {
   return findings;
 }
 
-function programPhaseRecord(programText, phase) {
-  for (const line of String(programText ?? '').split('\n')) {
-    if (!line.startsWith('|')) continue;
-    const cells = line.split('|').map((cell) => cell.trim());
-    if (cells[1] === String(phase)) return { status: cells[3]?.replaceAll('`', '') || '', line };
+function markdownTableCells(line) {
+  if (!line.startsWith('|') || !line.endsWith('|')) return undefined;
+  return line
+    .slice(1, -1)
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+export function parseProgramPhaseTable(programText) {
+  const lines = String(programText ?? '').split('\n');
+  const headings = lines
+    .map((line, index) => ({ cells: markdownTableCells(line), index }))
+    .filter(({ cells }) => cells?.length === PROGRAM_TABLE_HEADER.length && cells[0] === 'Phase');
+  const findings = [];
+  addFinding(findings, headings.length === 1, 'program must contain exactly one phase table');
+  const records = new Map();
+  if (headings.length !== 1) return { records, findings };
+  const heading = headings[0];
+  addFinding(
+    findings,
+    heading.cells.every((cell, index) => cell === PROGRAM_TABLE_HEADER[index]),
+    'program phase table header is invalid',
+  );
+  const separator = markdownTableCells(lines[heading.index + 1] || '');
+  addFinding(
+    findings,
+    separator?.length === PROGRAM_TABLE_HEADER.length && separator.every((cell) => /^:?-{3,}:?$/.test(cell)),
+    'program phase table separator is invalid',
+  );
+  for (let index = heading.index + 2; index < lines.length; index += 1) {
+    const cells = markdownTableCells(lines[index]);
+    if (!cells || !/^\d+$/.test(cells[0] || '')) continue;
+    addFinding(findings, cells.length === PROGRAM_TABLE_HEADER.length, `program phase row ${index + 1} is malformed`);
+    if (cells.length !== PROGRAM_TABLE_HEADER.length) continue;
+    const phase = Number(cells[0]);
+    addFinding(findings, PROGRAM_PHASES.includes(phase), `program phase row ${index + 1} has an invalid phase`);
+    const statusMatch = cells[2].match(/^`([a-z_]+)`$/);
+    const status = statusMatch?.[1] || '';
+    addFinding(findings, PROGRAM_STATUSES.has(status), `program phase ${cells[0]} has an invalid status`);
+    if (!PROGRAM_PHASES.includes(phase)) continue;
+    addFinding(findings, !records.has(phase), `program phase ${phase} is duplicated`);
+    if (!records.has(phase)) records.set(phase, { status, line: lines[index] });
   }
-  return { status: '', line: '' };
+  for (const phase of PROGRAM_PHASES) addFinding(findings, records.has(phase), `program phase ${phase} is missing`);
+  return { records, findings };
+}
+
+function programPhaseRecord(programText, phase) {
+  return parseProgramPhaseTable(programText).records.get(phase) || { status: '', line: '' };
 }
 
 export function acceptedPhaseEvidenceFindings(programText, pathExists = existsSync) {
-  const findings = [];
-  for (const line of String(programText ?? '').split('\n')) {
-    if (!line.startsWith('|')) continue;
-    const cells = line.split('|').map((cell) => cell.trim());
-    const phase = Number(cells[1]);
-    if (!Number.isSafeInteger(phase) || cells[3]?.replaceAll('`', '') !== 'accepted') continue;
+  const table = parseProgramPhaseTable(programText);
+  const findings = [...table.findings];
+  for (const [phase, record] of table.records) {
+    if (record.status !== 'accepted') continue;
     const evidencePath = PROGRAM_EVIDENCE[phase];
     addFinding(findings, Boolean(evidencePath), `accepted phase ${phase} has no registered evidence record`);
     if (!evidencePath) continue;
-    addFinding(findings, line.includes(evidencePath), `accepted phase ${phase} does not reference ${evidencePath}`);
+    addFinding(
+      findings,
+      record.line.includes(evidencePath),
+      `accepted phase ${phase} does not reference ${evidencePath}`,
+    );
     addFinding(findings, pathExists(evidencePath), `accepted phase ${phase} evidence is missing: ${evidencePath}`);
   }
   return findings;
@@ -126,6 +180,9 @@ export function phaseEvidenceNeedsLiveVerification({
   if (verifyAll) return true;
   const evidencePath = PROGRAM_EVIDENCE[phase];
   if (changedPaths.includes(evidencePath)) return true;
+  const previousTable = parseProgramPhaseTable(previousProgramText);
+  const currentTable = parseProgramPhaseTable(currentProgramText);
+  if (previousTable.findings.length > 0 || currentTable.findings.length > 0) return true;
   const previous = programPhaseRecord(previousProgramText, phase);
   const current = programPhaseRecord(currentProgramText, phase);
   if (changedPaths.includes(PROGRAM_PATH) && current.status === 'accepted') return true;
@@ -453,7 +510,8 @@ function workflowRunMatchesIdentity(run, expected) {
     run?.head_sha === expected.headSha &&
     (!expected.headBranch || run?.head_branch === expected.headBranch) &&
     (!expected.headRepository || run?.head_repository?.full_name === expected.headRepository) &&
-    (!expected.displayTitle || run?.display_title === expected.displayTitle)
+    (!expected.historyDisplayTitlePrefix || run?.display_title?.startsWith(expected.historyDisplayTitlePrefix)) &&
+    (!expected.displayTitle || Boolean(expected.historyDisplayTitlePrefix) || run?.display_title === expected.displayTitle)
   );
 }
 
@@ -924,9 +982,13 @@ export function phase2EvidenceFindings(evidence, observed) {
     if (key === 'mainDelivery') {
       expected.displayTitle = `Deliver trigger ${autonomousReviewRecord.workflowRunId} attempt 1`;
     }
-    if (key === 'deployTest') expected.displayTitle = `Deploy Test ${record.sourceSha} ${record.deliveryCorrelation}`;
+    if (key === 'deployTest') {
+      expected.displayTitle = `Deploy Test ${record.sourceSha} ${record.deliveryCorrelation}`;
+      expected.historyDisplayTitlePrefix = `Deploy Test ${record.sourceSha} `;
+    }
     if (key === 'promoteProduction') {
       expected.displayTitle = `Promote Production ${record.sourceSha} ${record.deliveryCorrelation}`;
+      expected.historyDisplayTitlePrefix = `Promote Production ${record.sourceSha} `;
     }
     findings.push(
       ...canonicalWorkflowRunFindings(

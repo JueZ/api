@@ -132,6 +132,17 @@ function workflowRun(id, path, event, sha, overrides = {}) {
   };
 }
 
+function programText(phase2Status = 'in_progress', phase2Evidence = 'None') {
+  return `| Phase | Scope | Status | PR and exact commit references | Accepted evidence | Remaining risk |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Aggregate | \`accepted\` | PR | docs/agent-learning/evidence/branch-protection-aggregation.json | none |
+| 2 | Artifacts | \`${phase2Status}\` | PR | ${phase2Evidence} | pending |
+| 3 | Conversion | \`not_started\` | None | None | pending |
+| 4 | Evaluations | \`not_started\` | None | None | pending |
+| 5 | Freshness | \`not_started\` | None | None | pending |
+`;
+}
+
 function releaseLedger(environment, record) {
   return {
     environment,
@@ -354,7 +365,7 @@ test('offline program validation requires registered evidence for every accepted
   const root = await mkdtemp(join(tmpdir(), 'program-evidence-offline-'));
   context.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, 'docs/agent-learning/evidence'), { recursive: true });
-  const program = `| Phase | Scope | Status | PR | Evidence | Risk |\n| --- | --- | --- | --- | --- | --- |\n| 1 | Aggregate | \`accepted\` | PR | docs/agent-learning/evidence/branch-protection-aggregation.json | none |\n| 2 | Artifacts | \`in_progress\` | PR | none | pending |\n`;
+  const program = programText();
   await writeFile(join(root, PROGRAM_PATH), program);
   let result = await verifyOfflineProgramEvidence({ repositoryRoot: root });
   assert.ok(result.errors.some((error) => error.includes('branch-protection-aggregation.json')));
@@ -479,8 +490,14 @@ test('canonical workflow and deployment histories reject later failed records', 
     headBranch: 'main',
     headRepository: 'JueZ/api',
     displayTitle: recordedDeploy.display_title,
+    historyDisplayTitlePrefix: `Deploy Test ${mergeSha} `,
   };
-  const laterFailedRun = { ...recordedDeploy, id: 5300, conclusion: 'failure' };
+  const laterFailedRun = {
+    ...recordedDeploy,
+    id: 5300,
+    conclusion: 'failure',
+    display_title: `Deploy Test ${mergeSha} later-correlation-9999`,
+  };
   assert.ok(
     canonicalWorkflowRunFindings(recordedDeploy, [recordedDeploy, laterFailedRun], expectedDeploy, 'deployTest').some(
       (finding) => finding.includes('not the canonical latest applicable run'),
@@ -810,7 +827,7 @@ test('trusted verification accepts a bound low-risk review only when program evi
     },
     async getFile(path) {
       assert.equal(path, PROGRAM_PATH);
-      return '| 2 | Artifacts | `in_progress` | PR | None | Risk |';
+      return programText();
     },
   };
   const options = {
@@ -837,9 +854,7 @@ test('trusted verification accepts a bound low-risk review only when program evi
   client.getPullRequestFiles = async () => [{ filename: PROGRAM_PATH }];
   client.getFile = async (path, ref) => {
     assert.equal(path, PROGRAM_PATH);
-    return ref === headSha
-      ? `| 2 | Artifacts | \`accepted\` | PR | ${PHASE_2_EVIDENCE_PATH} | Risk |`
-      : '| 2 | Artifacts | `in_progress` | PR | None | Risk |';
+    return ref === headSha ? programText('accepted', PHASE_2_EVIDENCE_PATH) : programText();
   };
   await assert.rejects(
     verifyTrustedPullRequest(options, { client, runtime: { env, checkoutSha: mergeSha } }),
@@ -848,8 +863,8 @@ test('trusted verification accepts a bound low-risk review only when program evi
 });
 
 test('Phase 2 live verification triggers only for its evidence or authoritative phase record', () => {
-  const previous = '| 2 | Artifacts | `in_progress` | PR | None | Risk |';
-  const current = `| 2 | Artifacts | \`accepted\` | PR | ${PHASE_2_EVIDENCE_PATH} | Risk |`;
+  const previous = programText();
+  const current = programText('accepted', PHASE_2_EVIDENCE_PATH);
   assert.equal(
     phaseEvidenceNeedsLiveVerification({
       phase: 2,
@@ -888,8 +903,27 @@ test('Phase 2 live verification triggers only for its evidence or authoritative 
   );
 });
 
+test('duplicate or malformed phase tables cannot bypass live verification', () => {
+  const duplicate = `${programText()}\n| 2 | Artifacts | \`accepted\` | PR | ${PHASE_2_EVIDENCE_PATH} | none |\n`;
+  assert.equal(
+    phaseEvidenceNeedsLiveVerification({
+      phase: 2,
+      changedPaths: [PROGRAM_PATH],
+      previousProgramText: programText(),
+      currentProgramText: duplicate,
+    }),
+    true,
+  );
+  assert.ok(acceptedPhaseEvidenceFindings(duplicate, () => true).some((finding) => finding.includes('duplicated')));
+  assert.ok(
+    acceptedPhaseEvidenceFindings(programText().replace('| 5 |', '| 6 |'), () => true).some((finding) =>
+      finding.includes('phase 5 is missing'),
+    ),
+  );
+});
+
 test('accepted-phase registration helper rejects missing paths without interpreting evidence contents', () => {
-  const program = `| 2 | Artifacts | \`accepted\` | PR | ${PHASE_2_EVIDENCE_PATH} | Risk |`;
+  const program = programText('accepted', PHASE_2_EVIDENCE_PATH);
   assert.deepEqual(
     acceptedPhaseEvidenceFindings(program, () => true),
     [],
