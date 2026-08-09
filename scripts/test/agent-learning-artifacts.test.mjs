@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -342,22 +341,16 @@ test('live PR provenance must bind the implementation number and exact broken/fi
   );
 });
 
-test('policy alias remains compatible and reserved task aliases fail closed', () => {
+test('policy and historical task aliases use fixed compatible entry points', () => {
   const packageDefinition = JSON.parse(readFileSync(join(REPOSITORY_ROOT, 'package.json'), 'utf8'));
   assert.equal(packageDefinition.scripts['eval:agent-policy'], packageDefinition.scripts['eval:agents']);
-  assert.equal(
-    packageDefinition.scripts['eval:agent-tasks:validate'],
-    'node scripts/agent-task-evals/unavailable.mjs validate',
-  );
+  assert.equal(packageDefinition.scripts['eval:agent-tasks:validate'], 'node scripts/agent-task-evals/validate.mjs');
+});
 
-  const result = spawnSync(
-    process.execPath,
-    [join(REPOSITORY_ROOT, 'scripts/agent-task-evals/unavailable.mjs'), 'validate'],
-    {
-      encoding: 'utf8',
-    },
-  );
-  assert.equal(result.status, 2);
-  assert.match(result.stderr, /unavailable until Phase 4/);
-  assert.match(result.stderr, /blocked, not passing/);
+test('delivery skill requires phase-first reporting and proportional local validation', () => {
+  const skill = readFileSync(join(REPOSITORY_ROOT, '.agents/skills/autonomous-pr-delivery/SKILL.md'), 'utf8');
+  assert.match(skill, /lead progress updates with the active phase, its status, and the next exact slice/);
+  assert.match(skill, /Run one complete local set selected from the protected-base diff/);
+  assert.match(skill, /Do not repeat dependency installation, unchanged application builds/);
+  assert.match(skill, /never skips or weakens protected remote aggregates/);
 });

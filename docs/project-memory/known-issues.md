@@ -1,10 +1,10 @@
 # Known issues and unresolved risks
 
-## Phase 3 automatic learning rollout is not yet accepted
+## First genuine post-rollout learning candidate has not occurred
 
-- Branch `codex/agent-learning-phase-3-triage` implements the rollout-bounded extension to repair triage, but no protected PR, merge, exact-main CI, scheduled write, or idempotent live candidate evidence exists yet.
-- Until that evidence is accepted, significant post-rollout repair issues are not proven to create or update learning candidates automatically. Do not backfill historical issues without an exact manually dispatched range; backfill defaults to dry run and is bounded to 100 issue numbers.
-- Repository tests are evidence of deterministic behavior only. They do not prove GitHub label permissions, issue-marker persistence, candidate linking, scheduled rerun idempotency, or closure behavior on the live repository.
+- Phase 3 operational evidence exists from protected PR #394, exact-main CI, one exact-range dry run, and two idempotent write-enabled rollout runs. The six labels exist and the rollout timestamp prevented a historical flood. Ledger status remains `in_progress` until a later protected PR accepts the newly registered evidence class from trusted `main`; the implementation PR cannot self-approve that registration.
+- No significant `codex-repair` issue has been created after the rollout timestamp, so live candidate creation, same-fingerprint recurrence, and link persistence await the first genuine event. Deterministic tests and the protected dry-run proposal cover those paths; do not manufacture an incident or treat the absence of a real source as a failure.
+- Historical backfill remains manually dispatched, exact-range, bounded to 100 issue numbers, and dry-run by default. Scheduled triage cannot close repairs.
 
 ## Main Delivery artifact contract incident is resolved
 

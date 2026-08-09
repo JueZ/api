@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -8,6 +8,8 @@ import {
   OPEN_PR_LEDGER_PATHS,
   PHASE_2_IMPLEMENTATION_IDENTITY,
   PHASE_2_EVIDENCE_PATH,
+  PHASE_3_EVIDENCE_PATH,
+  PHASE_4_EVIDENCE_PATH,
   PROGRAM_PATH,
   acceptedPhaseEvidenceFindings,
   canonicalWorkflowRunFindings,
@@ -19,6 +21,7 @@ import {
   phase2EvidenceFindings,
   phase2EvidenceShapeFindings,
   phase2ImplementationIdentityFindings,
+  phase3EvidenceShapeFindings,
   phaseEvidenceNeedsLiveVerification,
   protectedMainControllerFindings,
   governanceEvidenceFindings,
@@ -451,6 +454,16 @@ test('Phase 2 evidence schema is strict and rejects malformed or secret-shaped f
   assert.ok(findings.some((finding) => finding.includes('rawLog is not allowed')));
   assert.ok(findings.some((finding) => finding.includes('deploymentId is not allowed')));
   assert.ok(findings.some((finding) => finding.includes('secret-shaped')));
+});
+
+test('Phase 3 evidence schema is strict and pinned to the accepted rollout', async () => {
+  const evidence = JSON.parse(await readFile(join(process.cwd(), PHASE_3_EVIDENCE_PATH), 'utf8'));
+  assert.deepEqual(phase3EvidenceShapeFindings(evidence), []);
+  evidence.rollout.historicalFloodCreated = true;
+  evidence.modelUsage.modelInvoked = true;
+  const findings = phase3EvidenceShapeFindings(evidence);
+  assert.ok(findings.some((finding) => finding.includes('historical issue flood')));
+  assert.ok(findings.some((finding) => finding.includes('model invocation')));
 });
 
 test('Phase 2 evidence is pinned to the reviewed implementation identity', () => {
@@ -1042,9 +1055,24 @@ test('Phase 2 live verification triggers only for its evidence or authoritative 
       phase: 2,
       changedPaths: [PROGRAM_PATH],
       previousProgramText: current,
-      currentProgramText: current.replace('Risk', 'Updated risk'),
+      currentProgramText: current.replace(
+        `${PHASE_2_EVIDENCE_PATH} | pending |`,
+        `${PHASE_2_EVIDENCE_PATH} | updated risk |`,
+      ),
     }),
     true,
+  );
+  assert.equal(
+    phaseEvidenceNeedsLiveVerification({
+      phase: 2,
+      changedPaths: [PROGRAM_PATH],
+      previousProgramText: current,
+      currentProgramText: current.replace(
+        '| 3 | Conversion | `not_started` | None | None | pending |',
+        '| 3 | Conversion | `in_progress` | PR | None | active |',
+      ),
+    }),
+    false,
   );
   assert.equal(
     phaseEvidenceNeedsLiveVerification({
@@ -1084,5 +1112,17 @@ test('accepted-phase registration helper rejects missing paths without interpret
   );
   assert.ok(
     acceptedPhaseEvidenceFindings(program, () => false).some((finding) => finding.includes('evidence is missing')),
+  );
+});
+
+test('future Phase 4 acceptance uses a protected-main evidence registration', () => {
+  const program = programText().replace(
+    '| 4 | Evaluations | `not_started` | None | None | pending |',
+    `| 4 | Evaluations | \`accepted\` | PR | ${PHASE_4_EVIDENCE_PATH} | none |`,
+  );
+
+  assert.deepEqual(
+    acceptedPhaseEvidenceFindings(program, () => true),
+    [],
   );
 });

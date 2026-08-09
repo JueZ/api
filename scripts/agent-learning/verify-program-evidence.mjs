@@ -21,6 +21,8 @@ export { ACCEPTANCE_RUNTIME_HOSTS, protectedMainControllerFindings };
 
 export const PROGRAM_PATH = 'docs/agent-learning/program.md';
 export const PHASE_2_EVIDENCE_PATH = 'docs/agent-learning/evidence/phase-2-versioned-artifacts.json';
+export const PHASE_3_EVIDENCE_PATH = 'docs/agent-learning/evidence/phase-3-failure-conversion.json';
+export const PHASE_4_EVIDENCE_PATH = 'docs/agent-learning/evidence/phase-4-agent-task-evaluations.json';
 export const OPEN_PR_LEDGER_PATHS = Object.freeze([
   PROGRAM_PATH,
   'docs/project-memory/current-state.md',
@@ -30,6 +32,8 @@ export const OPEN_PR_LEDGER_PATHS = Object.freeze([
 export const PROGRAM_EVIDENCE = Object.freeze({
   1: 'docs/agent-learning/evidence/branch-protection-aggregation.json',
   2: PHASE_2_EVIDENCE_PATH,
+  3: PHASE_3_EVIDENCE_PATH,
+  4: PHASE_4_EVIDENCE_PATH,
 });
 export const PHASE_2_IMPLEMENTATION_IDENTITY = Object.freeze({
   pullRequestNumber: 349,
@@ -95,6 +99,21 @@ const PROGRAM_TABLE_HEADER = Object.freeze([
   'PR and exact commit references',
   'Accepted evidence',
   'Remaining risk',
+]);
+const PHASE_3_IMPLEMENTATION_IDENTITY = Object.freeze({
+  baseSha: '0a85184c866fbea789b320e9559fe276c072fffa',
+  branch: 'codex/agent-learning-phase-3-triage',
+  pullRequest: 394,
+  headSha: 'b5bbb0926282ca4a45fd93551d4ef47538f82f2b',
+  mergeSha: '5f874d8bdbe51d7e69b2155e4b4aac977085bfcd',
+});
+const PHASE_3_LABELS = Object.freeze([
+  'agent-learning',
+  'learning-regression',
+  'learning-required',
+  'learning-skill',
+  'learning-task-eval',
+  'learning-waived',
 ]);
 
 function isRecord(value) {
@@ -244,10 +263,8 @@ export function phaseEvidenceNeedsLiveVerification({
   if (previousTable.findings.length > 0 || currentTable.findings.length > 0) return true;
   const previous = programPhaseRecord(previousProgramText, phase);
   const current = programPhaseRecord(currentProgramText, phase);
-  if (changedPaths.includes(PROGRAM_PATH) && current.status === 'accepted') return true;
-  return (
-    previous.status !== current.status || previous.line.includes(evidencePath) !== current.line.includes(evidencePath)
-  );
+  if (!changedPaths.includes(PROGRAM_PATH)) return false;
+  return previous.line !== current.line;
 }
 
 function publicPullRequestUrl(value, number) {
@@ -456,6 +473,240 @@ export function phase2EvidenceShapeFindings(evidence) {
     /(?:authorization|client_secret|connection_string|accountkey)\s*[:=]/i,
   ]) {
     addFinding(findings, !pattern.test(serialized), 'evidence contains a secret-shaped or credential-bearing value');
+  }
+  return findings;
+}
+
+export function phase3EvidenceShapeFindings(evidence) {
+  const findings = [];
+  findings.push(
+    ...exactKeysFindings(
+      evidence,
+      [
+        'schemaVersion',
+        'phase',
+        'status',
+        'observedAt',
+        'implementation',
+        'exactHeadChecks',
+        'postMerge',
+        'rollout',
+        'modelUsage',
+        'evidenceBoundary',
+      ],
+      'phase3Evidence',
+    ),
+  );
+  if (!isRecord(evidence)) return findings;
+  addFinding(findings, evidence.schemaVersion === 1, 'phase3Evidence.schemaVersion must be 1');
+  addFinding(findings, evidence.phase === 3, 'phase3Evidence.phase must be 3');
+  addFinding(findings, evidence.status === 'accepted', 'phase3Evidence.status must be accepted');
+  addFinding(findings, !Number.isNaN(Date.parse(evidence.observedAt)), 'phase3Evidence.observedAt is invalid');
+  addFinding(
+    findings,
+    typeof evidence.evidenceBoundary === 'string' && evidence.evidenceBoundary.includes('not deployed'),
+    'phase3Evidence must state the non-runtime evidence boundary',
+  );
+
+  const implementation = evidence.implementation;
+  findings.push(
+    ...exactKeysFindings(
+      implementation,
+      ['baseSha', 'branch', 'pullRequest', 'pullRequestUrl', 'headSha', 'mergeSha', 'mergedAt'],
+      'phase3Evidence.implementation',
+    ),
+  );
+  if (isRecord(implementation)) {
+    for (const key of ['baseSha', 'branch', 'pullRequest', 'headSha', 'mergeSha']) {
+      addFinding(
+        findings,
+        implementation[key] === PHASE_3_IMPLEMENTATION_IDENTITY[key],
+        `phase3Evidence.implementation.${key} does not match the immutable Phase 3 identity`,
+      );
+    }
+    addFinding(
+      findings,
+      publicPullRequestUrl(implementation.pullRequestUrl, implementation.pullRequest),
+      'phase3Evidence implementation PR URL is not canonical',
+    );
+    addFinding(findings, !Number.isNaN(Date.parse(implementation.mergedAt)), 'phase3Evidence merge time is invalid');
+  }
+
+  const checks = evidence.exactHeadChecks;
+  addFinding(
+    findings,
+    Array.isArray(checks) && checks.length === 4,
+    'phase3Evidence must contain four exact-head checks',
+  );
+  if (Array.isArray(checks)) {
+    const contexts = new Set();
+    const runIds = new Set();
+    checks.forEach((record, index) => {
+      const label = `phase3Evidence.exactHeadChecks[${index}]`;
+      const keys =
+        record?.context === 'Autonomous review complete'
+          ? ['context', 'workflowRun', 'url', 'conclusion', 'evaluator']
+          : ['context', 'workflowRun', 'url', 'conclusion'];
+      findings.push(...exactKeysFindings(record, keys, label));
+      if (!isRecord(record)) return;
+      contexts.add(record.context);
+      runIds.add(record.workflowRun);
+      addFinding(findings, Object.hasOwn(EXPECTED_AGGREGATES, record.context), `${label}.context is unsupported`);
+      addFinding(findings, exactPositiveInteger(record.workflowRun), `${label}.workflowRun is invalid`);
+      addFinding(
+        findings,
+        record.url === `https://github.com/JueZ/api/actions/runs/${record.workflowRun}`,
+        `${label}.url is not canonical`,
+      );
+      addFinding(findings, record.conclusion === 'success', `${label}.conclusion must be success`);
+      if (record.context === 'Autonomous review complete') {
+        addFinding(
+          findings,
+          record.evaluator === 'deterministic-protected-controller-v1',
+          `${label}.evaluator is invalid`,
+        );
+      }
+    });
+    addFinding(findings, contexts.size === 4, 'phase3Evidence aggregate contexts are not unique');
+    addFinding(findings, runIds.size === 4, 'phase3Evidence aggregate workflow runs are not unique');
+    for (const context of Object.keys(EXPECTED_AGGREGATES)) {
+      addFinding(findings, contexts.has(context), `phase3Evidence is missing ${context}`);
+    }
+  }
+
+  const postMerge = evidence.postMerge;
+  findings.push(
+    ...exactKeysFindings(
+      postMerge,
+      [
+        'mainDeliveryRun',
+        'mainDeliveryUrl',
+        'mainDeliveryConclusion',
+        'exactMainCiRun',
+        'exactMainCiUrl',
+        'exactMainCiHeadSha',
+        'exactMainCiConclusion',
+        'environmentDeployment',
+      ],
+      'phase3Evidence.postMerge',
+    ),
+  );
+  if (isRecord(postMerge)) {
+    for (const [runKey, urlKey] of [
+      ['mainDeliveryRun', 'mainDeliveryUrl'],
+      ['exactMainCiRun', 'exactMainCiUrl'],
+    ]) {
+      addFinding(findings, exactPositiveInteger(postMerge[runKey]), `phase3Evidence.postMerge.${runKey} is invalid`);
+      addFinding(
+        findings,
+        postMerge[urlKey] === `https://github.com/JueZ/api/actions/runs/${postMerge[runKey]}`,
+        `phase3Evidence.postMerge.${urlKey} is not canonical`,
+      );
+    }
+    addFinding(findings, postMerge.mainDeliveryConclusion === 'success', 'Phase 3 Main Delivery did not succeed');
+    addFinding(findings, postMerge.exactMainCiConclusion === 'success', 'Phase 3 exact-main CI did not succeed');
+    addFinding(
+      findings,
+      postMerge.exactMainCiHeadSha === PHASE_3_IMPLEMENTATION_IDENTITY.mergeSha,
+      'Phase 3 exact-main CI does not bind the merge SHA',
+    );
+    const deployment = postMerge.environmentDeployment;
+    findings.push(
+      ...exactKeysFindings(
+        deployment,
+        [
+          'decision',
+          'reason',
+          'deployTest',
+          'promoteProduction',
+          'smoke',
+          'telemetry',
+          'releaseLedger',
+          'runtimeTruth',
+        ],
+        'phase3Evidence.postMerge.environmentDeployment',
+      ),
+    );
+    if (isRecord(deployment)) {
+      addFinding(findings, deployment.decision === 'skipped', 'Phase 3 deployment decision must be skipped');
+      for (const key of ['deployTest', 'promoteProduction']) {
+        addFinding(findings, deployment[key] === 'not_started', `Phase 3 ${key} must be not_started`);
+      }
+      for (const key of ['smoke', 'telemetry', 'releaseLedger', 'runtimeTruth']) {
+        addFinding(findings, deployment[key] === 'not_applicable', `Phase 3 ${key} must be not_applicable`);
+      }
+    }
+  }
+
+  const rollout = evidence.rollout;
+  findings.push(
+    ...exactKeysFindings(
+      rollout,
+      [
+        'rolloutTimestamp',
+        'exactRangeDryRun',
+        'writeEnabledRuns',
+        'closeResolvedEnabled',
+        'labels',
+        'historicalFloodCreated',
+        'candidateIssuesCreated',
+        'repairIssuesClosed',
+        'secondWriteRunWasIdempotent',
+      ],
+      'phase3Evidence.rollout',
+    ),
+  );
+  if (isRecord(rollout)) {
+    addFinding(
+      findings,
+      rollout.rolloutTimestamp === '2026-08-09T20:24:47Z',
+      'Phase 3 rollout timestamp does not match protected policy',
+    );
+    addFinding(findings, rollout.closeResolvedEnabled === false, 'Phase 3 live exercise enabled repair closure');
+    addFinding(findings, rollout.historicalFloodCreated === false, 'Phase 3 created a historical issue flood');
+    addFinding(findings, rollout.candidateIssuesCreated === 0, 'Phase 3 exercise unexpectedly created candidates');
+    addFinding(findings, rollout.repairIssuesClosed === 0, 'Phase 3 exercise unexpectedly closed repairs');
+    addFinding(findings, rollout.secondWriteRunWasIdempotent === true, 'Phase 3 second write run was not idempotent');
+    addFinding(
+      findings,
+      JSON.stringify(rollout.labels) === JSON.stringify(PHASE_3_LABELS),
+      'Phase 3 label set is not exact',
+    );
+    const dryRun = rollout.exactRangeDryRun;
+    addFinding(findings, exactPositiveInteger(dryRun?.workflowRun), 'Phase 3 dry-run ID is invalid');
+    addFinding(findings, dryRun?.conclusion === 'success', 'Phase 3 dry run did not succeed');
+    addFinding(findings, dryRun?.mutatedRepositoryIssues === false, 'Phase 3 dry run mutated issues');
+    addFinding(
+      findings,
+      dryRun?.range?.start === 310 && dryRun?.range?.end === 310,
+      'Phase 3 dry-run range is invalid',
+    );
+    const writeRuns = rollout.writeEnabledRuns;
+    addFinding(findings, Array.isArray(writeRuns) && writeRuns.length === 2, 'Phase 3 write run count is invalid');
+    if (Array.isArray(writeRuns)) {
+      addFinding(
+        findings,
+        new Set(writeRuns.map((record) => record?.workflowRun)).size === 2,
+        'Phase 3 write runs are duplicated',
+      );
+      for (const record of writeRuns) {
+        addFinding(findings, exactPositiveInteger(record?.workflowRun), 'Phase 3 write-run ID is invalid');
+        addFinding(findings, record?.conclusion === 'success', 'Phase 3 write run did not succeed');
+      }
+    }
+  }
+
+  const modelUsage = evidence.modelUsage;
+  findings.push(
+    ...exactKeysFindings(modelUsage, ['modelInvoked', 'paidAgentTaskEvaluationInvoked'], 'phase3Evidence.modelUsage'),
+  );
+  if (isRecord(modelUsage)) {
+    addFinding(findings, modelUsage.modelInvoked === false, 'Phase 3 evidence reports model invocation');
+    addFinding(
+      findings,
+      modelUsage.paidAgentTaskEvaluationInvoked === false,
+      'Phase 3 evidence reports a paid task evaluation',
+    );
   }
   return findings;
 }
@@ -1463,9 +1714,8 @@ export async function verifyTrustedPullRequest(options, dependencies = {}) {
   }
 
   const evidenceText = await client.getFile(PHASE_2_EVIDENCE_PATH, options.headSha, [PHASE_2_EVIDENCE_PATH]);
-  const programFindings = acceptedPhaseEvidenceFindings(currentProgramText, (path) =>
-    path === PROGRAM_EVIDENCE[1] ? true : path === PHASE_2_EVIDENCE_PATH,
-  );
+  const registeredEvidence = new Set(Object.values(PROGRAM_EVIDENCE));
+  const programFindings = acceptedPhaseEvidenceFindings(currentProgramText, (path) => registeredEvidence.has(path));
   if (programFindings.length > 0)
     throw new Error(`program evidence registration failed: ${programFindings.join('; ')}`);
   const evidence = parseStrictJson(evidenceText, PHASE_2_EVIDENCE_PATH);
@@ -1483,15 +1733,20 @@ export async function verifyOfflineProgramEvidence({ repositoryRoot = REPOSITORY
   if (!existsSync(programPath)) return { verified: 0, errors: [`${PROGRAM_PATH}: authoritative program is missing`] };
   const programText = await readFile(programPath, 'utf8');
   const errors = acceptedPhaseEvidenceFindings(programText, (path) => existsSync(join(repositoryRoot, path)));
-  const evidencePath = join(repositoryRoot, PHASE_2_EVIDENCE_PATH);
   let verified = 0;
-  if (existsSync(evidencePath)) {
+  for (const [evidencePath, shapeFindings] of [
+    [PHASE_2_EVIDENCE_PATH, phase2EvidenceShapeFindings],
+    [PHASE_3_EVIDENCE_PATH, phase3EvidenceShapeFindings],
+  ]) {
+    const absoluteEvidencePath = join(repositoryRoot, evidencePath);
+    if (!existsSync(absoluteEvidencePath)) continue;
     try {
-      const evidence = parseStrictJson(await readFile(evidencePath, 'utf8'), PHASE_2_EVIDENCE_PATH);
-      errors.push(...phase2EvidenceShapeFindings(evidence).map((finding) => `${PHASE_2_EVIDENCE_PATH}: ${finding}`));
-      if (errors.length === 0) verified = 1;
+      const evidence = parseStrictJson(await readFile(absoluteEvidencePath, 'utf8'), evidencePath);
+      const evidenceErrors = shapeFindings(evidence).map((finding) => `${evidencePath}: ${finding}`);
+      errors.push(...evidenceErrors);
+      if (evidenceErrors.length === 0) verified += 1;
     } catch (error) {
-      errors.push(`${PHASE_2_EVIDENCE_PATH}: ${error instanceof Error ? error.message : String(error)}`);
+      errors.push(`${evidencePath}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   return { verified, errors };
@@ -1537,8 +1792,8 @@ async function runCli() {
       throw new Error(`Program evidence validation failed:\n- ${result.errors.join('\n- ')}`);
     console.log(
       result.verified > 0
-        ? `Program evidence schema validation passed for ${result.verified} candidate record.`
-        : 'Program evidence registration validation passed; no Phase 2 record is staged.',
+        ? `Program evidence schema validation passed for ${result.verified} candidate records.`
+        : 'Program evidence registration validation passed; no registered record is staged.',
     );
     return;
   }

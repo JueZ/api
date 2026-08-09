@@ -44,6 +44,8 @@ Complete repository-changing work through the required autonomous delivery loop 
 
    Batch the complete locally validated change before pushing. High-risk paths require proportional local validation and deterministic protected governance, so do not push exploratory, partially validated, or no-op repair commits. A failed remote head may receive at most the documented meaningful repair attempts.
 
+   For a multi-phase program, lead progress updates with the active phase, its status, and the next exact slice before individual gate details. Run one complete local set selected from the protected-base diff and affected risk surface. Do not repeat dependency installation, unchanged application builds, or an already passing local gate unless the diff, base, environment, or a concrete failure changed; record every omitted redundant check with its reason. This local proportionality never skips or weakens protected remote aggregates, security checks, or applicable delivery/runtime evidence.
+
    Common examples:
 
    ```bash

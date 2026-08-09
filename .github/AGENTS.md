@@ -5,6 +5,7 @@
 - Pin third-party actions to full commit SHAs and keep Dependabot coverage.
 - Preserve CodeQL, lint, tests, secret/security/dependency scans, lockfile policy, architecture/evals, policy, and aggregate checks.
 - Run learning-artifact validation and generated-index checking by fixed trusted script paths inside the existing architecture/agent job; do not create a separate protected context or route these checks through mutable package aliases.
+- Run agent-task schema validation, trusted scorer tests, and fake-adapter worktree/timeout/cleanup tests by fixed paths in the same architecture/agent job. Never run a real paid agent in required CI.
 - Keep every mandatory validation as an internal job while exposing only `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete` as stable protected-branch contexts.
 - Treat `Autonomous review complete` as the stable legacy aggregate name. Publish it successfully only when deterministic exact-head governance and any applicable protected-main program-evidence verification both pass; do not invoke a model, expose `OPENAI_API_KEY`, defer the evidence decision only to the later merge job, or add another context.
 - Aggregate jobs must run with `if: always()`, explicitly depend on all applicable internal jobs, and fail for every result other than success; do not include a PR-inapplicable main-only job in a PR aggregate.

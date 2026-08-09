@@ -3,6 +3,7 @@ dist/
 .angular/
 coverage/
 .quality-report/
+.agent-eval-results/
 local.settings.json
 .env
 .env.*
