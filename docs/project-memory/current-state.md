@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-09 Phase 2 evidence PR exposed identical-compare compatibility defect
+
+- Controller-wiring PR #371 merged as `8f71efebfa317853a89970eec4527bde696e277a` after exact-head CI `31316360899`, Policy Check `31316360920`, CodeQL `31316360918`, and autonomous review/controller `31316360856`. Main Delivery `31316505347`, main CI `31316519451`, Deploy Test `31316596882`, Promote Production `31316759228`, and fresh test/production runtime truth all passed.
+- Evidence PR #372 final head `ea32247e769c8a3e92b083a052e8b0d975894ba6` passed exact-head CI `31317696391`, Policy Check `31317696352`, CodeQL `31317696353`, and independent review in controller run `31317695730`, then failed closed in protected verifier job `93255754296`. GitHub's identical compare omitted `head_commit`; protected main and controller were both exact `8f71efebfa317853a89970eec4527bde696e277a` and all other comparison identities agreed.
+- PR #372 closed unmerged after two repairs, so no main delivery or runtime acceptance exists for it. Phase 2 remains `in_progress`. Issue #373 records the premature phase-status transition; issue #374 records the identical-compare regression. The current branch is the bounded compatibility fix, not an acceptance retry.
+
 ## 2026-08-09 Phase 2 orchestration PR #369 delivered; controller wiring started
 
 - PR #369 repair head `898ab7fb283cff6e31ee618ae49a07f204348a4b` passed exact-head CI `31315399006`, Policy Check `31315399022`, CodeQL `31315398997`, and autonomous review/controller `31315397319`, then merged as `8e1ab87efbedbc02075e820a13b98721423be710` after one repair. Issue #370 records the candidate-head final-stability correction.

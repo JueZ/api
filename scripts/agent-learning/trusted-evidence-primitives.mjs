@@ -503,6 +503,7 @@ export function protectedMainControllerFindings(mainBefore, mainAfter, compariso
   const controllerSha = options.controllerSha;
   const beforeSha = mainBefore?.object?.sha;
   const afterSha = mainAfter?.object?.sha;
+  const comparisonStatus = comparison?.status;
   if (!EXACT_SHA.test(controllerSha || '')) findings.push('controller workflow SHA is invalid');
   if (mainBefore?.ref !== 'refs/heads/main' || mainBefore?.object?.type !== 'commit') {
     findings.push('protected main initial ref is invalid');
@@ -512,7 +513,7 @@ export function protectedMainControllerFindings(mainBefore, mainAfter, compariso
   }
   if (!EXACT_SHA.test(beforeSha || '')) findings.push('protected main initial SHA is invalid');
   if (afterSha !== beforeSha) findings.push('protected main changed during trusted verification');
-  if (comparison?.status !== 'ahead' && comparison?.status !== 'identical') {
+  if (comparisonStatus !== 'ahead' && comparisonStatus !== 'identical') {
     findings.push('controller workflow SHA is not an ancestor of protected main');
   }
   if (comparison?.base_commit?.sha !== controllerSha) {
@@ -521,12 +522,23 @@ export function protectedMainControllerFindings(mainBefore, mainAfter, compariso
   if (comparison?.merge_base_commit?.sha !== controllerSha) {
     findings.push('controller comparison merge base is not the runtime workflow SHA');
   }
-  if (comparison?.head_commit?.sha !== beforeSha) {
+  const identicalHeadOmitted =
+    comparisonStatus === 'identical' && (comparison?.head_commit === undefined || comparison?.head_commit === null);
+  if (!identicalHeadOmitted && comparison?.head_commit?.sha !== beforeSha) {
     findings.push('controller comparison head is not protected main');
   }
-  if (comparison?.behind_by !== 0) findings.push('protected main comparison is behind the controller SHA');
-  if (!Number.isSafeInteger(comparison?.ahead_by) || comparison.ahead_by < 0) {
-    findings.push('protected main comparison distance is invalid');
+  if (comparisonStatus === 'identical') {
+    if (controllerSha !== beforeSha) {
+      findings.push('identical protected-main comparison endpoints do not match');
+    }
+    if (comparison?.ahead_by !== 0 || comparison?.behind_by !== 0) {
+      findings.push('identical protected-main comparison distance is invalid');
+    }
+  } else {
+    if (comparison?.behind_by !== 0) findings.push('protected main comparison is behind the controller SHA');
+    if (!Number.isSafeInteger(comparison?.ahead_by) || comparison.ahead_by < 1) {
+      findings.push('protected main comparison distance is invalid');
+    }
   }
   if (
     comparison?.url !==
