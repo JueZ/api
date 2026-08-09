@@ -255,6 +255,21 @@ test('canonical autonomous policy is internally valid', () => {
   assert.match(autonomousControllerSource, /enforceGitHubActions: !openAIClient/);
   assert.match(autonomousControllerSource, /maxRetries: 0/);
   assert.match(codexAutomergeWorkflow, /ref: \$\{\{ github\.workflow_sha \}\}/);
+  assert.match(codexAutomergeWorkflow, /Verify agent-learning program evidence/);
+  assert.match(codexAutomergeWorkflow, /verify-program-evidence\.mjs trusted-pr/);
+  assert.match(codexAutomergeWorkflow, /--controller-run-id "\$\{\{ github\.run_id \}\}"/);
+  assert.match(codexAutomergeWorkflow, /--controller-sha "\$\{\{ github\.workflow_sha \}\}"/);
+  assert.match(codexAutomergeWorkflow, /--review-file "\$RUNNER_TEMP\/autonomous-review\/autonomous-review\.json"/);
+  assert.match(codexAutomergeWorkflow, /Upload sanitized agent-learning program verification/);
+  assert.match(codexAutomergeWorkflow, /if-no-files-found: error/);
+  assert.ok(
+    codexAutomergeWorkflow.indexOf('Download exact-head review evidence') <
+      codexAutomergeWorkflow.indexOf('Verify agent-learning program evidence'),
+  );
+  assert.ok(
+    codexAutomergeWorkflow.indexOf('Verify agent-learning program evidence') <
+      codexAutomergeWorkflow.indexOf('Wait for required checks and merge the exact reviewed head'),
+  );
   assert.doesNotMatch(codexAutomergeWorkflow, /source-run-id|Reuse approved exact-head review evidence/);
   assert.doesNotMatch(autonomousControllerSource, /releaseReviewClaim|method: 'PATCH'[\s\S]*check-runs/);
 });

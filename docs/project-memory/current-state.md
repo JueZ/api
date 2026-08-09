@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-09 Phase 2 orchestration PR #369 delivered; controller wiring started
+
+- PR #369 repair head `898ab7fb283cff6e31ee618ae49a07f204348a4b` passed exact-head CI `31315399006`, Policy Check `31315399022`, CodeQL `31315398997`, and autonomous review/controller `31315397319`, then merged as `8e1ab87efbedbc02075e820a13b98721423be710` after one repair. Issue #370 records the candidate-head final-stability correction.
+- Main Delivery `31315537065`, exact-main CI `31315551214`, Deploy Test `31315629346`, and Promote Production `31315785046` passed. Fresh runtime truth at `2026-08-09T13:30:17.453Z` and `2026-08-09T13:30:17.455Z` verified exact test/production commit and run identity, public and authenticated smoke, telemetry, and release ledgers. This accepted the orchestration slice, not Phase 2.
+- Phase 2 remains `in_progress`. The current branch wires the merged verifier into the protected-main exact-head job after autonomous review and before merge, without adding a protected context or model call. A later evidence/artifact PR must exercise full live verification before Phase 2 can be accepted. A merged PR alone is not runtime evidence.
+
 ## 2026-08-09 Phase 2 trusted-primitives PR #367 delivered; orchestration slice started
 
 - PR #367 final head `4438256d035ac12ee384b86c7176dc733230e8b9` passed exact-head CI `31313942311`, Policy Check `31313942312`, CodeQL `31313942345`, and autonomous review/controller `31313941531`, then merged as `697cf2065666c0b384b13ea166ea57933b13bc03` after one repair.
