@@ -3,8 +3,9 @@
 ## Closed-loop agent-learning program
 
 - `docs/agent-learning/program.md` is authoritative. Phase 1 is accepted at implementation merge `da8459aec5756f684b27d692dd838b0135c7fe9f`; live protection and negative-canary evidence is archived under `docs/agent-learning/evidence/`.
-- Phase 2 is in progress on `codex/agent-learning-phase-2-artifacts` from exact baseline `eab88f735d3644181d2a043156970f0df02e3ff8`. Finish its complete local validation, protected PR, exact-head checks, merge, main delivery, and evidence-ledger update before beginning another phase.
-- Keep the existing policy evaluation compatible, keep the task-evaluation aliases fail closed until Phase 4 implements the harness, add no new protected context, and do not begin Phase 3 issue automation or paid/general task execution in the Phase 2 slice. A merged PR alone remains insufficient runtime or live-configuration evidence.
+- Phase 2 implementation PR #349 merged as `9310c94f97541e57f83b186af2cacf989d6f5330` and completed staged delivery/runtime verification, but the phase remains `in_progress`. Evidence PRs #350 and #352 closed unmerged after exhausting their repair limits; issue #351 records the recurrence.
+- Next, deliver one trusted-verifier foundation PR from current main: keep PR CI tokenless; execute authenticated evidence collection only from protected-main controller code; treat candidate files as data; bind the exact head and review; verify artifact bytes/digests; allowlist exact runtime hosts; disable redirects; and retain every existing aggregate, rollup, review, permission, and delivery gate. Do not mark Phase 2 accepted in that foundation PR.
+- After the foundation is merged and active, use a separate evidence-only PR to exercise it and record final acceptance. Keep task-evaluation aliases fail closed until Phase 4, add no new protected context, and do not begin Phase 3 or paid/general task execution first. A merged PR alone remains insufficient runtime or live-configuration evidence.
 
 ## Quality 10 program
 
