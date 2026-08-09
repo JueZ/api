@@ -22,6 +22,7 @@ import {
   phase2EvidenceShapeFindings,
   phase2ImplementationIdentityFindings,
   phase3EvidenceShapeFindings,
+  phase4EvidenceShapeFindings,
   phaseEvidenceNeedsLiveVerification,
   protectedMainControllerFindings,
   governanceEvidenceFindings,
@@ -464,6 +465,20 @@ test('Phase 3 evidence schema is strict and pinned to the accepted rollout', asy
   const findings = phase3EvidenceShapeFindings(evidence);
   assert.ok(findings.some((finding) => finding.includes('historical issue flood')));
   assert.ok(findings.some((finding) => finding.includes('model invocation')));
+});
+
+test('Phase 4 evidence schema is strict, exact-head bound, and model-free', async () => {
+  const evidence = JSON.parse(await readFile(join(process.cwd(), PHASE_4_EVIDENCE_PATH), 'utf8'));
+  assert.deepEqual(phase4EvidenceShapeFindings(evidence), []);
+  evidence.harness.validation.timeoutCleanup = 'skipped';
+  evidence.modelUsage.modelInvoked = true;
+  evidence.harness.codexCli.reason = 'Authorization: Bearer unsafe-token-value';
+  evidence.rawTranscript = 'untrusted';
+  const findings = phase4EvidenceShapeFindings(evidence);
+  assert.ok(findings.some((finding) => finding.includes('rawTranscript is not allowed')));
+  assert.ok(findings.some((finding) => finding.includes('timeoutCleanup')));
+  assert.ok(findings.some((finding) => finding.includes('model invocation')));
+  assert.ok(findings.some((finding) => finding.includes('secret-shaped')));
 });
 
 test('Phase 2 evidence is pinned to the reviewed implementation identity', () => {

@@ -304,12 +304,26 @@ test('registered historical scorers prove each broken and fixed invariant transi
       `${FIXED_SHA}:apps/api/src/mcp/tools/bring.ts`,
       "server.registerTool('bring_add_item')\nitem: itemInputSchema\nitems: [item]\n",
     ],
+    [
+      `${BROKEN_SHA}:scripts/agent-learning/verify-program-evidence.mjs`,
+      "changedPaths.includes(PROGRAM_PATH) && current.status === 'accepted'\n",
+    ],
+    [
+      `${FIXED_SHA}:scripts/agent-learning/verify-program-evidence.mjs`,
+      'if (!changedPaths.includes(PROGRAM_PATH)) return false;\nreturn previous.line !== current.line;\n',
+    ],
+    [`${BROKEN_SHA}:.agents/skills/autonomous-pr-delivery/SKILL.md`, 'Run relevant local checks.\n'],
+    [
+      `${FIXED_SHA}:.agents/skills/autonomous-pr-delivery/SKILL.md`,
+      'Run one complete local set selected from the protected-base diff.\nDo not repeat dependency installation, unchanged application builds.\n',
+    ],
   ]);
   const readAt = (commit, path) => fixtures.get(`${commit}:${path}`) ?? '';
   for (const [id, scorerId] of [
     ['workflow-run-identity', 'historical.workflow-run-identity'],
     ['ci-script-indirection', 'historical.ci-script-indirection'],
     ['bring-singular-add-item', 'historical.bring-singular-add-item'],
+    ['proportional-program-gating', 'historical.proportional-program-gating'],
   ]) {
     const artifact = validVerifiedArtifact({ id });
     artifact.counterfactual.verification = { trustedScorers: [scorerId] };

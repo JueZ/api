@@ -8,6 +8,9 @@ source:
     - kind: issue
       locator: JueZ/api#365
       url: https://github.com/JueZ/api/issues/365
+    - kind: pull_request
+      locator: JueZ/api#395
+      url: https://github.com/JueZ/api/pull/395
 classification:
   failureArea: agent-delivery-efficiency
   severity: medium
@@ -27,4 +30,17 @@ artifacts:
     kind: regression-test
 counterfactual:
   hypothesis: Unrelated Phase 3 or 4 ledger edits no longer activate Phase 2 live verification, while Phase 2 row/evidence changes and malformed ledgers still do; delivery guidance reports the active slice first and does not repeat unchanged local work without a concrete reason.
-status: implemented
+  broken:
+    commit: 5f874d8bdbe51d7e69b2155e4b4aac977085bfcd
+    expectedResult: Any program ledger edit while Phase 2 is accepted activates the historical live runtime verifier, and the delivery skill does not forbid unexplained repetition of unchanged local gates.
+  fixed:
+    commit: efc0793657d6d5bb5f86375fad67ca0ce67c1c07
+    expectedResult: Only the selected phase row or evidence activates its live verifier, malformed ledgers remain fail closed, and the delivery skill requires one protected-base-diff validation set with reasons for repetition.
+  verification:
+    trustedScorers:
+      - historical.proportional-program-gating
+  implementationPr:
+    repository: JueZ/api
+    number: 395
+    url: https://github.com/JueZ/api/pull/395
+status: verified

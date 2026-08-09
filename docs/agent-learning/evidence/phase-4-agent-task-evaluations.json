@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "phase": 4,
+  "status": "accepted",
+  "observedAt": "2026-08-09T22:09:22Z",
+  "implementation": {
+    "baseSha": "5f874d8bdbe51d7e69b2155e4b4aac977085bfcd",
+    "branch": "codex/agent-task-evals-phase-4",
+    "pullRequest": 395,
+    "pullRequestUrl": "https://github.com/JueZ/api/pull/395",
+    "headSha": "7f922c45c5ed81d0091c4d840f6054fc73efc27b",
+    "mergeSha": "efc0793657d6d5bb5f86375fad67ca0ce67c1c07",
+    "mergedAt": "2026-08-09T22:06:54Z"
+  },
+  "exactHeadChecks": [
+    {
+      "context": "CI complete",
+      "workflowRun": 31338455257,
+      "url": "https://github.com/JueZ/api/actions/runs/31338455257",
+      "conclusion": "success"
+    },
+    {
+      "context": "Policy complete",
+      "workflowRun": 31338455252,
+      "url": "https://github.com/JueZ/api/actions/runs/31338455252",
+      "conclusion": "success"
+    },
+    {
+      "context": "CodeQL complete",
+      "workflowRun": 31338455278,
+      "url": "https://github.com/JueZ/api/actions/runs/31338455278",
+      "conclusion": "success"
+    },
+    {
+      "context": "Autonomous review complete",
+      "workflowRun": 31338454226,
+      "url": "https://github.com/JueZ/api/actions/runs/31338454226",
+      "conclusion": "success",
+      "evaluator": "deterministic-protected-controller-v1"
+    }
+  ],
+  "postMerge": {
+    "mainDeliveryRun": 31338579706,
+    "mainDeliveryUrl": "https://github.com/JueZ/api/actions/runs/31338579706",
+    "mainDeliveryConclusion": "success",
+    "exactMainCiRun": 31338595876,
+    "exactMainCiUrl": "https://github.com/JueZ/api/actions/runs/31338595876",
+    "exactMainCiHeadSha": "efc0793657d6d5bb5f86375fad67ca0ce67c1c07",
+    "exactMainCiConclusion": "success",
+    "environmentDeployment": {
+      "decision": "skipped",
+      "reason": "explicit PR skip marker authorized for a runtime-neutral agent-governance change",
+      "deployTest": "not_started",
+      "promoteProduction": "not_started",
+      "smoke": "not_applicable",
+      "telemetry": "not_applicable",
+      "releaseLedger": "not_applicable",
+      "runtimeTruth": "not_applicable"
+    }
+  },
+  "harness": {
+    "taskDefinitions": [
+      {
+        "id": "bring-singular-add-item",
+        "historicalBaseSha": "0cb159d8c05248de2e6decbd80d8325bd38d6623",
+        "sourcePr": 344,
+        "scorerId": "bring-singular-add-item"
+      },
+      {
+        "id": "ci-script-indirection",
+        "historicalBaseSha": "b9ea568fffa0f51aa0be8c5d4dc73a6c3884c005",
+        "sourcePr": 324,
+        "scorerId": "ci-script-indirection"
+      },
+      {
+        "id": "delivery-evidence-truthfulness",
+        "historicalBaseSha": "8f71efebfa317853a89970eec4527bde696e277a",
+        "sourcePr": 372,
+        "scorerId": "delivery-evidence-truthfulness"
+      },
+      {
+        "id": "workflow-run-identity",
+        "historicalBaseSha": "d24fe187ce5b3aeaf238e5b66e0339c5ccc7afbd",
+        "sourcePr": 321,
+        "scorerId": "workflow-run-identity"
+      }
+    ],
+    "contextVariants": ["historical", "current-agent-context", "current-without-skills"],
+    "validation": {
+      "taskSchema": "passed",
+      "trustedScorers": "passed",
+      "fakeAdapterIntegration": "passed",
+      "timeoutCleanup": "passed",
+      "contextOverlay": "passed",
+      "pathCommandInjection": "passed",
+      "environmentIsolation": "passed",
+      "reportSanitization": "passed",
+      "architectureCiJob": "architecture and agent validation",
+      "architectureCiWorkflowRun": 31338455257,
+      "fakeAdapterTests": 12
+    },
+    "codexCli": {
+      "version": "codex-cli 0.147.0-alpha.6.5",
+      "helpInspected": true,
+      "realExecution": "blocked_operator_restriction",
+      "reason": "The operator prohibited general model use for agent-task evaluation; adapter availability was not treated as a passing task."
+    }
+  },
+  "modelUsage": {
+    "modelInvoked": false,
+    "paidAgentTaskEvaluationInvoked": false,
+    "transcriptsArchived": false
+  },
+  "evidenceBoundary": "Protected merge and exact-main CI prove repository acceptance. The runtime-neutral harness was not deployed, and the optional real Codex execution remains blocked by the operator restriction rather than passing."
+}
