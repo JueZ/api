@@ -2,7 +2,7 @@
 
 ## Closed-loop agent-learning program
 
-- Complete local validation for `codex/remove-independent-model-review`, record its exact commits, and keep it unpushed until there is a protected bootstrap that neither invokes the removed API reviewer nor weakens branch protection. Do not set review-capacity variables, change credentials, or manufacture a low-risk classification for the migration.
+- Complete PR #384 under the authorized model-free bootstrap: require every temporary strict check, re-enable `Codex Auto-Merge` before protected squash merge, restore the four stable aggregate contexts immediately after merge, and verify main delivery/runtime evidence. Do not set review-capacity variables, change credentials, or invoke the removed reviewer.
 
 - `docs/agent-learning/program.md` is authoritative. Phase 1 is accepted at implementation merge `da8459aec5756f684b27d692dd838b0135c7fe9f`; live protection and negative-canary evidence is archived under `docs/agent-learning/evidence/`.
 - Phase 2 implementation PR #349 merged as `9310c94f97541e57f83b186af2cacf989d6f5330`; trusted-primitives PR #367 merged as `697cf2065666c0b384b13ea166ea57933b13bc03`; orchestration PR #369 merged as `8e1ab87efbedbc02075e820a13b98721423be710`; controller wiring PR #371 merged as `8f71efebfa317853a89970eec4527bde696e277a`. Each completed its recorded terminal delivery/runtime evidence, but Phase 2 remains `in_progress`.

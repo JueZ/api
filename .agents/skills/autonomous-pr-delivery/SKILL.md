@@ -54,6 +54,13 @@ Complete repository-changing work through the required autonomous delivery loop 
    npm run ops:policy-guardrails
    ```
 
+   For a pull request with multiple local commits, validate guardrail policy against the actual protected base rather than only the immediately preceding commit:
+
+   ```bash
+   git fetch --no-tags origin main
+   BASE_REF=origin/main INCLUDE_WORKTREE=true npm run ops:policy-guardrails
+   ```
+
    If a command cannot run because credentials, network, tools, or environment variables are unavailable, record it as blocked or skipped with the reason. Do not treat skipped checks as passing.
 
 3. Commit the change if it is not already committed:
