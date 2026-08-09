@@ -56,6 +56,10 @@ const codexAutomergeWorkflow = readFileSync(
 );
 const codexAutomergeDefinition = parseYaml(codexAutomergeWorkflow);
 const autonomousControllerSource = readFileSync(new URL('../autonomous-merge-controller.mjs', import.meta.url), 'utf8');
+const autonomousDeliverySkill = readFileSync(
+  new URL('../../.agents/skills/autonomous-pr-delivery/SKILL.md', import.meta.url),
+  'utf8',
+);
 const deployEnvironmentWorkflow = readFileSync(
   new URL('../../.github/workflows/deploy-environment.yml', import.meta.url),
   'utf8',
@@ -269,6 +273,15 @@ test('canonical autonomous policy is internally valid', () => {
   );
   assert.doesNotMatch(codexAutomergeWorkflow, /source-run-id|Reuse approved exact-head review evidence/);
   assert.doesNotMatch(autonomousControllerSource, /releaseReviewClaim|method: 'PATCH'[\s\S]*check-runs/);
+});
+
+test('delivery guidance prevents futile autonomous-review reruns after a permanent exact-head claim', () => {
+  assert.match(autonomousDeliverySkill, /Autonomous review paid-call claim/);
+  assert.match(autonomousDeliverySkill, /inspect[^\n]*exact-head[^\n]*claim/i);
+  assert.match(autonomousDeliverySkill, /must not rerun[^\n]*same[^\n]*head/i);
+  assert.match(autonomousDeliverySkill, /substantive[^\n]*new[^\n]*head/i);
+  assert.match(autonomousDeliverySkill, /no-op[^\n]*commit/i);
+  assert.match(autonomousDeliverySkill, /permanent[^\n]*one[^\n]*paid[^\n]*call/i);
 });
 
 test('protected program evidence is part of the required autonomous review aggregate', () => {

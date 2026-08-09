@@ -115,7 +115,13 @@ Complete repository-changing work through the required autonomous delivery loop 
    - `Deploy Test`
    - `Promote Production`
 
-9. If checks fail, apply the smallest safe fix and repeat at most 2 repair attempts for the same failing area.
+9. If checks fail, diagnose the exact failed job before retrying or changing the branch.
+
+   Before using `gh run rerun` for a failed high-risk `Codex Auto-Merge` run, inspect the exact-head check rollup for the canonical `Autonomous review paid-call claim` marker. When that completed neutral GitHub Actions marker exists, the permanent one-paid-call boundary has already been consumed and Codex must not rerun the autonomous review workflow for the same head. A same-head rerun is deterministically denied and cannot repair an unavailable or rejected review.
+
+   Preserve the claim and its cost/idempotency boundary. Never delete, rewrite, release, or bypass it. Only a substantive scoped correction may produce a new exact head and a new protected review; a no-op commit, metadata-only retry commit, or repeated commit that does not address the failure is forbidden. If the failure is external and no substantive correction is available, stop with the exact blocker and create or update the required learning disposition instead of looping.
+
+   For other recoverable failures, apply the smallest safe fix and repeat at most 2 repair attempts for the same failing area. Treat a workflow rerun as an attempt in that area even when it creates no commit.
 
 10. Stop when delivery reaches a terminal result or a concrete blocker is found.
 
