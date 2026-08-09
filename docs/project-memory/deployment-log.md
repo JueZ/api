@@ -1,5 +1,12 @@
 # Deployment log
 
+## 2026-08-09 — Model-free protected governance accepted through production
+
+- Source: PR #384 final head `780ed310e10bdf58398e6edd87af3c1fe6a5f50b` passed exact-head CI `31328232675`, Policy Check `31328232650`, CodeQL `31328232653`, and the authorized temporary deterministic architecture aggregate after one policy repair. It squash-merged through ordinary protection as `2a966e193072036c65b3c412aeffec60d91ca9a8`; no direct main push or admin bypass occurred.
+- Main delivery: main CI `31328333417`, Policy Check `31328333414`, CodeQL `31328333432`, controller `31328416228`, Deploy Test `31328428553`, and Promote Production `31328600923` succeeded for the exact merge.
+- Acceptance: both environments passed immutable-source and generation validation, public smoke, GitHub-OIDC authenticated hello and Reddit smoke, telemetry correlation, and release-ledger publication. The active auto-merge workflow no longer receives an OpenAI credential or invokes a model; `Autonomous review complete` is deterministic protected governance.
+- Live repository state: the workflow was re-enabled before merge and strict protection was immediately restored to exactly `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete`. Admin enforcement, PR requirement, linear history, conversation resolution, force-push denial, and deletion denial were preserved. Public-safe evidence is archived at `docs/agent-learning/evidence/model-free-governance-migration.json`.
+
 ## 2026-08-08 — Stable branch-protection aggregation accepted through production
 
 - Source: PR #345 exact head `06a68d42e205ec38ec8c0fb906e59dd9fc8ce415` passed exact-head CI `31276396714`, Policy Check `31276396688`, CodeQL `31276396684`, and autonomous review/merge `31276396717`, then squash-merged as `da8459aec5756f684b27d692dd838b0135c7fe9f`.

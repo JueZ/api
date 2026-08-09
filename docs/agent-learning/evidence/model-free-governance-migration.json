@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "repository": "JueZ/api",
+  "capturedAt": "2026-08-09T18:20:00Z",
+  "purpose": "Public-safe evidence for replacing API-backed pull-request review with deterministic protected governance while retaining the legacy stable aggregate name.",
+  "implementation": {
+    "baselineMainSha": "f56422021640b34be2588c33999f63b59a87399a",
+    "pullRequest": {
+      "number": 384,
+      "url": "https://github.com/JueZ/api/pull/384",
+      "branch": "codex/remove-independent-model-review",
+      "initialHeadSha": "74447171a1c4324d4435c5798eb3e119d4d3acd8",
+      "finalHeadSha": "780ed310e10bdf58398e6edd87af3c1fe6a5f50b",
+      "mergeSha": "2a966e193072036c65b3c412aeffec60d91ca9a8",
+      "mergedAt": "2026-08-09T18:10:13Z",
+      "mergeMethod": "ordinary protected squash",
+      "adminBypassUsed": false
+    },
+    "exactHeadChecks": [
+      {
+        "context": "CI complete",
+        "checkRunId": 93282244036,
+        "workflowRunId": 31328232675,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      },
+      {
+        "context": "Policy complete",
+        "checkRunId": 93282091564,
+        "workflowRunId": 31328232650,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      },
+      {
+        "context": "CodeQL complete",
+        "checkRunId": 93282164456,
+        "workflowRunId": 31328232653,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      },
+      {
+        "context": "architecture and agent validation",
+        "checkRunId": 93282049436,
+        "workflowRunId": 31328232675,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      }
+    ],
+    "repairAttempts": {
+      "policy": 1,
+      "firstFailedHeadSha": "74447171a1c4324d4435c5798eb3e119d4d3acd8",
+      "failedPolicyRunId": 31328095177,
+      "resolution": "Preserved explicit fail-closed governance wording and validated the complete protected-base diff."
+    },
+    "postMergeDelivery": {
+      "mainCi": {
+        "workflowRunId": 31328333417,
+        "sourceSha": "2a966e193072036c65b3c412aeffec60d91ca9a8",
+        "conclusion": "success"
+      },
+      "mainPolicy": {
+        "workflowRunId": 31328333414,
+        "sourceSha": "2a966e193072036c65b3c412aeffec60d91ca9a8",
+        "conclusion": "success"
+      },
+      "mainCodeQl": {
+        "workflowRunId": 31328333432,
+        "sourceSha": "2a966e193072036c65b3c412aeffec60d91ca9a8",
+        "conclusion": "success"
+      },
+      "mainDelivery": {
+        "workflowRunId": 31328416228,
+        "sourceSha": "2a966e193072036c65b3c412aeffec60d91ca9a8",
+        "conclusion": "success"
+      },
+      "deployTest": {
+        "workflowRunId": 31328428553,
+        "deploymentJobId": 93282581944,
+        "sourceSha": "2a966e193072036c65b3c412aeffec60d91ca9a8",
+        "conclusion": "success",
+        "publicSmoke": "passed",
+        "authenticatedSmoke": "passed",
+        "telemetry": "passed",
+        "releaseLedgerArtifactId": 9042241341,
+        "releaseLedgerArtifactDigest": "sha256:e9f5d8deccce7c8509ff23dbfc7b38a599220e838a3dc9bcb7ca67c9ece8c5b3",
+        "releaseLedger": "validated"
+      },
+      "promoteProduction": {
+        "workflowRunId": 31328600923,
+        "deploymentJobId": 93283019037,
+        "sourceSha": "2a966e193072036c65b3c412aeffec60d91ca9a8",
+        "conclusion": "success",
+        "publicSmoke": "passed",
+        "authenticatedSmoke": "passed",
+        "telemetry": "passed",
+        "releaseLedgerArtifactId": 9042286261,
+        "releaseLedgerArtifactDigest": "sha256:26cac54635da161b6c0476720d04d32023da124825627d2e04df40044bed381c",
+        "releaseLedger": "validated"
+      }
+    }
+  },
+  "branchProtectionMigration": {
+    "scope": "required-status list and Codex Auto-Merge workflow state only",
+    "before": {
+      "mainSha": "f56422021640b34be2588c33999f63b59a87399a",
+      "workflowState": "active",
+      "requiredChecks": [
+        "CI complete",
+        "Policy complete",
+        "CodeQL complete",
+        "Autonomous review complete"
+      ],
+      "settings": {
+        "strict": true,
+        "enforceAdmins": true,
+        "pullRequestRequired": true,
+        "requiredApprovingReviewCount": 0,
+        "requiredLinearHistory": true,
+        "requiredConversationResolution": true,
+        "allowForcePushes": false,
+        "allowDeletions": false
+      }
+    },
+    "temporary": {
+      "observedAt": "2026-08-09T18:04:18Z",
+      "workflowState": "disabled_manually",
+      "requiredChecks": [
+        "CI complete",
+        "Policy complete",
+        "CodeQL complete",
+        "architecture and agent validation"
+      ],
+      "reason": "The protected-main workflow being removed could not be allowed to invoke the superseded API reviewer while its replacement was still only on the candidate branch.",
+      "modelInvocationPermitted": false,
+      "otherProtectionSettingsChanged": false
+    },
+    "after": {
+      "readBackAt": "2026-08-09T18:10:16Z",
+      "mainSha": "2a966e193072036c65b3c412aeffec60d91ca9a8",
+      "workflowState": "active",
+      "requiredChecks": [
+        "CI complete",
+        "Policy complete",
+        "CodeQL complete",
+        "Autonomous review complete"
+      ],
+      "requiredCheckAppId": 15368,
+      "settings": {
+        "strict": true,
+        "enforceAdmins": true,
+        "pullRequestRequired": true,
+        "requiredApprovingReviewCount": 0,
+        "requiredLinearHistory": true,
+        "requiredConversationResolution": true,
+        "allowForcePushes": false,
+        "allowDeletions": false
+      }
+    }
+  },
+  "assertions": {
+    "apiBackedPullRequestReviewRemoved": true,
+    "stableAggregateNamePreserved": true,
+    "completeRollupDefensePreserved": true,
+    "protectedProgramEvidenceVerifierPreserved": true,
+    "underlyingCiPolicyCodeQlJobsPreserved": true,
+    "openAiCredentialPassedToPullRequestAutomation": false,
+    "modelInvocationDuringMigration": false,
+    "directMainPushUsed": false,
+    "adminBypassUsed": false,
+    "secretsOrCredentialsArchived": false,
+    "mergedPullRequestAloneTreatedAsRuntimeEvidence": false
+  }
+}

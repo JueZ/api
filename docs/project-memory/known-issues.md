@@ -1,16 +1,17 @@
 # Known issues and unresolved risks
 
-## Model-free governance migration bootstrap is in progress
+## Model-free governance migration is delivered; exercised evidence remains
 
-- The repository owner directed removal of the API-backed high-risk reviewer and restricted OpenAI API use to runtime repairable-error classification.
-- The replacement is complete locally at `c5791b8c3148906ee58e467e9a0f1166f6398ea9` on `codex/remove-independent-model-review`: `Autonomous review complete` remains the stable required context but becomes deterministic exact-head governance with the protected program-evidence verifier and complete-rollup merge defense intact.
-- Live protected main still contains the old provider-backed controller, but the repository owner explicitly authorized a controlled bootstrap for PR #384. The old workflow is temporarily disabled and the required aggregate is temporarily replaced by the deterministic `architecture and agent validation` check without reducing the strict required-check count. The remaining risk is failure to re-enable the workflow and restore the four stable aggregates immediately after merge; no passing merge or runtime evidence exists yet.
+- PR #384 removed the API-backed high-risk reviewer and restricted provider inference to bounded repairable-error diagnostics using `gpt-5.6-luna` with high reasoning. It merged as `2a966e193072036c65b3c412aeffec60d91ca9a8` through ordinary protection after one policy repair.
+- Main CI, Policy Check, CodeQL, Main Delivery, Deploy Test, Promote Production, public/authenticated smoke, telemetry, and release-ledger publication passed. Live protection again requires exactly the four stable aggregates, and `Codex Auto-Merge` is active without an OpenAI credential or model invocation.
+- The remaining governance evidence risk is narrower: PR #384 used the authorized temporary deterministic context during the bootstrap, so the current evidence PR must exercise the restored deterministic `Autonomous review complete` on an exact protected head. Public-safe migration facts are archived at `docs/agent-learning/evidence/model-free-governance-migration.json`.
 
-## Phase 2 evidence verification is not yet part of the required aggregate
+## Phase 2 evidence verification is part of the required aggregate but not yet exercised
 
 - PR #376 exact head `d6f207117e770aabc7b7baa4414c35f4d318072a` passed all free aggregates, but autonomous review run `31319465352` rejected the acceptance design because `Autonomous review complete` was published before the protected program-evidence verifier ran in the later merge job.
 - Branch protection intentionally requires exactly four stable aggregates and does not separately require `merge exact PR head`. PR #375's bounded bootstrap merge proved that ordinary protected merge can remain available after the later verifier fails. The verifier therefore must participate in the existing review aggregate rather than relying only on autonomous-controller merge behavior or adding a fifth context.
-- Issue #377 requires executable prevention. The current successor runs the existing verifier inside the protected-main review job after independent review, makes that combined job result control `Autonomous review complete`, removes duplicate later verification, and retains complete-rollup enforcement. PR #376 closed unmerged with zero repair pushes; Phase 2 remains `in_progress` with no evidence-retry merge or runtime claim.
+- PR #378 delivered the issue #377 correction as merge `f56422021640b34be2588c33999f63b59a87399a`: the protected-main verifier now runs before the existing aggregate is published, its result controls `Autonomous review complete`, the duplicate later verification is absent, and complete-rollup enforcement remains. Its exact-main delivery and fresh test/production runtime truth passed.
+- The staged Phase 2 record has not yet passed that required boundary on a protected evidence PR. Phase 2 remains `in_progress`; issue #377 remains open until its versioned artifact is delivered, and no evidence-retry merge or runtime claim is made.
 
 ## Identical-compare compatibility is delivered; durable learning remains
 
@@ -25,7 +26,7 @@
 - PR #354 moved authenticated verification into protected-main controller code and repaired the runtime-host, redirect, byte-bound, digest, and candidate/controller identity boundaries. Its final head `0fef86e2de488545970507f362e2abbc974681ca` passed CI `31305790271`, Policy Check `31305790288`, and CodeQL `31305790267`, but autonomous review `31305789487` found that generic authenticated evidence was not pinned to designated Phase 2 implementation PR #349. It closed unmerged after both repairs.
 - PR #358 and library-only successor #362 also closed unmerged after their two-repair limits. PR #362 final exact head `1f53529064742eb7d224eb3362b88aa6e3f52aa7` passed CI `31310187492`, Policy Check `31310187489`, and CodeQL `31310187546`, but autonomous review `31310186793` rejected an ambiguous implementation-commit/final-head claim and controller code checked only against a caller-provided SHA.
 - Library PR #364 closed after both repairs. Final head `c44278942e5c9252e529959487ad20c9e355c1a1` passed same-head CI retry `31312184558`, Policy Check `31312184559`, and CodeQL `31312184545`, but controller `31312367284` stopped before model generation when the exact-input estimate exceeded the unchanged cost ceiling by `$0.002460`. No review approval, merge, or runtime evidence exists.
-- PRs #367, #369, #371, and #375 delivered the trusted primitives, orchestration, controller invocation, and identical-compare compatibility with terminal evidence. After issue #377's aggregate-boundary correction is delivered, the public-safe evidence PR must exercise the complete verifier while Phase 2 remains `in_progress`; only a later protected ledger PR can mark acceptance after the evidence PR's post-merge proof exists. Keep ordinary PR CI tokenless and retain every artifact, identity, history, workflow, and runtime boundary. Open learning issues still require versioned dispositions; no waiver substitutes for proof.
+- PRs #367, #369, #371, #375, and #378 delivered the trusted primitives, orchestration, controller invocation, identical-compare compatibility, and aggregate-boundary correction with terminal evidence. The public-safe evidence PR must now exercise the complete verifier while Phase 2 remains `in_progress`; only a later protected ledger PR can mark acceptance after the evidence PR's post-merge proof exists. Keep ordinary PR CI tokenless and retain every artifact, identity, history, workflow, and runtime boundary. Open learning issues still require versioned dispositions; no waiver substitutes for proof.
 
 ## Test and production are accepted on the same immutable release
 
@@ -62,7 +63,7 @@ Update: PR #289 merged as `7907708d3db92a698bbfb549cb8ccfa91a1e86c8`; PR #290 me
 ## Remaining live acceptance criteria
 
 - An intentionally failing or pending-check PR must be shown unable to merge.
-- High-risk exact-head independent review and no-bypass branch rules must be verified on GitHub.
+- High-risk exact-head deterministic governance and no-bypass branch rules must be verified on GitHub.
 - First-attempt CI/test pinning, immutable Function activation, activation-last frontend convergence, fail-closed auth, authenticated REST, MCP origin/REC behavior, telemetry correlation, and accepted test provenance are proven by run `30695340416`, its artifacts, and independent live probes.
 - A live authenticated MCP provider call was not separately executed outside the authenticated workflow smoke. Local API/MCP tests and live unauthenticated MCP REC behavior pass; add a token-safe authenticated MCP smoke to a future workflow change if this must become an explicit deployment gate.
 - Bring remains disabled in test, so live Bring read-only behavior and private/session migration remain intentionally unaccepted.

@@ -136,7 +136,7 @@ Production deployment must not run unless `DEPLOY_PRODUCTION_ENABLED=true` and e
 
 Do not set `DEPLOY_PRODUCTION_ENABLED=true` unless the operator/user explicitly requests enabling production deployment and the guardrails, approval posture, and risk are documented. Do not enable it merely because a promotion or rollback is blocked.
 
-If independent production review or the required production guardrails are not configured, keep `DEPLOY_PRODUCTION_ENABLED=false` and report production promotion as blocked.
+If the required production guardrails are not configured, keep `DEPLOY_PRODUCTION_ENABLED=false` and report production promotion as blocked.
 
 Do not introduce long-lived Azure client secrets unless there is no practical alternative and the reason, expiry, rotation owner, and blast radius are documented.
 
