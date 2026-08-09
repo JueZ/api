@@ -1,10 +1,16 @@
 # Current state
 
+## 2026-08-09 Phase 2 accepted after protected historical-evidence verification
+
+- PR #389 exact head `91f79994c62cdcbe67b489c06629a862aff14ac5` passed CI `31330795938`, Policy Check `31330795948`, CodeQL `31330795967`, and deterministic governance `31330796084`. The required aggregate authenticated the complete Phase 2 historical record before exact-head merge `c71db002a86ac82f1076f6e6fe031c4bbc2b91b7`.
+- Main Delivery `31330909296`, exact-main CI `31330924386`, Deploy Test `31331003596`, and Promote Production `31331166859` passed. Both environments passed exact-generation validation, public and authenticated smoke, telemetry correlation, and ledger publication. Test provenance artifact `9042952622` and production ledger artifact `9043000601` bind the exact merge. No model call occurred.
+- Phase 2 is `accepted`. Phase 3 is `not_started`; its next exact slice extends the existing repair-triage architecture with deterministic, rollout-bounded, idempotent failure-to-learning conversion through one protected high-risk PR. A merged PR alone is not runtime evidence.
+
 ## 2026-08-09 Post-merge artifact contract repaired; Phase 2 evidence retry started
 
 - PR #388 exact head `70a9ad451d60385f9f1824df38849702484e54df` passed CI `31329974798`, Policy Check `31329974783`, CodeQL `31329974788`, and deterministic governance `31329974916`, then merged through the exact-head controller as `2a616bbe76fa2bf972fee68d51714ebacdffc143` with zero remote repair pushes.
 - Main Delivery `31330087561`, exact-main CI `31330102189`, Deploy Test `31330187457`, and Promote Production `31330356402` passed. Test and production passed exact-generation validation, public and authenticated smoke, telemetry correlation, and release-ledger publication. Issue #387 is closed with the protected PR and runtime evidence; no model call occurred.
-- Branch `codex/phase-2-evidence-retry` archives only public-safe Phase 2 and model-free migration evidence and keeps Phase 2 `in_progress`. Its protected deterministic aggregate must verify the complete historical evidence before merge; only a later protected ledger PR may mark acceptance. A merged PR alone is not runtime evidence.
+- PR #389 archived only public-safe Phase 2 and model-free migration evidence and kept Phase 2 `in_progress` until its complete terminal delivery existed. The later protected ledger transition above records acceptance. A merged PR alone is not runtime evidence.
 
 ## 2026-08-09 Historical lineage merged; post-merge artifact contract repair started
 
