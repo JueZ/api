@@ -915,6 +915,8 @@ test('trusted verification accepts a bound low-risk review only when program evi
     }),
   );
   const requests = [];
+  let unstableCandidate = false;
+  let pullRequestReads = 0;
   const client = {
     async getProtectedMainRef() {
       requests.push('/git/ref/heads/main');
@@ -926,10 +928,17 @@ test('trusted verification accepts a bound low-risk review only when program evi
     },
     async getPullRequest() {
       requests.push('/pulls/400');
+      pullRequestReads += 1;
       return {
         number: 400,
         state: 'open',
-        head: { sha: headSha, repo: { full_name: 'JueZ/api' } },
+        changed_files: 1,
+        commits: 1,
+        head: {
+          ref: 'codex/candidate',
+          sha: unstableCandidate && pullRequestReads % 2 === 0 ? mergeSha : headSha,
+          repo: { full_name: 'JueZ/api' },
+        },
         base: { ref: 'main', sha: baselineSha, repo: { full_name: 'JueZ/api' } },
       };
     },
@@ -966,6 +975,13 @@ test('trusted verification accepts a bound low-risk review only when program evi
     requests.some((path) => path.startsWith('/check-runs/')),
     false,
   );
+
+  unstableCandidate = true;
+  await assert.rejects(
+    verifyTrustedPullRequest(options, { client, runtime: { env, checkoutSha: mergeSha } }),
+    /final candidate identity failed: candidate PR head does not match/,
+  );
+  unstableCandidate = false;
 
   client.getPullRequestFiles = async () => [{ filename: PROGRAM_PATH }];
   client.getPullRequestCommits = async () => [{ sha: headSha }];

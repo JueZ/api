@@ -202,7 +202,14 @@ test('trusted GitHub client exposes only validated evidence endpoints', async ()
   const requests = [];
   const fetchImpl = async (url) => {
     requests.push(url);
-    if (url.endsWith('/pulls/7')) return jsonResponse({ number: 7, changed_files: 1, commits: 1 });
+    if (url.endsWith('/pulls/7'))
+      return jsonResponse({
+        number: 7,
+        changed_files: 1,
+        commits: 1,
+        head: { sha: SHA_A },
+        base: { sha: SHA_B },
+      });
     if (url.includes('/files?')) return jsonResponse([{ filename: 'reviewed.mjs' }]);
     if (url.includes('/pulls/7/commits?')) return jsonResponse([{ sha: SHA_A }]);
     if (url.includes('/check-runs?')) return jsonResponse({ check_runs: [] });
@@ -213,7 +220,7 @@ test('trusted GitHub client exposes only validated evidence endpoints', async ()
     return jsonResponse({ id: 7 });
   };
   const client = trustedClient({ fetchImpl });
-  await client.getPullRequestFiles(7);
+  await client.getPullRequestFiles(7, SHA_A, SHA_B);
   await client.getPullRequestCommits(7);
   await client.getCheckRun(7);
   await client.getCheckRuns(SHA_A);
@@ -229,6 +236,7 @@ test('trusted GitHub client exposes only validated evidence endpoints', async ()
   assert.deepEqual(requests, [
     'https://api.github.com/repos/JueZ/api/pulls/7',
     'https://api.github.com/repos/JueZ/api/pulls/7/files?per_page=100&page=1',
+    'https://api.github.com/repos/JueZ/api/pulls/7',
     'https://api.github.com/repos/JueZ/api/pulls/7',
     'https://api.github.com/repos/JueZ/api/pulls/7/commits?per_page=100&page=1',
     'https://api.github.com/repos/JueZ/api/check-runs/7',
@@ -253,9 +261,15 @@ test('pull-request file and commit histories must satisfy authenticated PR count
     trustedClient({
       fetchImpl: async (url) =>
         url.endsWith('/pulls/9')
-          ? jsonResponse({ number: 9, changed_files: 2, commits: 1 })
+          ? jsonResponse({
+              number: 9,
+              changed_files: 2,
+              commits: 1,
+              head: { sha: SHA_A },
+              base: { sha: SHA_B },
+            })
           : jsonResponse([{ filename: 'only-one.mjs' }]),
-    }).getPullRequestFiles(9),
+    }).getPullRequestFiles(9, SHA_A, SHA_B),
     /ended before the authenticated file count/,
   );
   await assert.rejects(
@@ -271,10 +285,34 @@ test('pull-request file and commit histories must satisfy authenticated PR count
     trustedClient({
       fetchImpl: async (url) =>
         url.endsWith('/pulls/9')
-          ? jsonResponse({ number: 9, changed_files: 2, commits: 1 })
+          ? jsonResponse({
+              number: 9,
+              changed_files: 2,
+              commits: 1,
+              head: { sha: SHA_A },
+              base: { sha: SHA_B },
+            })
           : jsonResponse([{ filename: 'duplicate.mjs' }, { filename: 'duplicate.mjs' }]),
-    }).getPullRequestFiles(9),
+    }).getPullRequestFiles(9, SHA_A, SHA_B),
     /duplicate filename/,
+  );
+  let pullRequestReads = 0;
+  await assert.rejects(
+    trustedClient({
+      fetchImpl: async (url) => {
+        if (url.endsWith('/pulls/9')) {
+          pullRequestReads += 1;
+          return jsonResponse({
+            number: 9,
+            changed_files: 1,
+            head: { sha: pullRequestReads === 1 ? SHA_A : SHA_B },
+            base: { sha: SHA_B },
+          });
+        }
+        return jsonResponse([{ filename: 'stable-name.mjs' }]);
+      },
+    }).getPullRequestFiles(9, SHA_A, SHA_B),
+    /file history changed during collection/,
   );
 });
 

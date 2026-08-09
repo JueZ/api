@@ -1341,6 +1341,25 @@ function pullRequestIdentityFindings(pullRequest, options) {
   return findings;
 }
 
+function finalCandidateSnapshotFindings(initialPullRequest, finalPullRequest, options) {
+  const findings = pullRequestIdentityFindings(finalPullRequest, options);
+  addFinding(findings, finalPullRequest?.head?.ref === initialPullRequest?.head?.ref, 'candidate PR head ref changed');
+  addFinding(findings, finalPullRequest?.base?.sha === initialPullRequest?.base?.sha, 'candidate PR base SHA changed');
+  addFinding(
+    findings,
+    finalPullRequest?.changed_files === initialPullRequest?.changed_files,
+    'candidate PR changed-file count changed',
+  );
+  addFinding(findings, finalPullRequest?.commits === initialPullRequest?.commits, 'candidate PR commit count changed');
+  return findings;
+}
+
+async function requireStableFinalCandidate(client, initialPullRequest, options) {
+  const finalPullRequest = await client.getPullRequest(options.prNumber);
+  const findings = finalCandidateSnapshotFindings(initialPullRequest, finalPullRequest, options);
+  if (findings.length > 0) throw new Error(`final candidate identity failed: ${findings.join('; ')}`);
+}
+
 export function controllerRunFindings(run, options) {
   const findings = [];
   addFinding(findings, run?.id === options.controllerRunId, 'controller run ID does not match');
@@ -1417,10 +1436,9 @@ export async function verifyTrustedPullRequest(options, dependencies = {}) {
   if (protectedMainFindings.length > 0) {
     throw new Error(`trusted controller protected-main authentication failed: ${protectedMainFindings.join('; ')}`);
   }
-  const [pullRequest, controllerRun, changedFiles, review] = await Promise.all([
+  const [pullRequest, controllerRun, review] = await Promise.all([
     client.getPullRequest(options.prNumber),
     client.getWorkflowRun(options.controllerRunId),
-    client.getPullRequestFiles(options.prNumber),
     readBoundedReviewFile(options.reviewFile),
   ]);
   const identityFindings = [
@@ -1440,6 +1458,7 @@ export async function verifyTrustedPullRequest(options, dependencies = {}) {
   }
   if (reviewFindings.length > 0) throw new Error(`review binding failed: ${reviewFindings.join('; ')}`);
 
+  const changedFiles = await client.getPullRequestFiles(options.prNumber, options.headSha, pullRequest.base.sha);
   const changedPaths = changedFiles.map((file) => file.filename);
   if (changedPaths.some((path) => typeof path !== 'string' || path.length === 0)) {
     throw new Error('candidate changed-file list is invalid');
@@ -1469,7 +1488,10 @@ export async function verifyTrustedPullRequest(options, dependencies = {}) {
   if (verifyPhase2 && review.risk.highRisk !== true) {
     throw new Error('review binding failed: Phase 2 program evidence requires an independent high-risk review');
   }
-  if (!verifyPhase2) return sanitizedSuccess(options, undefined, 'not_applicable');
+  if (!verifyPhase2) {
+    await requireStableFinalCandidate(client, pullRequest, options);
+    return sanitizedSuccess(options, undefined, 'not_applicable');
+  }
 
   const evidenceText = await client.getFile(PHASE_2_EVIDENCE_PATH, options.headSha, [PHASE_2_EVIDENCE_PATH]);
   const programFindings = acceptedPhaseEvidenceFindings(currentProgramText, (path) =>
@@ -1483,6 +1505,7 @@ export async function verifyTrustedPullRequest(options, dependencies = {}) {
   const observed = await collectPhase2Observed(evidence, client, dependencies);
   const findings = phase2EvidenceFindings(evidence, observed);
   if (findings.length > 0) throw new Error(`phase 2 evidence verification failed: ${findings.join('; ')}`);
+  await requireStableFinalCandidate(client, pullRequest, options);
   return sanitizedSuccess(options, evidence, 'verified');
 }
 
