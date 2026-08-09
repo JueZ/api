@@ -1,5 +1,11 @@
 # Deployment log
 
+## 2026-08-09 — Deterministic governance artifact contract accepted through production
+
+- Source: PR #388 exact head `70a9ad451d60385f9f1824df38849702484e54df` passed CI `31329974798`, Policy Check `31329974783`, CodeQL `31329974788`, and deterministic governance `31329974916`, then merged as `2a616bbe76fa2bf972fee68d51714ebacdffc143` with zero remote repair pushes.
+- Main delivery: controller `31330087561`, exact-main CI `31330102189`, Deploy Test `31330187457`, and Promote Production `31330356402` passed for the exact merge.
+- Acceptance: both environments passed immutable-source validation, public and authenticated smoke, telemetry correlation, and release-ledger publication. Test provenance artifact `9042730191` has digest `sha256:01bcaf2262955b27897ec515653a128765e233f4b242b8f21fc150642a2cd6be`; production ledger artifact `9042776595` has digest `sha256:276138ba14c11c966d5cb02d703eeb57602273f4173d6361a9ca65b44e981299`. Issue #387 is closed. A merged PR alone was not treated as runtime evidence.
+
 ## 2026-08-09 — Historical-lineage merge blocked before main CI
 
 - Source: PR #386 exact head `af3c3131d7dd9cb842c273e9e4bef4582bb33f5f` passed CI `31329560162`, Policy Check `31329560166`, CodeQL `31329560180`, and deterministic governance `31329560170`, then merged as `a56a932393a885976ad85f56df6cf3ba0f142e1b`.
