@@ -292,7 +292,7 @@ export async function runReview(options, policy, github, openAIClient, runtime =
           evidence:
             'The trusted capacity declaration did not equal true, so no paid-call claim or provider request was made.',
           remediation:
-            'An authorized operator must restore the existing review capacity and set the repository capacity declaration to true; do not change credentials or bypass review.',
+            'Restore usable review capacity and set the repository capacity declaration to true; do not change credentials or bypass review.',
         },
       ],
       risk,

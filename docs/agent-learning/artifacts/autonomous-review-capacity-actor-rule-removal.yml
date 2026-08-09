@@ -1,0 +1,39 @@
+version: 1
+id: autonomous-review-capacity-actor-rule-removal
+title: Keep review capacity state separate from actor approval
+fingerprint: agent-learning.autonomous-review.capacity-state-vs-actor-approval
+source:
+  type: user_correction
+  references:
+    - kind: user_correction
+      locator: user-confirmed-capacity-and-removed-actor-rule-2026-08-09
+classification:
+  failureArea: autonomous-review-delivery
+  severity: high
+  symptom: The prepared delivery guidance required an actor-specific confirmation before restoring a non-secret capacity-state value even though the value grants no approval and bypasses no review control.
+  rootCause: The local design conflated provider capacity state with authorization, adding an unnecessary manual governance bottleneck outside the exact-head independent-review boundary.
+disposition:
+  primary: regression-test
+  rationale: Guidance and controller evidence now treat readiness only as capacity state, and deterministic tests reject actor-specific approval wording while preserving exact-true fail-closed enforcement.
+artifacts:
+  - path: .agents/skills/autonomous-pr-delivery/SKILL.md
+    kind: skill
+  - path: scripts/test/autonomous-policy.test.mjs
+    kind: regression-test
+  - path: scripts/autonomous-merge-controller.mjs
+    kind: implementation
+  - path: AGENTS.md
+    kind: instruction
+  - path: docs/autonomous-delivery.md
+    kind: architecture-documentation
+  - path: docs/security/autonomous-guardrails.md
+    kind: architecture-documentation
+counterfactual:
+  hypothesis: The focused guidance test fails when review readiness is described as actor approval and passes only when it remains non-secret capacity state without changing the exact-true gate.
+  broken:
+    commit: 4a74255bc902a8df49ac5750ce7322ece5d34cbf
+    expectedResult: The focused test fails because the delivery skill and controller require an authorized-operator confirmation rather than treating readiness solely as capacity state.
+  verification:
+    commands:
+      - node --test --test-name-pattern 'capacity readiness remains state rather than actor approval' scripts/test/autonomous-policy.test.mjs
+status: implemented

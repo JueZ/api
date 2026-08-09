@@ -60,6 +60,16 @@ const autonomousDeliverySkill = readFileSync(
   new URL('../../.agents/skills/autonomous-pr-delivery/SKILL.md', import.meta.url),
   'utf8',
 );
+const rootAgentInstructions = readFileSync(new URL('../../AGENTS.md', import.meta.url), 'utf8');
+const githubAgentInstructions = readFileSync(new URL('../../.github/AGENTS.md', import.meta.url), 'utf8');
+const autonomousDeliveryDocumentation = readFileSync(
+  new URL('../../docs/autonomous-delivery.md', import.meta.url),
+  'utf8',
+);
+const autonomousGuardrailsDocumentation = readFileSync(
+  new URL('../../docs/security/autonomous-guardrails.md', import.meta.url),
+  'utf8',
+);
 const deployEnvironmentWorkflow = readFileSync(
   new URL('../../.github/workflows/deploy-environment.yml', import.meta.url),
   'utf8',
@@ -296,8 +306,28 @@ test('delivery guidance prevents futile autonomous-review reruns after a permane
   assert.match(autonomousDeliverySkill, /AUTONOMOUS_REVIEW_CAPACITY_READY/);
   assert.match(autonomousDeliverySkill, /high-risk[^\n]*not exactly `true`[^\n]*local/i);
   assert.match(autonomousDeliverySkill, /Low-risk[^\n]*deterministic approval/i);
-  assert.match(autonomousDeliverySkill, /Never set it to `true`[^\n]*explicit operator confirmation/i);
+  assert.match(autonomousDeliverySkill, /capacity state[^\n]*not an approval or authorization signal/i);
   assert.match(autonomousDeliverySkill, /Never inspect, replace, or reveal the shared API key/i);
+});
+
+test('capacity readiness remains state rather than actor approval', () => {
+  const activeGovernance = [
+    autonomousDeliverySkill,
+    rootAgentInstructions,
+    githubAgentInstructions,
+    autonomousDeliveryDocumentation,
+    autonomousGuardrailsDocumentation,
+    autonomousControllerSource,
+  ].join('\n');
+  assert.doesNotMatch(activeGovernance, /authorized operator|operator confirmation/i);
+  assert.match(autonomousDeliverySkill, /capacity state[^\n]*not an approval or authorization signal/i);
+  assert.match(rootAgentInstructions, /capacity state[^\n]*not an approval or authorization signal/i);
+  assert.match(autonomousDeliveryDocumentation, /capacity state, not approval or authorization/i);
+  assert.match(autonomousGuardrailsDocumentation, /not an approval or authorization signal/i);
+  assert.match(
+    autonomousControllerSource,
+    /Restore usable review capacity[^\n]*do not change credentials or bypass review/i,
+  );
 });
 
 test('protected program evidence is part of the required autonomous review aggregate', () => {

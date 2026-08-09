@@ -18,7 +18,7 @@ classification:
   rootCause: The trusted reviewer had no explicit fail-closed capacity declaration before source-diff collection and claim creation, so known external unavailability could consume otherwise valid exact heads.
 disposition:
   primary: regression-test
-  rationale: Trusted classification now requires an exact non-secret capacity declaration for high-risk review and deterministic tests prove that an outage makes no diff, claim, token-count, or generation call while low-risk approval remains available.
+  rationale: Trusted classification now requires an exact non-secret capacity-state declaration for high-risk review and deterministic tests prove that an outage makes no diff, claim, token-count, or generation call while low-risk approval remains available; the declaration is not an actor approval signal.
 artifacts:
   - path: scripts/autonomous-merge-controller.mjs
     kind: implementation

@@ -1,11 +1,11 @@
 # Known issues and unresolved risks
 
-## Autonomous-review capacity is externally exhausted
+## Autonomous-review capacity is declared restored; protected proof is pending
 
 - PR #378 delivered the required evidence aggregate boundary as merge `f56422021640b34be2588c33999f63b59a87399a` with terminal exact-main CI, test/production delivery, smoke, telemetry, release-ledger, and runtime evidence. Issue #377 remains open only because its versioned verified learning artifact still needs exact counterfactual references.
 - PR #379 then failed closed on an external autonomous-review `request_error` after the exact-head permanent paid-call claim was created. Its bounded workflow rerun was denied as `exact_head_claim_exists`, as designed; retrying a paid review on the same head is not an available recovery path.
 - PR #381 independently identified the sanitized blocker as HTTP 429 `credit_balance_exhausted`; it passed every free aggregate and closed unmerged after the required review aggregate failed. Issue #382 owns the external capacity disposition, while issue #380 owns the missing same-head-rerun guidance.
-- The current local capsule adds a non-secret exact capacity declaration before every high-risk provider boundary and preserves low-risk deterministic approval, the permanent claim, one paid call, credentials, permissions, four required contexts, and complete-rollup defense. The code cannot be accepted until capacity is restored; setting readiness to `true` requires explicit operator confirmation and the shared API key remains unchanged.
+- The current local capsule adds a non-secret exact capacity declaration before every high-risk provider boundary and preserves low-risk deterministic approval, the permanent claim, one paid call, credentials, permissions, four required contexts, and complete-rollup defense. The user confirmed availability and live readiness is now `true`; a protected review must still prove actual capacity. The value is capacity state rather than actor approval, and the shared API key remains unchanged.
 
 ## Identical-compare compatibility is delivered; durable learning remains
 
