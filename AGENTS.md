@@ -44,6 +44,8 @@ Query live GitHub and deployment state when a claim depends on current state; do
 
 Validate versioned learnings with `npm run agent:learning:validate` and keep `docs/agent-learning/index.md` reproducible with `npm run agent:learning:index -- --check`. These run inside the existing CI aggregate and must not create another branch-protection context.
 
+Validate historical task definitions with `npm run eval:agent-tasks:validate`. Required CI may run only trusted scorers and the deterministic fake adapter; a real Codex task evaluation is optional, must be explicitly confirmed, must use an isolated temporary worktree and current supported sandbox/output options, and must never become a branch-required or production-credentialed check. A missing adapter, authentication failure, timeout, or blocked run is not a pass.
+
 ## Project map
 
 - `apps/web/` — Angular frontend.

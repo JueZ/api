@@ -1,0 +1,30 @@
+version: 1
+id: proportional-program-gating
+title: Keep program reporting and validation proportional to the active slice
+fingerprint: agent-delivery.phase-progress-and-proportional-local-validation
+source:
+  type: user_correction
+  references:
+    - kind: issue
+      locator: JueZ/api#365
+      url: https://github.com/JueZ/api/issues/365
+classification:
+  failureArea: agent-delivery-efficiency
+  severity: medium
+  symptom: Long-running program updates centered on repeated gate detail, obscured the active phase, and repeated unchanged local work without making the reason visible.
+  rootCause: Delivery guidance required proportional local validation but did not require phase-first progress reporting, a single diff-based local validation set, or an explicit reason before repeating unchanged dependency and application work.
+disposition:
+  primary: skill-update
+  rationale: The delivery skill now requires phase-first status, one protected-base-diff validation set, explicit rationale for omitted redundant checks, and no repetition unless the diff, base, environment, or a concrete failure changed. Protected checks remain mandatory.
+artifacts:
+  - path: .agents/skills/autonomous-pr-delivery/SKILL.md
+    kind: skill
+  - path: scripts/agent-learning/verify-program-evidence.mjs
+    kind: implementation
+  - path: scripts/test/agent-learning-program-evidence.test.mjs
+    kind: regression-test
+  - path: scripts/test/agent-learning-artifacts.test.mjs
+    kind: regression-test
+counterfactual:
+  hypothesis: Unrelated Phase 3 or 4 ledger edits no longer activate Phase 2 live verification, while Phase 2 row/evidence changes and malformed ledgers still do; delivery guidance reports the active slice first and does not repeat unchanged local work without a concrete reason.
+status: implemented

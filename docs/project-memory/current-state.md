@@ -1,10 +1,10 @@
 # Current state
 
-## 2026-08-09 Phase 3 failure-to-learning conversion in progress
+## 2026-08-09 Phase 3 accepted; Phase 4 historical task harness in progress
 
-- Branch `codex/agent-learning-phase-3-triage` starts from protected-main SHA `0a85184c866fbea789b320e9559fe276c072fffa` and extends the existing repair triage rather than introducing a competing system.
-- The active slice adds deterministic significant-failure classification, normalized mechanism fingerprints, stable candidate/source/link markers, sanitized candidate bodies, source deduplication, recurrence escalation, strict owned/dated no-artifact dispositions, an immutable rollout boundary, exact-range dry-run backfill, and write-enabled scheduled candidate reconciliation. Raw issue text, logs, prompts, patches, credentials, and provider content are not copied or executed; no model is invoked.
-- Operational recovery remains independently evidence-gated. Repair closure additionally requires a linked candidate or valid explicit disposition, and the schedule cannot close repairs because its closure flag remains false. Phase 3 remains `in_progress` until protected PR, exact-main CI, runtime-neutral delivery decision, and exercised idempotent GitHub issue evidence exist. A merged PR alone is not runtime evidence.
+- Phase 3 PR #394 exact head `b5bbb0926282ca4a45fd93551d4ef47538f82f2b` passed all four aggregates and merged as `5f874d8bdbe51d7e69b2155e4b4aac977085bfcd`. Main Delivery `31335457986` and exact-main CI `31335474345` passed; the authorized explicit marker skipped environment deployment, so smoke, telemetry, release-ledger, and runtime truth are not applicable rather than passing evidence.
+- Exact-range dry run `31335725152` proposed one historical candidate without mutation. Write-enabled rollout runs `31335759191` and `31335788001` succeeded with closure disabled, created the exact six labels idempotently, processed no pre-rollout issue, created no candidate because no post-rollout repair existed, and closed no repair. Public-safe evidence is `docs/agent-learning/evidence/phase-3-failure-conversion.json`.
+- Branch `codex/agent-task-evals-phase-4` starts from exact main `5f874d8bdbe51d7e69b2155e4b4aac977085bfcd` and implements detached historical worktrees, reviewed context overlays, adapter isolation, trusted scorers, sanitized reports, and deterministic fake-adapter CI coverage. The operator prohibits general model use in this program slice, so no real Codex task will run and that optional evidence remains explicitly blocked. A merged PR alone will not be treated as runtime evidence.
 
 ## 2026-08-09 Runtime-neutral delivery optimization authorized
 
