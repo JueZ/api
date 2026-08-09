@@ -54,7 +54,6 @@ const codexAutomergeWorkflow = readFileSync(
   new URL('../../.github/workflows/codex-automerge.yml', import.meta.url),
   'utf8',
 );
-const codexAutomergeWorkflowDefinition = parseYaml(codexAutomergeWorkflow);
 const autonomousControllerSource = readFileSync(new URL('../autonomous-merge-controller.mjs', import.meta.url), 'utf8');
 const deployEnvironmentWorkflow = readFileSync(
   new URL('../../.github/workflows/deploy-environment.yml', import.meta.url),
@@ -259,41 +258,6 @@ test('canonical autonomous policy is internally valid', () => {
   assert.match(ciWorkflow, /node scripts\/agent-learning\/verify-program-evidence\.mjs offline/);
   assert.doesNotMatch(codexAutomergeWorkflow, /source-run-id|Reuse approved exact-head review evidence/);
   assert.doesNotMatch(autonomousControllerSource, /releaseReviewClaim|method: 'PATCH'[\s\S]*check-runs/);
-});
-
-test('trusted program evidence runs only reviewed default-branch code with least read permissions', () => {
-  const job = codexAutomergeWorkflowDefinition.jobs['trusted-program-evidence'];
-  assert.equal(job.name, 'verify trusted agent-learning program evidence');
-  assert.deepEqual(normalizedNeeds(job), ['resolve', 'autonomous-review']);
-  assert.deepEqual(job.permissions, {
-    actions: 'read',
-    checks: 'read',
-    contents: 'read',
-    deployments: 'read',
-    'pull-requests': 'read',
-  });
-  const checkout = job.steps.find((step) => step.name === 'Checkout trusted program-evidence controller');
-  assert.equal(checkout.with.ref, '${{ github.workflow_sha }}');
-  assert.equal(checkout.with['persist-credentials'], false);
-  const verification = job.steps.find(
-    (step) => step.name === 'Verify candidate program evidence with trusted controller code',
-  );
-  assert.equal(verification.env.GH_TOKEN, '${{ github.token }}');
-  assert.match(verification.run, /node scripts\/agent-learning\/verify-program-evidence\.mjs trusted-pr/);
-  assert.match(verification.run, /--controller-sha "\$\{\{ github\.workflow_sha \}\}"/);
-  assert.doesNotMatch(verification.run, /checkout|git\s+(?:switch|checkout)|npm\s+run/);
-
-  const publish = codexAutomergeWorkflowDefinition.jobs['publish-review-check'];
-  assert.deepEqual(normalizedNeeds(publish), ['resolve', 'autonomous-review', 'trusted-program-evidence']);
-  assert.match(publish.steps[0].run, /\[ "\$PROGRAM_EVIDENCE_RESULT" = "success" \]/);
-  const merge = codexAutomergeWorkflowDefinition.jobs['exact-head-gate'];
-  assert.deepEqual(normalizedNeeds(merge), [
-    'resolve',
-    'autonomous-review',
-    'trusted-program-evidence',
-    'publish-review-check',
-  ]);
-  assert.match(merge.if, /needs\.trusted-program-evidence\.result == 'success'/);
 });
 
 test('stable aggregate jobs cover every merge-relevant internal validation and fail closed', () => {

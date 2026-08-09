@@ -642,14 +642,15 @@ export function verifyArtifactArchiveDigest(archive, authenticatedDigest, record
   return computed;
 }
 
-function workflowRunIdFromJobUrl(value) {
+function workflowJobIdentityFromUrl(value) {
   if (typeof value !== 'string') return undefined;
   try {
     const url = new URL(value);
-    const match = url.pathname.match(/^\/JueZ\/api\/actions\/runs\/(\d+)\/job\/\d+\/?$/);
+    const match = url.pathname.match(/^\/JueZ\/api\/actions\/runs\/(\d+)\/job\/(\d+)\/?$/);
     if (url.protocol !== 'https:' || url.hostname !== 'github.com' || !match) return undefined;
     const runId = Number(match[1]);
-    return exactPositiveInteger(runId) ? runId : undefined;
+    const jobId = Number(match[2]);
+    return exactPositiveInteger(runId) && exactPositiveInteger(jobId) ? { runId, jobId } : undefined;
   } catch {
     return undefined;
   }
@@ -712,11 +713,98 @@ export function currentRuntimeFindings(currentRuntime) {
         `https://${ACCEPTANCE_RUNTIME_HOSTS[environment]}`,
       `${environment} current deployment runtime origin is not allowlisted`,
     );
-    const currentRunId = workflowRunIdFromJobUrl(latestStatus?.log_url);
+    const execution = workflowJobIdentityFromUrl(latestStatus?.log_url);
+    addFinding(findings, Boolean(execution), `${environment} current deployment run identity is invalid`);
+    findings.push(
+      ...workflowRunFindings(
+        observed?.workflowRun,
+        {
+          id: execution?.runId,
+          repository: 'JueZ/api',
+          path:
+            environment === 'test'
+              ? EXPECTED_DELIVERY_RUNS.deployTest.path
+              : EXPECTED_DELIVERY_RUNS.promoteProduction.path,
+          event: 'repository_dispatch',
+          headSha: beforeSha,
+          headBranch: 'main',
+          headRepository: 'JueZ/api',
+        },
+        `${environment} current deployment workflow`,
+      ),
+    );
+    const job = observed?.deploymentJob;
+    const workflowTitlePrefix =
+      environment === 'test' ? `Deploy Test ${beforeSha} ` : `Promote Production ${beforeSha} `;
     addFinding(
       findings,
-      exactPositiveInteger(currentRunId),
-      `${environment} current deployment run identity is invalid`,
+      observed?.workflowRun?.display_title?.startsWith(workflowTitlePrefix),
+      `${environment} current deployment workflow title does not match`,
+    );
+    addFinding(findings, job?.id === execution?.jobId, `${environment} current deployment job ID does not match`);
+    addFinding(findings, job?.run_id === execution?.runId, `${environment} current deployment job run does not match`);
+    addFinding(
+      findings,
+      job?.workflow_name?.startsWith(workflowTitlePrefix),
+      `${environment} current deployment job workflow does not match`,
+    );
+    addFinding(
+      findings,
+      job?.name === EXPECTED_DEPLOYMENT_JOBS[environment],
+      `${environment} current deployment job name does not match`,
+    );
+    addFinding(findings, job?.head_sha === beforeSha, `${environment} current deployment job is not exact main`);
+    addFinding(findings, job?.head_branch === 'main', `${environment} current deployment job branch is not main`);
+    addFinding(
+      findings,
+      job?.status === 'completed' && job?.conclusion === 'success',
+      `${environment} current deployment job did not succeed`,
+    );
+    addFinding(findings, job?.run_attempt === 1, `${environment} current deployment job must be the first attempt`);
+    addFinding(
+      findings,
+      job?.runner_group_name === 'GitHub Actions',
+      `${environment} current deployment job runner is invalid`,
+    );
+    addFinding(
+      findings,
+      job?.html_url === latestStatus?.log_url,
+      `${environment} current deployment job URL does not match`,
+    );
+    addFinding(
+      findings,
+      observed?.workflowRun?.html_url === `https://github.com/JueZ/api/actions/runs/${execution?.runId}`,
+      `${environment} current deployment workflow URL does not match`,
+    );
+    const deploymentCreated = Date.parse(latestDeployment?.created_at);
+    const jobCreated = Date.parse(job?.created_at);
+    const jobStarted = Date.parse(job?.started_at);
+    const jobCompleted = Date.parse(job?.completed_at);
+    const statusCreated = Date.parse(latestStatus?.created_at);
+    addFinding(
+      findings,
+      [deploymentCreated, jobCreated, jobStarted, jobCompleted, statusCreated].every(Number.isFinite),
+      `${environment} current deployment provenance timestamps are invalid`,
+    );
+    addFinding(
+      findings,
+      deploymentCreated >= jobCreated && deploymentCreated <= jobStarted,
+      `${environment} current deployment was not created by the authenticated job`,
+    );
+    addFinding(
+      findings,
+      statusCreated >= jobStarted && statusCreated <= jobCompleted + 5_000,
+      `${environment} current deployment status was not completed by the authenticated job`,
+    );
+    addFinding(
+      findings,
+      statuses.every(
+        (status) =>
+          status?.log_url === job?.html_url &&
+          status?.environment === expectedEnvironment &&
+          githubActionsBot(status?.creator),
+      ),
+      `${environment} current deployment status history is not bound to the authenticated job`,
     );
     addFinding(findings, observed?.liveHealth?.status === 'ok', `${environment} current live health is not ok`);
     addFinding(
@@ -736,7 +824,7 @@ export function currentRuntimeFindings(currentRuntime) {
     );
     addFinding(
       findings,
-      observed?.liveHealth?.deploymentRunId === String(currentRunId),
+      observed?.liveHealth?.deploymentRunId === String(execution?.runId),
       `${environment} current live health deployment run does not match`,
     );
   }
@@ -1402,10 +1490,14 @@ async function collectPhase2Observed(evidence, client, dependencies = {}) {
       ),
     );
     if (!deployment) throw new Error(`${environment} current deployment is unavailable`);
+    const deploymentStatuses = await client.getDeploymentStatuses(deployment.id);
+    const execution = workflowJobIdentityFromUrl(latestByNumericId(deploymentStatuses)?.log_url);
     observed.currentRuntime.environments[environment] = {
       deployments,
       deployment,
-      deploymentStatuses: await client.getDeploymentStatuses(deployment.id),
+      deploymentStatuses,
+      workflowRun: execution ? await client.getJson(`/actions/runs/${execution.runId}`) : undefined,
+      deploymentJob: execution ? await client.getJson(`/actions/jobs/${execution.jobId}`) : undefined,
       liveHealth: await fetchHealth(environment, `https://${ACCEPTANCE_RUNTIME_HOSTS[environment]}`),
     };
   }

@@ -236,12 +236,16 @@ function observedEnvironment(environment, record) {
 
 function currentObservedEnvironment(environment, deploymentId, statusId, runId) {
   const expectedEnvironment = environment === 'test' ? 'test' : 'production';
+  const jobId = deploymentId + 5000;
+  const jobUrl = `https://github.com/JueZ/api/actions/runs/${runId}/job/${jobId}`;
+  const workflowTitle = `${environment === 'test' ? 'Deploy Test' : 'Promote Production'} ${currentMainSha} current-correlation`;
   const deployment = {
     id: deploymentId,
     sha: currentMainSha,
     ref: 'main',
     environment: expectedEnvironment,
     task: 'deploy',
+    created_at: '2026-08-09T09:35:48Z',
     creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
   };
   return {
@@ -253,10 +257,39 @@ function currentObservedEnvironment(environment, deploymentId, statusId, runId) 
         state: 'success',
         environment: expectedEnvironment,
         environment_url: `https://${ACCEPTANCE_RUNTIME_HOSTS[environment]}`,
-        log_url: `https://github.com/JueZ/api/actions/runs/${runId}/job/${deploymentId + 5000}`,
+        log_url: jobUrl,
+        created_at: '2026-08-09T09:39:39Z',
         creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
       },
     ],
+    workflowRun: workflowRun(
+      runId,
+      environment === 'test' ? '.github/workflows/deploy-test.yml' : '.github/workflows/promote-production.yml',
+      'repository_dispatch',
+      currentMainSha,
+      {
+        head_branch: 'main',
+        head_repository: { full_name: 'JueZ/api' },
+        html_url: `https://github.com/JueZ/api/actions/runs/${runId}`,
+        display_title: workflowTitle,
+      },
+    ),
+    deploymentJob: {
+      id: jobId,
+      run_id: runId,
+      workflow_name: workflowTitle,
+      name: environment === 'test' ? 'deploy test / deploy test' : 'promote production / deploy prod',
+      head_sha: currentMainSha,
+      head_branch: 'main',
+      status: 'completed',
+      conclusion: 'success',
+      run_attempt: 1,
+      created_at: '2026-08-09T09:35:48Z',
+      started_at: '2026-08-09T09:35:51Z',
+      completed_at: '2026-08-09T09:39:38Z',
+      runner_group_name: 'GitHub Actions',
+      html_url: jobUrl,
+    },
     liveHealth: {
       status: 'ok',
       environmentName: environment,
@@ -515,7 +548,7 @@ test('canonical workflow and deployment histories reject later failed records', 
   assert.ok(findings.some((finding) => finding.includes('test deployment has a later non-supersession status')));
 });
 
-test('historical inactive supersession requires healthy exact-current-main runtime', () => {
+test('historical supersession requires authenticated exact-current-main deployment provenance', () => {
   const evidence = validEvidence();
   const observed = validObserved(evidence);
   assert.deepEqual(currentRuntimeFindings(observed.currentRuntime), []);
@@ -523,10 +556,16 @@ test('historical inactive supersession requires healthy exact-current-main runti
 
   observed.currentRuntime.environments.prod.deploymentStatuses[0].state = 'in_progress';
   observed.currentRuntime.environments.test.liveHealth.deployedCommitSha = mergeSha;
+  observed.currentRuntime.environments.test.workflowRun.path = '.github/workflows/repair-triage.yml';
+  observed.currentRuntime.environments.test.deploymentJob.name = 'unrelated job';
+  observed.currentRuntime.environments.test.deployment.created_at = '2026-08-09T09:39:40Z';
   observed.currentRuntime.mainAfter.object.sha = 'f'.repeat(40);
   const findings = currentRuntimeFindings(observed.currentRuntime);
   assert.ok(findings.some((finding) => finding.includes('prod current deployment did not succeed')));
   assert.ok(findings.some((finding) => finding.includes('test current live health commit is not exact main')));
+  assert.ok(findings.some((finding) => finding.includes('test current deployment workflow immutable workflow path')));
+  assert.ok(findings.some((finding) => finding.includes('test current deployment job name')));
+  assert.ok(findings.some((finding) => finding.includes('test current deployment was not created')));
   assert.ok(findings.some((finding) => finding.includes('current main changed')));
 });
 

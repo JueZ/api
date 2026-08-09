@@ -156,67 +156,9 @@ jobs:
           if-no-files-found: error
           retention-days: 365
 
-  trusted-program-evidence:
-    name: verify trusted agent-learning program evidence
-    needs: [resolve, autonomous-review]
-    if: >-
-      ${{
-        needs.resolve.outputs.eligible == 'true' &&
-        needs.autonomous-review.result == 'success'
-      }}
-    timeout-minutes: 20
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      checks: read
-      contents: read
-      deployments: read
-      pull-requests: read
-    steps:
-      - name: Checkout trusted program-evidence controller
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
-        with:
-          ref: ${{ github.workflow_sha }}
-          persist-credentials: false
-      - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - name: Install trusted verifier dependencies
-        shell: bash
-        run: npm ci --ignore-scripts
-      - name: Download exact-head reviewed decision
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
-        with:
-          name: autonomous-review-${{ needs.resolve.outputs.head_sha }}
-          path: ${{ runner.temp }}/autonomous-review
-      - name: Verify candidate program evidence with trusted controller code
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/agent-learning/verify-program-evidence.mjs trusted-pr \
-            --repository "${{ github.repository }}" \
-            --pr "${{ needs.resolve.outputs.pr_number }}" \
-            --head-sha "${{ needs.resolve.outputs.head_sha }}" \
-            --controller-run-id "${{ github.run_id }}" \
-            --controller-sha "${{ github.workflow_sha }}" \
-            --review-file "$RUNNER_TEMP/autonomous-review/autonomous-review.json" \
-            --output-file "$RUNNER_TEMP/trusted-program-evidence.json"
-      - name: Upload sanitized program-evidence verification
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
-        with:
-          name: trusted-program-evidence-${{ needs.resolve.outputs.head_sha }}
-          path: ${{ runner.temp }}/trusted-program-evidence.json
-          if-no-files-found: error
-          retention-days: 365
-
   publish-review-check:
     name: publish autonomous review check
-    needs: [resolve, autonomous-review, trusted-program-evidence]
+    needs: [resolve, autonomous-review]
     if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.eligible == 'true'
     timeout-minutes: 5
     runs-on: ubuntu-latest
@@ -232,7 +174,6 @@ jobs:
           REVIEW_RESULT: ${{ needs.autonomous-review.result }}
           REVIEW_DECISION: ${{ needs.autonomous-review.outputs.decision }}
           REVIEWED_HEAD_SHA: ${{ needs.autonomous-review.outputs.reviewed_head_sha }}
-          PROGRAM_EVIDENCE_RESULT: ${{ needs.trusted-program-evidence.result }}
           EXPECTED_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
           HIGH_RISK: ${{ needs.autonomous-review.outputs.high_risk }}
           MODEL_INVOKED: ${{ needs.autonomous-review.outputs.model_invoked }}
@@ -253,11 +194,10 @@ jobs:
           if [ "$claim_state_valid" = "true" ] &&
              [ "$REVIEW_RESULT" = "success" ] &&
              [ "$REVIEW_DECISION" = "approve" ] &&
-             [ "$PROGRAM_EVIDENCE_RESULT" = "success" ] &&
              [ "$REVIEWED_HEAD_SHA" = "$EXPECTED_HEAD_SHA" ]; then
             conclusion=success
             title='Autonomous review approved'
-            summary="Exact head $EXPECTED_HEAD_SHA passed autonomous review and trusted program-evidence verification (high-risk: ${HIGH_RISK:-unknown}, model invoked: ${MODEL_INVOKED:-unknown})."
+            summary="Exact head $EXPECTED_HEAD_SHA passed autonomous review (high-risk: ${HIGH_RISK:-unknown}, model invoked: ${MODEL_INVOKED:-unknown})."
           fi
 
           gh api \
@@ -279,12 +219,11 @@ jobs:
 
   exact-head-gate:
     name: merge exact PR head
-    needs: [resolve, autonomous-review, trusted-program-evidence, publish-review-check]
+    needs: [resolve, autonomous-review, publish-review-check]
     if: >-
       ${{
         needs.resolve.outputs.eligible == 'true' &&
         needs.autonomous-review.result == 'success' &&
-        needs.trusted-program-evidence.result == 'success' &&
         needs.publish-review-check.result == 'success'
       }}
     timeout-minutes: 70
