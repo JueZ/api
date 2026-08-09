@@ -170,6 +170,8 @@ Protected `main` must require exactly these stable GitHub Actions contexts:
 
 Those stable branch-required contexts aggregate mandatory internal jobs; they do not replace or make those jobs optional. `CI complete` must use `if: always()` and explicitly require every merge-relevant CI job: install, lint, type check, unit and API tests, Angular and Azure Functions builds, OpenAPI and Bicep validation, workflow/ShellCheck validation, architecture/skill/eval/generated-doc validation, Trivy, Gitleaks, dependency audit, and immutable release artifacts. The main-only provenance-attestation job remains mandatory on applicable main runs but is intentionally not a pull-request dependency. `Policy complete` must similarly cover cost policy, guardrail policy, and dependency-lock policy, while `CodeQL complete` must cover every CodeQL matrix analysis.
 
+`Autonomous review complete` must be published as successful only after the exact-head independent review and the protected-main agent-learning program-evidence verifier both succeed. Applicable malformed, unavailable, stale, or unauthenticated program evidence must therefore fail the existing required aggregate; it must not be deferred solely to the later merge job or exposed as a fifth protected context.
+
 The autonomous controller must still inspect the complete latest exact-head check-run and legacy-status rollup at the final merge boundary. Any unrelated failing or pending latest result blocks merge even when the four configured aggregates pass. The only permitted explanation for GitHub aggregate `unstable` is the current trusted `merge exact PR head` job itself.
 
 Codex delivery checks to monitor for Codex PRs include:

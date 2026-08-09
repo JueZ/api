@@ -1,10 +1,16 @@
 # Current state
 
+## 2026-08-09 Phase 2 evidence aggregate-boundary repair started
+
+- Compatibility PR #375 merged as `f7ec8cbb4d9bc44fecd9a833c3d7cc483f6974f2` and completed exact-main CI `31318612977`, Main Delivery `31318690680`, Deploy Test `31318705872`, Promote Production `31318872853`, and fresh test/production runtime truth with public and authenticated smoke, telemetry, and release ledgers.
+- Evidence retry PR #376 exact head `d6f207117e770aabc7b7baa4414c35f4d318072a` passed CI `31319465316`, Policy Check `31319465287`, and CodeQL `31319465282`. Autonomous review run `31319465352` correctly rejected that protected program-evidence verification ran after `Autonomous review complete` was published, leaving ordinary protected merge available if only the later controller job failed. PR #376 closed unmerged with zero repair pushes and no downstream evidence.
+- Issue #377 records recurrence fingerprint `agent-learning.protected-evidence.required-aggregate-boundary`. The current bounded workflow capsule moves the existing verifier into the aggregate-producing review job after independent review and removes the duplicate from the later merge job. It adds no job, model call, credential, or status context and preserves the complete-rollup merge defense. Phase 2 remains `in_progress`; a merged PR alone is not runtime evidence.
+
 ## 2026-08-09 Phase 2 evidence PR exposed identical-compare compatibility defect
 
 - Controller-wiring PR #371 merged as `8f71efebfa317853a89970eec4527bde696e277a` after exact-head CI `31316360899`, Policy Check `31316360920`, CodeQL `31316360918`, and autonomous review/controller `31316360856`. Main Delivery `31316505347`, main CI `31316519451`, Deploy Test `31316596882`, Promote Production `31316759228`, and fresh test/production runtime truth all passed.
 - Evidence PR #372 final head `ea32247e769c8a3e92b083a052e8b0d975894ba6` passed exact-head CI `31317696391`, Policy Check `31317696352`, CodeQL `31317696353`, and independent review in controller run `31317695730`, then failed closed in protected verifier job `93255754296`. GitHub's identical compare omitted `head_commit`; protected main and controller were both exact `8f71efebfa317853a89970eec4527bde696e277a` and all other comparison identities agreed.
-- PR #372 closed unmerged after two repairs, so no main delivery or runtime acceptance exists for it. Phase 2 remains `in_progress`. Issue #373 records the premature phase-status transition; issue #374 records the identical-compare regression. The current branch is the bounded compatibility fix, not an acceptance retry.
+- PR #372 closed unmerged after two repairs, so no main delivery or runtime acceptance exists for it. Phase 2 remains `in_progress`. Issue #373 records the premature phase-status transition; issue #374 records the identical-compare regression that PR #375 subsequently repaired.
 
 ## 2026-08-09 Phase 2 orchestration PR #369 delivered; controller wiring started
 

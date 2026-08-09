@@ -1,19 +1,25 @@
 # Known issues and unresolved risks
 
-## Phase 2 protected evidence verifier rejects GitHub's identical compare shape
+## Phase 2 evidence verification is not yet part of the required aggregate
+
+- PR #376 exact head `d6f207117e770aabc7b7baa4414c35f4d318072a` passed all free aggregates, but autonomous review run `31319465352` rejected the acceptance design because `Autonomous review complete` was published before the protected program-evidence verifier ran in the later merge job.
+- Branch protection intentionally requires exactly four stable aggregates and does not separately require `merge exact PR head`. PR #375's bounded bootstrap merge proved that ordinary protected merge can remain available after the later verifier fails. The verifier therefore must participate in the existing review aggregate rather than relying only on autonomous-controller merge behavior or adding a fifth context.
+- Issue #377 requires executable prevention. The current successor runs the existing verifier inside the protected-main review job after independent review, makes that combined job result control `Autonomous review complete`, removes duplicate later verification, and retains complete-rollup enforcement. PR #376 closed unmerged with zero repair pushes; Phase 2 remains `in_progress` with no evidence-retry merge or runtime claim.
+
+## Identical-compare compatibility is delivered; durable learning remains
 
 - PR #372 proved that the protected evidence verifier runs after independent review and before merge, but job `93255754296` rejected an exact controller/protected-main comparison because GitHub omitted `head_commit` for `status: identical`.
-- Protected main remained exact `8f71efebfa317853a89970eec4527bde696e277a`; the compare response had exact base and merge-base identities, zero ahead/behind counts, and the canonical exact-SHA URL. This is a narrow response-shape compatibility defect, not evidence that protection changed.
-- Issue #374 requires executable prevention. Permit absent `head_commit` only for the fully bound identical case; non-identical comparisons must retain exact head binding and fail closed. PR #372 closed unmerged after two repairs, so Phase 2 remains `in_progress` with no acceptance or runtime claim.
+- Compatibility PR #375 merged the bounded fix as `f7ec8cbb4d9bc44fecd9a833c3d7cc483f6974f2` and completed exact-main CI, test/production delivery, smoke, telemetry, release-ledger, and fresh runtime verification. Omitted `head_commit` is accepted only for the fully bound identical case; non-identical comparisons retain exact head binding and fail closed.
+- Issue #374 remains open because operational recovery is not a versioned learning artifact. It still requires the recurrence fingerprint, executable regression reference, and exact broken/fixed counterfactual proof through an ordinary protected PR.
 
-## Phase 2 acceptance still lacks a merged trusted verifier
+## Phase 2 acceptance still lacks exercised required evidence
 
-- PR #349 implemented and delivered the versioned-learning system, but Phase 2 acceptance evidence is not yet protected by a merged trusted verifier.
+- PR #349 implemented and delivered the versioned-learning system, but its acceptance evidence has not yet exercised the trusted verifier at the required aggregate boundary.
 - PR #350 closed after its second repair because environment identity was not independently bound. PR #352 final head `54d76353d72d5342f4b7f3944b58d384a95b7075` passed all free gates, but autonomous review `31301156652` rejected the design because it exported an authenticated Actions/deployment token to scripts from the PR checkout. The same review found that generic HTTPS origins plus default redirects permit SSRF/redirect escape.
 - PR #354 moved authenticated verification into protected-main controller code and repaired the runtime-host, redirect, byte-bound, digest, and candidate/controller identity boundaries. Its final head `0fef86e2de488545970507f362e2abbc974681ca` passed CI `31305790271`, Policy Check `31305790288`, and CodeQL `31305790267`, but autonomous review `31305789487` found that generic authenticated evidence was not pinned to designated Phase 2 implementation PR #349. It closed unmerged after both repairs.
 - PR #358 and library-only successor #362 also closed unmerged after their two-repair limits. PR #362 final exact head `1f53529064742eb7d224eb3362b88aa6e3f52aa7` passed CI `31310187492`, Policy Check `31310187489`, and CodeQL `31310187546`, but autonomous review `31310186793` rejected an ambiguous implementation-commit/final-head claim and controller code checked only against a caller-provided SHA.
 - Library PR #364 closed after both repairs. Final head `c44278942e5c9252e529959487ad20c9e355c1a1` passed same-head CI retry `31312184558`, Policy Check `31312184559`, and CodeQL `31312184545`, but controller `31312367284` stopped before model generation when the exact-input estimate exceeded the unchanged cost ceiling by `$0.002460`. No review approval, merge, or runtime evidence exists.
-- Keep ordinary PR CI tokenless. Split the next successor into trusted primitives and Phase 2 orchestration so each independently reviewed capsule targets at most 140,000 diff bytes. Retain artifact-bound workflow/job/ledger/runtime proof, exact identity separation, protected-main `GITHUB_WORKFLOW_SHA` ancestry, self-identity denial, stable final histories, and all prior boundaries. Issues #351, #355, #356, #359, #360, #361, and #365 remain open; no waiver or passing proof exists.
+- PRs #367, #369, #371, and #375 delivered the trusted primitives, orchestration, controller invocation, and identical-compare compatibility with terminal evidence. After issue #377's aggregate-boundary correction is delivered, the public-safe evidence PR must exercise the complete verifier while Phase 2 remains `in_progress`; only a later protected ledger PR can mark acceptance after the evidence PR's post-merge proof exists. Keep ordinary PR CI tokenless and retain every artifact, identity, history, workflow, and runtime boundary. Open learning issues still require versioned dispositions; no waiver substitutes for proof.
 
 ## Test and production are accepted on the same immutable release
 
