@@ -730,7 +730,7 @@ export function lowRiskReviewEvidenceFindings(review, options) {
 }
 
 export function trustedControllerFindings(options, runtime = {}) {
-  const env = runtime.env || process.env;
+  const env = runtime.env ?? process.env;
   const findings = [];
   addFinding(findings, env.GITHUB_ACTIONS === 'true', 'trusted verification must run in GitHub Actions');
   addFinding(
@@ -1038,7 +1038,7 @@ export async function verifyTrustedPullRequest(options, dependencies = {}) {
   if (runtimeFindings.length > 0) throw new Error(`trusted controller identity failed: ${runtimeFindings.join('; ')}`);
   const client =
     dependencies.client ||
-    createTrustedGithubClient({ repository: options.repository, token: (runtime.env || process.env).GH_TOKEN });
+    createTrustedGithubClient({ repository: options.repository, token: (runtime.env ?? process.env).GH_TOKEN });
   const [pullRequest, controllerRun, changedFiles, review] = await Promise.all([
     client.getJson(`/pulls/${options.prNumber}`),
     client.getJson(`/actions/runs/${options.controllerRunId}`),
