@@ -621,10 +621,22 @@ function workflowRunMatchesIdentity(run, expected) {
   );
 }
 
-export function canonicalWorkflowRunFindings(recordedRun, workflowRuns, expected, label = 'workflow run') {
+export function canonicalWorkflowRunFindings(
+  recordedRun,
+  workflowRuns,
+  expected,
+  label = 'workflow run',
+  options = {},
+) {
   const findings = [...workflowRunFindings(recordedRun, expected, label)];
-  const applicable = (Array.isArray(workflowRuns) ? workflowRuns : []).filter((run) =>
-    workflowRunMatchesIdentity(run, expected),
+  const bindExactDisplayTitle = options.bindExactDisplayTitle === true;
+  if (bindExactDisplayTitle) {
+    addFinding(findings, Boolean(expected.displayTitle), `${label} canonical lineage title is missing`);
+  }
+  const applicable = (Array.isArray(workflowRuns) ? workflowRuns : []).filter(
+    (run) =>
+      workflowRunMatchesIdentity(run, expected) &&
+      (!bindExactDisplayTitle || run?.display_title === expected.displayTitle),
   );
   const latest = latestByNumericId(applicable);
   addFinding(findings, Boolean(latest), `${label} canonical history is missing`);
@@ -1021,6 +1033,7 @@ export function phase2EvidenceFindings(evidence, observed) {
         observed.workflowHistories?.merge,
         expected,
         `${key} workflow run`,
+        key === 'mainDelivery' ? { bindExactDisplayTitle: true } : undefined,
       ),
     );
   }
