@@ -20,14 +20,17 @@ source:
     - kind: workflow_run
       locator: JueZ/api/actions/runs/31300174096
       url: https://github.com/JueZ/api/actions/runs/31300174096
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31300664072
+      url: https://github.com/JueZ/api/actions/runs/31300664072
 classification:
   failureArea: agent-learning-evidence
   severity: high
   symptom: Live health evidence could be queried without independently proving that test and production were different intended environments.
-  rootCause: The verifier first trusted the release ledger for the runtime origin, then overclaimed a deployment status URL as immutable job provenance and left pull-request-target source-head versus runner base-context SHA semantics implicit.
+  rootCause: The verifier first trusted the release ledger for the runtime origin, then overclaimed a deployment status URL as immutable job provenance, and did not verify the downloaded run artifact bytes against GitHub's authenticated digest before using their origin.
 disposition:
   primary: regression-test
-  rationale: Deterministic tests reject aliased environments, require an authenticated exact-run job and unique run-bound ledger artifact, and distinguish REST source-head evidence from separately authenticated PR base/head identity.
+  rationale: Deterministic tests reject aliased environments, require successful ledger-publication steps and exact-run artifact identity/digest, and distinguish REST source-head evidence from separately authenticated PR base/head identity; the live verifier hashes the downloaded archive before using its origin.
 artifacts:
   - path: scripts/agent-learning/verify-program-evidence.mjs
     kind: implementation
@@ -36,10 +39,10 @@ artifacts:
   - path: .github/workflows/ci.yml
     kind: workflow
 counterfactual:
-  hypothesis: The rejected verifier accepts aliased or status-URL-only evidence, while the repaired verifier requires distinct authenticated environment origins, a successful exact-run job, a unique run-bound ledger artifact, and separate pull-request-target source/base bindings.
+  hypothesis: The rejected verifier accepts aliased, status-URL-only, or metadata-only evidence, while the repaired verifier requires distinct digest-bound ledger origins, a successful exact-run job and publication steps, exact artifact bytes, and separate pull-request-target source/base bindings.
   broken:
     commit: b928577c9a88218dcdacc7293f6264196837a80e
-    expectedResult: The provenance regressions fail because distinct deployment origins, exact-run job/artifact binding, and explicit pull-request-target source/base semantics are not required.
+    expectedResult: The provenance regressions fail because distinct attested origins, exact-run job/artifact digest binding, and explicit pull-request-target source/base semantics are not required.
   verification:
     commands:
       - node --test scripts/test/agent-learning-artifacts.test.mjs

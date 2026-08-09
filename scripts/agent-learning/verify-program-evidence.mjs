@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { validateReleaseLedger } from '../validate-release-ledger.mjs';
@@ -50,6 +51,7 @@ const GITHUB_ACTIONS_BOT = Object.freeze({
   login: 'github-actions[bot]',
   type: 'Bot',
 });
+const MAX_LEDGER_ARCHIVE_BYTES = 2 * 1024 * 1024;
 
 function addFinding(findings, condition, message) {
   if (!condition) findings.push(message);
@@ -282,6 +284,14 @@ function githubActionsBot(actor) {
   );
 }
 
+export function verifyArtifactArchiveDigest(archive, authenticatedDigest, recordedDigest, label = 'artifact') {
+  const computedDigest = `sha256:${createHash('sha256').update(archive).digest('hex')}`;
+  if (computedDigest !== authenticatedDigest || computedDigest !== recordedDigest) {
+    throw new Error(`${label} archive digest does not match authenticated metadata`);
+  }
+  return computedDigest;
+}
+
 export function deploymentJobFindings(record, job, environment, evidence) {
   const findings = [];
   const expectedName = EXPECTED_DEPLOYMENT_JOBS[environment];
@@ -303,6 +313,7 @@ export function deploymentJobFindings(record, job, environment, evidence) {
   addFinding(findings, job?.head_branch === 'main', `${environment} deployment job head branch is not main`);
   addFinding(findings, job?.status === 'completed', `${environment} deployment job is not completed`);
   addFinding(findings, job?.conclusion === 'success', `${environment} deployment job did not succeed`);
+  addFinding(findings, job?.run_attempt === 1, `${environment} deployment job must be the first attempt`);
   addFinding(
     findings,
     job?.runner_group_name === 'GitHub Actions',
@@ -313,6 +324,20 @@ export function deploymentJobFindings(record, job, environment, evidence) {
     job?.html_url === `https://github.com/JueZ/api/actions/runs/${record.workflowRunId}/job/${record.deploymentJobId}`,
     `${environment} deployment job URL does not match`,
   );
+  addFinding(
+    findings,
+    job?.check_run_url === `https://api.github.com/repos/JueZ/api/check-runs/${record.deploymentJobId}`,
+    `${environment} deployment job check-run URL does not match`,
+  );
+  for (const stepName of ['Write release ledger', 'Upload release ledger']) {
+    const steps = Array.isArray(job?.steps) ? job.steps : [];
+    const matches = steps.filter((step) => step.name === stepName);
+    addFinding(
+      findings,
+      matches.length === 1 && matches[0].status === 'completed' && matches[0].conclusion === 'success',
+      `${environment} deployment job did not successfully complete ${stepName}`,
+    );
+  }
   return findings;
 }
 
@@ -433,6 +458,16 @@ function deploymentLedgerFindings(
     `${environment} release-ledger artifact name does not match`,
   );
   addFinding(findings, matchingArtifact?.expired === false, `${environment} release-ledger artifact is expired`);
+  addFinding(
+    findings,
+    /^sha256:[0-9a-f]{64}$/.test(String(record.releaseLedgerArtifactDigest ?? '')),
+    `${environment} recorded release-ledger artifact digest is invalid`,
+  );
+  addFinding(
+    findings,
+    matchingArtifact?.digest === record.releaseLedgerArtifactDigest,
+    `${environment} release-ledger artifact digest does not match`,
+  );
   addFinding(
     findings,
     matchingArtifact?.workflow_run?.id === record.workflowRunId,
@@ -599,75 +634,82 @@ export function phase2EvidenceFindings(evidence, observed) {
       evidence,
     ),
   );
-  const testStatus = observed?.deploymentStatuses?.test?.find(
-    (status) => status.id === delivery.deployTest?.deploymentStatusId,
-  );
-  const productionStatus = observed?.deploymentStatuses?.prod?.find(
-    (status) => status.id === delivery.promoteProduction?.deploymentStatusId,
-  );
-  const testOrigin = publicHttpsOrigin(testStatus?.environment_url);
-  const productionOrigin = publicHttpsOrigin(productionStatus?.environment_url);
+  const testOrigin = publicHttpsOrigin(observed?.ledgers?.test?.apiBaseUrl);
+  const productionOrigin = publicHttpsOrigin(observed?.ledgers?.prod?.apiBaseUrl);
   addFinding(
     findings,
     Boolean(testOrigin) && Boolean(productionOrigin) && testOrigin !== productionOrigin,
-    'test and production must resolve to distinct GitHub deployment environment URLs',
+    'test and production must resolve to distinct digest-bound release-ledger origins',
   );
   return findings;
 }
 
-async function findJsonFiles(directory) {
-  const found = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) found.push(...(await findJsonFiles(path)));
-    else if (entry.name.endsWith('.json')) found.push(path);
-  }
-  return found;
-}
-
-async function downloadLedger(repository, record, environment, options = {}) {
+async function downloadLedger(repository, record, artifact, environment, options = {}) {
   const token = options.token || githubToken(options.env, options.spawn);
-  const artifactName = `release-ledger-${environment}-${record.sourceSha}-${record.deliveryCorrelation}`;
   const directory = await mkdtemp(join(tmpdir(), 'agent-learning-evidence-'));
   try {
-    const completed = (options.spawn || spawnSync)(
-      'gh',
-      [
-        'run',
-        'download',
-        String(record.workflowRunId),
-        '--repo',
-        repository,
-        '--name',
-        artifactName,
-        '--dir',
-        directory,
-      ],
-      {
-        encoding: 'utf8',
-        env: { ...process.env, GH_TOKEN: token },
-        timeout: 30_000,
-        maxBuffer: 2 * 1024 * 1024,
+    if (artifact?.id !== record.releaseLedgerArtifactId) {
+      throw new Error(`${environment} release-ledger artifact ID is unavailable for authenticated download`);
+    }
+    const response = await fetch(`https://api.github.com/repos/${repository}/actions/artifacts/${artifact.id}/zip`, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
+        'User-Agent': 'JueZ-api-agent-learning-evidence-validator',
+        'X-GitHub-Api-Version': '2022-11-28',
       },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) {
+      throw new Error(`authenticated ${environment} release-ledger download failed with HTTP ${response.status}`);
+    }
+    const declaredLength = Number(response.headers.get('content-length') || 0);
+    if (declaredLength > MAX_LEDGER_ARCHIVE_BYTES) {
+      throw new Error(`${environment} release-ledger archive exceeds the byte limit`);
+    }
+    const archive = Buffer.from(await response.arrayBuffer());
+    if (archive.length === 0 || archive.length > MAX_LEDGER_ARCHIVE_BYTES) {
+      throw new Error(`${environment} release-ledger archive has an invalid byte length`);
+    }
+    verifyArtifactArchiveDigest(
+      archive,
+      artifact.digest,
+      record.releaseLedgerArtifactDigest,
+      `${environment} release-ledger`,
     );
-    if (completed.status !== 0) throw new Error(`could not download authenticated ${environment} release ledger`);
-    const files = await findJsonFiles(directory);
-    if (files.length !== 1)
-      throw new Error(`${environment} release-ledger artifact must contain exactly one JSON file`);
-    return JSON.parse(await readFile(files[0], 'utf8'));
+    const archivePath = join(directory, 'release-ledger.zip');
+    await writeFile(archivePath, archive, { mode: 0o600 });
+    const spawn = options.spawn || spawnSync;
+    const listing = spawn('unzip', ['-Z1', archivePath], {
+      encoding: 'utf8',
+      timeout: 10_000,
+      maxBuffer: MAX_LEDGER_ARCHIVE_BYTES,
+    });
+    const entries = listing.status === 0 ? listing.stdout.split(/\r?\n/).filter(Boolean) : [];
+    const ledgerEntry = `release-ledger-${environment}.json`;
+    if (entries.length !== 1 || entries[0] !== ledgerEntry) {
+      throw new Error(`${environment} release-ledger archive must contain only its canonical ledger file`);
+    }
+    const extracted = spawn('unzip', ['-p', archivePath, ledgerEntry], {
+      encoding: 'utf8',
+      timeout: 10_000,
+      maxBuffer: MAX_LEDGER_ARCHIVE_BYTES,
+    });
+    if (extracted.status !== 0) throw new Error(`could not read authenticated ${environment} release ledger`);
+    return JSON.parse(extracted.stdout);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 }
 
-export function deploymentHealthUrl(environmentUrl) {
-  const origin = publicHttpsOrigin(environmentUrl);
-  if (!origin) throw new Error('GitHub deployment environment URL is not a public HTTPS origin');
+export function attestedHealthUrl(apiBaseUrl) {
+  const origin = publicHttpsOrigin(apiBaseUrl);
+  if (!origin) throw new Error('Digest-bound release-ledger API URL is not a public HTTPS origin');
   return new URL('/health', origin).toString();
 }
 
-async function fetchLiveHealth(environmentUrl) {
-  const response = await fetch(deploymentHealthUrl(environmentUrl), {
+async function fetchLiveHealth(apiBaseUrl) {
+  const response = await fetch(attestedHealthUrl(apiBaseUrl), {
     headers: { Accept: 'application/json', 'User-Agent': 'JueZ-api-agent-learning-evidence-validator' },
     signal: AbortSignal.timeout(20_000),
   });
@@ -729,12 +771,19 @@ async function collectPhase2Observed(evidence, options = {}) {
       `repos/${repository}/actions/runs/${record.workflowRunId}/artifacts?per_page=100`,
       { token },
     );
-    observed.ledgers[environment] = await downloadLedger(repository, record, environment, { ...options, token });
+    const artifactList = observed.artifacts[String(record.workflowRunId)]?.artifacts;
+    const artifact = Array.isArray(artifactList)
+      ? artifactList.find((candidate) => candidate.id === record.releaseLedgerArtifactId)
+      : undefined;
+    observed.ledgers[environment] = await downloadLedger(repository, record, artifact, environment, {
+      ...options,
+      token,
+    });
     const deploymentStatus = observed.deploymentStatuses[environment].find(
       (status) => status.id === record.deploymentStatusId,
     );
     if (!deploymentStatus) throw new Error(`${environment} successful deployment status ID is unavailable`);
-    observed.liveHealth[environment] = await fetchLiveHealth(deploymentStatus.environment_url);
+    observed.liveHealth[environment] = await fetchLiveHealth(observed.ledgers[environment].apiBaseUrl);
   }
   return observed;
 }

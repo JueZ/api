@@ -15,10 +15,11 @@ import {
 import { historicalScorerFindings, pullRequestProvenanceFindings } from '../agent-learning/verify-artifacts.mjs';
 import {
   acceptedPhaseEvidenceFindings,
+  attestedHealthUrl,
   deploymentEnvironmentFindings,
-  deploymentHealthUrl,
   phase2EvidenceFindings,
   phaseEvidenceNeedsLiveVerification,
+  verifyArtifactArchiveDigest,
 } from '../agent-learning/verify-program-evidence.mjs';
 
 const BROKEN_SHA = 'a'.repeat(40);
@@ -118,6 +119,7 @@ function validPhase2Observed(evidence) {
           id: record.releaseLedgerArtifactId,
           name: `release-ledger-${environment}-${record.sourceSha}-${record.deliveryCorrelation}`,
           expired: false,
+          digest: record.releaseLedgerArtifactDigest,
           workflow_run: {
             id: record.workflowRunId,
             head_sha: implementation.mergeSha,
@@ -168,8 +170,14 @@ function validPhase2Observed(evidence) {
       head_branch: 'main',
       status: 'completed',
       conclusion: 'success',
+      run_attempt: 1,
       runner_group_name: 'GitHub Actions',
       html_url: `https://github.com/JueZ/api/actions/runs/${record.workflowRunId}/job/${record.deploymentJobId}`,
+      check_run_url: `https://api.github.com/repos/JueZ/api/check-runs/${record.deploymentJobId}`,
+      steps: [
+        { name: 'Write release ledger', status: 'completed', conclusion: 'success' },
+        { name: 'Upload release ledger', status: 'completed', conclusion: 'success' },
+      ],
     };
     observed.deploymentStatuses[environment] = [
       {
@@ -537,7 +545,7 @@ test('Phase 2 acceptance evidence rejects stale or mismatched remote proof', () 
   assert.ok(findings.some((finding) => finding.includes('test live /health commit')));
 });
 
-test('Phase 2 runtime evidence is independently bound to distinct GitHub deployment environments', () => {
+test('Phase 2 runtime evidence is independently bound to distinct attested environments', () => {
   const evidence = JSON.parse(
     readFileSync(join(REPOSITORY_ROOT, 'docs/agent-learning/evidence/phase-2-versioned-artifacts.json'), 'utf8'),
   );
@@ -564,7 +572,7 @@ test('Phase 2 runtime evidence is independently bound to distinct GitHub deploym
   const findings = phase2EvidenceFindings(evidence, observed);
   assert.ok(findings.some((finding) => finding.includes('prod deployment is not bound')));
   assert.ok(findings.some((finding) => finding.includes('prod deployment status is not bound')));
-  assert.ok(findings.some((finding) => finding.includes('distinct GitHub deployment environment URLs')));
+  assert.ok(findings.some((finding) => finding.includes('distinct digest-bound release-ledger origins')));
 });
 
 test('Phase 2 deployment provenance requires an authenticated exact-run job and run-bound ledger artifact', () => {
@@ -575,9 +583,13 @@ test('Phase 2 deployment provenance requires an authenticated exact-run job and 
   const testRecord = evidence.implementation.postMergeDelivery.deployTest;
 
   observed.deploymentJobs.test.run_id += 1;
+  observed.deploymentJobs.test.steps[1].conclusion = 'failure';
+  observed.artifacts[String(testRecord.workflowRunId)].artifacts[0].digest = `sha256:${'0'.repeat(64)}`;
   observed.artifacts[String(testRecord.workflowRunId)].artifacts[0].workflow_run.id += 1;
   const findings = phase2EvidenceFindings(evidence, observed);
   assert.ok(findings.some((finding) => finding.includes('test deployment job run does not match')));
+  assert.ok(findings.some((finding) => finding.includes('test deployment job did not successfully complete Upload')));
+  assert.ok(findings.some((finding) => finding.includes('test release-ledger artifact digest does not match')));
   assert.ok(findings.some((finding) => finding.includes('test release-ledger artifact is not bound')));
 });
 
@@ -596,13 +608,23 @@ test('Phase 2 pull-request-target proof distinguishes REST source head from the 
   assert.ok(findings.some((finding) => finding.includes('Autonomous review complete workflow run head branch')));
 });
 
-test('Phase 2 live health requests derive only from a public GitHub deployment origin', () => {
-  assert.equal(deploymentHealthUrl('https://test.example.invalid'), 'https://test.example.invalid/health');
+test('Phase 2 live health requests derive only from a public digest-bound ledger origin', () => {
+  assert.equal(attestedHealthUrl('https://test.example.invalid'), 'https://test.example.invalid/health');
   assert.throws(
-    () => deploymentHealthUrl('https://test.example.invalid/evidence-controlled-path'),
+    () => attestedHealthUrl('https://test.example.invalid/evidence-controlled-path'),
     /not a public HTTPS origin/,
   );
-  assert.throws(() => deploymentHealthUrl('http://test.example.invalid'), /not a public HTTPS origin/);
+  assert.throws(() => attestedHealthUrl('http://test.example.invalid'), /not a public HTTPS origin/);
+});
+
+test('Phase 2 archive bytes must match both authenticated and recorded SHA-256 digests', () => {
+  const archive = Buffer.from('digest-bound-release-ledger');
+  const digest = 'sha256:8ae64bbb73c6f20f7bcad727be04f50e481a024f9307eef9c93324913b0faebd';
+  assert.equal(verifyArtifactArchiveDigest(archive, digest, digest, 'test ledger'), digest);
+  assert.throws(
+    () => verifyArtifactArchiveDigest(archive, `sha256:${'0'.repeat(64)}`, digest, 'test ledger'),
+    /archive digest does not match authenticated metadata/,
+  );
 });
 
 test('accepted program phases fail closed when registered evidence is deleted', () => {

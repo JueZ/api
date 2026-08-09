@@ -72,6 +72,7 @@
         "authenticatedSmoke": "passed",
         "telemetry": "passed",
         "releaseLedgerArtifactId": 9028101525,
+        "releaseLedgerArtifactDigest": "sha256:31b54a35c2359ecd2ba98e4d7169f32c929582643f1f68592e6725a549a2ea70",
         "releaseLedger": "validated",
         "runtimeTruth": {
           "status": "verified",
@@ -92,6 +93,7 @@
         "authenticatedSmoke": "passed",
         "telemetry": "passed",
         "releaseLedgerArtifactId": 9028141502,
+        "releaseLedgerArtifactDigest": "sha256:b7ee193f3685eadd1e7506a1c5db454d37512b9e0f29d319bde8661cf7035070",
         "releaseLedger": "validated",
         "runtimeTruth": {
           "status": "verified",
