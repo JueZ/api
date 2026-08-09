@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-08-09 — Keep authenticated acceptance verification outside PR-controlled code
+
+- Decision: Ordinary `pull_request` CI remains tokenless for repository-metadata and Actions-artifact access. Authenticated program-evidence collection must execute from trusted protected-main controller code and may read candidate program/evidence files only as strictly validated non-executable data bound to the exact PR head and review decision.
+- Decision: Runtime evidence fetches require explicit expected test/production host allowlists and redirects disabled. Artifact-backed origins must be bound to authenticated artifact IDs, run metadata, and verified archive digests before use.
+- Rationale: Closed PR #352 final review `31301156652` found that exporting `${{ github.token }}` to PR-controlled verifier scripts enabled credential exfiltration/misuse before review and that unrestricted HTTPS origins/default redirects enabled SSRF. Both allowed repairs were exhausted; no bypass or weakening was used.
+- Status: Phase 2 remains `in_progress`. PR #349 implementation is merged and delivered; evidence PRs #350 and #352 are closed unmerged, and issue #351 remains open. The next protected PR owns the trusted-verifier foundation only, followed by a separate evidence-only acceptance PR.
+
 ## 2026-08-08 — Version repository learning as strict counterfactual artifacts
 
 - Decision: Store each durable learning in its own strict versioned YAML file under `docs/agent-learning/artifacts/`, deduplicate active records by normalized recurrence fingerprint, and require explicit bidirectional supersession instead of a conflict-prone central editable ledger.

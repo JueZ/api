@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-09 Phase 2 implementation merged; acceptance verifier remains in progress
+
+- PR #349 head `7188188cc0b3fd1a58a5ee14ae5335158294135c` merged as `9310c94f97541e57f83b186af2cacf989d6f5330`. Exact-head gates and Main Delivery `31279667347`, exact-main CI `31279682790`, Deploy Test `31279752243`, and Promote Production `31279913572` passed with smoke, telemetry, ledgers, and runtime truth. The strict artifact lifecycle, three verified historical artifacts, reproducible index, fixed-path validation, and closed-loop skill are on main.
+- Evidence PR #350 closed unmerged after two repairs when autonomous review `31281439847` rejected insufficient independent test/production environment binding. Successor #352 also closed unmerged after two repairs. Its final head `54d76353d72d5342f4b7f3944b58d384a95b7075` passed CI `31301157780`, Policy Check `31301157810`, and CodeQL `31301157783`, but review `31301156652` rejected an authenticated repository token exposed to PR-controlled verifier code and unrestricted HTTPS/redirect SSRF risk.
+- No merge, deployment, smoke, telemetry, ledger, or runtime acceptance exists for #350 or #352. Phase 2 remains `in_progress`; issue #351 stays open. The next slice must keep PR CI tokenless and move authenticated collection into trusted protected-main controller code that treats candidate files only as data, allowlists exact runtime hosts, and disables redirects.
+
 ## 2026-08-08 Versioned agent learning Phase 2 in progress
 
 - Work is isolated on `codex/agent-learning-phase-2-artifacts` from protected-main baseline `eab88f735d3644181d2a043156970f0df02e3ff8`. Authenticated GitHub reads verified PRs #321, #324, and #344 plus each supplied exact broken base and fixed merge before their historical artifacts were seeded.

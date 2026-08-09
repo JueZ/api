@@ -1,5 +1,11 @@
 # Known issues and unresolved risks
 
+## Phase 2 acceptance evidence cannot run in the untrusted PR checkout
+
+- PR #349 implemented and delivered the versioned-learning system, but Phase 2 acceptance evidence is not yet protected by a merged trusted verifier.
+- PR #350 closed after its second repair because environment identity was not independently bound. PR #352 final head `54d76353d72d5342f4b7f3944b58d384a95b7075` passed all free gates, but autonomous review `31301156652` rejected the design because it exported an authenticated Actions/deployment token to scripts from the PR checkout. The same review found that generic HTTPS origins plus default redirects permit SSRF/redirect escape.
+- Keep ordinary PR CI tokenless. The repair requires trusted protected-main collection against candidate files treated only as data, exact head/review binding, authenticated artifact-digest verification, explicit test/production host allowlists, and redirects disabled. Issue #351 remains open; no waiver or passing proof exists.
+
 ## Test and production are accepted on the same immutable release
 
 - Main CI `30744552173`, Deploy Test `30744611475`, and Promote Production `30744732911` accepted exact commit `e8e1070b4a4f2e67b9d60b97a3586bf16b3bfeea` after exact-generation, runtime, authenticated-smoke, telemetry, ledger, and provenance gates passed.
