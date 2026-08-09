@@ -1,5 +1,12 @@
 # Current state
 
+## 2026-08-09 Phase 2 verifier PRs #358 and #362 closed unmerged
+
+- PR #358 final head `90e69177d335ef372b4b0e876563bfad63c89380` passed CI `31308454258`, Policy Check `31308454262`, and CodeQL `31308454257`; autonomous review `31308451194` rejected unauthenticated current deployment workflow/job provenance. It closed unmerged after both repairs.
+- Library-only PR #362 retained the protected controller unchanged. Repair-attempt-1 head `62b466d33ae20f652d949ffe28d92361b5450276` passed all free gates, but review `31309478932` correctly rejected spoofable Deployment API provenance. Final implementation commit `739cc1d622d2df1446d3a11b594d08d3d268230d` replaced that inference with reviewed workflow bytes and GitHub's run-associated release-ledger artifact/job/runtime chain.
+- PR #362 final reviewed head was the later ledger commit `1f53529064742eb7d224eb3362b88aa6e3f52aa7`, not the implementation commit. It passed CI `31310187492`, Policy Check `31310187489`, and CodeQL `31310187546`; autonomous review `31310186793` rejected the ambiguous in-repository head description and caller-asserted controller SHA. It closed unmerged after both repairs; no merge or runtime evidence exists.
+- Issues #355 and #356 now record recurrence count 2; #359 records count 3 and #361 count 3. Issues #351, #355, #356, #359, #360, and #361 remain open with no waiver. Phase 2 remains `in_progress`. A merged PR alone is not runtime evidence.
+
 ## 2026-08-09 Trusted Phase 2 verifier successor required
 
 - Trusted-verifier foundation PR #354 was based on protected main `74f09b72789ad3acc5c2ce82747298b4bd8264be` and closed unmerged after both allowed repairs. Its final head `0fef86e2de488545970507f362e2abbc974681ca` passed CI `31305790271`, Policy Check `31305790288`, and CodeQL `31305790267`, but autonomous review `31305789487` rejected a missing immutable binding from Phase 2 to designated implementation PR #349.
