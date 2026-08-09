@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-09 Trusted Phase 2 verifier successor required
+
+- Trusted-verifier foundation PR #354 was based on protected main `74f09b72789ad3acc5c2ce82747298b4bd8264be` and closed unmerged after both allowed repairs. Its final head `0fef86e2de488545970507f362e2abbc974681ca` passed CI `31305790271`, Policy Check `31305790288`, and CodeQL `31305790267`, but autonomous review `31305789487` rejected a missing immutable binding from Phase 2 to designated implementation PR #349.
+- The rejected verifier authenticated candidate-declared PR, commit, check, workflow, deployment, job, artifact, ledger, and runtime evidence, but an unrelated successfully merged and deployed PR could satisfy those generic checks. No merge, main delivery, deployment, smoke, telemetry, ledger, or runtime acceptance exists for #354.
+- Learning issues #351, #355, and #356 remain open. The next successor must retain the tokenless PR boundary, fixed protected-main verifier, exact runtime allowlists, disabled redirects, bounded reads, digest checks, separate workflow/candidate SHA binding, and every existing merge/delivery control while pinning Phase 2 to PR #349 and its exact baseline, branch, head, and merge identity.
+
 ## 2026-08-09 Phase 2 implementation merged; acceptance verifier remains in progress
 
 - PR #349 head `7188188cc0b3fd1a58a5ee14ae5335158294135c` merged as `9310c94f97541e57f83b186af2cacf989d6f5330`. Exact-head gates and Main Delivery `31279667347`, exact-main CI `31279682790`, Deploy Test `31279752243`, and Promote Production `31279913572` passed with smoke, telemetry, ledgers, and runtime truth. The strict artifact lifecycle, three verified historical artifacts, reproducible index, fixed-path validation, and closed-loop skill are on main.
