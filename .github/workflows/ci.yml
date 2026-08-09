@@ -276,7 +276,7 @@ jobs:
       - name: Validate historical agent-task harness
         run: |
           node scripts/agent-task-evals/validate.mjs
-          node --test scripts/test/agent-task-evals.test.mjs
+          node --test scripts/agent-task-evals/test/harness.test.mjs
       - name: Run deterministic agent safety evals
         run: |
           ./node_modules/.bin/tsc -p apps/api/tsconfig.json

@@ -4,16 +4,16 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
-import { buildAdapterProcessEnvironment, buildCodexArguments, runAdapter } from '../agent-task-evals/adapters.mjs';
-import { contextPathsForVariant } from '../agent-task-evals/context.mjs';
-import { runTaskEvaluation } from '../agent-task-evals/controller.mjs';
+import { buildAdapterProcessEnvironment, buildCodexArguments, runAdapter } from '../adapters.mjs';
+import { contextPathsForVariant } from '../context.mjs';
+import { runTaskEvaluation } from '../controller.mjs';
 import {
   HARD_FAIL_CONDITIONS,
   REPOSITORY_ROOT,
   validateTaskDefinition,
   validateTaskRepository,
-} from '../agent-task-evals/definitions.mjs';
-import { scoreCandidate } from '../agent-task-evals/scorers.mjs';
+} from '../definitions.mjs';
+import { scoreCandidate } from '../scorers.mjs';
 
 const temporaryDirectories = [];
 const temporaryDirectory = (prefix) => {
