@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-09 Phase 2 library PR #364 closed; modular successor required
+
+- PR #364 final head `c44278942e5c9252e529959487ad20c9e355c1a1` exhausted two code repairs. It added authenticated runtime workflow identity, open-PR self-identity denial, and stable final history snapshots; focused validation passed 65/65.
+- Final-head CI `31312184558` recovered from one transient GitHub HTTP 403 on the same SHA and passed on attempt 2. Policy Check `31312184559` and CodeQL `31312184545` passed. Controller run `31312367284` blocked before model generation because the exact-input estimate was `$0.312460` against the unchanged `$0.31` ceiling. No merge or downstream evidence exists.
+- Phase 2 remains `in_progress`. The next verifier work must be split into smaller primitive and orchestration PRs, target no more than 140,000 diff bytes per complete high-risk capsule, and retain every reviewed security/provenance boundary. Issue #365 tracks executable prevention for phase-first reporting and proportional validation/capsule sizing. A merged PR alone is not runtime evidence.
+
 ## 2026-08-09 Phase 2 verifier PRs #358 and #362 closed unmerged
 
 - PR #358 final head `90e69177d335ef372b4b0e876563bfad63c89380` passed CI `31308454258`, Policy Check `31308454262`, and CodeQL `31308454257`; autonomous review `31308451194` rejected unauthenticated current deployment workflow/job provenance. It closed unmerged after both repairs.
