@@ -104,12 +104,7 @@
     "before": {
       "mainSha": "f56422021640b34be2588c33999f63b59a87399a",
       "workflowState": "active",
-      "requiredChecks": [
-        "CI complete",
-        "Policy complete",
-        "CodeQL complete",
-        "Autonomous review complete"
-      ],
+      "requiredChecks": ["CI complete", "Policy complete", "CodeQL complete", "Autonomous review complete"],
       "settings": {
         "strict": true,
         "enforceAdmins": true,
@@ -124,12 +119,7 @@
     "temporary": {
       "observedAt": "2026-08-09T18:04:18Z",
       "workflowState": "disabled_manually",
-      "requiredChecks": [
-        "CI complete",
-        "Policy complete",
-        "CodeQL complete",
-        "architecture and agent validation"
-      ],
+      "requiredChecks": ["CI complete", "Policy complete", "CodeQL complete", "architecture and agent validation"],
       "reason": "The protected-main workflow being removed could not be allowed to invoke the superseded API reviewer while its replacement was still only on the candidate branch.",
       "modelInvocationPermitted": false,
       "otherProtectionSettingsChanged": false
@@ -138,12 +128,7 @@
       "readBackAt": "2026-08-09T18:10:16Z",
       "mainSha": "2a966e193072036c65b3c412aeffec60d91ca9a8",
       "workflowState": "active",
-      "requiredChecks": [
-        "CI complete",
-        "Policy complete",
-        "CodeQL complete",
-        "Autonomous review complete"
-      ],
+      "requiredChecks": ["CI complete", "Policy complete", "CodeQL complete", "Autonomous review complete"],
       "requiredCheckAppId": 15368,
       "settings": {
         "strict": true,
