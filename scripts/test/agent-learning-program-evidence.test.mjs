@@ -732,6 +732,33 @@ test('trusted GitHub check history pagination is complete and exact-SHA bound', 
   assert.equal(requests.length, 2);
 });
 
+test('trusted GitHub pull-request commit history is complete, bounded, and no-redirect', async () => {
+  const requests = [];
+  const client = createTrustedGithubClient({
+    repository: 'JueZ/api',
+    token: 'test-token-placeholder',
+    fetchImpl: async (url, init) => {
+      requests.push({ url, init });
+      const page = Number(new URL(url).searchParams.get('page'));
+      const count = page === 1 ? 100 : 1;
+      return new Response(
+        JSON.stringify(
+          Array.from({ length: count }, (_, index) => ({
+            sha: page === 2 ? headSha : `${String(page * 1000 + index).padStart(40, '0')}`,
+          })),
+        ),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    },
+  });
+  const commits = await client.getPullRequestCommits(364);
+  assert.equal(commits.length, 101);
+  assert.equal(commits.at(-1).sha, headSha);
+  assert.equal(requests.length, 2);
+  assert.ok(requests.every((request) => request.init.redirect === 'error'));
+  assert.ok(requests.every((request) => request.url.includes('/pulls/364/commits?per_page=100&page=')));
+});
+
 test('trusted workflow content is fixed-path, exact-ref, and digest-bound', async () => {
   const content = Buffer.from('reviewed workflow bytes\n');
   const requests = [];
@@ -859,28 +886,43 @@ test('trusted controller workflow SHA must be authenticated as stable protected-
   );
 });
 
-test('an open PR cannot describe an in-PR implementation commit as its final reviewed head', () => {
-  const options = { prNumber: 364 };
+test('an open PR cannot self-record any of its commit identities in governance ledgers', () => {
+  const options = { prNumber: 364, headSha };
+  const pullRequestCommits = [{ sha: mergeSha }, { sha: headSha }];
   assert.deepEqual(
     openPullRequestLedgerFindings(
       {
-        [PROGRAM_PATH]: `PR #364 implementation commit \`${mergeSha}\`; exact-head review is pending.`,
+        [PROGRAM_PATH]: `PR #362 final head \`${baselineSha}\`; current exact-head review is pending.`,
       },
       options,
+      pullRequestCommits,
     ),
     [],
   );
-  for (const phrase of ['final repair', 'final head', 'final reviewed head']) {
+  for (const claim of [
+    `PR #364 final reviewed head \`${mergeSha}\``,
+    `Final reviewed head **${mergeSha}** for PR #364`,
+    `Final reviewed head\n\n${mergeSha}\n\nfor PR #364`,
+    `PR **#364** has FINAL REPAIR \`${mergeSha.toUpperCase()}\``,
+  ]) {
     const findings = openPullRequestLedgerFindings(
-      Object.fromEntries(OPEN_PR_LEDGER_PATHS.map((path) => [path, `PR #364 ${phrase} \`${mergeSha}\``])),
+      Object.fromEntries(OPEN_PR_LEDGER_PATHS.map((path) => [path, claim])),
       options,
+      pullRequestCommits,
     );
     assert.equal(findings.length, OPEN_PR_LEDGER_PATHS.length);
   }
   assert.deepEqual(
-    openPullRequestLedgerFindings({ [PROGRAM_PATH]: `PR #362 final head \`${mergeSha}\`` }, options),
+    openPullRequestLedgerFindings(
+      { [PROGRAM_PATH]: `PR #362 final head \`${baselineSha}\`` },
+      options,
+      pullRequestCommits,
+    ),
     [],
   );
+  assert.match(openPullRequestLedgerFindings({}, options, [])[0], /history is missing/);
+  assert.match(openPullRequestLedgerFindings({}, options, [{ sha: headSha }, { sha: headSha }])[0], /duplicate SHAs/);
+  assert.match(openPullRequestLedgerFindings({}, options, [{ sha: mergeSha }])[0], /does not terminate/);
 });
 
 test('pull_request_target REST head binds the candidate while trusted checkout binds workflow SHA', () => {
@@ -1025,6 +1067,7 @@ test('trusted verification accepts a bound low-risk review only when program evi
   );
 
   client.getPullRequestFiles = async () => [{ filename: PROGRAM_PATH }];
+  client.getPullRequestCommits = async () => [{ sha: headSha }];
   client.getFile = async (path, ref) => {
     assert.equal(path, PROGRAM_PATH);
     return ref === headSha ? programText('accepted', PHASE_2_EVIDENCE_PATH) : programText();

@@ -188,20 +188,40 @@ export function acceptedPhaseEvidenceFindings(programText, pathExists = existsSy
   return findings;
 }
 
-export function openPullRequestLedgerFindings(records, options) {
+export function openPullRequestLedgerFindings(records, options, pullRequestCommits) {
   const findings = [];
   const prNumber = Number(options?.prNumber);
   if (!exactPositiveInteger(prNumber)) return ['open pull-request ledger PR number is invalid'];
-  const ambiguousClaim = new RegExp(
-    `\\bPR\\s+#${prNumber}\\b[^\\n]*(?:final\\s+(?:reviewed\\s+)?head|final\\s+repair)[^\\n]*\\b[0-9a-f]{40}\\b`,
-    'i',
-  );
+  const headSha = typeof options?.headSha === 'string' ? options.headSha.toLowerCase() : '';
+  if (!EXACT_SHA.test(headSha)) return ['open pull-request ledger head SHA is invalid'];
+  if (!Array.isArray(pullRequestCommits) || pullRequestCommits.length === 0) {
+    return ['open pull-request commit history is missing'];
+  }
+  const commitShas = [];
+  for (const commit of pullRequestCommits) {
+    const sha = typeof commit?.sha === 'string' ? commit.sha.toLowerCase() : '';
+    if (!EXACT_SHA.test(sha)) return ['open pull-request commit history contains an invalid SHA'];
+    commitShas.push(sha);
+  }
+  if (new Set(commitShas).size !== commitShas.length) {
+    return ['open pull-request commit history contains duplicate SHAs'];
+  }
+  if (commitShas.at(-1) !== headSha) {
+    return ['open pull-request commit history does not terminate at the exact candidate head'];
+  }
   for (const [path, text] of Object.entries(isRecord(records) ? records : {})) {
-    addFinding(
-      findings,
-      typeof text === 'string' && !ambiguousClaim.test(text),
-      `${path} cannot call an in-PR implementation commit the final repair or final reviewed head`,
-    );
+    if (typeof text !== 'string') {
+      findings.push(`${path} open pull-request ledger content is invalid`);
+      continue;
+    }
+    const normalizedText = text.toLowerCase();
+    for (const sha of commitShas) {
+      addFinding(
+        findings,
+        !normalizedText.includes(sha),
+        `${path} cannot self-record open pull-request commit ${sha}; record exact identities only from later authenticated evidence`,
+      );
+    }
   }
   return findings;
 }
@@ -1227,6 +1247,17 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     throw new Error('pull request contains more than 3000 changed files');
   }
 
+  async function getPullRequestCommits(prNumber) {
+    const commits = [];
+    for (let page = 1; page <= 3; page += 1) {
+      const rows = await getJson(`/pulls/${prNumber}/commits?per_page=100&page=${page}`);
+      if (!Array.isArray(rows)) throw new Error('pull-request commit response is invalid');
+      commits.push(...rows);
+      if (rows.length < 100) return commits;
+    }
+    throw new Error('pull request contains more than 299 commits');
+  }
+
   async function getPaginatedCollection(path, key, label) {
     const records = [];
     for (let page = 1; page <= 100; page += 1) {
@@ -1301,6 +1332,7 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
   return {
     getJson,
     getFile,
+    getPullRequestCommits,
     getPullRequestFiles,
     getCheckRuns,
     getCommitStatuses,
@@ -1602,7 +1634,11 @@ export async function verifyTrustedPullRequest(options, dependencies = {}) {
   const changedLedgerRecords = Object.fromEntries(
     await Promise.all(changedLedgerPaths.map(async (path) => [path, await client.getFile(path, options.headSha)])),
   );
-  const ledgerFindings = openPullRequestLedgerFindings(changedLedgerRecords, options);
+  const pullRequestCommits = changedLedgerPaths.length > 0 ? await client.getPullRequestCommits(options.prNumber) : [];
+  const ledgerFindings =
+    changedLedgerPaths.length > 0
+      ? openPullRequestLedgerFindings(changedLedgerRecords, options, pullRequestCommits)
+      : [];
   if (ledgerFindings.length > 0)
     throw new Error(`open pull-request ledger identity failed: ${ledgerFindings.join('; ')}`);
   const currentProgramText =

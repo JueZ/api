@@ -3,7 +3,7 @@
 ## 2026-08-09 Phase 2 verifier v4 implementation prepared
 
 - Ledger PR #363 exact head `af310d6cd75588ebeccae1112d81505a894885b8` merged as `23f23f0751c5c3ac1aa6901b88b8e2aa8d3e0570` after all four protected aggregates. Main Delivery `31310637452`, exact-main CI `31310651022`, Deploy Test `31310724036`, and Promote Production `31310877671` passed; fresh test and production runtime truth verified exact SHA/run, public and authenticated smoke, telemetry, and release ledgers.
-- Successor branch `codex/agent-learning-trusted-verifier-v4` is based on that exact protected main. Implementation commit `f3e3b89c6ec564963cc6a8c5367db72a3028626d` is not the later exact reviewed head. It preserves the artifact-bound deployment proof, binds runtime workflow SHA to protected-main history, and rejects ambiguous in-PR final-head claims with deterministic regressions.
+- Successor branch `codex/agent-learning-trusted-verifier-v4` is based on that exact protected main. It preserves the artifact-bound deployment proof, binds runtime workflow SHA to protected-main history, and rejects all self-recorded open-PR commit identities in changed governance ledgers with deterministic regressions. Exact PR and commit identities require later authenticated evidence.
 - The successor remains library-only: the protected controller is unchanged and no live credential path is added. Exact-head CI, Policy Check, CodeQL, autonomous review, merge, delivery, and runtime evidence are pending. Phase 2 remains `in_progress`; a merged PR alone is not runtime evidence.
 
 ## 2026-08-09 Phase 2 verifier PRs #358 and #362 closed unmerged
