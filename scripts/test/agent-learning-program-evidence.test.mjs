@@ -179,6 +179,7 @@ function observedEnvironment(environment, record) {
     ref: 'main',
     environment: expectedEnvironment,
     task: 'deploy',
+    created_at: '2026-08-08T21:37:26Z',
     creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
   };
   return {
@@ -211,6 +212,7 @@ function observedEnvironment(environment, record) {
         environment: expectedEnvironment,
         environment_url: ledger.apiBaseUrl,
         log_url: jobUrl,
+        created_at: '2026-08-08T21:41:21Z',
         creator: { id: 41_898_282, login: 'github-actions[bot]', type: 'Bot' },
       },
     ],
@@ -224,6 +226,9 @@ function observedEnvironment(environment, record) {
       status: 'completed',
       conclusion: 'success',
       run_attempt: 1,
+      created_at: '2026-08-08T21:37:25Z',
+      started_at: '2026-08-08T21:37:29Z',
+      completed_at: '2026-08-08T21:41:20Z',
       runner_group_name: 'GitHub Actions',
       html_url: jobUrl,
       steps: [
@@ -470,10 +475,12 @@ test('live Phase 2 verification binds distinct GitHub environments, jobs, ledger
   assert.deepEqual(phase2EvidenceFindings(evidence, observed), []);
 
   observed.environments.test.deployment.environment = 'production';
+  observed.environments.test.deployment.created_at = '2026-08-08T21:38:00Z';
   observed.environments.test.ledger.apiBaseUrl = observed.environments.prod.ledger.apiBaseUrl;
   const findings = phase2EvidenceFindings(evidence, observed);
   assert.ok(findings.some((finding) => finding.includes('test GitHub environment does not match')));
   assert.ok(findings.some((finding) => finding.includes('test ledger runtime origin is not allowlisted')));
+  assert.ok(findings.some((finding) => finding.includes('test historical deployment was not created')));
 });
 
 test('historical check rollup rejects unrelated and aggregate superseding failures', () => {
@@ -523,7 +530,6 @@ test('canonical workflow and deployment histories reject later failed records', 
     headBranch: 'main',
     headRepository: 'JueZ/api',
     displayTitle: recordedDeploy.display_title,
-    historyDisplayTitlePrefix: `Deploy Test ${mergeSha} `,
   };
   const laterFailedRun = {
     ...recordedDeploy,
@@ -538,6 +544,12 @@ test('canonical workflow and deployment histories reject later failed records', 
   );
 
   observed.workflowHistories.merge.push(laterFailedRun);
+  observed.workflowHistories.merge.push({
+    ...observed.workflowRuns['301'],
+    id: 5301,
+    conclusion: 'failure',
+    display_title: 'Deliver trigger 999 attempt 1',
+  });
   observed.environments.test.deploymentStatuses.push({
     ...observed.environments.test.deploymentStatuses[0],
     id: 5400,
@@ -545,6 +557,7 @@ test('canonical workflow and deployment histories reject later failed records', 
   });
   const findings = phase2EvidenceFindings(evidence, observed);
   assert.ok(findings.some((finding) => finding.includes('deployTest workflow run is not the canonical latest')));
+  assert.ok(findings.some((finding) => finding.includes('mainDelivery workflow run is not the canonical latest')));
   assert.ok(findings.some((finding) => finding.includes('test deployment has a later non-supersession status')));
 });
 
