@@ -1,5 +1,11 @@
 # Current state
 
+## 2026-08-09 API-backed PR reviewer removal prepared locally
+
+- The repository owner explicitly superseded the independent API-backed high-risk reviewer as redundant with the active Codex session. Branch `codex/remove-independent-model-review` is based on protected main `f56422021640b34be2588c33999f63b59a87399a`; the complete local implementation is commit `c5791b8c3148906ee58e467e9a0f1166f6398ea9`.
+- The local capsule removes the OpenAI credential from `Codex Auto-Merge`, deletes provider generation, token counting, cost ceilings, and paid-call claims, and retains the legacy `Autonomous review complete` name as deterministic exact-head governance. The only permitted provider-backed path is the bounded repairable-error analyzer, pinned to `gpt-5.6-luna` with high reasoning while retaining input/output/timeout/sampling/no-retry limits and deterministic fallback. All free aggregates, immutable workflow hashes, permission/secret checks, protected Phase 2 evidence verification, final complete-rollup defense, and exact-head squash merge remain.
+- PR #384 opened at initial exact head `74447171a1c4324d4435c5798eb3e119d4d3acd8` after the repository owner explicitly authorized a controlled model-free bootstrap. During the migration window, the old workflow is disabled and its required context is replaced by the deterministic `architecture and agent validation` check while strict PR protection, four required GitHub Actions checks, admin enforcement, linear history, conversation resolution, force-push denial, and deletion denial remain. No model call is permitted. No merge, deployment, smoke, telemetry, release-ledger, or runtime evidence exists yet.
+
 ## 2026-08-09 Phase 2 evidence aggregate-boundary repair started
 
 - Compatibility PR #375 merged as `f7ec8cbb4d9bc44fecd9a833c3d7cc483f6974f2` and completed exact-main CI `31318612977`, Main Delivery `31318690680`, Deploy Test `31318705872`, Promote Production `31318872853`, and fresh test/production runtime truth with public and authenticated smoke, telemetry, and release ledgers.

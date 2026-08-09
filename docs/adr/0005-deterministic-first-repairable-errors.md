@@ -16,7 +16,7 @@ The gateway remains one `/mcp` route and one `McpServer` instance. REC support m
 
 ## Configuration and cost
 
-`REPAIRABLE_ERRORS_LLM_ENABLED`, `REPAIRABLE_ERRORS_LLM_MODEL`, timeout, and sample-rate settings control the optional analyzer. Test and production intentionally reuse the repository `OPENAI_API_KEY`; deployments store it in Key Vault and expose only the managed application setting reference. Deterministic handling avoids model cost and latency for expected failures.
+`REPAIRABLE_ERRORS_LLM_ENABLED`, `REPAIRABLE_ERRORS_LLM_MODEL`, timeout, and sample-rate settings control the optional analyzer. The only approved model path is `gpt-5.6-luna` with high reasoning. Test and production intentionally reuse the repository `OPENAI_API_KEY`; deployments store it in Key Vault and expose only the managed application setting reference. Pull-request governance and general agent evaluation must not receive that credential. Deterministic handling avoids model cost and latency for expected failures.
 
 ## Consequences
 

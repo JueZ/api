@@ -42,7 +42,7 @@ Complete repository-changing work through the required autonomous delivery loop 
 
 2. Run the smallest relevant local validation set for the change when the environment allows.
 
-   Batch the complete locally validated change before pushing. Every new exact head on a high-risk PR can require one paid independent review, so do not push exploratory, partially validated, or no-op repair commits. A failed remote head may receive at most the documented meaningful repair attempts.
+   Batch the complete locally validated change before pushing. High-risk paths require proportional local validation and deterministic protected governance, so do not push exploratory, partially validated, or no-op repair commits. A failed remote head may receive at most the documented meaningful repair attempts.
 
    Common examples:
 
@@ -52,6 +52,13 @@ Complete repository-changing work through the required autonomous delivery loop 
    npm run test:api
    npm run build
    npm run ops:policy-guardrails
+   ```
+
+   For a pull request with multiple local commits, validate guardrail policy against the actual protected base rather than only the immediately preceding commit:
+
+   ```bash
+   git fetch --no-tags origin main
+   BASE_REF=origin/main INCLUDE_WORKTREE=true npm run ops:policy-guardrails
    ```
 
    If a command cannot run because credentials, network, tools, or environment variables are unavailable, record it as blocked or skipped with the reason. Do not treat skipped checks as passing.

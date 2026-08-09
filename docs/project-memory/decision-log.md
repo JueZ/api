@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-08-09 — Replace independent API-backed PR review with deterministic governance
+
+- Decision: Remove provider generation, token counting, cost limits, and paid-call claims from pull-request automation. Keep `Autonomous review complete` as the stable branch-required name, but produce it from deterministic exact-head governance plus applicable protected-main program-evidence verification. Restrict provider-backed inference to bounded repairable-error diagnostics using `gpt-5.6-luna` with high reasoning.
+- Rationale: The repository owner determined that a second model pass is redundant when the active Codex session already implements and reviews the change. Provider credits must be reserved for runtime repairable-error classification.
+- Preserved controls: every CI/Policy/CodeQL internal job and aggregate, immutable workflow hashes, explicit permissions, secret allowlists, exact GitHub App/head binding, candidate-code isolation, Phase 2 evidence verification, complete latest check/status rollup, exact-head squash merge, deployment gates, smoke, telemetry, provenance, and release ledgers.
+- Status: Implemented on `codex/remove-independent-model-review`; PR #384 opened under the explicitly authorized controlled bootstrap. No merge or runtime acceptance exists yet.
+
 ## 2026-08-09 — Keep authenticated acceptance verification outside PR-controlled code
 
 - Decision: Ordinary `pull_request` CI remains tokenless for repository-metadata and Actions-artifact access. Authenticated program-evidence collection must execute from trusted protected-main controller code and may read candidate program/evidence files only as strictly validated non-executable data bound to the exact PR head and review decision.

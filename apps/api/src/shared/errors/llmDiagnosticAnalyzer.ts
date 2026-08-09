@@ -34,7 +34,7 @@ export async function analyzeRepairableErrorWithLlm(args: {
     } as ConstructorParameters<typeof OpenAI>[0]);
     const response = await client.responses.create({
       model,
-      reasoning: { effort: 'low' },
+      reasoning: { effort: 'high' },
       store: false,
       max_output_tokens: MAX_OUTPUT_TOKENS,
       input: [
