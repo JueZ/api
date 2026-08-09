@@ -509,11 +509,7 @@ function workflowRunMatchesIdentity(run, expected) {
     run?.event === expected.event &&
     run?.head_sha === expected.headSha &&
     (!expected.headBranch || run?.head_branch === expected.headBranch) &&
-    (!expected.headRepository || run?.head_repository?.full_name === expected.headRepository) &&
-    (!expected.historyDisplayTitlePrefix || run?.display_title?.startsWith(expected.historyDisplayTitlePrefix)) &&
-    (!expected.displayTitle ||
-      Boolean(expected.historyDisplayTitlePrefix) ||
-      run?.display_title === expected.displayTitle)
+    (!expected.headRepository || run?.head_repository?.full_name === expected.headRepository)
   );
 }
 
@@ -667,6 +663,48 @@ function deploymentIdentityMatches(deployment, environment, expectedSha) {
   );
 }
 
+function deploymentTimelineFindings(deployment, statuses, status, job, environment, scope) {
+  const findings = [];
+  const deploymentCreated = Date.parse(deployment?.created_at);
+  const jobCreated = Date.parse(job?.created_at);
+  const jobStarted = Date.parse(job?.started_at);
+  const jobCompleted = Date.parse(job?.completed_at);
+  const statusCreated = Date.parse(status?.created_at);
+  addFinding(
+    findings,
+    [deploymentCreated, jobCreated, jobStarted, jobCompleted, statusCreated].every(Number.isFinite),
+    `${environment} ${scope} deployment provenance timestamps are invalid`,
+  );
+  addFinding(
+    findings,
+    deploymentCreated >= jobCreated && deploymentCreated <= jobStarted,
+    `${environment} ${scope} deployment was not created by the authenticated job`,
+  );
+  addFinding(
+    findings,
+    statusCreated >= jobStarted && statusCreated <= jobCompleted + 5_000,
+    `${environment} ${scope} deployment status was not completed by the authenticated job`,
+  );
+  const relevant = statuses.filter((candidate) => Number(candidate?.id) <= Number(status?.id));
+  addFinding(
+    findings,
+    relevant.length > 0 &&
+      relevant.every((candidate) => {
+        const created = Date.parse(candidate?.created_at);
+        return (
+          Number.isFinite(created) &&
+          created >= deploymentCreated &&
+          created <= jobCompleted + 5_000 &&
+          candidate?.log_url === job?.html_url &&
+          candidate?.environment === EXPECTED_DEPLOYMENT_ENVIRONMENTS[environment] &&
+          githubActionsBot(candidate?.creator)
+        );
+      }),
+    `${environment} ${scope} deployment status history is not bound to the authenticated job`,
+  );
+  return findings;
+}
+
 export function currentRuntimeFindings(currentRuntime) {
   const findings = [];
   const beforeSha = currentRuntime?.mainBefore?.object?.sha;
@@ -778,36 +816,7 @@ export function currentRuntimeFindings(currentRuntime) {
       observed?.workflowRun?.html_url === `https://github.com/JueZ/api/actions/runs/${execution?.runId}`,
       `${environment} current deployment workflow URL does not match`,
     );
-    const deploymentCreated = Date.parse(latestDeployment?.created_at);
-    const jobCreated = Date.parse(job?.created_at);
-    const jobStarted = Date.parse(job?.started_at);
-    const jobCompleted = Date.parse(job?.completed_at);
-    const statusCreated = Date.parse(latestStatus?.created_at);
-    addFinding(
-      findings,
-      [deploymentCreated, jobCreated, jobStarted, jobCompleted, statusCreated].every(Number.isFinite),
-      `${environment} current deployment provenance timestamps are invalid`,
-    );
-    addFinding(
-      findings,
-      deploymentCreated >= jobCreated && deploymentCreated <= jobStarted,
-      `${environment} current deployment was not created by the authenticated job`,
-    );
-    addFinding(
-      findings,
-      statusCreated >= jobStarted && statusCreated <= jobCompleted + 5_000,
-      `${environment} current deployment status was not completed by the authenticated job`,
-    );
-    addFinding(
-      findings,
-      statuses.every(
-        (status) =>
-          status?.log_url === job?.html_url &&
-          status?.environment === expectedEnvironment &&
-          githubActionsBot(status?.creator),
-      ),
-      `${environment} current deployment status history is not bound to the authenticated job`,
-    );
+    findings.push(...deploymentTimelineFindings(latestDeployment, statuses, latestStatus, job, environment, 'current'));
     addFinding(findings, observed?.liveHealth?.status === 'ok', `${environment} current live health is not ok`);
     addFinding(
       findings,
@@ -956,6 +965,7 @@ function deploymentEnvironmentFindings(record, ledger, observed, environment, ev
     Boolean(expectedOrigin) && allowedRuntimeOrigin(environment, status?.environment_url) === expectedOrigin,
     `${environment} deployment runtime origin does not match the allowlist and ledger`,
   );
+  findings.push(...deploymentTimelineFindings(deployment, statuses, status, job, environment, 'historical'));
   findings.push(...deploymentJobFindings(record, job, environment, evidence));
   return findings;
 }
@@ -1074,11 +1084,9 @@ export function phase2EvidenceFindings(evidence, observed) {
     }
     if (key === 'deployTest') {
       expected.displayTitle = `Deploy Test ${record.sourceSha} ${record.deliveryCorrelation}`;
-      expected.historyDisplayTitlePrefix = `Deploy Test ${record.sourceSha} `;
     }
     if (key === 'promoteProduction') {
       expected.displayTitle = `Promote Production ${record.sourceSha} ${record.deliveryCorrelation}`;
-      expected.historyDisplayTitlePrefix = `Promote Production ${record.sourceSha} `;
     }
     findings.push(
       ...canonicalWorkflowRunFindings(
