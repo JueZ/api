@@ -346,7 +346,13 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
   assert.match(mainDeliveryWorkflow, /TRIGGER_WORKFLOW_PATH: \$\{\{ github\.event\.workflow_run\.path \}\}/);
   assert.doesNotMatch(mainDeliveryWorkflow, /github\.event\.workflow_run\.name/);
   assert.match(mainDeliveryWorkflow, /gh run download "\$TRIGGER_RUN_ID"/);
-  assert.match(mainDeliveryWorkflow, /\[ "\$pr_head" != "\$reviewed_head" \]/);
+  assert.match(mainDeliveryWorkflow, /--name "autonomous-governance-\$TRIGGER_HEAD_SHA"/);
+  assert.match(mainDeliveryWorkflow, /-name autonomous-governance\.json/);
+  assert.match(mainDeliveryWorkflow, /\.verifiedHeadSha/);
+  assert.match(mainDeliveryWorkflow, /deterministic-protected-controller-v1/);
+  assert.match(mainDeliveryWorkflow, /\[ "\$verified_head" != "\$TRIGGER_HEAD_SHA" \]/);
+  assert.match(mainDeliveryWorkflow, /\[ "\$pr_head" != "\$verified_head" \]/);
+  assert.doesNotMatch(mainDeliveryWorkflow, /autonomous-review-|autonomous-review\.json|reviewedHeadSha/);
   assert.match(mainDeliveryWorkflow, /-f delivery_correlation="\$ci_correlation"/);
   assert.match(mainDeliveryWorkflow, /wait_for_dispatch ci\.yml "\$ci_title" "\$ci_started_at" "\$SOURCE_REF" "CI"/);
   assert.match(mainDeliveryWorkflow, /Dispatch correlation matched more than one/);

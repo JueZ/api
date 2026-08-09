@@ -1,10 +1,16 @@
 # Known issues and unresolved risks
 
+## Main Delivery uses a superseded governance artifact contract
+
+- PR #386 merged exact head `af3c3131d7dd9cb842c273e9e4bef4582bb33f5f` as `a56a932393a885976ad85f56df6cf3ba0f142e1b` after all four protected aggregates passed. Main Delivery `31329669160` then failed before main CI because the post-merge consumer requested the removed `autonomous-review-*` artifact contract.
+- The exact trusted controller run publishes `autonomous-governance-<head>` containing `autonomous-governance.json`, `verifiedHeadSha`, and evaluator `deterministic-protected-controller-v1`. Issue #387 requires the consumer to bind that exact artifact, evaluator, decision, and trigger head.
+- No deployment or runtime evidence exists for merge `a56a932393a885976ad85f56df6cf3ba0f142e1b`. The repair must preserve exact-run, exact-PR, exact-merge, current-main, CI, Deploy Test, production, smoke, telemetry, provenance, and ledger controls.
+
 ## Historical Main Delivery canonicalization over-groups unrelated triggers
 
 - PR #385 exact repair head `b88703cfa0ecb2c7d512c0030a4ebc4ad073a19b` passed every free aggregate, then protected controller `31329139128` failed closed while verifying historical Phase 2 evidence. Main Delivery run `31279667347` is the exact successful lineage triggered by autonomous-governance run `31279529529`, but later skipped runs for unrelated trigger IDs share implementation merge SHA `9310c94f97541e57f83b186af2cacf989d6f5330` and were incorrectly treated as superseding it.
 - PR #385 closed unmerged after one formatting repair; no merge, deployment, model call, or runtime acceptance exists. Issue #359 records recurrence count 6 and artifact `historical-main-delivery-lineage` records the implemented disposition.
-- The narrow repair selects canonical Main Delivery records within the independently derived exact trigger title and still rejects a later duplicate/failure for that same trigger. Deploy Test, Promote Production, current-runtime, aggregate, complete-history, and stable-final-snapshot supersession rules remain unchanged.
+- PR #386 merged the narrow repair selecting canonical Main Delivery records within the independently derived exact trigger title while still rejecting a later duplicate/failure for that same trigger. Its downstream delivery remains unaccepted because of the separate artifact-contract incident above.
 
 ## Phase 2 evidence verification is required but not yet accepted
 

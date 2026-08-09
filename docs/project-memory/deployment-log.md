@@ -1,5 +1,11 @@
 # Deployment log
 
+## 2026-08-09 — Historical-lineage merge blocked before main CI
+
+- Source: PR #386 exact head `af3c3131d7dd9cb842c273e9e4bef4582bb33f5f` passed CI `31329560162`, Policy Check `31329560166`, CodeQL `31329560180`, and deterministic governance `31329560170`, then merged as `a56a932393a885976ad85f56df6cf3ba0f142e1b`.
+- Blocker: Main Delivery `31329669160` could not download the removed `autonomous-review-*` artifact because the exact trusted trigger run publishes `autonomous-governance-<head>`. It failed before main CI, Deploy Test, or Promote Production.
+- Runtime truth: unavailable, not passing. No deployment, smoke, telemetry, release ledger, or runtime evidence exists for this merge. Issue #387 owns the protected repair and counterfactual regression.
+
 ## 2026-08-09 — Model-free protected governance accepted through production
 
 - Source: PR #384 final head `780ed310e10bdf58398e6edd87af3c1fe6a5f50b` passed exact-head CI `31328232675`, Policy Check `31328232650`, CodeQL `31328232653`, and the authorized temporary deterministic architecture aggregate after one policy repair. It squash-merged through ordinary protection as `2a966e193072036c65b3c412aeffec60d91ca9a8`; no direct main push or admin bypass occurred.
