@@ -284,6 +284,11 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     return getJson(`/actions/runs/${id}`);
   }
 
+  function getWorkflowJob(id) {
+    requireExactPositiveInteger(id, 'workflow job ID');
+    return getJson(`/actions/jobs/${id}`);
+  }
+
   function getWorkflowRuns(headSha) {
     requireExactSha(headSha, 'workflow-history SHA');
     return getPaginatedCollection(`/actions/runs?head_sha=${headSha}`, 'workflow_runs', 'workflow history');
@@ -370,6 +375,7 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     getCheckRuns,
     getCommitStatuses,
     getWorkflowRun,
+    getWorkflowJob,
     getWorkflowRuns,
     getWorkflowJobs,
     getWorkflowArtifacts,

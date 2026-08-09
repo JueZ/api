@@ -219,6 +219,7 @@ test('trusted GitHub client exposes only validated evidence endpoints', async ()
   await client.getCheckRuns(SHA_A);
   await client.getCommitStatuses(SHA_A);
   await client.getWorkflowRun(7);
+  await client.getWorkflowJob(7);
   await client.getWorkflowRuns(SHA_A);
   await client.getWorkflowJobs(7);
   await client.getWorkflowArtifacts(7);
@@ -234,13 +235,14 @@ test('trusted GitHub client exposes only validated evidence endpoints', async ()
     `https://api.github.com/repos/JueZ/api/commits/${SHA_A}/check-runs?filter=all&per_page=100&page=1`,
     `https://api.github.com/repos/JueZ/api/commits/${SHA_A}/statuses?per_page=100&page=1`,
     'https://api.github.com/repos/JueZ/api/actions/runs/7',
+    'https://api.github.com/repos/JueZ/api/actions/jobs/7',
     `https://api.github.com/repos/JueZ/api/actions/runs?head_sha=${SHA_A}&per_page=100&page=1`,
     'https://api.github.com/repos/JueZ/api/actions/runs/7/jobs?filter=all&per_page=100&page=1',
     'https://api.github.com/repos/JueZ/api/actions/runs/7/artifacts?per_page=100&page=1',
     'https://api.github.com/repos/JueZ/api/git/ref/heads/main',
     `https://api.github.com/repos/JueZ/api/compare/${SHA_A}...${SHA_B}`,
   ]);
-  for (const method of ['getPullRequest', 'getCheckRun', 'getWorkflowRun', 'getWorkflowJobs']) {
+  for (const method of ['getPullRequest', 'getCheckRun', 'getWorkflowRun', 'getWorkflowJob', 'getWorkflowJobs']) {
     assert.throws(() => client[method](0), /positive integer/);
   }
   await assert.rejects(client.downloadArtifact(0), /positive integer/);
