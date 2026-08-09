@@ -511,7 +511,9 @@ function workflowRunMatchesIdentity(run, expected) {
     (!expected.headBranch || run?.head_branch === expected.headBranch) &&
     (!expected.headRepository || run?.head_repository?.full_name === expected.headRepository) &&
     (!expected.historyDisplayTitlePrefix || run?.display_title?.startsWith(expected.historyDisplayTitlePrefix)) &&
-    (!expected.displayTitle || Boolean(expected.historyDisplayTitlePrefix) || run?.display_title === expected.displayTitle)
+    (!expected.displayTitle ||
+      Boolean(expected.historyDisplayTitlePrefix) ||
+      run?.display_title === expected.displayTitle)
   );
 }
 

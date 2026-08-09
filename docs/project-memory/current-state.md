@@ -1,11 +1,11 @@
 # Current state
 
-## 2026-08-09 Trusted Phase 2 verifier successor repair prepared
+## 2026-08-09 Trusted Phase 2 verifier successor final repair prepared
 
 - PR #358 is based on protected main `5aa5ac93e9ca9c0677a4edf38d2364a08a5df372`. Implementation commit `eecc95625608f316ca4e4de9237073a783f2c19a` restores the protected-main, read-only verifier boundary from #354 and adds the missing immutable binding to PR #349, baseline `eab88f735d3644181d2a043156970f0df02e3ff8`, branch `codex/agent-learning-phase-2-artifacts`, head `7188188cc0b3fd1a58a5ee14ae5335158294135c`, and merge `9310c94f97541e57f83b186af2cacf989d6f5330`.
 - Initial reviewed head `e950fd8ac858415a59019d3c8e1b7fd415e9ca8d` passed CI `31307099439`, Policy Check `31307099423`, and CodeQL `31307099456`, but autonomous review `31307099237` found that individually authenticated success IDs were not proven canonical against later check, run, or deployment state. Learning issue #359 records recurrence fingerprint `agent-learning.historical-evidence.latest-terminal-state`.
-- Repair-attempt-1 implementation commit `010080b57f3d855b8283bed3fe6e6ab09f5ce8c5` adds complete paginated exact-head check/status rollups, canonical latest workflow and deployment histories, later-failure rejection, tightly validated `inactive` supersession, and fresh latest-deployment/live-health binding to protected main read before and after the checks. Local full validation passes; repaired remote checks and review remain pending.
-- Phase 2 remains `in_progress`. After #358 is accepted and active on main, a separate protected evidence PR must exercise the trusted verifier, add versioned artifacts for #351, #355, #356, and #359, close those issues, and record Phase 2 acceptance. A merged PR alone is not runtime evidence.
+- Repair-attempt-1 head `9a63d1baab9957a6518ff1652fc5c08f5d8ac87d` passed CI `31307837556`, Policy Check `31307837559`, and CodeQL `31307837561`; autonomous review `31307836692` rejected duplicate ledger rows and candidate-selected delivery correlations. Final repair implementation `eaeff6cc5ee5ecaa0dd584b3a0b5c98467a8c99d` adds one strict five-phase table plus correlation-independent canonical deploy/promotion selection. Issue #359 now records recurrence count 2 and issue #360 records the ledger-row fingerprint. This is the second and last permitted repair; final remote evidence remains pending.
+- Phase 2 remains `in_progress`. After #358 is accepted and active on main, a separate protected evidence PR must exercise the trusted verifier, add versioned artifacts for #351, #355, #356, #359, and #360, close those issues, and record Phase 2 acceptance. A merged PR alone is not runtime evidence.
 
 ## 2026-08-09 Trusted Phase 2 verifier successor required
 
