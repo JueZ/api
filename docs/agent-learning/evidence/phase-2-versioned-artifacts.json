@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "repository": "JueZ/api",
+  "phase": 2,
+  "implementation": {
+    "baselineMainSha": "eab88f735d3644181d2a043156970f0df02e3ff8",
+    "pullRequest": {
+      "number": 349,
+      "url": "https://github.com/JueZ/api/pull/349",
+      "branch": "codex/agent-learning-phase-2-artifacts",
+      "headSha": "7188188cc0b3fd1a58a5ee14ae5335158294135c",
+      "mergeSha": "9310c94f97541e57f83b186af2cacf989d6f5330",
+      "mergedAt": "2026-08-08T21:35:12Z"
+    },
+    "exactHeadAggregates": [
+      {
+        "context": "CI complete",
+        "checkRunId": 93158693886,
+        "workflowRunId": 31279530179,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      },
+      {
+        "context": "Policy complete",
+        "checkRunId": 93158540339,
+        "workflowRunId": 31279530178,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      },
+      {
+        "context": "CodeQL complete",
+        "checkRunId": 93158614982,
+        "workflowRunId": 31279530171,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      },
+      {
+        "context": "Autonomous review complete",
+        "checkRunId": 93158796793,
+        "workflowRunId": 31279529529,
+        "appSlug": "github-actions",
+        "conclusion": "success"
+      }
+    ],
+    "postMergeDelivery": {
+      "mainDelivery": {
+        "workflowRunId": 31279667347,
+        "sourceSha": "9310c94f97541e57f83b186af2cacf989d6f5330",
+        "conclusion": "success"
+      },
+      "mainCi": {
+        "workflowRunId": 31279682790,
+        "sourceSha": "9310c94f97541e57f83b186af2cacf989d6f5330",
+        "conclusion": "success"
+      },
+      "deployTest": {
+        "workflowRunId": 31279752243,
+        "deploymentJobId": 93159053054,
+        "sourceSha": "9310c94f97541e57f83b186af2cacf989d6f5330",
+        "deliveryCorrelation": "3224b951116e313a443c8bb6ae041c095491c217579afdae",
+        "conclusion": "success",
+        "publicSmoke": "passed",
+        "authenticatedSmoke": "passed",
+        "telemetry": "passed",
+        "releaseLedgerArtifactId": 9028101525,
+        "releaseLedgerArtifactDigest": "sha256:31b54a35c2359ecd2ba98e4d7169f32c929582643f1f68592e6725a549a2ea70",
+        "releaseLedger": "validated",
+        "runtimeTruth": {
+          "status": "verified",
+          "checkedAt": "2026-08-08T21:41:16.696Z",
+          "failures": 0,
+          "blockers": 0
+        }
+      },
+      "promoteProduction": {
+        "workflowRunId": 31279913572,
+        "deploymentJobId": 93159446477,
+        "sourceSha": "9310c94f97541e57f83b186af2cacf989d6f5330",
+        "deliveryCorrelation": "00f6c049f7dd7607007131dae4b30541daedc184cc483a0f",
+        "conclusion": "success",
+        "publicSmoke": "passed",
+        "authenticatedSmoke": "passed",
+        "telemetry": "passed",
+        "releaseLedgerArtifactId": 9028141502,
+        "releaseLedgerArtifactDigest": "sha256:b7ee193f3685eadd1e7506a1c5db454d37512b9e0f29d319bde8661cf7035070",
+        "releaseLedger": "validated",
+        "runtimeTruth": {
+          "status": "verified",
+          "checkedAt": "2026-08-08T21:44:48.673Z",
+          "failures": 0,
+          "blockers": 0
+        }
+      }
+    }
+  }
+}
