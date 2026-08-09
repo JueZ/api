@@ -616,7 +616,7 @@ test('final acceptance rejects check, status, and workflow histories that change
   );
 });
 
-test('canonical workflow histories and authenticated artifacts reject later or duplicate records', () => {
+test('canonical workflow histories retain deployment supersession and bind main-delivery lineages', () => {
   const evidence = validEvidence();
   const observed = validObserved(evidence);
   const recordedDeploy = observed.workflowRuns['303'];
@@ -642,13 +642,55 @@ test('canonical workflow histories and authenticated artifacts reject later or d
     ),
   );
 
-  observed.workflowHistories.merge.push(laterFailedRun);
-  observed.workflowHistories.merge.push({
-    ...observed.workflowRuns['301'],
+  const recordedMainDelivery = observed.workflowRuns['301'];
+  const expectedMainDelivery = {
+    id: 301,
+    repository: 'JueZ/api',
+    path: '.github/workflows/codex-main-delivery.yml',
+    event: 'workflow_run',
+    headSha: mergeSha,
+    headBranch: 'main',
+    headRepository: 'JueZ/api',
+    displayTitle: recordedMainDelivery.display_title,
+  };
+  const laterUnrelatedTrigger = {
+    ...recordedMainDelivery,
     id: 5301,
     conclusion: 'failure',
     display_title: 'Deliver trigger 999 attempt 1',
-  });
+  };
+  assert.deepEqual(
+    canonicalWorkflowRunFindings(
+      recordedMainDelivery,
+      [recordedMainDelivery, laterUnrelatedTrigger],
+      expectedMainDelivery,
+      'mainDelivery',
+      { bindExactDisplayTitle: true },
+    ),
+    [],
+  );
+  const laterSameTriggerFailure = {
+    ...recordedMainDelivery,
+    id: 5302,
+    conclusion: 'failure',
+  };
+  assert.ok(
+    canonicalWorkflowRunFindings(
+      recordedMainDelivery,
+      [recordedMainDelivery, laterSameTriggerFailure],
+      expectedMainDelivery,
+      'mainDelivery',
+      { bindExactDisplayTitle: true },
+    ).some((finding) => finding.includes('not the canonical latest applicable run')),
+  );
+
+  observed.workflowHistories.merge.push(laterUnrelatedTrigger);
+  assert.ok(
+    !phase2EvidenceFindings(evidence, observed).some((finding) =>
+      finding.includes('mainDelivery workflow run is not the canonical latest'),
+    ),
+  );
+  observed.workflowHistories.merge.push(laterFailedRun, laterSameTriggerFailure);
   observed.environments.test.artifactList.artifacts.push({
     ...observed.environments.test.artifactList.artifacts[0],
     id: 5400,
