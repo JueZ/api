@@ -1,5 +1,11 @@
 # Known issues and unresolved risks
 
+## Phase 2 protected evidence verifier rejects GitHub's identical compare shape
+
+- PR #372 proved that the protected evidence verifier runs after independent review and before merge, but job `93255754296` rejected an exact controller/protected-main comparison because GitHub omitted `head_commit` for `status: identical`.
+- Protected main remained exact `8f71efebfa317853a89970eec4527bde696e277a`; the compare response had exact base and merge-base identities, zero ahead/behind counts, and the canonical exact-SHA URL. This is a narrow response-shape compatibility defect, not evidence that protection changed.
+- Issue #374 requires executable prevention. Permit absent `head_commit` only for the fully bound identical case; non-identical comparisons must retain exact head binding and fail closed. PR #372 closed unmerged after two repairs, so Phase 2 remains `in_progress` with no acceptance or runtime claim.
+
 ## Phase 2 acceptance still lacks a merged trusted verifier
 
 - PR #349 implemented and delivered the versioned-learning system, but Phase 2 acceptance evidence is not yet protected by a merged trusted verifier.

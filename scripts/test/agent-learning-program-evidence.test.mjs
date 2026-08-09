@@ -125,7 +125,7 @@ function protectedMainComparison(controllerSha = mergeSha, mainSha = currentMain
     behind_by: 0,
     base_commit: { sha: controllerSha },
     merge_base_commit: { sha: controllerSha },
-    head_commit: { sha: mainSha },
+    ...(controllerSha === mainSha ? {} : { head_commit: { sha: mainSha } }),
     url: `https://api.github.com/repos/JueZ/api/compare/${controllerSha}...${mainSha}`,
   };
 }
@@ -777,6 +777,11 @@ test('trusted controller workflow SHA must be authenticated as stable protected-
       (finding) => finding.includes('comparison URL'),
     ),
   );
+
+  const identicalMain = { ref: 'refs/heads/main', object: { type: 'commit', sha: mergeSha } };
+  const identicalComparison = protectedMainComparison(mergeSha, mergeSha);
+  assert.equal(Object.hasOwn(identicalComparison, 'head_commit'), false);
+  assert.deepEqual(protectedMainControllerFindings(identicalMain, identicalMain, identicalComparison, options), []);
 });
 
 test('an open PR cannot self-record any of its commit identities in governance ledgers', () => {

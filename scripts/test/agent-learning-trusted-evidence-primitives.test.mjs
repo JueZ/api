@@ -506,3 +506,44 @@ test('controller workflow ancestry requires stable protected main and exact comp
   assert.ok(findings.includes('protected main changed during trusted verification'));
   assert.ok(findings.includes('controller workflow SHA is not an ancestor of protected main'));
 });
+
+test('identical controller comparisons accept GitHub omission of head_commit only with exact identity', () => {
+  const main = { ref: 'refs/heads/main', object: { type: 'commit', sha: SHA_A } };
+  const comparison = {
+    status: 'identical',
+    base_commit: { sha: SHA_A },
+    merge_base_commit: { sha: SHA_A },
+    behind_by: 0,
+    ahead_by: 0,
+    url: `https://api.github.com/repos/JueZ/api/compare/${SHA_A}...${SHA_A}`,
+  };
+
+  assert.deepEqual(
+    protectedMainControllerFindings(main, structuredClone(main), comparison, { controllerSha: SHA_A }),
+    [],
+  );
+  assert.ok(
+    protectedMainControllerFindings(
+      main,
+      structuredClone(main),
+      { ...comparison, head_commit: { sha: SHA_B } },
+      { controllerSha: SHA_A },
+    ).includes('controller comparison head is not protected main'),
+  );
+  assert.ok(
+    protectedMainControllerFindings(
+      main,
+      structuredClone(main),
+      { ...comparison, ahead_by: 1 },
+      { controllerSha: SHA_A },
+    ).includes('identical protected-main comparison distance is invalid'),
+  );
+  assert.ok(
+    protectedMainControllerFindings(
+      main,
+      structuredClone(main),
+      { ...comparison, status: 'ahead', ahead_by: 1 },
+      { controllerSha: SHA_A },
+    ).includes('controller comparison head is not protected main'),
+  );
+});
