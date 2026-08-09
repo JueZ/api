@@ -253,6 +253,28 @@ jobs:
         with:
           name: autonomous-review-${{ needs.resolve.outputs.head_sha }}
           path: ${{ runner.temp }}/autonomous-review
+      - name: Verify agent-learning program evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/agent-learning/verify-program-evidence.mjs trusted-pr \
+            --repository "${{ github.repository }}" \
+            --pr "${{ needs.resolve.outputs.pr_number }}" \
+            --head-sha "${{ needs.resolve.outputs.head_sha }}" \
+            --controller-run-id "${{ github.run_id }}" \
+            --controller-sha "${{ github.workflow_sha }}" \
+            --review-file "$RUNNER_TEMP/autonomous-review/autonomous-review.json" \
+            --output-file "$RUNNER_TEMP/agent-learning-program-verification.json"
+      - name: Upload sanitized agent-learning program verification
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
+        with:
+          name: agent-learning-program-verification-${{ needs.resolve.outputs.head_sha }}
+          path: ${{ runner.temp }}/agent-learning-program-verification.json
+          if-no-files-found: error
+          retention-days: 365
       - name: Wait for required checks and merge the exact reviewed head
         env:
           GH_TOKEN: ${{ github.token }}

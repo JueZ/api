@@ -17,8 +17,9 @@ For each candidate it:
 7. never patches, releases, or reuses a paid-call marker or approval; any existing marker permanently blocks another request for that PR/head;
 8. makes one exact input-token count request and, only when the complete request remains within the cost ceiling, at most one independent structured model-generation request with `store=false`, a 3,500-token static output cap, and explicit final-JSON capacity reservation;
 9. publishes `Autonomous review complete` for that exact SHA;
-10. rechecks open/current/non-behind PR state and the complete latest exact-head check-run and legacy-status rollup; aggregate `unstable` is accepted only when its sole pending cause is the current trusted `merge exact PR head` job;
-11. squash-merges only the reviewed head SHA.
+10. from the protected-main controller checkout, authenticates the candidate, controller, and review identities and runs full live Phase 2 evidence verification only when the candidate changes the Phase 2 acceptance record or evidence file; ordinary candidates return a fail-closed sanitized `not_applicable` result after the same identity and final-head stability checks;
+11. uploads that sanitized verification result, then rechecks open/current/non-behind PR state and the complete latest exact-head check-run and legacy-status rollup; aggregate `unstable` is accepted only when its sole pending cause is the current trusted `merge exact PR head` job;
+12. squash-merges only the reviewed head SHA.
 
 Critical/high review findings, a duplicate/consumed paid-review claim, stale heads, missing/wrong-app checks, forks, merge conflicts, and policy errors fail closed. Label changes are controller events, so adding/removing eligibility or hold labels is evaluated immediately without permitting a second exact-head paid request. Routine and high-risk changes do not require human approval under the selected policy.
 
@@ -51,6 +52,8 @@ The live branch ruleset must require exactly the aggregate names in `.github/aut
 Significant failures are disposed through versioned YAML records under `docs/agent-learning/artifacts/`. The strict validator rejects unknown schema fields, duplicate IDs, non-exact commits, repository path escape, stale or missing durable artifacts, expired exceptions, and secret-shaped or private provider content. Verified records additionally require a registered trusted scorer to inspect the exact broken/fixed Git objects without executing historical code; required CI binds live merged-PR metadata to those exact base and merge commits. The generated index is timestamp-free and checked byte-for-byte in CI.
 
 Learning validation runs by fixed script paths inside `architecture and agent validation`, so it remains mandatory behind `CI complete` without adding a brittle protected context. `AGENTS.md`, repository skills, learning records, task definitions, and trusted scorer/controller paths are independently reviewed high-risk agent-governance changes. Failure evidence can create a candidate, but cannot directly rewrite those controls; implementation and any waiver require a normal protected PR. A waiver does not count as verified proof.
+
+The exact-head merge job invokes `scripts/agent-learning/verify-program-evidence.mjs trusted-pr` from the protected-main checkout after exact-head autonomous-review evidence is downloaded and before the general merge-boundary gate. The candidate checkout is never executed or given a credential. For ordinary PRs the verifier authenticates repository, PR, exact head/base, changed files, controller run/workflow SHA, review evidence, and a stable final candidate snapshot, then writes a sanitized `not_applicable` artifact. A Phase 2 evidence or acceptance change additionally requires the registered public-safe evidence file and independently verifies its complete GitHub, delivery, ledger, and runtime claims. Missing, malformed, stale, self-referential, or unavailable evidence blocks merge; the verifier does not add a fifth branch-required context or invoke a model.
 
 ## Build and delivery
 
