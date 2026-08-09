@@ -26,7 +26,7 @@ test('runtime-neutral deployment paths are exact protected policy', () => {
   );
 });
 
-test('documentation and scoped instruction changes skip environment deployment', () => {
+test('documentation, scoped instruction, and non-shipped agent-governance changes skip environment deployment', () => {
   assert.deepEqual(classifyDeploymentImpact([file('README.md'), file('docs/project-memory/next-steps.md')]), {
     valid: true,
     deploymentRequired: false,
@@ -37,6 +37,16 @@ test('documentation and scoped instruction changes skip environment deployment',
   });
   assert.equal(classifyDeploymentImpact([file('.github/AGENTS.md')]).deploymentRequired, false);
   assert.equal(classifyDeploymentImpact([file('.agents/skills/example/SKILL.md')]).deploymentRequired, false);
+  assert.equal(classifyDeploymentImpact([file('evals/agent-tasks/example.yml')]).deploymentRequired, false);
+  assert.equal(classifyDeploymentImpact([file('scripts/agent-learning/status-report.mjs')]).deploymentRequired, false);
+  assert.equal(
+    classifyDeploymentImpact([file('scripts/agent-task-evals/scorers/example.mjs')]).deploymentRequired,
+    false,
+  );
+  assert.equal(
+    classifyDeploymentImpact([file('scripts/test/agent-learning-memory.test.mjs')]).deploymentRequired,
+    false,
+  );
 });
 
 test('code, workflow, policy, infrastructure, contract, and mixed changes still deploy', () => {
@@ -48,6 +58,7 @@ test('code, workflow, policy, infrastructure, contract, and mixed changes still 
     'contracts/openapi.yaml',
     'package.json',
     'scripts/example.mjs',
+    'scripts/triage-repair-issues.mjs',
   ]) {
     assert.equal(classifyDeploymentImpact([file(filename)]).deploymentRequired, true, filename);
   }

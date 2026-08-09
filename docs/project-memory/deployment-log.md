@@ -152,13 +152,13 @@
 ## 2026-05-16 full Codex delivery orchestrator deployed
 
 - PR #137 updated `Codex Main Delivery` to explicitly dispatch and wait for `CI`, `Deploy Test`, and `Promote Production` after Codex auto-merge because a GitHub-token `workflow_dispatch` CI run did not trigger downstream `workflow_run` deployment workflows.
-- Validation commit: `06d05f3` on `main`. Manual `Deploy Test` run `25968770752` and `Promote Production` run `25968813057` succeeded after PR #137 merged; production smoke tests passed.
+- Validation commit: `06d05f3ca94cc911b908ff20f6d9f02d7660f41c` on `main`. Manual `Deploy Test` run `25968770752` and `Promote Production` run `25968813057` succeeded after PR #137 merged; production smoke tests passed.
 - The next Codex auto-merge should exercise the full orchestrator directly from `Codex Main Delivery`.
 
 ## 2026-05-16 Codex auto-merge deployment chain validation succeeded
 
 - PR #135 added the `Codex Main Delivery` workflow to bridge GitHub-token Codex auto-merges into explicit `main` CI dispatches.
-- Validation commit: `8cf55a7` on `main`. Manual `CI` dispatch run `25968500874` passed, automatically triggered `Deploy Test` run `25968521526`, and that successful CI-triggered test deployment automatically triggered `Promote Production` run `25968560857`.
+- Validation commit: `8cf55a7be911f105a265437c1d3193b6da7279ff` on `main`. Manual `CI` dispatch run `25968500874` passed, automatically triggered `Deploy Test` run `25968521526`, and that successful CI-triggered test deployment automatically triggered `Promote Production` run `25968560857`.
 - Production smoke tests passed for Function App `func-api-catalogue-prod-bfjstshehpbfk` and static website storage account `stapicatalogueprodbfjsts`.
 
 ## 2026-05-15 production promotion for security-finding main head
@@ -298,7 +298,7 @@ Entries are reverse chronological. Do not include secrets or SAS URLs.
 - Result: Failed closed during the Bicep infrastructure step before package/frontend deployment and smoke tests.
 - Root cause: The GitHub Actions Azure deployment identity lacks permission to create/update `Microsoft.Authorization/roleAssignments` in `rg-api-prod`; `infra/main.bicep` manages a storage role assignment for the Function App identity.
 - Follow-up: Grant the deployment identity `Role Based Access Control Administrator` at `rg-api-prod` scope, or pre-provision/remove the Bicep-managed role assignment in a safe PR. `DEPLOY_PRODUCTION_ENABLED=false` was restored after the failed promotion.
-- Links: Production-failure issues #50 and #51 were created for commit `a025c76`.
+- Links: Production-failure issues #50 and #51 were created for commit `a025c76afc1074ec9d9c50e1119834a70ba6a150`.
 
 ## 2026-05-14 — Auth deployment preparation blocked by Entra permissions
 

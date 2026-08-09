@@ -31,6 +31,7 @@
     "ops:check-architecture": "node scripts/check-architecture.mjs",
     "ops:validate-agent-skills": "node scripts/validate-agent-skills.mjs",
     "ops:check-lockfile": "node scripts/check-lockfile-policy.mjs",
+    "ops:check-memory-freshness": "node scripts/agent-learning/check-memory-freshness.mjs",
     "eval:agents": "npm run build:api --silent && node scripts/run-agent-evals.mjs",
     "eval:agent-policy": "npm run build:api --silent && node scripts/run-agent-evals.mjs",
     "eval:agent-tasks:validate": "node scripts/agent-task-evals/validate.mjs",
@@ -38,7 +39,7 @@
     "eval:agent-tasks:report": "node scripts/agent-task-evals/report.mjs",
     "agent:learning:validate": "node scripts/agent-learning/validate-artifacts.mjs && node scripts/agent-learning/verify-artifacts.mjs",
     "agent:learning:index": "node scripts/agent-learning/generate-index.mjs",
-    "agent:learning:status": "node scripts/agent-learning/verify-artifacts.mjs --status",
+    "agent:learning:status": "node scripts/agent-learning/status-report.mjs",
     "docs:check-operations": "npm run build:api --silent && node scripts/generate-operation-docs.mjs --check"
   },
   "packageManager": "npm@10.9.8",
