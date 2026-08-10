@@ -1,0 +1,13 @@
+version: 2
+id: setup-node-cache-false
+fingerprint: repair-queue.setup-node.unsupported-cache-value
+severity: high
+invariant: Dependency-free workflow jobs omit the setup-node cache input; a boolean-looking false value must not be passed as an unsupported package-manager name.
+scope:
+  - .github/workflows/repair-triage.yml
+prevention:
+  - kind: regression-test
+    path: scripts/test/agent-learning-triage.test.mjs
+broken: a72f8245bd398c1929069cd63c647ee57d1c3411
+recurrenceCount: 1
+status: active

@@ -1,0 +1,14 @@
+version: 2
+id: reusable-workflow-permission-ceiling
+fingerprint: delivery-v2.delivery-controller-failure.workflow-run
+severity: high
+invariant: A reusable deployment workflow requests only permissions granted by every direct caller; centralized repair automation exclusively owns issue writes.
+scope:
+  - .github/workflows/delivery-v2.yml
+  - .github/workflows/deploy-environment.yml
+prevention:
+  - kind: regression-test
+    path: scripts/test/delivery-v2-workflow.test.mjs
+broken: a72f8245bd398c1929069cd63c647ee57d1c3411
+recurrenceCount: 1
+status: active
