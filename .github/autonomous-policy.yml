@@ -13,10 +13,12 @@ trustedWorkflowSha256:
   deploy-test.yml: be874930e0d375765afe67d50429744f5f629d129b944cae601e915ea16c7275
   migrate-private-storage.yml: c5e8ba9e1379179ec4f1f3a6abcfaa7eb712b468e3f43e9c4606157a7ba8d31b
   policy-check.yml: 553f5783cfbdb4dda498809b74265a9a247e5644663b74bacd1dd66c17fe23b2
+  pr-gate.yml: 870e3667280900763b4e5aa3ea4d096c7fbffaa6973491e406443cb8e5debce7
   prepare-production-private-storage.yml: 62b7d4a413ea2ed57f5ebeb63b54adfb46e42abcf825e94be3f2f049f501277e
   promote-production.yml: eb87a6f7fd479226a68e0edd7f9867ce9b6c3bac853ffae0ed687734e0944387
   repair-triage.yml: f428e6f3f866505493468349db9622687390e35fd4e26975711b34ad1c895521
   rollback-production.yml: 2aae30732058ba956f52a0fc5151e5ee236856464bb961dac576c9a033e49635
+  security-gate.yml: fc5e018cbd6ab0747a9e9e0913f63465f0ec80fa248bd6f8adfa528213c729ec
   verify-azure-oidc.yml: 8f98932d92d84740df6573397fa2ad29678fd09f1c3fe44fd8a9910bfee424d7
 
 # This file is the canonical repository policy consumed by CI, the autonomous
