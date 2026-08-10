@@ -1,34 +1,13 @@
-version: 1
+version: 2
 id: model-free-delivery-artifact-contract
-title: Bind post-merge delivery to deterministic governance evidence
 fingerprint: delivery.model-free-governance-artifact-contract
-source:
-  type: deployment_incident
-  references:
-    - kind: issue
-      locator: JueZ/api#387
-      url: https://github.com/JueZ/api/issues/387
-    - kind: pull_request
-      locator: JueZ/api#386
-      url: https://github.com/JueZ/api/pull/386
-    - kind: workflow_run
-      locator: JueZ/api/actions/runs/31329669160
-      url: https://github.com/JueZ/api/actions/runs/31329669160
-classification:
-  failureArea: post-merge-delivery
-  severity: high
-  symptom: The first Main Delivery run after deterministic governance merged failed before main CI because it could not download the superseded autonomous-review artifact.
-  rootCause: The auto-merge producer changed to the versioned autonomous-governance artifact contract, but the post-merge consumer still requested the former artifact name, file name, and reviewed-head field.
-disposition:
-  primary: regression-test
-  rationale: Main Delivery now downloads the exact deterministic artifact from the exact trigger run and requires its approved decision, pinned evaluator, and verified head to match the immutable trigger head before binding the merged pull request.
-artifacts:
-  - path: .github/workflows/codex-main-delivery.yml
-    kind: workflow
-  - path: scripts/test/autonomous-policy.test.mjs
-    kind: regression-test
-  - path: .github/autonomous-policy.yml
-    kind: policy
-counterfactual:
-  hypothesis: The regression fails for the legacy autonomous-review artifact contract and passes only when the post-merge consumer requires the exact deterministic governance artifact and exact trigger head.
-status: implemented
+severity: high
+invariant: Delivery accepts only immutable deterministic release identity from the protected source and never depends on a model-generated governance hand-off.
+scope:
+  - .github/workflows/codex-main-delivery.yml
+  - .github/autonomous-policy.yml
+prevention:
+  - kind: regression-test
+    path: scripts/test/autonomous-policy.test.mjs
+recurrenceCount: 1
+status: active

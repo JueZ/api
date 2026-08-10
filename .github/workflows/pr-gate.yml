@@ -4,8 +4,6 @@ run-name: PR Gate ${{ github.event.pull_request.head.sha || github.sha }}
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -33,6 +31,7 @@ jobs:
       dependencies: ${{ steps.classify.outputs.dependencies }}
       infrastructure: ${{ steps.classify.outputs.infrastructure }}
       workflow: ${{ steps.classify.outputs.workflow }}
+      learning: ${{ steps.classify.outputs.learning }}
       privileged: ${{ steps.classify.outputs.privileged }}
     steps:
       - name: Checkout exact candidate
@@ -117,6 +116,7 @@ jobs:
         shell: bash
         env:
           BASE_REF: ${{ needs.classify.outputs.base_sha }}
+          LEARNING: ${{ needs.classify.outputs.learning }}
           PRIVILEGED: ${{ needs.classify.outputs.privileged }}
           WORKFLOW: ${{ needs.classify.outputs.workflow }}
         run: |
@@ -124,6 +124,11 @@ jobs:
           npm run ops:validate-autonomous-policy
           node scripts/policy-guardrails.mjs
           node --test scripts/test/path-classifier.test.mjs scripts/test/gate-aggregate.test.mjs
+          if [ "$LEARNING" = 'true' ]; then
+            node scripts/agent-learning/validate-artifacts.mjs
+            node scripts/agent-learning/generate-index.mjs --check
+            node --test scripts/test/agent-learning-artifacts.test.mjs
+          fi
           if [ "$PRIVILEGED" = 'true' ]; then
             node scripts/check-architecture.mjs
             node scripts/validate-agent-skills.mjs
@@ -133,7 +138,8 @@ jobs:
               scripts/test/deployment-impact.test.mjs \
               scripts/test/deployment-generation.test.mjs \
               scripts/test/delivery-v2-workflow.test.mjs \
-              scripts/test/known-good-release.test.mjs
+              scripts/test/known-good-release.test.mjs \
+              scripts/test/agent-learning-triage.test.mjs
           fi
       - name: Enforce cost and dependency policy when applicable
         shell: bash

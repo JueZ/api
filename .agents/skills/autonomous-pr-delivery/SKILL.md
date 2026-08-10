@@ -22,9 +22,9 @@ Use this skill for routine repository delivery. Add `github-cli-devops` only for
      --json databaseId,workflowName,event,status,conclusion,headSha,createdAt
    ```
 
-6. Required PR evidence is exact-head `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete`, plus successful protected merge. The aggregate controller still checks every latest check/status result.
-7. After merge, monitor `Codex Main Delivery`, its exact-main CI, and applicable Deploy Test/Promote Production/runtime evidence. A trusted runtime-neutral decision makes deployment, smoke, telemetry, and release-ledger evidence not applicable; do not wait for absent workflows or call them passing.
-8. On failure, inspect only failed logs, make the smallest safe repair, and use no more than two attempts for the same area.
+6. Required PR evidence is exact-head `PR Gate` and `Security Gate`, followed by GitHub-native protected squash merge. Optional or advisory checks are reported but do not become undeclared merge requirements.
+7. After merge, monitor the protected-main `Delivery v2` DAG. A trusted runtime-neutral classification makes build and environment deployment not applicable. Deployment-impacting changes require the one immutable artifact to pass test and production exact-SHA/digest, public/authenticated smoke, telemetry, release-identity, and applicable rollback-safety gates.
+8. On failure, inspect only the failed job and minimum relevant logs, fingerprint the cause, and make the smallest safe repair. Use at most three meaningful repair commits, stop when the same fingerprint repeats twice without progress, and allow one unchanged rerun only for a demonstrated flaky or external failure.
 
 Useful failed-run command:
 
@@ -42,4 +42,4 @@ Do not open a follow-up bookkeeping PR solely to transcribe terminal run IDs alr
 
 ## Final report
 
-Report branch, exact head, PR, four aggregate results, merge commit, Main Delivery/exact-main CI, applicable deployment/runtime proof, repair attempts, local checks, blockers, project-memory changes, and remaining risk. Collapse non-applicable deployment fields into one concise statement.
+Report branch, exact head, PR, `PR Gate`, `Security Gate`, native auto-merge, merge commit, Delivery v2 classification, applicable deployment/runtime proof, repair attempts, local checks, blockers, project-memory changes, and remaining risk. Mark unexercised or non-applicable behavior explicitly rather than calling it passing.

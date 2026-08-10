@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { validateReleaseLedger } from '../validate-release-ledger.mjs';
-import { parseRepairIssueBody, decideRepairIssueAction } from '../triage-repair-issues.mjs';
 import { forbiddenDiffFindings, highRiskPaths } from '../policy-guardrails.mjs';
 import {
   DEFAULT_SMOKE_FETCH_TIMEOUT_MS,
@@ -48,22 +47,6 @@ test('release ledger validation accepts required runtime truth fields', () => {
     validateReleaseLedger(ledger, { expectedDeliveryCorrelation: 'delivery-other123' }).includes(
       'deliveryCorrelation does not match the expected workflow dispatch',
     ),
-  );
-});
-
-test('repair issue parser finds PRs and workflow runs', () => {
-  const parsed = parseRepairIssueBody('Fix in PR #123. Workflow run: https://github.com/JueZ/api/actions/runs/456');
-  assert.deepEqual(parsed.prNumbers, [123]);
-  assert.deepEqual(parsed.workflowRunIds, ['456']);
-});
-
-test('repair issue decision closes PR-check issues only with merged PR and check evidence', () => {
-  assert.equal(
-    decideRepairIssueAction(
-      { title: 'CI check failed', body: 'PR #1' },
-      { prStates: [{ number: 1, merged: true, checksPassed: true }] },
-    ).action,
-    'close',
   );
 });
 

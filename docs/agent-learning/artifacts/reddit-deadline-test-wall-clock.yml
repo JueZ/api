@@ -1,33 +1,13 @@
-version: 1
+version: 2
 id: reddit-deadline-test-wall-clock
-title: Keep the Reddit deadline regression independent of runner timing
 fingerprint: ci.reddit.deadline-test-wall-clock
-source:
-  type: repository_audit
-  references:
-    - kind: issue
-      locator: JueZ/api#412
-      url: https://github.com/JueZ/api/issues/412
-    - kind: pull_request
-      locator: JueZ/api#411
-      url: https://github.com/JueZ/api/pull/411
-    - kind: workflow_run
-      locator: JueZ/api/actions/runs/31403705315
-      url: https://github.com/JueZ/api/actions/runs/31403705315
-classification:
-  failureArea: reddit-deadline-test
-  severity: medium
-  symptom: The expansion-deadline test observed zero or two mocked calls instead of one depending on runner load, blocking an unrelated pull request.
-  rootCause: The test asserted an exact call count while using the process wall clock, so initial request setup and scheduling consumed a variable part of its 25 millisecond expansion budget.
-disposition:
-  primary: regression-test
-  rationale: The test now uses the existing injected clock to isolate setup time and advances it when the one in-flight expansion is aborted, while preserving the real abort-signal behavior.
-artifacts:
-  - path: apps/api/test/reddit.test.mjs
-    kind: regression-test
-counterfactual:
-  hypothesis: Under the wall clock the assertion varies with setup and runner timing, while the controlled clock permits exactly one in-flight expansion and then makes the deadline terminal.
-  verification:
-    commands:
-      - node --test --test-name-pattern="RedditThreadService aborts an in-flight expansion at its server-owned deadline and preserves continuation" apps/api/test/reddit.test.mjs
-status: implemented
+severity: medium
+invariant: Reddit deadline behavior is tested with a controlled clock so setup time and runner speed cannot change the asserted terminal deadline.
+scope:
+  - apps/api/src/**/reddit*
+  - apps/api/test/reddit.test.mjs
+prevention:
+  - kind: regression-test
+    path: apps/api/test/reddit.test.mjs
+recurrenceCount: 1
+status: active

@@ -3,23 +3,23 @@ version: 1
 # Exact content allowlist for the trusted workflow set. Any workflow byte change
 # requires a protected update to this canonical manifest.
 trustedWorkflowSha256:
-  agent-learning-status.yml: 9bd60db1a21e4c177b9ac8ef2e4bca0c8578a5a4bf89981cd52fbb77652c05a7
+  agent-learning-status.yml: 293a481327ca638c06244a5d0ad7ecf288a692ab35193b33b4796ac3d866a6b3
   bring-readonly-canary.yml: 9cd2cd547a3b36b1c1de1769730883e613dc370493d978c356d37d90f1e08898
   ci.yml: a5bc491bff7af9e027921922ada6ceab6675709073a24e3ef2d47e3054c703af
   codeql.yml: 8220b94fdc56f9b33d7db4111fd41e60beb814ef3f2fc99611a09dd71e910590
   codex-automerge.yml: cb73e8d982468c58b77717213ceec6a23e7ed1e26863b663cff7a75e7d6d5054
   codex-main-delivery.yml: 45e33b68c6feeed2778cb60817f2dfe12e1738c3530db186c3aae002ca07fc50
-  delivery-v2.yml: a88f7b642093829fce377463d531fbb0e9e793bd834343d3b774c8ce8f03c33f
-  deploy-environment.yml: 63ef7269da14d57a49eea81d04e973110315b9f3d29a2e518efe89878cba6452
+  delivery-v2.yml: b5541b3eff0679f25271d714369a0dabf40df3d18184bc93a9a6e48fdb75b711
+  deploy-environment.yml: b4128c8cccb70544109fcdcc33876023fa1be0afa744c5c77e3a6047bc209576
   deploy-test.yml: be874930e0d375765afe67d50429744f5f629d129b944cae601e915ea16c7275
   migrate-private-storage.yml: c5e8ba9e1379179ec4f1f3a6abcfaa7eb712b468e3f43e9c4606157a7ba8d31b
   policy-check.yml: 553f5783cfbdb4dda498809b74265a9a247e5644663b74bacd1dd66c17fe23b2
-  pr-gate.yml: 84cea329f7b85adea1d111373bdbbec63981479099946417d41dad4a0b7155ce
-  prepare-production-private-storage.yml: 62b7d4a413ea2ed57f5ebeb63b54adfb46e42abcf825e94be3f2f049f501277e
+  pr-gate.yml: 77bc023650fb85060682af9cd12378f2887fde95213266942494cfe7170d3903
+  prepare-production-private-storage.yml: 74608a5ace6bd58f8a29796176bd6631b53c8e8eac03cc2127698a8779e9da27
   promote-production.yml: eb87a6f7fd479226a68e0edd7f9867ce9b6c3bac853ffae0ed687734e0944387
-  repair-triage.yml: f428e6f3f866505493468349db9622687390e35fd4e26975711b34ad1c895521
+  repair-triage.yml: 5920e46fa1f94b8d4f5a940ece7ec135d7e6d026a604c4c6400dd6832c9b9013
   rollback-production.yml: 2aae30732058ba956f52a0fc5151e5ee236856464bb961dac576c9a033e49635
-  security-gate.yml: fc5e018cbd6ab0747a9e9e0913f63465f0ec80fa248bd6f8adfa528213c729ec
+  security-gate.yml: 81c1ab0b52042569362b3420c90f381ca957f159cf08a3cd06f8710476903ece
   verify-azure-oidc.yml: 8f98932d92d84740df6573397fa2ad29678fd09f1c3fe44fd8a9910bfee424d7
 
 # This file is the canonical repository policy consumed by CI, the autonomous

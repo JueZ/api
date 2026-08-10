@@ -1,32 +1,12 @@
-version: 1
+version: 2
 id: historical-main-delivery-lineage
-title: Bind historical Main Delivery evidence to its immutable trigger lineage
 fingerprint: agent-learning.historical-evidence.latest-terminal-state
-source:
-  type: autonomous_review
-  references:
-    - kind: issue
-      locator: JueZ/api#359
-      url: https://github.com/JueZ/api/issues/359
-    - kind: pull_request
-      locator: JueZ/api#385
-      url: https://github.com/JueZ/api/pull/385
-    - kind: workflow_run
-      locator: JueZ/api/actions/runs/31329139128
-      url: https://github.com/JueZ/api/actions/runs/31329139128
-classification:
-  failureArea: agent-learning-program-evidence
-  severity: high
-  symptom: A verified historical Main Delivery run became non-canonical when later skipped runs for unrelated trigger IDs shared the same immutable merge SHA.
-  rootCause: Canonical Main Delivery selection grouped every workflow_run event for one workflow path and merge SHA, even though each delivery lineage is independently bound to an exact triggering autonomous-governance run ID in the immutable display title.
-disposition:
-  primary: regression-test
-  rationale: The verifier selects the latest Main Delivery record within the independently derived exact trigger lineage, still rejects a later failed duplicate for that same trigger, and leaves deployment, current-runtime, aggregate, and history-stability supersession checks unchanged.
-artifacts:
-  - path: scripts/agent-learning/verify-program-evidence.mjs
-    kind: implementation
-  - path: scripts/test/agent-learning-program-evidence.test.mjs
-    kind: regression-test
-counterfactual:
-  hypothesis: The regression fails when an unrelated-trigger run sharing the merge SHA supersedes valid historical delivery, and passes only when unrelated triggers are excluded while a later failure for the exact same trigger still blocks.
-status: implemented
+severity: high
+invariant: When historical delivery evidence is inspected, only runs bound to the exact immutable trigger may determine that trigger's terminal state.
+scope:
+  - scripts/agent-learning/**
+prevention:
+  - kind: regression-test
+    path: scripts/test/agent-learning-program-evidence.test.mjs
+recurrenceCount: 1
+status: active

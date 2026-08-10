@@ -1,25 +1,21 @@
-name: Agent Learning Status
+name: Agent Learning Validation
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '41 5 * * 1'
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: read
-  actions: read
 
 jobs:
-  status:
-    name: report agent learning and memory freshness
-    timeout-minutes: 15
+  validate:
+    name: validate concise learning artifacts
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+      - name: Checkout protected main
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          fetch-depth: 0
+          ref: main
           persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
@@ -28,61 +24,6 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
-        shell: bash
         run: npm ci --ignore-scripts
-      - name: Run deterministic validators
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          node scripts/agent-learning/validate-artifacts.mjs
-          node scripts/agent-learning/verify-artifacts.mjs --github
-          node scripts/agent-learning/generate-index.mjs --check
-          node scripts/agent-learning/verify-program-evidence.mjs offline
-          node scripts/agent-task-evals/validate.mjs
-          node scripts/agent-learning/check-memory-freshness.mjs
-      - name: Build live status and deduplicate stale-memory learning
-        id: live-status
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          node scripts/agent-learning/status-report.mjs \
-            --live \
-            --create-stale-memory-issue \
-            --repository '${{ github.repository }}' \
-            --json "$RUNNER_TEMP/agent-learning-status.json" \
-            --markdown "$RUNNER_TEMP/agent-learning-status.md"
-      - name: Publish Actions summary
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f "$RUNNER_TEMP/agent-learning-status.md" ]; then
-            sed -n '1,400p' "$RUNNER_TEMP/agent-learning-status.md" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo 'Agent-learning status report was unavailable.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Upload sanitized status reports
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
-        with:
-          name: agent-learning-status-${{ github.run_id }}
-          path: |
-            ${{ runner.temp }}/agent-learning-status.json
-            ${{ runner.temp }}/agent-learning-status.md
-          if-no-files-found: warn
-          retention-days: 30
-      - name: Enforce truthful status result
-        if: always()
-        shell: bash
-        env:
-          STATUS_OUTCOME: ${{ steps.live-status.outcome }}
-        run: |
-          set -euo pipefail
-          if [ "$STATUS_OUTCOME" != 'success' ]; then
-            echo 'Live status was failing or blocked; see the sanitized report.'
-            exit 1
-          fi
+      - name: Validate artifacts and deterministic index
+        run: npm run agent:learning:validate
