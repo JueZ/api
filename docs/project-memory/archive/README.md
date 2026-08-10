@@ -1,6 +1,6 @@
 # Project-memory archive
 
-The active trackers (`current-state.md`, `known-issues.md`, and `next-steps.md`) were consolidated on 2026-07-31 so resolved and superseded 2026 status snapshots no longer appear as current work.
+The active trackers (`current-state.md`, `known-issues.md`, and `next-steps.md`) were consolidated on 2026-07-31 and again on 2026-08-10 so resolved and superseded status snapshots no longer appear as current work.
 
 Historical evidence remains recoverable and reviewable in:
 

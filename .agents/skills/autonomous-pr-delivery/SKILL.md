@@ -1,159 +1,45 @@
 ---
 name: autonomous-pr-delivery
-description: Use this skill for every repository-changing Codex task in JueZ/api to complete the branch -> commit -> push -> PR -> checks -> delivery-status report loop safely.
+description: Use this skill for every repository-changing task in JueZ/api to complete protected branch, commit, PR, checks, merge, and applicable delivery reporting.
 ---
 
-# Autonomous PR Delivery Skill
+# Autonomous PR delivery
 
-Use this skill whenever a Codex task changes repository files.
-
-## Purpose
-
-Complete repository-changing work through the required autonomous delivery loop without skipping:
-
-- branch and commit verification
-- local validation evidence
-- remote/auth preflight
-- branch push
-- PR create/update
-- CI and Policy Check monitoring
-- auto-merge status
-- post-merge delivery status when available
-- runtime-truth delivery summary
-
-## Inputs
-
-- Repository: `JueZ/api`
-- Current working tree with intended changes, or a branch with committed changes
-- GitHub CLI auth on the host
-- A non-`main` branch for repository-changing work
+Use this skill for routine repository delivery. Add `github-cli-devops` only for diagnostics, configuration, branch protection, or a failing/non-routine GitHub operation.
 
 ## Procedure
 
-1. Verify branch and working tree state:
+1. Confirm protected `main`, branch, head, and working tree. Work only on a non-`main` `codex/...` branch.
+2. Implement one coherent change. Run one complete local set selected from the protected-base diff and affected risk surface. Do not repeat dependency installation, unchanged application builds, or an already passing check unless the diff, base, environment, or failure changed. Local proportionality never skips or weakens protected remote aggregates or applicable delivery/runtime proof.
+3. Commit intentionally, verify the exact commit, confirm repository-scoped GitHub authentication, push, and create/update the PR.
+4. For high-risk or multi-phase work, lead progress updates with the active phase, its status, and the next exact slice.
+5. Monitor compactly with structured one-shot queries. Emit only state transitions and a final summary; do not use continuously repeating `--watch` output. For example:
 
    ```bash
-   git branch --show-current
-   git status --short
-   git log -1 --oneline
+   gh pr view <number> --repo JueZ/api \
+     --json url,state,mergeStateStatus,headRefOid,autoMergeRequest,statusCheckRollup
+   gh run list --repo JueZ/api --limit 20 \
+     --json databaseId,workflowName,event,status,conclusion,headSha,createdAt
    ```
 
-   If on `main`, create or switch to a non-`main` branch before committing.
+6. Required PR evidence is exact-head `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete`, plus successful protected merge. The aggregate controller still checks every latest check/status result.
+7. After merge, monitor `Codex Main Delivery`, its exact-main CI, and applicable Deploy Test/Promote Production/runtime evidence. A trusted runtime-neutral decision makes deployment, smoke, telemetry, and release-ledger evidence not applicable; do not wait for absent workflows or call them passing.
+8. On failure, inspect only failed logs, make the smallest safe repair, and use no more than two attempts for the same area.
 
-2. Run the smallest relevant local validation set for the change when the environment allows.
+Useful failed-run command:
 
-   Batch the complete locally validated change before pushing. High-risk paths require proportional local validation and deterministic protected governance, so do not push exploratory, partially validated, or no-op repair commits. A failed remote head may receive at most the documented meaningful repair attempts.
+```bash
+gh run view <run-id> --repo JueZ/api --log-failed
+```
 
-   For a multi-phase program, lead progress updates with the active phase, its status, and the next exact slice before individual gate details. Run one complete local set selected from the protected-base diff and affected risk surface. Do not repeat dependency installation, unchanged application builds, or an already passing local gate unless the diff, base, environment, or a concrete failure changed; record every omitted redundant check with its reason. This local proportionality never skips or weakens protected remote aggregates, security checks, or applicable delivery/runtime evidence.
+Do not download or print full successful logs merely to prove success. PR/run metadata is the primary terminal evidence.
 
-   Common examples:
+## Guardrails
 
-   ```bash
-   npm run type-check
-   npm test
-   npm run test:api
-   npm run build
-   npm run ops:policy-guardrails
-   ```
+Never push to `main`, bypass protection, force merge, weaken validation/auth/security/delivery, expose credentials, delete resources without explicit authorization, or claim completion when the PR/delivery is blocked. A skipped or unavailable command is not passing evidence.
 
-   For a pull request with multiple local commits, validate guardrail policy against the actual protected base rather than only the immediately preceding commit:
+Do not open a follow-up bookkeeping PR solely to transcribe terminal run IDs already linked from the merged PR unless an active incident or authoritative program requires a reviewed state transition.
 
-   ```bash
-   git fetch --no-tags origin main
-   BASE_REF=origin/main INCLUDE_WORKTREE=true npm run ops:policy-guardrails
-   ```
+## Final report
 
-   If a command cannot run because credentials, network, tools, or environment variables are unavailable, record it as blocked or skipped with the reason. Do not treat skipped checks as passing.
-
-3. Commit the change if it is not already committed:
-
-   ```bash
-   git status --short
-   git add <changed-files>
-   git commit -m "<concise task summary>"
-   git log -1 --oneline
-   ```
-
-4. Run mandatory PR preflight and safe recovery:
-
-   ```bash
-   git remote -v
-   gh auth status
-   gh repo view JueZ/api
-   gh auth setup-git --hostname github.com
-   ```
-
-   If `origin` is missing, add it:
-
-   ```bash
-   git remote add origin https://github.com/JueZ/api.git
-   ```
-
-   If `origin` points to the wrong repository, fix it:
-
-   ```bash
-   git remote set-url origin https://github.com/JueZ/api.git
-   ```
-
-5. Push the current non-`main` branch with upstream tracking:
-
-   ```bash
-   git push -u origin "$(git branch --show-current)"
-   ```
-
-6. Create or update the pull request explicitly against the repository:
-
-   ```bash
-   gh pr view --repo JueZ/api || gh pr create --repo JueZ/api --fill
-   ```
-
-7. Collect autonomous-delivery status evidence:
-
-   ```bash
-   gh pr view --repo JueZ/api --json url,state,isDraft,mergeStateStatus,autoMergeRequest,headRefName,headRefOid,baseRefName,labels
-   gh pr checks --repo JueZ/api --watch
-   gh run list --repo JueZ/api --limit 20
-   ```
-
-8. For Codex PRs, monitor the relevant delivery checks and workflows:
-
-   - `enable auto-merge`
-   - `run main delivery after Codex auto-merge`
-   - `CI`
-   - `Policy Check`
-   - `Deploy Test`, when deployment is applicable
-   - `Promote Production`, when deployment is applicable
-
-   After exact-main CI, treat a protected-controller runtime-neutral decision as terminal evidence that environment deployment was not applicable. Report Deploy Test, Promote Production, smoke, telemetry, release ledger, and runtime truth as `not applicable`; never wait for those workflows or describe them as passing when the controller intentionally omitted them.
-
-9. If checks fail, apply the smallest safe fix and repeat at most 2 repair attempts for the same failing area.
-
-10. Stop when delivery reaches a terminal result or a concrete blocker is found.
-
-## Required output
-
-Final task report must include:
-
-- Branch name
-- Commit SHA
-- PR URL
-- CI and Policy Check status
-- Auto-merge status
-- `Deploy Test` status when applicable
-- `Promote Production` status when applicable
-- Smoke/runtime-truth status when applicable
-- Repair attempts used
-- Blockers, skipped checks, and remaining risks
-
-## Safety guardrails
-
-Never:
-
-- bypass branch protection
-- Do not bypass, remove, disable, or weaken tests, policy checks, security scans, dependency audits, secret scans, required status checks, telemetry gates, smoke tests, or deployment gates to make delivery pass
-- weaken auth, JWT validation, role checks, allowlists, or deployment guardrails
-- commit, print, paste, or expose secrets/tokens
-- delete Azure or GitHub resources unless explicitly requested
-- claim completion if PR creation/update failed
-
-If PR creation/update fails, fail closed and report the exact failed command.
+Report branch, exact head, PR, four aggregate results, merge commit, Main Delivery/exact-main CI, applicable deployment/runtime proof, repair attempts, local checks, blockers, project-memory changes, and remaining risk. Collapse non-applicable deployment fields into one concise statement.
