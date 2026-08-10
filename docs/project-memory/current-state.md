@@ -1,12 +1,12 @@
 <!-- project-memory-asOf: 2026-08-10 -->
 # Current state
 
-## 2026-08-10 All five closed-loop agent-learning phases accepted
+## 2026-08-10 Phase 5 terminal evidence registration in progress
 
 - Phase 5 PR #398 exact head `a581189d34be41b1a7fda16497b251a0fd87902f` passed CI `31340391863`, Policy Check `31340391858`, CodeQL `31340391885`, and deterministic governance `31340391905`, then merged as `4c4872e94b2b6e7771c11b132e9dcd66514ff7c9` with zero repair pushes.
 - Main Delivery `31340499592` and exact-main CI `31340516106` passed. The explicit operator-authorized runtime-neutral marker skipped Deploy Test and Promote Production; smoke, telemetry, release-ledger, and runtime truth are not applicable rather than passing evidence.
 - Protected-main status run `31340620096` passed and published sanitized artifact `9045704965` with digest `sha256:dce09ab20d18c615ae0fb0aad1042c77e70b18938639ed5b1a4fad6db0bf00b4`. It found zero memory contradictions, zero post-rollout significant failures, four verified artifacts, zero waivers, and zero agent-task results; no model ran and memory was not rewritten.
-- Strict public-safe evidence is `docs/agent-learning/evidence/phase-5-memory-freshness.json`. All five phases are accepted. A merged PR alone was not treated as runtime evidence.
+- The current protected slice registers strict public-safe evidence at `docs/agent-learning/evidence/phase-5-memory-freshness.json`. Phase 5 remains `in_progress` until this registration merges and a later protected ledger-only PR records acceptance. A merged PR alone is not runtime evidence.
 
 ## 2026-08-09 Phases 3 and 4 accepted; Phase 5 is next
 
