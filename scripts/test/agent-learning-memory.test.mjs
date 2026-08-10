@@ -183,6 +183,7 @@ test('scheduled status workflow is non-paid, least-privilege, read-only to conte
     actions: 'read',
   });
   assert.ok(workflow.on.schedule);
+  assert.deepEqual(workflow.on.schedule, [{ cron: '41 5 * * 1' }]);
   assert.ok(workflow.on.workflow_dispatch !== undefined);
   assert.equal(workflow.on.pull_request, undefined);
   assert.equal(workflow.on.pull_request_target, undefined);

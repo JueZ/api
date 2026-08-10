@@ -327,6 +327,11 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     return getJson('/git/ref/heads/main');
   }
 
+  function getGitCommit(sha) {
+    requireExactSha(sha, 'git commit SHA');
+    return getJson(`/git/commits/${sha}`);
+  }
+
   function compareControllerToMain(controllerSha, mainSha) {
     requireExactSha(controllerSha, 'controller workflow SHA');
     requireExactSha(mainSha, 'protected main SHA');
@@ -399,6 +404,7 @@ export function createTrustedGithubClient({ repository, token, fetchImpl = fetch
     getWorkflowJobs,
     getWorkflowArtifacts,
     getProtectedMainRef,
+    getGitCommit,
     compareControllerToMain,
     getFile,
     getFileDigest,

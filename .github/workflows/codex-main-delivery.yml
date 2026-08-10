@@ -247,6 +247,9 @@ jobs:
           CI_RUN_ID=""
           CI_DELIVERY_CORRELATION=""
           associated_pr=""
+          PR_NUMBER=""
+          PR_HEAD_SHA=""
+          GOVERNANCE_RUN_ID=""
 
           if [ "$TRIGGER_WORKFLOW_PATH" = ".github/workflows/codex-automerge.yml" ]; then
             if ! [[ "$TRIGGER_RUN_ID" =~ ^[0-9]+$ ]]; then
@@ -303,19 +306,9 @@ jobs:
               echo "Completed auto-merge run does not prove an exact-head merge into main." >&2
               exit 1
             fi
-
-            assert_current_main
-            ci_correlation="$(openssl rand -hex 24)"
-            ci_title="CI $SOURCE_REF $ci_correlation"
-            ci_started_at="$(date -u +%s)"
-            gh workflow run ci.yml \
-              --repo "$REPOSITORY" \
-              --ref main \
-              -f delivery_correlation="$ci_correlation"
-            wait_for_dispatch ci.yml "$ci_title" "$ci_started_at" "$SOURCE_REF" "CI"
-            CI_RUN_URL="$(cat "$RUNNER_TEMP/ci.yml.url")"
-            CI_RUN_ID="$(cat "$RUNNER_TEMP/ci.yml.id")"
-            CI_DELIVERY_CORRELATION="$ci_correlation"
+            PR_NUMBER="$pr_number"
+            PR_HEAD_SHA="$verified_head"
+            GOVERNANCE_RUN_ID="$TRIGGER_RUN_ID"
           else
             CI_RUN_ID="$TRIGGER_RUN_ID"
             CI_DELIVERY_CORRELATION="$TRIGGER_RUN_ID"
@@ -325,9 +318,53 @@ jobs:
               --jq 'map(select(.merged_at != null and .base.ref == "main")) | sort_by(.merged_at) | last // {}')"
           fi
 
-          # CI can take long enough for main to advance. Never deploy a source
-          # that stopped being the current generation while checks were running.
+          # Classification and any later CI must bind the current main generation.
           assert_current_main
+
+          automatic_skip_autodeploy="false"
+          deployment_classification_reason="unavailable-associated-pull-request"
+          associated_pr_number="$(jq -r '.number // ""' <<<"$associated_pr")"
+          associated_pr_merge="$(jq -r '.merge_commit_sha // ""' <<<"$associated_pr")"
+          expected_changed_files="$(jq -r '.changed_files // ""' <<<"$associated_pr")"
+          if [[ "$associated_pr_number" =~ ^[0-9]+$ ]] &&
+             [ "$associated_pr_merge" = "$SOURCE_REF" ] &&
+             [[ "$expected_changed_files" =~ ^[1-9][0-9]*$ ]]; then
+            changed_file_pages="$RUNNER_TEMP/associated-pr-file-pages.json"
+            changed_files="$RUNNER_TEMP/associated-pr-files.json"
+            if gh api --paginate --slurp \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/$REPOSITORY/pulls/$associated_pr_number/files?per_page=100" > "$changed_file_pages" &&
+               jq -e '[.[] | .[]]' "$changed_file_pages" > "$changed_files"; then
+              actual_changed_files="$(jq 'length' "$changed_files")"
+              if [ "$actual_changed_files" = "$expected_changed_files" ]; then
+                if deployment_classification="$(node scripts/classify-deployment-impact.mjs "$changed_files")" &&
+                   jq -e '
+                     type == "object"
+                     and (.valid | type == "boolean")
+                     and (.deploymentRequired | type == "boolean")
+                     and (.reason | type == "string")
+                     and (.fileCount | type == "number")
+                     and (.impactPathCount | type == "number")' \
+                     <<<"$deployment_classification" >/dev/null; then
+                  deployment_classification_reason="$(jq -r '.reason' <<<"$deployment_classification")"
+                  automatic_skip_autodeploy="$(jq -r \
+                    --argjson expected "$expected_changed_files" \
+                    '.valid == true
+                      and .deploymentRequired == false
+                      and .reason == "runtime-neutral-only"
+                      and .fileCount == $expected
+                      and .impactPathCount == 0' \
+                    <<<"$deployment_classification")"
+                else
+                  deployment_classification_reason="malformed-classifier-result"
+                fi
+              else
+                deployment_classification_reason="changed-file-count-mismatch"
+              fi
+            else
+              deployment_classification_reason="changed-file-list-unavailable"
+            fi
+          fi
 
           explicit_skip_autodeploy="$(jq -r '(
             ([.labels[]?.name] | map(ascii_downcase) | index("skip-autodeploy")) != null
@@ -335,60 +372,43 @@ jobs:
           )' <<<"$associated_pr")"
 
           skip_reason=""
-          deployment_classification_reason="not-requested-explicit-skip"
           if [ "$explicit_skip_autodeploy" = "true" ]; then
             skip_reason="explicit PR marker or label"
+          elif [ "$automatic_skip_autodeploy" = "true" ]; then
+            skip_reason="trusted runtime-neutral path classification"
           else
-            automatic_skip_autodeploy="false"
-            deployment_classification_reason="unavailable-associated-pull-request"
-            associated_pr_number="$(jq -r '.number // ""' <<<"$associated_pr")"
-            associated_pr_merge="$(jq -r '.merge_commit_sha // ""' <<<"$associated_pr")"
-            expected_changed_files="$(jq -r '.changed_files // ""' <<<"$associated_pr")"
-            if [[ "$associated_pr_number" =~ ^[0-9]+$ ]] &&
-               [ "$associated_pr_merge" = "$SOURCE_REF" ] &&
-               [[ "$expected_changed_files" =~ ^[1-9][0-9]*$ ]]; then
-              changed_file_pages="$RUNNER_TEMP/associated-pr-file-pages.json"
-              changed_files="$RUNNER_TEMP/associated-pr-files.json"
-              if gh api --paginate --slurp \
-                -H 'Accept: application/vnd.github+json' \
-                "repos/$REPOSITORY/pulls/$associated_pr_number/files?per_page=100" > "$changed_file_pages" &&
-                 jq -e '[.[] | .[]]' "$changed_file_pages" > "$changed_files"; then
-                actual_changed_files="$(jq 'length' "$changed_files")"
-                if [ "$actual_changed_files" = "$expected_changed_files" ]; then
-                  if deployment_classification="$(node scripts/classify-deployment-impact.mjs "$changed_files")" &&
-                     jq -e '
-                       type == "object"
-                       and (.valid | type == "boolean")
-                       and (.deploymentRequired | type == "boolean")
-                       and (.reason | type == "string")
-                       and (.fileCount | type == "number")
-                       and (.impactPathCount | type == "number")' \
-                       <<<"$deployment_classification" >/dev/null; then
-                    deployment_classification_reason="$(jq -r '.reason' <<<"$deployment_classification")"
-                    automatic_skip_autodeploy="$(jq -r \
-                      --argjson expected "$expected_changed_files" \
-                      '.valid == true
-                        and .deploymentRequired == false
-                        and .reason == "runtime-neutral-only"
-                        and .fileCount == $expected
-                        and .impactPathCount == 0' \
-                      <<<"$deployment_classification")"
-                  else
-                    deployment_classification_reason="malformed-classifier-result"
-                  fi
-                else
-                  deployment_classification_reason="changed-file-count-mismatch"
-                fi
-              else
-                deployment_classification_reason="changed-file-list-unavailable"
-              fi
-            fi
-            if [ "$automatic_skip_autodeploy" = "true" ]; then
-              skip_reason="trusted runtime-neutral path classification"
-            else
-              echo "Environment deployment remains required: $deployment_classification_reason."
-            fi
+            echo "Environment deployment remains required: $deployment_classification_reason."
           fi
+
+          if [ "$TRIGGER_WORKFLOW_PATH" = ".github/workflows/codex-automerge.yml" ]; then
+            ci_correlation="$(openssl rand -hex 24)"
+            ci_title="CI $SOURCE_REF $ci_correlation"
+            ci_started_at="$(date -u +%s)"
+            if [ "$automatic_skip_autodeploy" = "true" ]; then
+              gh workflow run ci.yml \
+                --repo "$REPOSITORY" \
+                --ref main \
+                -f delivery_correlation="$ci_correlation" \
+                -f validation_profile=runtime-neutral-reuse \
+                -f source_pr_number="$PR_NUMBER" \
+                -f source_pr_head_sha="$PR_HEAD_SHA" \
+                -f governance_run_id="$GOVERNANCE_RUN_ID"
+            else
+              gh workflow run ci.yml \
+                --repo "$REPOSITORY" \
+                --ref main \
+                -f delivery_correlation="$ci_correlation"
+            fi
+            wait_for_dispatch ci.yml "$ci_title" "$ci_started_at" "$SOURCE_REF" "CI"
+            CI_RUN_URL="$(cat "$RUNNER_TEMP/ci.yml.url")"
+            CI_RUN_ID="$(cat "$RUNNER_TEMP/ci.yml.id")"
+            CI_DELIVERY_CORRELATION="$ci_correlation"
+          fi
+
+          # CI can take long enough for main to advance. Never deploy a source
+          # that stopped being the current generation while checks were running.
+          assert_current_main
+
           if [ -n "$skip_reason" ]; then
             echo "The PR associated with $SOURCE_REF skipped environment deployment: $skip_reason."
             {

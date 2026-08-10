@@ -80,6 +80,7 @@ const policyCheckWorkflowDefinition = parseYaml(policyCheckWorkflow);
 const codeqlWorkflowDefinition = parseYaml(codeqlWorkflow);
 
 const MERGE_RELEVANT_CI_JOBS = Object.freeze([
+  'validation-profile',
   'install',
   'lint',
   'type-check',
@@ -106,13 +107,15 @@ function workflowResults(jobIds, override = {}) {
   return Object.fromEntries(jobIds.map((jobId) => [jobId, { result: override[jobId] ?? 'success', outputs: {} }]));
 }
 
-function runAggregateStep(workflow, aggregateJobId, results) {
+function runAggregateStep(workflow, aggregateJobId, results, profile = 'full') {
   const job = workflow.jobs[aggregateJobId];
   const step = job.steps.find((candidate) => typeof candidate.run === 'string');
   assert.ok(step, `${aggregateJobId} must contain an executable aggregate step`);
   const expression = '${{ toJson(needs) }}';
   assert.equal(step.run.split(expression).length - 1, 1, `${aggregateJobId} must evaluate needs exactly once`);
-  const script = step.run.replace(expression, JSON.stringify(results));
+  const script = step.run
+    .replace(expression, JSON.stringify(results))
+    .replace('${{ needs.validation-profile.outputs.profile }}', profile);
   return spawnSync('bash', ['-c', script], { encoding: 'utf8' });
 }
 
@@ -229,6 +232,7 @@ test('protected program evidence is part of the stable autonomous governance agg
 
 test('stable aggregate jobs cover every merge-relevant internal validation and fail closed', () => {
   const ciComplete = ciWorkflowDefinition.jobs['ci-complete'];
+  const validationProfile = ciWorkflowDefinition.jobs['validation-profile'];
   const releaseArtifacts = ciWorkflowDefinition.jobs['release-artifacts'];
   assert.equal(ciComplete.name, 'CI complete');
   assert.equal(ciComplete.if, 'always()');
@@ -246,8 +250,39 @@ test('stable aggregate jobs cover every merge-relevant internal validation and f
     /^npm ci --ignore-scripts$/,
   );
   assert.ok(normalizedNeeds(ciComplete).includes('release-artifacts'));
+  assert.equal(validationProfile.name, 'validation profile');
+  assert.match(ciWorkflow, /node scripts\/resolve-main-ci-profile\.mjs/);
+  assert.deepEqual(ciWorkflowDefinition.permissions, { contents: 'read' });
+  assert.deepEqual(validationProfile.permissions, {
+    actions: 'read',
+    contents: 'read',
+    'pull-requests': 'read',
+  });
   assert.equal(
     runAggregateStep(ciWorkflowDefinition, 'ci-complete', workflowResults(MERGE_RELEVANT_CI_JOBS)).status,
+    0,
+  );
+  const reusedResults = workflowResults(MERGE_RELEVANT_CI_JOBS, {
+    ...Object.fromEntries(MERGE_RELEVANT_CI_JOBS.map((jobId) => [jobId, 'skipped'])),
+    'validation-profile': 'success',
+  });
+  assert.equal(runAggregateStep(ciWorkflowDefinition, 'ci-complete', reusedResults, 'runtime-neutral-reuse').status, 0);
+  assert.notEqual(
+    runAggregateStep(
+      ciWorkflowDefinition,
+      'ci-complete',
+      { ...reusedResults, lint: { result: 'success', outputs: {} } },
+      'runtime-neutral-reuse',
+    ).status,
+    0,
+  );
+  assert.notEqual(
+    runAggregateStep(
+      ciWorkflowDefinition,
+      'ci-complete',
+      { ...reusedResults, 'validation-profile': { result: 'failure', outputs: {} } },
+      'runtime-neutral-reuse',
+    ).status,
     0,
   );
   assert.notEqual(
@@ -369,6 +404,10 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
   assert.match(mainDeliveryWorkflow, /\[ "\$pr_head" != "\$verified_head" \]/);
   assert.doesNotMatch(mainDeliveryWorkflow, /autonomous-review-|autonomous-review\.json|reviewedHeadSha/);
   assert.match(mainDeliveryWorkflow, /-f delivery_correlation="\$ci_correlation"/);
+  assert.match(mainDeliveryWorkflow, /-f validation_profile=runtime-neutral-reuse/);
+  assert.match(mainDeliveryWorkflow, /-f source_pr_number="\$PR_NUMBER"/);
+  assert.match(mainDeliveryWorkflow, /-f source_pr_head_sha="\$PR_HEAD_SHA"/);
+  assert.match(mainDeliveryWorkflow, /-f governance_run_id="\$GOVERNANCE_RUN_ID"/);
   assert.match(mainDeliveryWorkflow, /wait_for_dispatch ci\.yml "\$ci_title" "\$ci_started_at" "\$SOURCE_REF" "CI"/);
   assert.match(mainDeliveryWorkflow, /Dispatch correlation matched more than one/);
   assert.match(mainDeliveryWorkflow, /\.path == \$path/);
@@ -394,8 +433,8 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
   assert.match(mainDeliveryWorkflow, /Pinned production run did not emit matching successful runtime-truth evidence/);
   assert.equal(mainDeliveryWorkflow.match(/^\s+assert_current_main$/gm)?.length, 4);
   assert.ok(
-    mainDeliveryWorkflow.indexOf('wait_for_dispatch ci.yml') <
-      mainDeliveryWorkflow.indexOf('node scripts/classify-deployment-impact.mjs'),
+    mainDeliveryWorkflow.indexOf('node scripts/classify-deployment-impact.mjs') <
+      mainDeliveryWorkflow.indexOf('wait_for_dispatch ci.yml'),
   );
   assert.ok(
     mainDeliveryWorkflow.indexOf('node scripts/classify-deployment-impact.mjs') <
