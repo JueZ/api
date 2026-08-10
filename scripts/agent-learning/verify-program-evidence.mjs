@@ -325,7 +325,10 @@ export function phaseEvidenceNeedsLiveVerification({
   const previous = programPhaseRecord(previousProgramText, phase);
   const current = programPhaseRecord(currentProgramText, phase);
   if (!changedPaths.includes(PROGRAM_PATH)) return false;
-  return previous.line !== current.line;
+  const previousCells = markdownTableCells(previous.line);
+  const currentCells = markdownTableCells(current.line);
+  if (!previousCells || !currentCells) return true;
+  return JSON.stringify(previousCells) !== JSON.stringify(currentCells);
 }
 
 function publicPullRequestUrl(value, number) {
