@@ -339,10 +339,8 @@ test('write-enabled scheduled reconciliation creates once, links once, and close
         state: 'MERGED',
         merged: true,
         statusCheckRollup: [
-          { name: 'CI complete', conclusion: 'SUCCESS' },
-          { name: 'Policy complete', conclusion: 'SUCCESS' },
-          { name: 'CodeQL complete', conclusion: 'SUCCESS' },
-          { name: 'Autonomous review complete', conclusion: 'SUCCESS' },
+          { name: 'PR Gate', conclusion: 'SUCCESS' },
+          { name: 'Security Gate', conclusion: 'SUCCESS' },
         ],
       });
     }

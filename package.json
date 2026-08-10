@@ -9,7 +9,7 @@
     "type-check": "tsc -p apps/api/tsconfig.json --noEmit && ng build --configuration development --no-progress",
     "test": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs apps/web/test/*.test.mjs scripts/test/*.test.mjs'",
     "test:api": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs'",
-    "test:gates": "node --test scripts/test/path-classifier.test.mjs scripts/test/gate-aggregate.test.mjs",
+    "test:gates": "node --test scripts/test/path-classifier.test.mjs scripts/test/gate-aggregate.test.mjs scripts/test/native-automerge-policy.test.mjs",
     "build": "npm run build:web && npm run build:api",
     "build:web": "ng build --configuration production --no-progress",
     "build:api": "tsc -p apps/api/tsconfig.json",

@@ -959,28 +959,28 @@ test('required checks pass only for exact head and expected GitHub app', () => {
   ];
   assert.ok(
     evaluateRequiredChecks(duplicateWrongApp, headSha, policy.requiredChecks).failures.some(
-      (failure) => failure.check === 'CI complete' && failure.reason === 'wrong_app',
+      (failure) => failure.check === 'PR Gate' && failure.reason === 'wrong_app',
     ),
   );
 
   const staleWrongHead = [...successfulChecks(), { ...successfulChecks()[0], id: 101, head_sha: 'b'.repeat(40) }];
   assert.ok(
     evaluateRequiredChecks(staleWrongHead, headSha, policy.requiredChecks).failures.some(
-      (failure) => failure.check === 'CI complete' && failure.reason === 'wrong_head_sha',
+      (failure) => failure.check === 'PR Gate' && failure.reason === 'wrong_head_sha',
     ),
   );
 });
 
 test('required checks treat missing, pending, and failed aggregate checks as non-passing', () => {
-  const missing = successfulChecks().filter((check) => check.name !== 'CI complete');
+  const missing = successfulChecks().filter((check) => check.name !== 'PR Gate');
   assert.deepEqual(evaluateRequiredChecks(missing, headSha, policy.requiredChecks).pending, [
-    { check: 'CI complete', reason: 'missing' },
+    { check: 'PR Gate', reason: 'missing' },
   ]);
 
   const pending = successfulChecks();
   pending[0] = { ...pending[0], status: 'in_progress', conclusion: null };
   assert.deepEqual(evaluateRequiredChecks(pending, headSha, policy.requiredChecks).pending, [
-    { check: 'CI complete', reason: 'in_progress' },
+    { check: 'PR Gate', reason: 'in_progress' },
   ]);
 
   const failed = successfulChecks();
@@ -1173,12 +1173,12 @@ test('governance preflight excludes its own aggregate and requires every free ex
   const missing = {
     ...github,
     async getCheckRuns() {
-      return successfulFreeChecks().filter((check) => check.name !== 'CodeQL complete');
+      return successfulFreeChecks().filter((check) => check.name !== 'Security Gate');
     },
   };
   await assert.rejects(
     runRequiredCheckPreflight({ prNumber: 42, headSha, waitSeconds: 0, pollSeconds: 0 }, policy, missing),
-    /CodeQL complete: missing/,
+    /Security Gate: missing/,
   );
 });
 

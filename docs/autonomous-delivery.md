@@ -2,44 +2,17 @@
 
 The canonical policy is `.github/autonomous-policy.yml`. This document explains the local design; it does not prove live repository settings.
 
-## Pull-request gate
+## Pull-request gate and merge
 
-`Codex Auto-Merge` uses `pull_request_target` only to run controller code checked out from protected `main`. It never checks out or executes PR code with write permissions.
+One dependency-free classifier maps the exact protected-base diff to documentation, backend, frontend, contracts/integrations, infrastructure/delivery, and privileged profiles. Mixed changes run the union; unknown or malformed inputs fail closed to the privileged profile.
 
-For each candidate it:
+`PR Gate` and `Security Gate` are the only branch-required contexts. Each aggregate has explicit internal dependencies and runs with `if: always()`. A non-applicable internal job must be skipped and is accepted only when the classifier output authorizes that exact skip. `PR Gate` owns formatting, policy, affected application tests/builds, contract drift, Bicep, and workflow/shell validation. `Security Gate` always runs Gitleaks and selects dependency audit, CodeQL, and Trivy by path, with scheduled complete coverage.
 
-1. records the exact PR head SHA and verifies branch/label eligibility, fork denial, blocking labels, and current mergeability;
-2. waits for the free exact-head `CI complete`, `Policy complete`, and `CodeQL complete` aggregates from the expected GitHub Actions App;
-3. verifies every trusted workflow's complete immutable hash, explicit permission map, effective job permissions, secret allowlist, built-in GitHub token use, and exclusive check-writer jobs;
-4. re-reads the exact head after changed-file collection and records deterministic high-risk classification as sanitized governance evidence;
-5. authenticates candidate, controller, workflow-run, and protected-main identities and performs applicable Phase 2 program-evidence verification without executing candidate code or exposing credentials;
-6. publishes the stable legacy context `Autonomous review complete` only when deterministic governance and program-evidence verification both pass;
-7. rechecks open/current/non-behind PR state and the complete latest exact-head check-run and legacy-status rollup; aggregate `unstable` is accepted only when its sole pending cause is the current trusted `merge exact PR head` job;
-8. squash-merges only the verified exact head.
-
-No independent model reviewer runs. The controller does not receive `OPENAI_API_KEY`, count provider tokens, create paid-call claims, build model capsules, or call the Responses API. High-risk classification remains a deterministic routing and reporting control; executable tests, scanners, fixed-path policy, workflow integrity, exact-head provenance, program-evidence verification, and complete-rollup enforcement remain mandatory. Missing, malformed, stale, or non-passing evidence makes governance fail closed.
-
-Repository workflow defaults are kept read-only with Actions unable to approve pull requests. Every workflow declares an explicit top-level permission map, job overrides are evaluated with GitHub inheritance semantics, and only the eligibility resolver and aggregate publisher may receive `checks: write`; deterministic governance uses `checks: read`. All workflow secret expressions use an exact allowlist; bracket/dynamic access and `secrets: inherit` are denied. `OPENAI_API_KEY` is additionally restricted to the bounded repairable-error runtime deployment workflows. GitHub App/PAT minting, shell token minting, non-built-in GitHub-auth tokens, and raw check-run access outside the controller are rejected.
+Eligible same-repository `codex/...` PRs use GitHub-native exact-head squash auto-merge. Codex records the current head and runs `gh pr merge --auto --squash --delete-branch --match-head-commit <sha>`. Branch protection—not a polling controller or arbitrary status rollup—decides merge eligibility. Optional and advisory checks do not silently become required.
 
 ## Required checks
 
-Mandatory internal jobs remain:
-
-- install, lint, type-check, unit tests, API tests;
-- Angular and Azure Functions builds;
-- OpenAPI and Bicep validation;
-- actionlint/ShellCheck;
-- architecture, repository-skill, versioned-learning, generated-index, generated-doc, and agent-eval checks;
-- Trivy, Gitleaks, dependency audit, npm lock policy;
-- CodeQL JavaScript/TypeScript and Actions;
-- immutable release artifacts;
-- cost and guardrail policy.
-
-Protected `main` intentionally requires only four stable aggregate contexts from GitHub Actions: `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete`. Full PR `CI complete` and `Policy complete` runs use explicit `needs` lists plus `if: always()` and reject every non-success dependency result. `CodeQL complete` waits for the complete analysis matrix and likewise rejects every non-success result. `Autonomous review complete` is a stable legacy name and succeeds only when exact-head deterministic governance—including applicable protected program-evidence verification—succeeds. The PR-inapplicable main-only release attestation remains required when applicable but is not included in the PR `CI complete` dependency set.
-
-Aggregate protection reduces configuration drift; it does not reduce validation. Immediately before merge, the controller still evaluates every latest exact-head check run and legacy commit status, including contexts outside the four configured aggregates. Any unrelated pending or failing result blocks merge. GitHub aggregate `unstable` is explainable only by the one in-progress `merge exact PR head` job bound to the current trusted controller run.
-
-The live branch ruleset must require exactly the aggregate names in `.github/autonomous-policy.yml`, disallow direct/force pushes and `main` deletion, require up-to-date PRs, and prevent admin bypass. CODEOWNERS records accountability but is not a routine approval gate.
+Protected `main` requires exactly the aggregate names in `.github/autonomous-policy.yml`, disallows direct and force pushes and branch deletion, requires an up-to-date PR, preserves linear history and conversation resolution, and prevents admin bypass. CODEOWNERS records accountability but is not a routine approval gate.
 
 ## Versioned agent learning
 
@@ -59,7 +32,7 @@ Required CI runs only task validation, trusted scorer unit tests, and determinis
 
 ## Build and delivery
 
-The steady-state operating model is always-on autonomous delivery. `Codex Auto-Merge`, `Codex Main Delivery`, `Deploy Test`, and `Promote Production` remain enabled so an eligible Codex PR can proceed through exact-head review, protected merge, exact-main CI, test acceptance, and production promotion without a human acting as the routine watcher. Codex monitors every terminal gate, applies only scoped repairs within the repository repair limit, and reports any concrete blocker. Disabling one of these workflows is an exceptional fail-closed incident or maintenance action; it must be time-bounded, documented in project memory, and restored after the blocker is resolved. Rollback remains a separate explicitly requested operational action.
+The operating model is always-on autonomous delivery. GitHub-native auto-merge owns protected merge. During the controlled delivery-v2 cutover, the existing Main Delivery, Deploy Test, and Promote Production workflows remain enabled until the push-based replacement has passed complete test verification and cannot duplicate a promotion. Codex monitors every terminal gate, applies scoped repairs within the repository repair bound, and reports any concrete blocker.
 
 For deployment-impacting work, main CI builds the Function, frontend source bundle, and CycloneDX SBOM once. Release construction begins after the standalone dependency-install validation and runs in parallel with the remaining lint, test, build, architecture, policy-independent security, and contract jobs. `CI complete` waits for release construction and every other merge-relevant job and rejects every non-success result; downstream delivery accepts artifacts only from the exact successful main CI run. The release manifest contains the full source SHA and SHA-256 digests; main artifacts receive build provenance attestations. Each environment then renders its approved runtime frontend configuration before deployment, updates the manifest and checksums with the rendered archive digest, and preserves the exact accepted production archive for rollback.
 

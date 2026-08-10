@@ -13,10 +13,8 @@ export { matchesPolicyGlob, pathsMatchingPatterns, RUNTIME_NEUTRAL_DEPLOYMENT_PA
 
 export const DEFAULT_POLICY_PATH = fileURLToPath(new URL('../../.github/autonomous-policy.yml', import.meta.url));
 export const STABLE_REQUIRED_CHECKS = Object.freeze([
-  Object.freeze({ name: 'CI complete', appSlug: 'github-actions' }),
-  Object.freeze({ name: 'Policy complete', appSlug: 'github-actions' }),
-  Object.freeze({ name: 'CodeQL complete', appSlug: 'github-actions' }),
-  Object.freeze({ name: 'Autonomous review complete', appSlug: 'github-actions' }),
+  Object.freeze({ name: 'PR Gate', appSlug: 'github-actions' }),
+  Object.freeze({ name: 'Security Gate', appSlug: 'github-actions' }),
 ]);
 export const AGENT_LEARNING_ROLLOUT_TIMESTAMP = '2026-08-09T20:24:47Z';
 const REQUIRED_EXECUTABLE_HIGH_RISK_PATTERNS = Object.freeze([
@@ -132,9 +130,17 @@ export function validateAutonomousPolicy(policy) {
     errors.push(`agentLearning.rolloutTimestamp must be ${AGENT_LEARNING_ROLLOUT_TIMESTAMP}`);
   }
   if (policy.merge?.exactHeadSha !== true) errors.push('merge.exactHeadSha must be true');
+  if (policy.merge?.nativeAutoMerge !== true) errors.push('merge.nativeAutoMerge must be true');
   if (policy.merge?.requireUpToDate !== true) errors.push('merge.requireUpToDate must be true');
   if (policy.merge?.allowAdminBypass !== false) errors.push('merge.allowAdminBypass must be false');
   if (policy.merge?.allowForks !== false) errors.push('merge.allowForks must be false');
+  if (policy.repair?.maxCommitsPerPullRequest !== 3) {
+    errors.push('repair.maxCommitsPerPullRequest must be 3');
+  }
+  if (policy.repair?.repeatedFingerprintStop !== 2) {
+    errors.push('repair.repeatedFingerprintStop must be 2');
+  }
+  if (policy.repair?.externalReruns !== 1) errors.push('repair.externalReruns must be 1');
   if (policy.deployment?.productionEnabledByDefault !== false) {
     errors.push('deployment.productionEnabledByDefault must be false');
   }
