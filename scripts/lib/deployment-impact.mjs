@@ -3,9 +3,7 @@ export const RUNTIME_NEUTRAL_DEPLOYMENT_PATHS = Object.freeze([
   'docs/**',
   '.github/**/*.md',
   '.agents/skills/**/*.md',
-  'evals/agent-tasks/**',
   'scripts/agent-learning/**',
-  'scripts/agent-task-evals/**',
   'scripts/test/agent-learning-*.test.mjs',
 ]);
 

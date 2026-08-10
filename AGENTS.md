@@ -54,5 +54,3 @@ Production uses GitHub Actions with Azure OIDC and the repository delivery path.
 Use `autonomous-pr-delivery` for repository changes, `github-cli-devops` for live GitHub/configuration work, `azure-cli-devops` for Azure/Bicep work, `azure-observability-diagnostics` for runtime failures, `production-rollback` only for an authorized rollback, `project-memory-maintainer` for durable operational changes, and `closed-loop-learning` for significant or recurring failures.
 
 Project memory stores current durable facts, decisions, and active blockers—not workflow chronology, run IDs, copied logs, acceptance ledgers, or secrets. Query live GitHub, Azure, and runtime state whenever a claim depends on current state.
-
-Read `docs/agent-learning/program.md` only for historical agent-learning program or evidence maintenance; normal feature tasks do not load it.

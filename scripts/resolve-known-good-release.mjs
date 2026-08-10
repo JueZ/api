@@ -8,7 +8,6 @@ const execFileAsync = promisify(execFile);
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const DIRECT_WORKFLOW_PATH = '.github/workflows/delivery-v2.yml';
-const LEGACY_WORKFLOW_PATH = '.github/workflows/promote-production.yml';
 
 export function classifyProductionFailureState({ failedSourceRef, previousSourceRef, observedSourceRef }) {
   for (const [name, value] of Object.entries({ failedSourceRef, previousSourceRef, observedSourceRef })) {
@@ -62,7 +61,7 @@ export function selectKnownGoodRelease({ artifacts, runs, repository, sourceRef,
   for (const group of groups.values()) {
     if (group.releaseArtifacts.length !== 1 || group.ledgerArtifacts.length !== 1) continue;
     const run = runsById.get(group.runId);
-    if (!isTrustedSuccessfulRun(run, repository, group.sourceRef, group.correlation)) continue;
+    if (!isTrustedSuccessfulRun(run, repository, group.sourceRef)) continue;
     candidates.push({
       sourceRef: group.sourceRef,
       correlation: group.correlation,
@@ -115,7 +114,7 @@ function parseArtifactIdentity(artifact) {
   };
 }
 
-function isTrustedSuccessfulRun(run, repository, sourceRef, correlation) {
+function isTrustedSuccessfulRun(run, repository, sourceRef) {
   if (
     run === null ||
     typeof run !== 'object' ||
@@ -131,11 +130,7 @@ function isTrustedSuccessfulRun(run, repository, sourceRef, correlation) {
   if (run.path === DIRECT_WORKFLOW_PATH) {
     return ['push', 'workflow_dispatch'].includes(run.event) && run.display_title === `Delivery v2 ${sourceRef}`;
   }
-  return (
-    run.path === LEGACY_WORKFLOW_PATH &&
-    ['repository_dispatch', 'workflow_dispatch'].includes(run.event) &&
-    run.display_title === `Promote Production ${sourceRef} ${correlation}`
-  );
+  return false;
 }
 
 async function resolveFromGitHub({ artifacts, repository, sourceRef, currentRunId, run = execFileAsync }) {

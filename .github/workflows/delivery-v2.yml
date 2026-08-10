@@ -238,15 +238,13 @@ jobs:
       environmentName: test
       azureResourceGroup: rg-api-test
       githubEnvironment: test
-      deliveryMode: direct
       deployFrontend: true
       deployFunctions: true
       sourceRef: ${{ github.sha }}
-      controllerRef: ${{ github.sha }}
-      controllerWorkflowSha: ${{ github.workflow_sha }}
+      expectedFunctionDigest: ${{ needs.build.outputs.function_digest }}
+      expectedFrontendDigest: ${{ needs.build.outputs.frontend_digest }}
+      expectedSbomDigest: ${{ needs.build.outputs.sbom_digest }}
       deliveryCorrelation: test-${{ github.run_id }}-${{ github.run_attempt }}
-      ciRunId: ${{ format('{0}', github.run_id) }}
-      ciDeliveryCorrelation: build-${{ github.run_id }}-${{ github.run_attempt }}
     secrets:
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -317,7 +315,7 @@ jobs:
   promote-production:
     name: promote and verify production
     if: ${{ always() && needs.current-main.result == 'success' && needs.current-main.outputs.promote == 'true' }}
-    needs: [classify, deploy-test, current-main]
+    needs: [classify, build, deploy-test, current-main]
     concurrency:
       group: production-deployment
       cancel-in-progress: false
@@ -330,19 +328,15 @@ jobs:
       environmentName: prod
       azureResourceGroup: rg-api-prod
       githubEnvironment: production
-      deliveryMode: direct
       deployFrontend: true
       deployFunctions: true
       sourceRef: ${{ github.sha }}
-      controllerRef: ${{ github.sha }}
-      controllerWorkflowSha: ${{ github.workflow_sha }}
       currentMainConfirmedRef: ${{ needs.current-main.outputs.confirmed_sha }}
       updateProductionVariables: true
+      expectedFunctionDigest: ${{ needs.build.outputs.function_digest }}
+      expectedFrontendDigest: ${{ needs.build.outputs.frontend_digest }}
+      expectedSbomDigest: ${{ needs.build.outputs.sbom_digest }}
       deliveryCorrelation: prod-${{ github.run_id }}-${{ github.run_attempt }}
-      testDeliveryCorrelation: test-${{ github.run_id }}-${{ github.run_attempt }}
-      testDeliveryRunId: ${{ format('{0}', github.run_id) }}
-      ciRunId: ${{ format('{0}', github.run_id) }}
-      ciDeliveryCorrelation: build-${{ github.run_id }}-${{ github.run_attempt }}
     secrets:
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -418,12 +412,9 @@ jobs:
       environmentName: prod
       azureResourceGroup: rg-api-prod
       githubEnvironment: production
-      deliveryMode: direct
       deployFrontend: true
       deployFunctions: true
       sourceRef: ${{ needs.resolve-rollback.outputs.rollback_source_ref }}
-      controllerRef: ${{ github.sha }}
-      controllerWorkflowSha: ${{ github.workflow_sha }}
       currentMainConfirmedRef: ${{ needs.current-main.outputs.confirmed_sha }}
       allowRollback: true
       deliveryCorrelation: rollback-${{ github.run_id }}-${{ github.run_attempt }}

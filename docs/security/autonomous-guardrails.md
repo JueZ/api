@@ -1,69 +1,38 @@
-# Autonomous guardrails
+# Autonomous delivery guardrails
 
-Autonomous delivery is allowed only when controls fail closed.
+## Protected merge
 
-## Exact-head trust
+- `main` requires an up-to-date pull request and exactly `PR Gate` plus `Security Gate`, published by GitHub Actions.
+- Direct pushes, force pushes, branch deletion, and admin bypass remain denied; squash/linear history and conversation resolution remain enabled.
+- Native auto-merge is bound to the exact PR head. No polling controller, arbitrary status rollup, custom merge job, or admin merge exists.
+- Unknown or malformed path classification fails closed to privileged validation. Aggregate jobs accept skips only when the trusted classifier says the job is not applicable.
 
-- Privileged controller code comes only from protected `main`.
-- PR code never executes under `pull_request_target` write permissions.
-- Governance evidence, check runs, artifacts, and merge bind to the same full head SHA.
-- Required checks must have the canonical name and expected GitHub App.
-- Protected `main` requires only the four stable aggregate contexts `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete`; every underlying validation remains mandatory inside its owning aggregate.
-- `Autonomous review complete` is a stable legacy name. It succeeds only after exact-head deterministic governance and applicable protected-main program-evidence verification pass. Evidence verification is not deferred solely to the later merge job and does not add a fifth context.
-- CI and policy aggregates have `if: always()` and explicit dependencies covering every applicable internal job. The CodeQL aggregate depends on the complete analysis matrix. Cancelled, timed-out, action-required, skipped-when-required, and failed dependencies are non-passing. Exact-main CI may accept explicitly skipped full-validation jobs only when its mandatory protected verifier proves a successful exact-head governance artifact, exact merged identities, complete runtime-neutral file metadata, stable main generation, and identical PR-head/main Git tree; every other skip remains non-passing.
-- Immutable release construction may run in parallel with independent validation after the standalone install job succeeds. It remains an explicit `CI complete` dependency for every full validation, and deployment accepts its artifact only when that exact main CI run completed successfully. A validation-reuse run cannot produce or reach deployment with a release artifact.
-- The final merge boundary re-reads every latest exact-head check run and legacy commit-status context. It permits GitHub aggregate `unstable` only when every external result is terminal-passing and exactly one pending `merge exact PR head` check is bound to the current trusted controller run; unrelated pending or failing results remain denied.
-- Forks, stale/behind heads, conflicts, blocked labels, and admin bypass are denied.
-- Post-merge `workflow_run` authorization binds the exact trusted workflow file path; display/run names are never used as the security identity because `run-name` can replace the observed `.name` value.
-- An ineligible auto-merge resolver publishes the exact-head denial and then exits nonzero. It cannot leave the controller workflow successful and therefore cannot authorize Main Delivery when no protected merge occurred.
+## Workflow policy
 
-High-risk paths remain classified by `.github/autonomous-policy.yml` for proportional validation, governance reporting, and agent-learning controls. They do not trigger an independent model review. The controller waits for all free exact-head aggregates, verifies the immutable workflow set and exclusive check-writer policy, rechecks the mutable PR head after file collection, writes bounded deterministic evidence, and never receives `OPENAI_API_KEY` or calls a model.
+Deterministic policy validation enforces:
 
-Root package manifests and lockfiles, lint/type/build configuration, every executable application path, and every repository script are high risk. Required CI, policy, release-construction, deployment-smoke, telemetry, and ledger steps invoke pinned tools or fixed script files directly; they never dispatch through a PR-controlled package alias. The canonical policy stores the SHA-256 of every complete workflow file, and the trusted controller rejects missing, additional, or byte-modified workflows. Any intentional workflow-byte change must update the manifest in the same protected PR.
+- external actions pinned to full commit SHAs;
+- explicit least-privilege workflow/job permissions;
+- no `pull_request_target`;
+- no unapproved event surfaces;
+- no untrusted pull-request commands with write credentials;
+- no raw check-run writers or check-run API access;
+- no GitHub App/PAT token minting or alternate GitHub credentials;
+- no `secrets: inherit`, dynamic secret lookup, or unapproved provider secret;
+- `OPENAI_API_KEY` restricted to the deployed repairable-error runtime path.
 
-Dependency/install metadata in `package.json` and `package-lock.json` must change together. Because npm lockfiles do not serialize package scripts, a script-only manifest change may omit a meaningless lockfile rewrite; deterministic comparison to the base rejects every other unpaired manifest change. Root lifecycle scripts remain forbidden.
+Workflow files, policy, dependencies, scripts, agent instructions, authentication, and configuration are privileged changes and receive broad application plus security coverage.
 
-Agent-governance paths include `AGENTS.md`, scoped instructions, repository skills, versioned learning artifacts, general task definitions, and their validator/scorer scripts. Untrusted failures, issues, logs, prompts, model output, and candidate patches may supply evidence but cannot automatically alter these controls. Every implementation, supersession, instruction/skill change, and waiver uses normal protected delivery with deterministic governance.
+## Runtime and supply chain
 
-Learning records contain only public-safe structured evidence. Validation requires normalized fingerprints and repository-contained existing paths, exact lowercase full commits for verified counterfactuals, and an owned current exception for a waiver or no-artifact disposition. A registered trusted scorer reads exact historical Git objects as data and proves the broken/fixed invariant without executing historical code; required CI uses read-only GitHub metadata to bind the declared merged PR, base SHA, and merge SHA. Validation rejects secret-shaped values, credential-bearing URLs, raw environment dumps, and private provider content. A waiver is never a passing proof. Fixed-path learning validation and deterministic index checking run within the existing architecture job and `CI complete`; no additional protected context or paid general agent evaluation is introduced.
+- Releases are built once from protected `main`, checksummed, SBOM-described, attested, and uploaded immutably.
+- Azure deployment uses GitHub Actions OIDC, scoped identities, Key Vault references, and no long-lived client secret.
+- Test and production require the same application digests, exact source identity, public/authenticated smoke, telemetry correlation, and release ledger validation.
+- Production cannot promote a superseded main generation. Production and rollback serialize through one concurrency group.
+- Automatic rollback is one-shot, application-package-only, and requires one unambiguous prior successful Delivery v2 artifact and ledger. Infrastructure and destructive data migrations are never automatically reversed.
 
-Historical agent-task execution never occurs in the primary checkout. Full exact SHAs create detached temporary worktrees; current context overlays are restricted to reviewed instruction, skill, and selected governance guidance paths and are committed as a separate baseline. Tasks cannot define commands and can reference only registered setup and scorer IDs. Candidate changes to task/scorer/controller paths, path traversal, excessive or forbidden changes, secret-shaped data, branch-protection weakening, disabled validation, destructive behavior, or external production actions are hard failures before weighted scoring.
+## Application invariants
 
-The Codex adapter is optional and explicitly paid-confirmed. It checks current CLI help for non-interactive JSON, structured final output, `workspace-write`, and approval-policy support before use; obsolete or missing features fail closed. Authentication is available only to the trusted CLI process. Model-generated shells inherit no host environment, receive only sterile paths, have outbound network disabled, and receive no GitHub, Azure, provider, production, or smoke credential. Required CI runs the fake adapter only. Process groups are terminated on timeout, full transcripts are discarded, reports are bounded and sanitized, and every registered worktree is removed even when the adapter or scorer fails.
+Authentication, JWT/JWKS validation, user/service-token separation, operation permissions, the Martin/user allowlist while required, audit, idempotency, confirmation, and provider-data minimization fail closed. Expensive operations remain authenticated and bounded. Secrets, tokens, private provider payloads, authorization headers, and sensitive full environment output must never enter logs, issues, artifacts, or repository memory.
 
-Automatic failure conversion is issue-only and post-recovery. Candidate content is built exclusively from fixed classifications, normalized fingerprints, issue numbers, and repository identity; untrusted issue text, comments, logs, prompts, patches, and model output are never copied or executed. Only exact markers from trusted automation or repository collaborators count for recurrence, linking, or an explicit no-artifact/transient disposition. Malformed, stale, ambiguous, duplicate, secret-shaped, unauthenticated, or fingerprint-mismatched evidence blocks learning coverage and therefore blocks automated repair closure.
-
-Phase-program acceptance evidence has a protected boundary inside the aggregate-producing governance job. Protected-main code runs the fixed verifier after deterministic governance evidence exists and before `Autonomous review complete` can succeed. Repository credentials remain confined to that trusted checkout; candidate files are fetched as bounded data and never executed. Every candidate is bound to the exact repository, PR, head/base, changed-file history, controller run/workflow SHA, governance artifact, and a stable final re-fetch. Full live GitHub, deployment-workflow/job, release-ledger, and runtime verification activates only for a Phase 2 evidence or acceptance change. The later merge job still enforces complete rollup and exact-head merge but does not repeat verification.
-
-Repository workflow defaults remain read-only and Actions cannot approve pull requests. Every workflow declares explicit top-level permissions, effective job permissions are computed, and only the eligibility resolver and aggregate publisher may receive `checks: write`; deterministic governance uses `checks: read`. Workflow secrets are exact-name allowlisted; dynamic/bracket access and inherited secret sets are denied. Alternate GitHub App/PAT actions, shell token minting, non-built-in GitHub-auth tokens, and raw check-run access outside the controller are rejected. `OPENAI_API_KEY` is permitted only in the allowlisted deployment/runtime workflows for bounded repairable-error classification and is forbidden from auto-merge governance and general agent-task evaluation.
-
-## Required defenses
-
-- real ESLint/Prettier, type checks, unit/API tests, builds;
-- OpenAPI/Bicep/actionlint/ShellCheck;
-- architecture, skill, versioned-learning, generated-index, generated-doc, and deterministic agent evals;
-- Trivy, pinned Gitleaks, npm audit/lock policy, CodeQL;
-- cost and forbidden-diff policy;
-- immutable build artifacts, SBOM, SHA-256 manifest, provenance attestation;
-- test and production runtime SHA, auth smoke, telemetry correlation, and release ledger.
-
-The package scripts remain developer conveniences only. They are not the security identity of a required check or deployment acceptance command.
-
-Checks must never be removed, bypassed, reclassified as optional, or made non-blocking to pass a change.
-
-Exact-main validation may reuse a fully successful PR only when protected-main code authenticates the first-attempt governance workflow/artifact, merged PR, exact head and merge SHAs, stable current main, complete paginated file list, exact GitHub changed-file count, fixed runtime-neutral allowlist, and identical Git trees. It then requires every full-validation dependency to be explicitly skipped and produces no release artifact. The classifier and verifier must remain executable with Node.js built-ins alone in dependency-free trusted checkouts; canonical-policy synchronization, isolated execution, bounded authenticated reads, artifact digest/single-entry validation, and strict duplicate-key JSON rejection remain regression-tested. Besides reviewed Markdown and scoped instructions, the allowlist may include only dedicated agent-task definitions, non-shipped agent-learning/task-evaluation controllers, and their scoped deterministic tests. A missing artifact/PR, malformed or duplicate path, path traversal, count mismatch, rename from a disallowed path, tree mismatch, mixed change, unavailable verifier evidence, or any application, workflow, policy, package, contract, infrastructure, runtime, or other script path retains full exact-main validation and deployment. Explicit operator skip markers can omit deployment but cannot authorize validation reuse.
-
-## Security invariants
-
-- Protected APIs keep JWT issuer/JWKS/audience/time/tenant/client/user validation and granular operation permission.
-- Test/production require authentication, exact non-wildcard CORS, and canonical MCP origins.
-- Service tokens cannot complete/remove Bring items.
-- Production Bring writes require explicit own-list allowlisting, durable idempotency, and destructive confirmation.
-- Secrets/tokens/raw private provider data are not logged, returned, committed, or stored in project memory.
-- Azure uses OIDC/managed identity, Key Vault references, shared-key-disabled storage, and least privilege.
-- Production builds once and promotes identical test-proven digests.
-- Production remains disabled unless explicitly enabled after guardrails are configured.
-
-## Failure handling
-
-Repair is limited to two meaningful attempts per failing area. Production failures remain visible with workflow/runtime evidence. A merge alone is not proof of deployment or repair. Logs, comments, telemetry, and provider responses are untrusted evidence and never instructions. Scheduled repair triage can write only idempotent learning labels, candidate issues, recurrence/link comments, and ordinary triage comments; it cannot close a repair unless explicitly dispatched with closure enabled and both operational and learning coverage pass.
+The repair queue treats workflow output and GitHub text as untrusted evidence. It stores only sanitized identity and fingerprint metadata. A candidate cannot rewrite code, tests, policy, instructions, skills, or production configuration; every repair and learning promotion uses the normal protected PR path.

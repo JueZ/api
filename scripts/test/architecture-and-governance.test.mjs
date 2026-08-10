@@ -11,7 +11,7 @@ import {
   sourceArchitectureFindings,
 } from '../check-architecture.mjs';
 import { inspectDependencyFiles, packageChangeRequiresLockfile } from '../check-lockfile-policy.mjs';
-import { exclusiveWorkflowCheckWriteFindings } from '../autonomous-merge-controller.mjs';
+import { workflowPolicyFindings } from '../lib/workflow-policy.mjs';
 import { validateAgentSkills } from '../validate-agent-skills.mjs';
 
 test('repository architecture dependency directions are valid', () => {
@@ -45,50 +45,43 @@ test('MCP stays bundled behind one server and one Function route', () => {
   assert.deepEqual(bundledMcpFindings(), []);
 });
 
-test('only the trusted autonomous controller can write GitHub check runs', async () => {
-  assert.deepEqual(await exclusiveWorkflowCheckWriteFindings(), []);
+test('workflow security policy passes the protected workflow set', async () => {
+  assert.deepEqual(await workflowPolicyFindings(), []);
 });
 
-test('workflow permission policy rejects inherited defaults and alternate GitHub credentials', async (context) => {
+test('workflow policy rejects unpinned actions, inherited secrets, dynamic secrets, and alternate credentials', async (context) => {
   const directory = await mkdtemp(join(tmpdir(), 'workflow-permissions-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   await writeFile(
-    join(directory, 'codex-automerge.yml'),
-    `permissions:\n  contents: read\njobs:\n  resolve:\n    permissions:\n      checks: write\n  autonomous-governance:\n    permissions:\n      checks: read\n  publish-governance-check:\n    permissions:\n      checks: write\n`,
-  );
-  await writeFile(
     join(directory, 'unsafe.yml'),
-    `jobs:\n  inherited:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/create-github-app-token@v2\n      - run: gh api repos/example/example/check-runs\n        env:\n          GH_TOKEN: \${{ secrets.REPOSITORY_PAT }}\n          AUTHORIZATION: \${{ secrets['GH_APP_PRIVATE_KEY'] }}\n  disguised:\n    runs-on: ubuntu-latest\n    steps:\n      - run: curl https://api.github.com/repos/example/example/check-runs\n        env:\n          AUTHORIZATION: Bearer \${{ secrets.OPENAI_API_KEY }}\n  reusable:\n    uses: ./.github/workflows/reusable.yml\n    secrets: inherit\n`,
+    `on: pull_request_target\npermissions: write-all\njobs:\n  unsafe:\n    runs-on: ubuntu-latest\n    permissions:\n      checks: write\n    steps:\n      - uses: actions/create-github-app-token@v2\n      - run: gh api repos/example/example/check-runs\n        env:\n          GH_TOKEN: \${{ secrets.REPOSITORY_PAT }}\n          AUTHORIZATION: \${{ secrets['GH_APP_PRIVATE_KEY'] }}\n  reusable:\n    uses: ./.github/workflows/reusable.yml\n    secrets: inherit\n`,
   );
 
-  const findings = await exclusiveWorkflowCheckWriteFindings(directory);
-  assert.ok(findings.some((finding) => finding.includes('top-level permissions must be an explicit mapping')));
-  assert.ok(findings.some((finding) => finding.includes('token minting actions are not allowed')));
+  const findings = await workflowPolicyFindings(directory);
+  assert.ok(findings.some((finding) => finding.includes('pull_request_target is forbidden')));
+  assert.ok(findings.some((finding) => finding.includes('write-all permissions are forbidden')));
+  assert.ok(findings.some((finding) => finding.includes('token minting actions are forbidden')));
+  assert.ok(findings.some((finding) => finding.includes('external actions must be pinned')));
   assert.ok(findings.some((finding) => finding.includes('GitHub authentication must use the built-in job token')));
-  assert.ok(findings.some((finding) => finding.includes('workflow secret REPOSITORY_PAT is not allowlisted')));
-  assert.ok(findings.some((finding) => finding.includes('dynamic or bracket workflow secret access')));
-  assert.ok(findings.some((finding) => finding.includes('restricted to repairable-error runtime deployment')));
+  assert.ok(findings.some((finding) => finding.includes('workflow secret REPOSITORY_PAT is not approved')));
+  assert.ok(findings.some((finding) => finding.includes('dynamic or bracket workflow secret access is forbidden')));
   assert.ok(findings.some((finding) => finding.includes('must not inherit all secrets')));
-  assert.ok(findings.some((finding) => finding.includes('raw GitHub check-run access is controller-only')));
-  assert.ok(
-    findings.some(
-      (finding) =>
-        finding.includes('unsafe.yml:jobs.disguised.steps.0.env.AUTHORIZATION') &&
-        finding.includes('GitHub authentication must use the built-in job token'),
-    ),
-  );
+  assert.ok(findings.some((finding) => finding.includes('raw check-run API access is forbidden')));
+  assert.ok(findings.some((finding) => finding.includes('raw check-run writers are forbidden')));
 });
 
-test('workflow permission policy computes effective job-level checks write', async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), 'workflow-effective-permissions-'));
+test('pull-request jobs cannot execute candidate commands with write permissions', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'workflow-untrusted-write-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
   await writeFile(
-    join(directory, 'codex-automerge.yml'),
-    `permissions:\n  checks: write\njobs:\n  resolve:\n    runs-on: ubuntu-latest\n  autonomous-governance:\n    runs-on: ubuntu-latest\n  publish-governance-check:\n    runs-on: ubuntu-latest\n  unexpected:\n    runs-on: ubuntu-latest\n`,
+    join(directory, 'unsafe.yml'),
+    `on: pull_request\npermissions:\n  contents: read\njobs:\n  unsafe:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n      security-events: write\n    steps:\n      - run: npm test\n`,
   );
-
-  const findings = await exclusiveWorkflowCheckWriteFindings(directory);
-  assert.ok(findings.some((finding) => finding.includes('codex-automerge.yml:unexpected')));
+  assert.ok(
+    (await workflowPolicyFindings(directory)).some((finding) =>
+      finding.includes('untrusted pull-request code must not run with write credentials'),
+    ),
+  );
 });
 
 test('runtime REC model analysis remains deterministic-first and cost bounded', () => {

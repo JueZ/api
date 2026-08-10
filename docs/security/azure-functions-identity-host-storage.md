@@ -2,7 +2,7 @@
 
 ## Status
 
-Feasible and validated for this repository's current Azure Functions host. PR #246 deployed successfully through the normal test and production workflow gates for merge commit `677b1adfbe551c48525ef8b11a0722f5515d9989` on 2026-06-09.
+Active and validated for this repository's current Azure Functions host. Query live Delivery v2 and runtime state for current deployment evidence.
 
 This note evaluates migration away from an account-key-based `AzureWebJobsStorage` connection string. The target state is an identity-based Azure Functions host-storage connection using the Function App's system-assigned managed identity and storage-account-scoped Azure RBAC.
 
@@ -82,16 +82,9 @@ Migration is currently feasible because:
 4. The Function App only registers HTTP triggers, so host-only storage roles plus diagnostic table support are sufficient.
 5. Existing application code that reads WLH category blobs uses `DefaultAzureCredential` and `WLH_STORAGE_ACCOUNT_NAME`, not the `AzureWebJobsStorage` connection string.
 
-## Rollout and validation evidence
+## Validation
 
-PR #246 completed the migration through the normal protected delivery flow for merge commit `677b1adfbe551c48525ef8b11a0722f5515d9989`:
-
-1. PR CI, Policy Check, and Codex Auto-Merge passed.
-2. Post-merge `main` CI passed for `677b1adfbe551c48525ef8b11a0722f5515d9989`.
-3. `Deploy Test` run `27229870948` succeeded for `677b1adfbe551c48525ef8b11a0722f5515d9989`, including Bicep deployment, Function package deployment, runtime smoke, authenticated smoke, telemetry gate, and release-ledger upload.
-4. `Promote Production` run `27229866903` succeeded for `677b1adfbe551c48525ef8b11a0722f5515d9989`, including Bicep deployment, Function package deployment, runtime smoke, authenticated smoke, telemetry gate, and release-ledger upload.
-
-Future validation should still confirm app-setting names and managed-identity role assignments without printing values if an operator changes storage, identity, or hosting configuration manually. Run authenticated smoke against `GET /api/hello` and `POST /api/reddit/thread` whenever this storage identity path is changed again.
+Delivery v2 must confirm app-setting names and managed-identity role assignments without printing values whenever storage, identity, or hosting configuration changes. The same protected-main release must pass test and production Function deployment, runtime source/digest checks, authenticated `GET /api/hello` and `POST /api/reddit/thread` smoke, telemetry correlation, and release-ledger validation.
 
 ## Compensating controls and rollback
 

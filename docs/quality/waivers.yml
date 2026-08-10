@@ -1,5 +1,0 @@
-version: 1
-# Every entry must define: rule, exactFileOrScope, technicalReason, owner,
-# creationDate, expiryDate, compensatingControl, linkedIssue, and
-# linkedReviewEvidence. A waiver never turns a failed gate into a pass.
-waivers: []

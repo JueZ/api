@@ -23,7 +23,7 @@ function parseArgs(argv = process.argv.slice(2), env = process.env) {
     expectedSha: String(args.expectedSha || env.EXPECTED_DEPLOYED_COMMIT_SHA || '').toLowerCase(),
     expectedDeliveryCorrelation: args.deliveryCorrelation || env.EXPECTED_DELIVERY_CORRELATION || '',
     repo: args.repo || env.GITHUB_REPOSITORY || 'JueZ/api',
-    workflow: args.workflow || (environment === 'prod' ? 'promote-production.yml' : 'deploy-test.yml'),
+    workflow: args.workflow || 'delivery-v2.yml',
     runId: args.runId || '',
     includeLedger: String(args.includeLedger ?? 'false').toLowerCase() === 'true',
     artifactDir: args.artifactDir || '',
@@ -42,22 +42,23 @@ function runGh(args, spawn = spawnSync) {
 }
 
 const workflowIdentities = {
-  'deploy-test.yml': { path: '.github/workflows/deploy-test.yml', name: 'Deploy Test' },
-  'promote-production.yml': { path: '.github/workflows/promote-production.yml', name: 'Promote Production' },
+  'delivery-v2.yml': { path: '.github/workflows/delivery-v2.yml', name: 'Delivery v2' },
 };
 
 export function validateWorkflowRunMetadata(run = {}, options = {}) {
   const errors = [];
   const identity = workflowIdentities[options.workflow];
   if (!identity) return [`unsupported deployment workflow: ${options.workflow || '<missing>'}`];
-  const expectedTitle = `${identity.name} ${options.expectedSha} ${options.expectedDeliveryCorrelation}`;
+  const expectedTitle = `${identity.name} ${options.expectedSha}`;
   if (String(run.id || '') !== options.runId) errors.push('workflow run ID does not match the requested run');
   if (run.repository?.full_name !== options.repo) errors.push('workflow repository does not match the requested repo');
   if (run.path !== identity.path) errors.push(`workflow path must be ${identity.path}`);
   if (run.name !== identity.name && run.name !== expectedTitle) {
     errors.push(`workflow run name must be ${identity.name} or ${expectedTitle}`);
   }
-  if (run.event !== 'repository_dispatch') errors.push('workflow event must be repository_dispatch');
+  if (!['push', 'workflow_dispatch'].includes(run.event)) {
+    errors.push('workflow event must be push or workflow_dispatch');
+  }
   if (run.run_attempt !== 1) errors.push('deployment evidence reruns are prohibited; dispatch a new workflow run');
   if (run.conclusion !== 'success') errors.push('workflow conclusion must be success');
   if (run.head_branch !== 'main') errors.push('workflow head branch must be main');
@@ -65,7 +66,7 @@ export function validateWorkflowRunMetadata(run = {}, options = {}) {
     errors.push('workflow head SHA does not match the expected deployed commit');
   }
   if (run.display_title !== expectedTitle) {
-    errors.push('workflow display title does not match the expected source and delivery correlation');
+    errors.push('workflow display title does not match the expected protected-main source');
   }
   return errors;
 }

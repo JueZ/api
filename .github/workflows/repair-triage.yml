@@ -9,7 +9,6 @@ on:
       - Delivery v2
       - Bring Read-Only Canary
       - Private Storage Migration
-      - Prepare Production Private Storage
       - Verify Azure OIDC
     types: [completed]
   workflow_dispatch:

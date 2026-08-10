@@ -38,7 +38,7 @@ Do not download or print full successful logs merely to prove success. PR/run me
 
 Never push to `main`, bypass protection, force merge, weaken validation/auth/security/delivery, expose credentials, delete resources without explicit authorization, or claim completion when the PR/delivery is blocked. A skipped or unavailable command is not passing evidence.
 
-Do not open a follow-up bookkeeping PR solely to transcribe terminal run IDs already linked from the merged PR unless an active incident or authoritative program requires a reviewed state transition.
+Do not open a follow-up bookkeeping PR solely to transcribe terminal run IDs already linked from the merged PR.
 
 ## Final report
 

@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   classifyRisk,
   loadAutonomousPolicy,
   pathsMatchingPatterns,
   validateAutonomousPolicy,
 } from './lib/autonomous-policy.mjs';
-import { exclusiveWorkflowCheckWriteFindings } from './autonomous-merge-controller.mjs';
+import { workflowPolicyFindings } from './lib/workflow-policy.mjs';
 
 export function highRiskPaths(paths, policy = loadAutonomousPolicy()) {
-  return pathsMatchingPatterns(paths, policy.highRiskPaths);
+  return pathsMatchingPatterns(paths, policy.profiles.privileged);
 }
 
-export function forbiddenDiffFindings(diff) {
+export function forbiddenDiffFindings(diff, repositorySource = '') {
   const scanDiff = diff
     .split('\n')
     .filter((line) => !/^\+\s*(?:\{ id: |(?:added|removed|replacement):\s*\/)/.test(line))
@@ -30,36 +30,43 @@ export function forbiddenDiffFindings(diff) {
       id: 'runtime-sha-verification-removed',
       removed: /^-.*(EXPECTED_DEPLOYED_COMMIT_SHA|deployedCommitSha|DEPLOYED_COMMIT_SHA)/im,
       replacement: /^\+.*(EXPECTED_DEPLOYED_COMMIT_SHA|deployedCommitSha|DEPLOYED_COMMIT_SHA)/im,
+      preserved: /(EXPECTED_DEPLOYED_COMMIT_SHA|deployedCommitSha|DEPLOYED_COMMIT_SHA)/i,
     },
     {
       id: 'telemetry-verification-removed',
       removed: /^-.*(check-telemetry|ops:check-telemetry|telemetryCheckResult)/im,
       replacement: /^\+.*(check-telemetry|ops:check-telemetry|telemetryCheckResult)/im,
+      preserved: /(check-telemetry|ops:check-telemetry|telemetryCheckResult)/i,
     },
     {
       id: 'smoke-coverage-removed',
       removed: /^-.*(ops:smoke|smoke-runtime|\/api\/reddit\/thread|\/api\/hello)/im,
       replacement: /^\+.*(ops:smoke|smoke-runtime|\/api\/reddit\/thread|\/api\/hello)/im,
+      preserved: /(ops:smoke|smoke-runtime|\/api\/reddit\/thread|\/api\/hello)/i,
     },
     {
       id: 'authenticated-smoke-removed',
       removed: /^-.*(ops:smoke:auth|smoke-auth|AUTH_ACCESS_TOKEN)/im,
       replacement: /^\+.*(ops:smoke:auth|smoke-auth|AUTH_ACCESS_TOKEN)/im,
+      preserved: /(ops:smoke:auth|smoke-auth|AUTH_ACCESS_TOKEN)/i,
     },
     {
       id: 'release-ledger-removed',
       removed: /^-.*(write-release-ledger|release-ledger|ops:validate-release-ledger)/im,
       replacement: /^\+.*(write-release-ledger|release-ledger|ops:validate-release-ledger)/im,
+      preserved: /(write-release-ledger|release-ledger|ops:validate-release-ledger)/i,
     },
     {
       id: 'jwt-validation-removed',
       removed: /^-.*(jwtVerify|authorizeRequest|JWT|jwks)/im,
       replacement: /^\+.*(jwtVerify|authorizeRequest|JWT|jwks)/im,
+      preserved: /(jwtVerify|authorizeRequest|JWT|jwks)/i,
     },
     {
       id: 'fail-closed-removed',
       removed: /^-.*(fail closed|exit 1|REQUIRE_TELEMETRY_CHECK|REQUIRE_AUTH_SMOKE)/im,
       replacement: /^\+.*(fail closed|exit 1|REQUIRE_TELEMETRY_CHECK|REQUIRE_AUTH_SMOKE)/im,
+      preserved: /(fail closed|exit 1|REQUIRE_TELEMETRY_CHECK|REQUIRE_AUTH_SMOKE)/i,
     },
     { id: 'auth-disabled-test-prod', added: /^\+.*AUTH_ENABLED\s*[:=]\s*false/im },
     {
@@ -75,9 +82,28 @@ export function forbiddenDiffFindings(diff) {
   ];
   return rules
     .filter((rule) =>
-      rule.added ? rule.added.test(scanDiff) : rule.removed.test(scanDiff) && !rule.replacement.test(scanDiff),
+      rule.added
+        ? rule.added.test(scanDiff)
+        : rule.removed.test(scanDiff) &&
+          !rule.replacement.test(scanDiff) &&
+          !(rule.preserved && rule.preserved.test(repositorySource)),
     )
     .map((rule) => rule.id);
+}
+
+function trackedRepositorySource() {
+  return git(['ls-files', '-z'])
+    .split('\0')
+    .filter(Boolean)
+    .filter((path) => existsSync(path))
+    .flatMap((path) => {
+      try {
+        return [readFileSync(path, 'utf8')];
+      } catch {
+        return [];
+      }
+    })
+    .join('\n');
 }
 
 function git(args) {
@@ -114,9 +140,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     JSON.stringify(
       {
         policyVersion: policy.version,
-        highRisk: risk.highRisk,
-        highRiskPaths: risk.highRiskPaths,
-        riskClasses: risk.classes,
+        privileged: risk.privileged,
+        privilegedPaths: risk.privilegedPaths,
+        profiles: risk.profiles,
       },
       null,
       2,
@@ -132,7 +158,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     )
     .join('\n');
   const diff = `${trackedDiff}\n${untrackedDiff}`;
-  const findings = [...forbiddenDiffFindings(diff), ...(await exclusiveWorkflowCheckWriteFindings())];
+  const findings = [...forbiddenDiffFindings(diff, trackedRepositorySource()), ...(await workflowPolicyFindings())];
   if (findings.length > 0) {
     console.error(`Forbidden guardrail changes detected: ${findings.join(', ')}`);
     process.exit(1);

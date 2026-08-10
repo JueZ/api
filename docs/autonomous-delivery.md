@@ -1,55 +1,51 @@
 # Autonomous delivery
 
-The canonical policy is `.github/autonomous-policy.yml`. This document explains the local design; it does not prove live repository settings.
+## Pull requests
 
-## Pull-request gate and merge
+Codex starts from protected `main`, implements one coherent change on `codex/...`, runs proportional local validation, commits, pushes, opens the PR, and enables GitHub-native squash auto-merge with the exact head SHA.
 
-One dependency-free classifier maps the exact protected-base diff to documentation, backend, frontend, contracts/integrations, infrastructure/delivery, and privileged profiles. Mixed changes run the union; unknown or malformed inputs fail closed to the privileged profile.
+Protected `main` requires only:
 
-`PR Gate` and `Security Gate` are the only branch-required contexts. Each aggregate has explicit internal dependencies and runs with `if: always()`. A non-applicable internal job must be skipped and is accepted only when the classifier output authorizes that exact skip. `PR Gate` owns formatting, policy, affected application tests/builds, contract drift, Bicep, and workflow/shell validation. `Security Gate` always runs Gitleaks and selects dependency audit, CodeQL, and Trivy by path, with scheduled complete coverage.
+- `PR Gate`
+- `Security Gate`
 
-Eligible same-repository `codex/...` PRs use GitHub-native exact-head squash auto-merge. Codex records the current head and runs `gh pr merge --auto --squash --delete-branch --match-head-commit <sha>`. Branch protection—not a polling controller or arbitrary status rollup—decides merge eligibility. Optional and advisory checks do not silently become required.
+Both are native GitHub Actions job contexts. No controller creates check runs or reinterprets optional statuses.
 
-## Required checks
+`PR Gate` checks out the exact candidate, classifies the complete base/head diff, and aggregates explicit jobs with `if: always()`. Missing or malformed paths use the privileged profile. Documentation-only work runs formatting and policy only. Backend, frontend, contract, infrastructure, workflow, dependency, and learning changes run only their applicable checks; mixed changes run the union. Pull requests never build release artifacts.
 
-Protected `main` requires exactly the aggregate names in `.github/autonomous-policy.yml`, disallows direct and force pushes and branch deletion, requires an up-to-date PR, preserves linear history and conversation resolution, and prevents admin bypass. CODEOWNERS records accountability but is not a routine approval gate.
+`Security Gate` always runs Gitleaks. Dependency audit, JavaScript/TypeScript CodeQL, Actions CodeQL, and Trivy are path-selected, with scheduled complete coverage. Its aggregate rejects any unexplained skip or failed applicable job.
 
-## Versioned agent learning
+Codex monitors both gates, repairs ordinary failures on the same PR within three meaningful repair commits, and retains or re-enables exact-head auto-merge after every new head. The same fingerprint occurring twice without progress stops repair; one unchanged rerun is allowed only for a demonstrated external or flaky failure.
 
-Significant failures are disposed through versioned YAML records under `docs/agent-learning/artifacts/`. The strict validator rejects unknown schema fields, duplicate IDs, non-exact commits, repository path escape, stale or missing durable artifacts, expired exceptions, and secret-shaped or private provider content. Verified records additionally require a registered trusted scorer to inspect the exact broken/fixed Git objects without executing historical code; required CI binds live merged-PR metadata to those exact base and merge commits. The generated index is timestamp-free and checked byte-for-byte in CI.
+## Protected-main delivery
 
-Learning validation runs by fixed script paths inside `architecture and agent validation`, so it remains mandatory behind `CI complete` without adding a brittle protected context. `AGENTS.md`, repository skills, learning records, task definitions, and trusted scorer/controller paths remain high-risk agent-governance changes. Failure evidence can create a candidate, but cannot directly rewrite those controls; implementation and any waiver require a normal protected PR with deterministic governance. A waiver does not count as verified proof.
+`Delivery v2` starts directly on a push to `main`:
 
-Weekly repair triage is write-enabled only for idempotent issue metadata: it can create the six fixed learning labels, create a sanitized learning candidate after operational recovery is proven, append a new unique source to an open matching fingerprint, and link the candidate from the repair. The model-free learning status workflow also runs weekly; both retain manual dispatch for an earlier operator check. Stable markers prevent duplicate scheduled mutations, and recurrence two adds executable-prevention guidance. The immutable rollout timestamp excludes earlier repair issues; a manual historical backfill requires an exact range of at most 100 issue numbers and defaults to dry run. The workflow retains `contents: read`, `issues: write`, `pull-requests: read`, and `actions: read`, executes no source text, invokes no model, and cannot close repairs unless the existing explicit closure input is enabled. Even then, runtime/PR evidence plus a linked candidate or strict owned and dated no-artifact/transient disposition is required.
+```text
+classify protected-main diff
+  -> build immutable release once
+  -> attest and upload
+  -> deploy exact artifact to test
+  -> verify test
+  -> read current main once
+  -> promote the same digest to production
+  -> verify production
+```
 
-The protected-main governance job invokes `scripts/agent-learning/verify-program-evidence.mjs trusted-pr` after exact-head deterministic governance and before publishing `Autonomous review complete`. The candidate checkout is never executed or given a credential. For ordinary PRs the verifier authenticates repository, PR, exact head/base, changed files, controller run/workflow SHA, governance evidence, and a stable final candidate snapshot, then writes a sanitized `not_applicable` artifact. A Phase 2 evidence or acceptance change additionally requires the registered public-safe evidence file and independently verifies its complete GitHub, delivery, ledger, and runtime claims. Missing, malformed, stale, self-referential, or unavailable evidence fails the existing branch-required aggregate. The later merge job retains complete-rollup and exact-head merge defenses but no longer repeats the verifier; no fifth context or model call is introduced.
+A diff composed entirely of the small runtime-neutral allowlist finishes successfully without application build or environment mutation. Ambiguous classification deploys.
 
-## Historical agent-task evaluation
+The immutable release contains the Function package, environment-neutral frontend bundle, CycloneDX SBOM, checksums, and source manifest. Test and production verify the same Function/frontend-source/SBOM digests. Environment-specific frontend configuration is rendered after verification and recorded separately.
 
-General task evaluation is separate from PR governance and never becomes a branch-required paid check. Versioned task files bind full historical SHAs, source PRs, registered setup/scorer IDs, timeouts, path bounds, file-count limits, hard safety gates, and behavioral assertions. The controller creates a detached temporary worktree outside the primary checkout, optionally commits a reviewed current instruction/context overlay, runs one registered adapter, scores from the trusted controller checkout, writes only sanitized local JSON/Markdown, and removes the worktree on success, failure, or timeout.
+Both environments use Azure OIDC and require exact source SHA, artifact identity, public smoke, authenticated `GET /api/hello` and `POST /api/reddit/thread` smoke, telemetry correlation, and a compact release ledger. Before production, one current-main read marks an older run superseded without polling. Production promotion and rollback share one concurrency group.
 
-Required CI runs only task validation, trusted scorer unit tests, and deterministic fake-adapter integration. Real Codex execution requires explicit paid confirmation and existing ChatGPT authentication. Its model-generated commands use `workspace-write`, approval policy `never`, no outbound network, a sterile allowlisted shell environment, and no GitHub, Azure, provider, or production credential. No adapter may push, open a PR, deploy, mutate production, change its task/scorer, or archive a full transcript. Adapter absence, authentication failure, timeout, cleanup failure, or an unavailable scorer is failing evidence.
+If production verification fails after mutation, the workflow accepts only one retained previous successful Delivery v2 release whose immutable artifact and production ledger match exactly. It redeploys that release once, repeats production verification, and never rolls back infrastructure or destructive data migrations. Missing or ambiguous identity stops mutation.
 
-## Build and delivery
+## Repair and learning
 
-`Delivery v2` is loaded from protected `main` on each `push`. Its explicit `needs` graph classifies the exact protected-main diff, skips runtime-neutral changes, builds one Function package, environment-neutral frontend archive, SBOM, manifest, and checksum set, attests them, deploys the exact artifact to test, verifies test, performs one current-main read, and promotes the same application digests to production. It does not rerun PR validation or reconstruct a squash tree.
+`Repair and Learning Queue` receives terminal trusted workflow events. It inspects the exact run through GitHub metadata, normalizes a stable fingerprint, and creates or updates one sanitized issue. It copies no raw logs or secrets and emits at most one record per exact source/fingerprint.
 
-The frontend application archive remains byte-identical at the trust boundary. Each environment replaces only its runtime configuration and build-identity files, then records the rendered archive digest separately. Production must consume the same Function, source-frontend, and SBOM digests accepted in test. Azure access uses OIDC, and every environment enforces exact source SHA, public smoke, authenticated smoke, telemetry correlation, and a compact release ledger.
+The official Codex GitHub integration does not expose an unattended implementation callback. The initiating Codex task therefore remains responsible for terminal monitoring and bounded repair. Failures that outlive the task stay visible as `codex-repair` issues and are prioritized by the next Codex repository task.
 
-`DELIVERY_V2_ENABLED` guards push-based mutation during cutover. Manual `dry-run` and `test-only` modes are restricted to the exact current protected-main SHA. Once the test-only cutover succeeds, the legacy workflow-run controller is disabled before this variable is enabled, so two controllers cannot promote the same SHA.
+Significant or recurring failures add executable prevention and, when objective criteria apply, one concise versioned learning artifact in the substantive protected repair PR. Learning validation runs only when learning files or validators change; there is no historical evidence or acceptance program on the feature critical path.
 
-The single pre-production main read marks an older delivery as superseded without polling. Production promotion and automatic recovery share the `production-deployment` concurrency group. If production verification fails, live health must show either the failed SHA or the exact pre-promotion SHA. Only the former permits one package-only rollback, and only when a retained, successful production run has one matching immutable release artifact and one validated release ledger. Missing, ambiguous, or mismatched identity stops mutation and leaves the repair issue open.
-
-## Runtime evidence
-
-Deployment is successful only when applicable evidence passes:
-
-- `/health` reports the exact source/deployed SHA;
-- public and authenticated smokes pass;
-- protected auth smoke covers hello and Reddit;
-- CORS/MCP origins match canonical values;
-- telemetry observes the safe smoke correlation ID;
-- release-ledger artifact/digests validate;
-- production repair issues reflect runtime evidence, not merely a merge.
-
-Local checks, commits, PR merge, and Azure deployment are different states. Project memory must state which one is proven.
+Actions summaries contain classification, exact SHA, duration, applicable/skipped jobs, artifact digest, environment verification, superseded/rollback state, and repair count. Bounded summary artifacts use finite retention. GitHub retains operational history; the repository does not duplicate run IDs or acceptance ledgers.

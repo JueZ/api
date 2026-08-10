@@ -1,32 +1,23 @@
 <!-- project-memory-asOf: 2026-08-10 -->
 # Current state
 
-This file contains current operational facts only. Historical phase, incident, and delivery detail remains in the program record, chronological logs, linked PRs/runs, and Git history.
+## Repository delivery
 
-## Repository and protected delivery
+- Protected `main` requires exactly `PR Gate` and `Security Gate` from GitHub Actions, with strict/up-to-date PRs, admin enforcement, linear history, conversation resolution, force-push denial, and deletion denial.
+- Repository-native exact-head squash auto-merge is enabled. No custom merge controller, check-run writer, arbitrary status rollup, or required model review exists.
+- `PR Gate` and `Security Gate` use one fail-closed path classifier. Pull requests run proportional validation and never build release artifacts.
+- `Delivery v2` is the sole normal controller. A push to protected `main` classifies runtime impact, builds one immutable release when applicable, verifies test, promotes the same application digests to production, and verifies production.
+- `DELIVERY_V2_ENABLED=true` and `DEPLOY_PRODUCTION_ENABLED=true`. Production and one-shot package rollback share `production-deployment` concurrency.
+- The repair queue creates or updates one sanitized issue per exact run/fingerprint. It cannot invoke Codex or rewrite repository files.
 
-- PR #403 established the exact-main validation-reuse implementation baseline at merge `a0ad8c424d82ce5ca83b19ca3c27a68a7ee79ce1`. Its exact head `2d79b28649de8d1375f6c494f5d2f1152d6b9b28` passed CI `31382712566`, Policy Check `31382712609`, CodeQL `31382712573`, and deterministic Codex Auto-Merge `31382712540` with zero repair pushes. Query GitHub for the current protected-main SHA rather than treating this implementation baseline as live state.
-- Main Delivery `31382884043` and exact-main CI `31382916620` passed. Because PR #403 changed workflow/policy/controller code, it correctly used full exact-main validation. The explicit operator-authorized marker omitted environment deployment; Deploy Test, Promote Production, smoke, telemetry, and release-ledger/runtime evidence are not applicable to that merge.
-- Exact-main runtime-neutral validation reuse requires the trusted first-attempt governance artifact, exact merged PR/head/main identities, the authenticated complete runtime-neutral file list, stable protected main, identical PR-head/squash-merge Git trees, and dependency-free classifier/verifier entrypoints. PR #404's first live canary exposed the missing-runtime-dependency recurrence; PR #406 repaired the classifier, and PR #407 proved authenticated reuse in CI `31385386341` with every full-validation job skipped and Main Delivery `31385358087` omitting deployment through trusted classification. PR #408 then removed the verifier-only dependency installation at merge `11296aa9475c6f773670e502cd0e0e7fe4abfef4`; its exact-head aggregates, full exact-main CI `31398247529`, and Main Delivery `31398205030` passed with no environment deployment. The verifier import graph now uses Node.js built-ins and retains strict JSON/policy/evidence validation without `npm ci`. Query subsequent runtime-neutral delivery metadata rather than copying each observation into memory.
-- Live branch protection requires exactly `CI complete`, `Policy complete`, `CodeQL complete`, and `Autonomous review complete`, all from GitHub Actions, with strict/up-to-date checks, required PRs, admin enforcement, linear history, conversation resolution, force-push denial, and deletion denial preserved.
-- `Autonomous review complete` is deterministic and model-free. It retains immutable workflow hashes, exact-head/app identity, high-risk classification, applicable program-evidence verification, complete latest check/status rollup, and exact-head protected merge. No independent model reviewer or PR-governance provider credential exists.
+## Runtime and security
 
-## Runtime
+- Test and production use Azure OIDC, managed identity/Key Vault boundaries, exact release SHA/digests, public and authenticated smoke, telemetry correlation, provenance, and compact release ledgers.
+- Authentication, authorization, operation permissions, audit, idempotency, destructive confirmation, allowlists, and provider-data minimization remain fail closed.
+- Optional OpenAI use is restricted to bounded sanitized runtime repairable-error analysis. Pull-request governance, repair callbacks, and required checks use no provider key.
 
-- Test and production public `/health` both report `ok` for deployed commit/source `0a85184c866fbea789b320e9559fe276c072fffa`.
-- Test deployment run `31333348155` and production promotion `31333503474` are the latest successful environment runs. That release passed the then-applicable public/authenticated smoke, telemetry, provenance, and ledger gates recorded in the deployment log.
-- Later accepted repository-governance and runtime-neutral merges do not change shipped application bytes. A merged PR alone is not deployment or runtime evidence.
-- `DEPLOY_PRODUCTION_ENABLED=true` remains intentionally configured. Normal runtime-impacting delivery uses GitHub Actions, Azure OIDC, exact-main CI, Deploy Test, Promote Production, smoke, telemetry, and ledgers. Rollback remains separately authorized.
+## Learning and memory
 
-## Agent learning and evaluation
-
-- All five phases in `docs/agent-learning/program.md` are accepted with strict public-safe evidence. The artifact validator/index, automatic rollout-bounded repair conversion, fake-adapter historical task harness, and memory/status reporting are active.
-- Agent Learning Status and Repair Triage are model-free and scheduled weekly on Monday, with manual dispatch retained. Repair triage remains idempotent, cannot flood pre-rollout issues, and cannot close repairs unless explicitly enabled and both operational and learning coverage pass.
-- No real or paid historical agent-task evaluation has run. Pass rates remain unavailable rather than passing. Required CI uses only deterministic trusted scorers and the fake adapter.
-- Provider inference is restricted to the bounded repairable-error runtime contract. PR governance, maintenance, and required evaluation do not receive `OPENAI_API_KEY` or invoke a model.
-
-## Current operational posture
-
-- Project-memory active files are concise routing documents. Read historical logs only when the task needs them; do not copy terminal workflow narration into active memory.
-- Quality 10 is resumable from its authoritative ledger; ordinary maintenance and feature work remain allowed between slices.
-- Remaining actionable risks and work are in `known-issues.md` and `next-steps.md`.
+- Significant and recurring failures use executable prevention plus concise schema-v2 learning artifacts. Learning validation runs only when learning files or their validator change.
+- Completed phase ledgers, historical acceptance evidence, model-backed task harnesses, workflow hashes, and chronological project-memory logs have been removed. GitHub and Git history are the execution record.
+- Query live GitHub/Azure/runtime state for the current deployed SHA and workflow outcome; do not copy routine run narration into this file.

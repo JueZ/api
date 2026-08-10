@@ -30,19 +30,6 @@ on:
         required: false
         default: ''
         type: string
-      deliveryMode:
-        description: Legacy dispatched delivery or the direct protected-main DAG.
-        required: false
-        default: legacy
-        type: string
-      controllerRef:
-        description: Immutable caller run head SHA containing the deployment workflow generation.
-        required: true
-        type: string
-      controllerWorkflowSha:
-        description: Immutable caller workflow definition SHA; must equal controllerRef.
-        required: true
-        type: string
       currentMainConfirmedRef:
         description: One-shot protected-main confirmation required before direct production mutation.
         required: false
@@ -59,61 +46,31 @@ on:
         default: false
         type: boolean
       allowRollback:
-        description: Permit a non-monotonic production source only from the dedicated rollback workflow.
+        description: Permit one non-monotonic production restore selected by Delivery v2.
         required: false
         default: false
         type: boolean
-      preparePrivateStorageOnly:
-        description: Provision and migrate only the bounded production private-storage boundary.
-        required: false
-        default: false
-        type: boolean
-      migrationSourceStorageAccount:
-        description: Existing production account containing the approved WLH reference blob.
+      expectedFunctionDigest:
+        description: Exact Function digest emitted by the protected-main build job.
         required: false
         default: ''
         type: string
-      migrationTargetStorageAccount:
-        description: Expected production private-storage account resolved by shared Bicep.
+      expectedFrontendDigest:
+        description: Exact environment-neutral frontend digest emitted by the protected-main build job.
         required: false
         default: ''
         type: string
-      migrationExpectedSha256:
-        description: Independently verified SHA-256 digest of the one approved WLH reference blob.
-        required: false
-        default: ''
-        type: string
-      migrationConfirmation:
-        description: Exact one-time production private-storage preparation confirmation.
+      expectedSbomDigest:
+        description: Exact SBOM digest emitted by the protected-main build job.
         required: false
         default: ''
         type: string
       deliveryCorrelation:
-        description: Unique value binding this deployment to one workflow dispatch and release ledger.
+        description: Unique value binding this deployment to one protected-main DAG run and release ledger.
         required: true
         type: string
-      ciRunId:
-        description: Exact first-attempt successful main CI run that produced the immutable release bundle.
-        required: false
-        default: ''
-        type: string
-      ciDeliveryCorrelation:
-        description: Correlation embedded in the exact main CI run title.
-        required: false
-        default: ''
-        type: string
-      testDeliveryCorrelation:
-        description: Correlation from the exact successful Deploy Test run promoted to production.
-        required: false
-        default: ''
-        type: string
-      testDeliveryRunId:
-        description: Exact successful Deploy Test workflow run promoted to production.
-        required: false
-        default: ''
-        type: string
       rollbackReleaseRunId:
-        description: Exact prior successful Promote Production run containing the accepted rollback ledger.
+        description: Exact prior successful Delivery v2 run containing the accepted rollback ledger.
         required: false
         default: ''
         type: string
@@ -180,7 +137,6 @@ permissions:
 
 jobs:
   deploy:
-    if: ${{ !inputs.preparePrivateStorageOnly }}
     name: deploy ${{ inputs.environmentName }}
     timeout-minutes: 90
     runs-on: ubuntu-latest
@@ -206,15 +162,11 @@ jobs:
       DEPLOY_FRONTEND: ${{ inputs.deployFrontend }}
       DEPLOY_FUNCTIONS: ${{ inputs.deployFunctions }}
       SOURCE_REF: ${{ inputs.sourceRef }}
-      DELIVERY_MODE: ${{ inputs.deliveryMode }}
-      CONTROLLER_REF: ${{ inputs.controllerRef }}
-      CONTROLLER_WORKFLOW_SHA: ${{ inputs.controllerWorkflowSha }}
+      DEPLOYMENT_CONTROL_REF: ${{ github.sha }}
       CURRENT_MAIN_CONFIRMED_REF: ${{ inputs.currentMainConfirmedRef }}
       DELIVERY_CORRELATION: ${{ inputs.deliveryCorrelation }}
-      CI_RUN_ID: ${{ inputs.ciRunId }}
-      CI_DELIVERY_CORRELATION: ${{ inputs.ciDeliveryCorrelation }}
-      TEST_DELIVERY_CORRELATION: ${{ inputs.testDeliveryCorrelation }}
-      TEST_DELIVERY_RUN_ID: ${{ inputs.testDeliveryRunId }}
+      CI_RUN_ID: ${{ github.run_id }}
+      CI_DELIVERY_CORRELATION: ${{ format('build-{0}-{1}', github.run_id, github.run_attempt) }}
       ROLLBACK_RELEASE_RUN_ID: ${{ inputs.rollbackReleaseRunId }}
       ROLLBACK_RELEASE_CORRELATION: ${{ inputs.rollbackReleaseCorrelation }}
       AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
@@ -274,20 +226,9 @@ jobs:
       ALLOW_ROLLBACK: >-
         ${{
           inputs.allowRollback &&
-          (
-            (
-              inputs.deliveryMode == 'direct' &&
-              github.workflow_ref == format('{0}/.github/workflows/delivery-v2.yml@refs/heads/main', github.repository) &&
-              github.ref == 'refs/heads/main' &&
-              (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-            ) ||
-            (
-              inputs.deliveryMode == 'legacy' &&
-              github.workflow_ref == format('{0}/.github/workflows/rollback-production.yml@refs/heads/main', github.repository) &&
-              github.ref == 'refs/heads/main' &&
-              github.event_name == 'repository_dispatch'
-            )
-          )
+          github.workflow_ref == format('{0}/.github/workflows/delivery-v2.yml@refs/heads/main', github.repository) &&
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         }}
       APPLICATIONINSIGHTS_NAME: ${{ vars.APPLICATIONINSIGHTS_NAME }}
       TEST_SERVICE_AUTH_CLIENT_ID: ${{ vars.TEST_SERVICE_AUTH_CLIENT_ID }}
@@ -297,52 +238,12 @@ jobs:
       PROD_SERVICE_AUTH_TENANT_ID: ${{ vars.PROD_SERVICE_AUTH_TENANT_ID }}
       PROD_SERVICE_AUTH_SCOPE: ${{ vars.PROD_SERVICE_AUTH_SCOPE }}
     steps:
-      - name: Checkout current deployment controller
-        shell: bash
-        env:
-          CHECKOUT_CONTROLLER_REF: ${{ inputs.controllerRef }}
-        run: |
-          set -euo pipefail
-          controller_ref="$CHECKOUT_CONTROLLER_REF"
-          immutable_controller_ref="$GITHUB_SHA"
-          if [[ ! "$controller_ref" =~ ^[0-9a-f]{40}$ ]] ||
-             [[ ! "$immutable_controller_ref" =~ ^[0-9a-f]{40}$ ]] ||
-             [ "$controller_ref" != "$immutable_controller_ref" ]; then
-            echo "controllerRef must equal the immutable caller SHA before repository fetch." >&2
-            exit 1
-          fi
-          if [ "$(pwd -P)" != "$(realpath "$GITHUB_WORKSPACE")" ] ||
-             [ -n "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]; then
-            echo "Deployment controller checkout requires the exact empty GitHub workspace." >&2
-            exit 1
-          fi
-
-          git init .
-          git remote add origin https://github.com/JueZ/api.git
-          if [ "$DELIVERY_MODE" = "direct" ]; then
-            git fetch --no-tags --prune origin "$immutable_controller_ref"
-          elif [ "$DELIVERY_MODE" = "legacy" ]; then
-            git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
-            fetched_main="$(git rev-parse refs/remotes/origin/main)"
-            if [ "$fetched_main" != "$immutable_controller_ref" ]; then
-              echo "Fetched protected main does not equal the immutable deployment controller." >&2
-              exit 1
-            fi
-          else
-            echo "deliveryMode must be direct or legacy." >&2
-            exit 1
-          fi
-          git checkout --detach "$immutable_controller_ref"
-          git reset --hard "$immutable_controller_ref"
-          if [ "$(git rev-parse HEAD)" != "$immutable_controller_ref" ]; then
-            echo "Checked-out deployment controller does not equal the immutable caller SHA." >&2
-            exit 1
-          fi
-          if [ -n "$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" ] ||
-             [ -n "$(git clean -ndx)" ]; then
-            echo "Deployment controller workspace contains content outside the exact commit." >&2
-            exit 1
-          fi
+      - name: Checkout protected-main deployment controller
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
       - name: Download exact accepted production release ledger
         if: ${{ inputs.environmentName == 'prod' && inputs.allowRollback }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
@@ -352,368 +253,90 @@ jobs:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ inputs.rollbackReleaseRunId }}
-      - name: Download exact accepted test provenance for production
-        if: ${{ inputs.environmentName == 'prod' && !inputs.allowRollback }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
-        with:
-          name: deploy-test-provenance-${{ inputs.sourceRef }}-${{ inputs.testDeliveryCorrelation }}
-          path: ${{ runner.temp }}/deploy-test-provenance
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.deliveryMode == 'direct' && github.run_id || inputs.testDeliveryRunId }}
-      - name: Validate deployment source
+      - name: Validate protected-main source and immutable identity
         id: source
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          deployment_ref="${SOURCE_REF:-${GITHUB_SHA}}"
-          # CONTROLLER_REF is assigned through the workflow job environment.
-          # shellcheck disable=SC2153
-          controller_ref="$CONTROLLER_REF"
-          checked_out_controller="$(git rev-parse HEAD)"
-
-          if [[ ! "$deployment_ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            echo "sourceRef must be a full 40-character commit SHA from the main branch." >&2
+          deployment_ref="${SOURCE_REF,,}"
+          controller_ref="${GITHUB_SHA,,}"
+          if [ "$GITHUB_REPOSITORY" != "JueZ/api" ] ||
+             [ "$GITHUB_REF" != "refs/heads/main" ] ||
+             { [ "$GITHUB_EVENT_NAME" != "push" ] && [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; } ||
+             [ "$GITHUB_WORKFLOW_REF" != "$GITHUB_REPOSITORY/.github/workflows/delivery-v2.yml@refs/heads/main" ] ||
+             [ "$GITHUB_RUN_ATTEMPT" != "1" ]; then
+            echo "Deployment must be called once from Delivery v2 on protected main." >&2
             exit 1
           fi
-          deployment_ref="${deployment_ref,,}"
           if [[ ! "$controller_ref" =~ ^[0-9a-f]{40}$ ]] ||
-             [[ ! "$CONTROLLER_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] ||
-             [ "$GITHUB_RUN_ATTEMPT" != "1" ] ||
-             [ "$controller_ref" != "$CONTROLLER_WORKFLOW_SHA" ] ||
-             [ "$controller_ref" != "$GITHUB_SHA" ] ||
-             [ "$controller_ref" != "$checked_out_controller" ]; then
-            echo "Deployment controller must equal the immutable caller run, workflow, and checkout SHA." >&2
+             [[ ! "$deployment_ref" =~ ^[0-9a-f]{40}$ ]] ||
+             [ "$(git rev-parse HEAD)" != "$controller_ref" ] ||
+             [ -n "$(git status --porcelain=v1 --untracked-files=all)" ]; then
+            echo "Deployment controller or source identity is invalid." >&2
             exit 1
           fi
-          current_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")"
-          if [ "$DELIVERY_MODE" = "direct" ]; then
-            expected_caller_path=".github/workflows/delivery-v2.yml"
-            expected_caller_name="Delivery v2"
-            expected_caller_title="Delivery v2 $controller_ref"
-            if ! jq -e \
-              --arg run_id "$GITHUB_RUN_ID" \
-              --arg repository "$GITHUB_REPOSITORY" \
-              --arg controller_ref "$controller_ref" \
-              --arg path "$expected_caller_path" \
-              --arg workflow_name "$expected_caller_name" \
-              --arg title "$expected_caller_title" \
-              '(.id | tostring) == $run_id
-                and .repository.full_name == $repository
-                and .head_sha == $controller_ref
-                and .head_branch == "main"
-                and (.event == "push" or .event == "workflow_dispatch")
-                and .path == $path
-                and (.name == $workflow_name or .name == $title)
-                and .display_title == $title
-                and .run_attempt == 1
-                and (.status == "queued" or .status == "in_progress")' \
-              <<<"$current_run_json" >/dev/null; then
-              echo "Direct delivery run identity does not match protected delivery-v2.yml." >&2
-              exit 1
-            fi
-          else
-            if [ "$ENVIRONMENT_NAME" = "test" ]; then
-              expected_caller_path=".github/workflows/deploy-test.yml"
-              expected_caller_name="Deploy Test"
-            elif [ "$ROLLBACK_REQUESTED" = "true" ]; then
-              expected_caller_path=".github/workflows/rollback-production.yml"
-              expected_caller_name="Rollback Production"
-            else
-              expected_caller_path=".github/workflows/promote-production.yml"
-              expected_caller_name="Promote Production"
-            fi
-            expected_caller_title="$expected_caller_name $deployment_ref $DELIVERY_CORRELATION"
-            # GitHub has exposed either the static workflow name or resolved
-            # run-name in .name; path and display_title remain exact identity gates.
-            if ! jq -e \
-              --arg run_id "$GITHUB_RUN_ID" \
-              --arg repository "$GITHUB_REPOSITORY" \
-              --arg controller_ref "$controller_ref" \
-              --arg path "$expected_caller_path" \
-              --arg workflow_name "$expected_caller_name" \
-              --arg title "$expected_caller_title" \
-              '(.id | tostring) == $run_id
-                and .repository.full_name == $repository
-                and .head_sha == $controller_ref
-                and .head_branch == "main"
-                and .event == "repository_dispatch"
-                and .path == $path
-                and (.name == $workflow_name or .name == $title)
-                and .display_title == $title
-                and .run_attempt == 1
-                and (.status == "queued" or .status == "in_progress")' \
-              <<<"$current_run_json" >/dev/null; then
-              echo "Current deployment run identity does not match its immutable caller workflow generation." >&2
-              exit 1
-            fi
-          fi
-          echo "DEPLOYMENT_CONTROL_REF=$controller_ref" >> "$GITHUB_ENV"
-          if [ "$DELIVERY_MODE" = "direct" ]; then
-            history_ref="$controller_ref"
-          else
-            git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
-            current_main="$(git rev-parse origin/main)"
-            if [ "$controller_ref" != "$current_main" ]; then
-              echo "The immutable deployment controller is no longer current main; redispatch from the new main." >&2
-              exit 1
-            fi
-            history_ref="origin/main"
-          fi
-          if ! git merge-base --is-ancestor "$deployment_ref" "$history_ref"; then
-            echo "sourceRef must point to a commit already present in the main branch history." >&2
-            exit 1
-          fi
-
-          if [ "$ROLLBACK_REQUESTED" = "true" ]; then
-            if [ "$ALLOW_ROLLBACK" != "true" ] || [ "$ENVIRONMENT_NAME" != "prod" ]; then
-              echo "Rollback is permitted only from rollback-production.yml on main for production." >&2
-              exit 1
-            fi
-            if [ "${deployment_ref,,}" = "$controller_ref" ]; then
-              echo "Rollback sourceRef must be an older main ancestor, not current main." >&2
-              exit 1
-            fi
-          elif [ "${deployment_ref,,}" != "$controller_ref" ]; then
-            echo "Normal deployment sourceRef must equal the current main controller commit." >&2
-            exit 1
-          fi
-
-          if [ "$ROLLBACK_REQUESTED" != "true" ]; then
-            if ! [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]] ||
-               ! [[ "$CI_DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]; then
-              echo "Normal deployment requires one exact main CI run ID and correlation." >&2
-              exit 1
-            fi
-            if [ "$DELIVERY_MODE" = "direct" ]; then
-              if [ "$CI_RUN_ID" != "$GITHUB_RUN_ID" ]; then
-                echo "Direct delivery artifacts must come from the current immutable DAG run." >&2
-                exit 1
-              fi
-            else
-              ci_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}")"
-              expected_ci_title="CI $deployment_ref $CI_DELIVERY_CORRELATION"
-              if ! jq -e \
-                --arg run_id "$CI_RUN_ID" \
-                --arg repository "$GITHUB_REPOSITORY" \
-                --arg source_ref "$deployment_ref" \
-                --arg workflow_name "CI" \
-                --arg title "$expected_ci_title" \
-                '(.id | tostring) == $run_id
-                  and .repository.full_name == $repository
-                  and .path == ".github/workflows/ci.yml"
-                  and (.name == $workflow_name or .name == $title)
-                  and (.event == "push" or .event == "workflow_dispatch")
-                  and .conclusion == "success"
-                  and .head_branch == "main"
-                  and .head_sha == $source_ref
-                  and .display_title == $title
-                  and .run_attempt == 1' \
-                <<<"$ci_run_json" >/dev/null; then
-                echo "Pinned CI run does not match the exact first-attempt main release authorization." >&2
-                exit 1
-              fi
-            fi
-            echo "ci_run_id=$CI_RUN_ID" >> "$GITHUB_OUTPUT"
-          fi
-
           if [ "$ENVIRONMENT_NAME" = "prod" ] &&
-             { [ "$DEPLOY_FRONTEND" != "true" ] || [ "$DEPLOY_FUNCTIONS" != "true" ]; }; then
-            echo "Production promotion and rollback require both Function and frontend packages." >&2
+             { [[ ! "$CURRENT_MAIN_CONFIRMED_REF" =~ ^[0-9a-f]{40}$ ]] ||
+               [ "$CURRENT_MAIN_CONFIRMED_REF" != "$controller_ref" ]; }; then
+            echo "Production requires the exact one-shot current-main confirmation." >&2
             exit 1
           fi
-
-          if [ "$ENVIRONMENT_NAME" = "prod" ]; then
-            if [ "$ALLOW_ROLLBACK" != "true" ]; then
-              : "${PRODUCTION_BASE_URL:?PRODUCTION_BASE_URL is required for monotonic production validation}"
-              current_health="$(curl --fail --show-error --silent --max-time 20 "${PRODUCTION_BASE_URL%/}/health")"
-              current_source_ref="$(jq -r '.deployedSourceRef // .deployedCommitSha // ""' <<<"$current_health")"
-              if ! [[ "$current_source_ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
-                echo "Current production health did not report an immutable source SHA." >&2
-                exit 1
-              fi
-              if [ "${current_source_ref,,}" != "${deployment_ref,,}" ] &&
-                 ! git merge-base --is-ancestor "$current_source_ref" "$deployment_ref"; then
-                echo "Refusing non-monotonic production deployment from $current_source_ref to $deployment_ref. Use rollback-production.yml for an intentional rollback." >&2
-                exit 1
-              fi
+          if [ "$ROLLBACK_REQUESTED" = "true" ]; then
+            if [ "$ALLOW_ROLLBACK" != "true" ] || [ "$ENVIRONMENT_NAME" != "prod" ] ||
+               [ "$deployment_ref" = "$controller_ref" ] ||
+               ! [[ "$ROLLBACK_RELEASE_RUN_ID" =~ ^[0-9]+$ ]] ||
+               ! [[ "$ROLLBACK_RELEASE_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]; then
+              echo "Rollback identity is invalid or ambiguous." >&2
+              exit 1
             fi
-
-            if [ "$ALLOW_ROLLBACK" = "true" ]; then
-              if ! [[ "$ROLLBACK_RELEASE_RUN_ID" =~ ^[0-9]+$ ]] ||
-                 ! [[ "$ROLLBACK_RELEASE_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]; then
-                echo "Rollback requires an exact prior production run ID and delivery correlation." >&2
-                exit 1
-              fi
-              rollback_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ROLLBACK_RELEASE_RUN_ID}")"
-              expected_rollback_title="Promote Production $deployment_ref $ROLLBACK_RELEASE_CORRELATION"
-              expected_direct_title="Delivery v2 $deployment_ref"
-              if ! jq -e \
-                --arg source_ref "$deployment_ref" \
-                --arg run_id "$ROLLBACK_RELEASE_RUN_ID" \
-                --arg repository "$GITHUB_REPOSITORY" \
-                --arg workflow_name "Promote Production" \
-                --arg title "$expected_rollback_title" \
-                --arg direct_title "$expected_direct_title" \
-                '(.id | tostring) == $run_id
-                  and .repository.full_name == $repository
-                  and .conclusion == "success"
-                  and .head_branch == "main"
-                  and .head_sha == $source_ref
-                  and .run_attempt == 1
-                  and (
-                    (
-                      .path == ".github/workflows/promote-production.yml"
-                      and (.name == $workflow_name or .name == $title)
-                      and (.event == "repository_dispatch" or .event == "workflow_dispatch")
-                      and .display_title == $title
-                    ) or (
-                      .path == ".github/workflows/delivery-v2.yml"
-                      and (.event == "push" or .event == "workflow_dispatch")
-                      and .display_title == $direct_title
-                    )
-                  )' \
-                <<<"$rollback_run_json" >/dev/null; then
-                echo "Rollback release run identity does not match the requested historical source and correlation." >&2
-                exit 1
-              fi
-              rollback_ledger="${{ runner.temp }}/rollback-ledger/release-ledger-prod.json"
-              if [ ! -f "$rollback_ledger" ] || [ -L "$rollback_ledger" ] ||
-                 [ "$(find "${{ runner.temp }}/rollback-ledger" -mindepth 1 -maxdepth 1 -printf '%P\n')" != "release-ledger-prod.json" ]; then
-                echo "Downloaded rollback evidence must contain only the exact regular release-ledger file." >&2
-                exit 1
-              fi
-              EXPECTED_DELIVERY_CORRELATION="$ROLLBACK_RELEASE_CORRELATION" \
-                node scripts/validate-release-ledger.mjs "$rollback_ledger"
-              if ! jq -e \
-                --arg source_ref "$deployment_ref" \
-                --arg run_id "$ROLLBACK_RELEASE_RUN_ID" \
-                --arg correlation "$ROLLBACK_RELEASE_CORRELATION" \
-                '.environment == "prod"
-                  and .sourceRef == $source_ref
-                  and .deployedCommit == $source_ref
-                  and .workflowRunId == $run_id
-                  and .deliveryCorrelation == $correlation
-                  and (.artifacts.functionappSha256 | test("^[0-9a-f]{64}$"))
-                  and (.artifacts.frontendSha256 | test("^[0-9a-f]{64}$"))
-                  and (.artifacts.sbomSha256 | test("^[0-9a-f]{64}$"))
-                  and .smokeResults.status == "passed"
-                  and .authenticatedSmokeResults.status == "passed"
-                  and .telemetryCheckResult.status == "passed"' \
-                "$rollback_ledger" >/dev/null; then
-                echo "Historical production ledger is missing exact successful release evidence." >&2
-                exit 1
-              fi
-              {
-                echo "approved_function_digest=$(jq -r '.artifacts.functionappSha256' "$rollback_ledger")"
-                echo "approved_frontend_digest=$(jq -r '.artifacts.frontendSha256' "$rollback_ledger")"
-                echo "approved_sbom_digest=$(jq -r '.artifacts.sbomSha256' "$rollback_ledger")"
-              } >> "$GITHUB_OUTPUT"
-              echo "Validated exact historical production ledger from run $ROLLBACK_RELEASE_RUN_ID."
-            else
-              if ! [[ "$TEST_DELIVERY_RUN_ID" =~ ^[0-9]+$ ]] ||
-                 ! [[ "$TEST_DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]; then
-                echo "Production promotion requires the exact Deploy Test run ID and delivery correlation." >&2
-                exit 1
-              fi
-              test_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TEST_DELIVERY_RUN_ID}")"
-              expected_test_title="Deploy Test $deployment_ref $TEST_DELIVERY_CORRELATION"
-              if [ "$DELIVERY_MODE" = "direct" ]; then
-                if [ "$TEST_DELIVERY_RUN_ID" != "$GITHUB_RUN_ID" ] ||
-                   ! jq -e \
-                    --arg source_ref "$deployment_ref" \
-                    --arg run_id "$TEST_DELIVERY_RUN_ID" \
-                    --arg repository "$GITHUB_REPOSITORY" \
-                    --arg title "Delivery v2 $deployment_ref" \
-                    '(.id | tostring) == $run_id
-                      and .repository.full_name == $repository
-                      and .path == ".github/workflows/delivery-v2.yml"
-                      and (.event == "push" or .event == "workflow_dispatch")
-                      and (.status == "queued" or .status == "in_progress")
-                      and .head_branch == "main"
-                      and .head_sha == $source_ref
-                      and .display_title == $title
-                      and .run_attempt == 1' \
-                    <<<"$test_run_json" >/dev/null; then
-                  echo "Direct production promotion must consume test evidence from the current DAG run." >&2
-                  exit 1
-                fi
-              elif ! jq -e \
-                  --arg source_ref "$deployment_ref" \
-                  --arg run_id "$TEST_DELIVERY_RUN_ID" \
-                  --arg repository "$GITHUB_REPOSITORY" \
-                  --arg workflow_name "Deploy Test" \
-                  --arg title "$expected_test_title" \
-                  '(.id | tostring) == $run_id
-                    and .repository.full_name == $repository
-                    and .path == ".github/workflows/deploy-test.yml"
-                    and (.name == $workflow_name or .name == $title)
-                    and .event == "repository_dispatch"
-                    and .conclusion == "success"
-                    and .head_branch == "main"
-                    and .head_sha == $source_ref
-                    and .display_title == $title
-                    and .run_attempt == 1' \
-                  <<<"$test_run_json" >/dev/null; then
-                  echo "Deploy Test run identity does not match the exact source and correlation being promoted." >&2
-                  exit 1
-              fi
-              provenance_file="${{ runner.temp }}/deploy-test-provenance/deploy-test-provenance.json"
-              if [ ! -f "$provenance_file" ] || [ -L "$provenance_file" ] ||
-                 [ "$(find "${{ runner.temp }}/deploy-test-provenance" -mindepth 1 -maxdepth 1 -printf '%P\n')" != "deploy-test-provenance.json" ]; then
-                echo "Downloaded test evidence must contain only the exact regular provenance file." >&2
-                exit 1
-              fi
-              if ! jq -e \
-                --arg source_ref "$deployment_ref" \
-                --arg test_run_id "$TEST_DELIVERY_RUN_ID" \
-                --arg repository "$GITHUB_REPOSITORY" \
-                --arg correlation "$TEST_DELIVERY_CORRELATION" \
-                --arg ci_run_id "$CI_RUN_ID" \
-                --arg ci_correlation "$CI_DELIVERY_CORRELATION" \
-                --arg delivery_mode "$DELIVERY_MODE" \
-                '.environmentName == "test"
-                  and .sourceRef == $source_ref
-                  and .resolvedHead == $source_ref
-                  and .runId == $test_run_id
-                  and .repository == $repository
-                  and .deliveryCorrelation == $correlation
-                  and .ciRunId == $ci_run_id
-                  and .ciDeliveryCorrelation == $ci_correlation
-                  and .runAttempt == "1"
-                  and .deployFrontend == "true"
-                  and .deployFunctions == "true"
-                  and (
-                    (
-                      $delivery_mode == "direct"
-                      and .workflow == "Delivery v2"
-                      and (.eventName == "push" or .eventName == "workflow_dispatch")
-                    ) or (
-                      $delivery_mode == "legacy"
-                      and .workflow == "Deploy Test"
-                      and .eventName == "repository_dispatch"
-                    )
-                  )
-                  and (.artifacts.functionappSha256 | test("^[0-9a-f]{64}$"))
-                  and (.artifacts.sourceFrontendSha256 | test("^[0-9a-f]{64}$"))
-                  and (.artifacts.frontendSha256 | test("^[0-9a-f]{64}$"))
-                  and (.artifacts.sbomSha256 | test("^[0-9a-f]{64}$"))
-                  and .authenticatedSmokeStatus == "passed"
-                  and .telemetryStatus == "passed"' \
-                "$provenance_file" >/dev/null; then
-                echo "Production sourceRef must match the exact pinned successful Deploy Test provenance." >&2
-                exit 1
-              fi
-              {
-                echo "approved_function_digest=$(jq -r '.artifacts.functionappSha256' "$provenance_file")"
-                echo "approved_frontend_digest=$(jq -r '.artifacts.sourceFrontendSha256' "$provenance_file")"
-                echo "approved_sbom_digest=$(jq -r '.artifacts.sbomSha256' "$provenance_file")"
-              } >> "$GITHUB_OUTPUT"
-              echo "Validated exact Deploy Test provenance from run $TEST_DELIVERY_RUN_ID."
+            rollback_ledger="$RUNNER_TEMP/rollback-ledger/release-ledger-prod.json"
+            if [ ! -f "$rollback_ledger" ] || [ -L "$rollback_ledger" ] ||
+               [ "$(find "$RUNNER_TEMP/rollback-ledger" -mindepth 1 -maxdepth 1 -printf '%P\n')" != "release-ledger-prod.json" ]; then
+              echo "Rollback evidence must contain exactly one regular production ledger." >&2
+              exit 1
             fi
+            if ! jq -e \
+              --arg source_ref "$deployment_ref" \
+              --arg run_id "$ROLLBACK_RELEASE_RUN_ID" \
+              --arg correlation "$ROLLBACK_RELEASE_CORRELATION" \
+              '.environment == "prod"
+                and .sourceRef == $source_ref
+                and .deployedCommit == $source_ref
+                and .workflowRunId == $run_id
+                and .deliveryCorrelation == $correlation
+                and (.artifacts.functionappSha256 | test("^[0-9a-f]{64}$"))
+                and (.artifacts.frontendSha256 | test("^[0-9a-f]{64}$"))
+                and (.artifacts.sbomSha256 | test("^[0-9a-f]{64}$"))
+                and .smokeResults.status == "passed"
+                and .authenticatedSmokeResults.status == "passed"
+                and .telemetryCheckResult.status == "passed"' \
+              "$rollback_ledger" >/dev/null; then
+              echo "Rollback ledger is not an exact successfully verified production release." >&2
+              exit 1
+            fi
+            {
+              echo "approved_function_digest=$(jq -r '.artifacts.functionappSha256' "$rollback_ledger")"
+              echo "approved_frontend_digest=$(jq -r '.artifacts.frontendSha256' "$rollback_ledger")"
+              echo "approved_sbom_digest=$(jq -r '.artifacts.sbomSha256' "$rollback_ledger")"
+            } >> "$GITHUB_OUTPUT"
+          else
+            if [ "$deployment_ref" != "$controller_ref" ] ||
+               ! [[ "${{ inputs.expectedFunctionDigest }}" =~ ^[0-9a-f]{64}$ ]] ||
+               ! [[ "${{ inputs.expectedFrontendDigest }}" =~ ^[0-9a-f]{64}$ ]] ||
+               ! [[ "${{ inputs.expectedSbomDigest }}" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "Normal deployment must use the current protected-main source and exact build digests." >&2
+              exit 1
+            fi
+            {
+              echo "approved_function_digest=${{ inputs.expectedFunctionDigest }}"
+              echo "approved_frontend_digest=${{ inputs.expectedFrontendDigest }}"
+              echo "approved_sbom_digest=${{ inputs.expectedSbomDigest }}"
+            } >> "$GITHUB_OUTPUT"
           fi
+          {
+            echo "resolved_head=$deployment_ref"
+            echo "ci_run_id=$GITHUB_RUN_ID"
+          } >> "$GITHUB_OUTPUT"
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
         with:
@@ -731,17 +354,6 @@ jobs:
             test|prod) ;;
             *) echo "environmentName must be test or prod." >&2; exit 1 ;;
           esac
-          case "$DELIVERY_MODE" in
-            direct|legacy) ;;
-            *) echo "deliveryMode must be direct or legacy." >&2; exit 1 ;;
-          esac
-          if [ "$DELIVERY_MODE" = "direct" ] && [ "$ENVIRONMENT_NAME" = "prod" ]; then
-            if [[ ! "$CURRENT_MAIN_CONFIRMED_REF" =~ ^[0-9a-f]{40}$ ]] ||
-               [ "$CURRENT_MAIN_CONFIRMED_REF" != "$CONTROLLER_REF" ]; then
-              echo "Direct production requires the exact one-shot current-main confirmation." >&2
-              exit 1
-            fi
-          fi
           if [[ ! "$DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]; then
             echo "deliveryCorrelation must be an opaque 8-128 character identifier." >&2
             exit 1
@@ -849,7 +461,7 @@ jobs:
           path: ${{ runner.temp }}/release
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.deliveryMode == 'direct' && github.run_id || steps.source.outputs.ci_run_id }}
+          run-id: ${{ github.run_id }}
       - name: Download exact accepted production release bundle
         if: ${{ inputs.allowRollback }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
@@ -884,20 +496,18 @@ jobs:
             echo "source_frontend_artifact_sha256=$frontend_digest"
             echo "sbom_sha256=$sbom_digest"
           } >> "$GITHUB_OUTPUT"
-          if [ "$ENVIRONMENT_NAME" = "prod" ]; then
-            # APPROVED_* values are assigned through the workflow step environment.
-            # shellcheck disable=SC2153
-            approved_function_digest="$APPROVED_FUNCTION_DIGEST"
-            # shellcheck disable=SC2153
-            approved_frontend_digest="$APPROVED_FRONTEND_DIGEST"
-            # shellcheck disable=SC2153
-            approved_sbom_digest="$APPROVED_SBOM_DIGEST"
-            if [ "$function_digest" != "$approved_function_digest" ] ||
-               [ "$frontend_digest" != "$approved_frontend_digest" ] ||
-               [ "$sbom_digest" != "$approved_sbom_digest" ]; then
-              echo "Production release artifacts do not match the exact accepted deployment evidence." >&2
-              exit 1
-            fi
+          # APPROVED_* values are assigned through the workflow step environment.
+          # shellcheck disable=SC2153
+          approved_function_digest="$APPROVED_FUNCTION_DIGEST"
+          # shellcheck disable=SC2153
+          approved_frontend_digest="$APPROVED_FRONTEND_DIGEST"
+          # shellcheck disable=SC2153
+          approved_sbom_digest="$APPROVED_SBOM_DIGEST"
+          if [ "$function_digest" != "$approved_function_digest" ] ||
+             [ "$frontend_digest" != "$approved_frontend_digest" ] ||
+             [ "$sbom_digest" != "$approved_sbom_digest" ]; then
+            echo "Release artifacts do not match the exact protected-main build or rollback evidence." >&2
+            exit 1
           fi
       - name: Deploy Bicep infrastructure
         if: ${{ !inputs.allowRollback }}
@@ -1766,63 +1376,6 @@ jobs:
           path: ${{ runner.temp }}/release
           if-no-files-found: error
           retention-days: 90
-      - name: Record test deployment provenance
-        if: ${{ inputs.environmentName == 'test' && success() }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .github
-          jq -n \
-            --arg environmentName "$ENVIRONMENT_NAME" \
-            --arg sourceRef "${SOURCE_REF:-${GITHUB_SHA}}" \
-            --arg resolvedHead "$(git rev-parse HEAD)" \
-            --arg deployFrontend "$DEPLOY_FRONTEND" \
-            --arg deployFunctions "$DEPLOY_FUNCTIONS" \
-            --arg eventName "$GITHUB_EVENT_NAME" \
-            --arg workflow "$GITHUB_WORKFLOW" \
-            --arg repository "$GITHUB_REPOSITORY" \
-            --arg runId "$GITHUB_RUN_ID" \
-            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
-            --arg deliveryCorrelation "$DELIVERY_CORRELATION" \
-            --arg ciRunId "$CI_RUN_ID" \
-            --arg ciDeliveryCorrelation "$CI_DELIVERY_CORRELATION" \
-            --arg functionappSha256 "$FUNCTION_ARTIFACT_SHA256" \
-            --arg sourceFrontendSha256 "$FRONTEND_SOURCE_ARTIFACT_SHA256" \
-            --arg frontendSha256 "$FRONTEND_ARTIFACT_SHA256" \
-            --arg sbomSha256 "$SBOM_SHA256" \
-            --arg authenticatedSmokeStatus "$(jq -r '.status // "missing"' "$AUTH_SMOKE_RESULTS_PATH")" \
-            --arg telemetryStatus "$(jq -r '.status // "missing"' "$TELEMETRY_RESULTS_PATH")" \
-            '{
-              environmentName: $environmentName,
-              sourceRef: $sourceRef,
-              resolvedHead: $resolvedHead,
-              deployFrontend: $deployFrontend,
-              deployFunctions: $deployFunctions,
-              eventName: $eventName,
-              workflow: $workflow,
-              repository: $repository,
-              runId: $runId,
-              runAttempt: $runAttempt,
-              deliveryCorrelation: $deliveryCorrelation,
-              ciRunId: $ciRunId,
-              ciDeliveryCorrelation: $ciDeliveryCorrelation,
-              artifacts: {
-                functionappSha256: $functionappSha256,
-                sourceFrontendSha256: $sourceFrontendSha256,
-                frontendSha256: $frontendSha256,
-                sbomSha256: $sbomSha256
-              },
-              authenticatedSmokeStatus: $authenticatedSmokeStatus,
-              telemetryStatus: $telemetryStatus
-            }' > .github/deploy-test-provenance.json
-      - name: Upload test deployment provenance
-        if: ${{ inputs.environmentName == 'test' && success() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
-        with:
-          name: deploy-test-provenance-${{ inputs.sourceRef || github.sha }}-${{ inputs.deliveryCorrelation }}
-          path: .github/deploy-test-provenance.json
-          if-no-files-found: error
-          retention-days: 30
       - name: Report production deployment values after smoke tests
         if: ${{ inputs.updateProductionVariables }}
         shell: bash
@@ -1839,540 +1392,3 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "::notice title=Production values resolved::Smoke tests passed for $EFFECTIVE_BASE_URL using Function App $EFFECTIVE_FUNCTIONAPP_NAME and static storage account $EFFECTIVE_STATIC_STORAGE_ACCOUNT."
-
-  prepare-private-storage:
-    if: ${{ inputs.preparePrivateStorageOnly }}
-    name: prepare private storage ${{ inputs.environmentName }}
-    timeout-minutes: 30
-    runs-on: ubuntu-latest
-    environment:
-      name: ${{ inputs.githubEnvironment }}
-    env:
-      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID: ${{ vars.AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID }}
-      AZURE_RESOURCE_GROUP: ${{ inputs.azureResourceGroup }}
-      ENVIRONMENT_NAME: ${{ inputs.environmentName }}
-      GITHUB_ENVIRONMENT_NAME: ${{ inputs.githubEnvironment }}
-      SOURCE_REF: ${{ inputs.sourceRef }}
-      CONTROLLER_REF: ${{ inputs.controllerRef }}
-      CONTROLLER_WORKFLOW_SHA: ${{ inputs.controllerWorkflowSha }}
-      DELIVERY_CORRELATION: ${{ inputs.deliveryCorrelation }}
-      CI_RUN_ID: ${{ inputs.ciRunId }}
-      CI_DELIVERY_CORRELATION: ${{ inputs.ciDeliveryCorrelation }}
-      TEST_DELIVERY_CORRELATION: ${{ inputs.testDeliveryCorrelation }}
-      TEST_DELIVERY_RUN_ID: ${{ inputs.testDeliveryRunId }}
-      DEPLOY_PRODUCTION_ENABLED: ${{ vars.DEPLOY_PRODUCTION_ENABLED }}
-      WLH_CATEGORY_BLOB_NAME: ${{ vars.WLH_CATEGORY_BLOB_NAME }}
-      WLH_CATEGORY_BLOB_CONTAINER: ${{ vars.WLH_CATEGORY_BLOB_CONTAINER }}
-      BRING_SESSION_CACHE_CONTAINER: ${{ vars.BRING_SESSION_CACHE_CONTAINER }}
-      BRING_MUTATION_CONTAINER: ${{ vars.BRING_MUTATION_CONTAINER }}
-      BRING_AUDIT_CONTAINER: ${{ vars.BRING_AUDIT_CONTAINER }}
-      MIGRATION_SOURCE_STORAGE_ACCOUNT: ${{ inputs.migrationSourceStorageAccount }}
-      MIGRATION_TARGET_STORAGE_ACCOUNT: ${{ inputs.migrationTargetStorageAccount }}
-      MIGRATION_EXPECTED_SHA256: ${{ inputs.migrationExpectedSha256 }}
-      MIGRATION_CONFIRMATION: ${{ inputs.migrationConfirmation }}
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Checkout current preparation controller
-        shell: bash
-        env:
-          CHECKOUT_CONTROLLER_REF: ${{ inputs.controllerRef }}
-        run: |
-          set -euo pipefail
-          controller_ref="$CHECKOUT_CONTROLLER_REF"
-          immutable_controller_ref="$GITHUB_SHA"
-          if [[ ! "$controller_ref" =~ ^[0-9a-f]{40}$ ]] ||
-             [[ ! "$immutable_controller_ref" =~ ^[0-9a-f]{40}$ ]] ||
-             [ "$controller_ref" != "$immutable_controller_ref" ]; then
-            echo "controllerRef must equal the immutable caller SHA before repository fetch." >&2
-            exit 1
-          fi
-          if [ "$(pwd -P)" != "$(realpath "$GITHUB_WORKSPACE")" ] ||
-             [ -n "$(find . -mindepth 1 -maxdepth 1 -print -quit)" ]; then
-            echo "Preparation controller checkout requires the exact empty GitHub workspace." >&2
-            exit 1
-          fi
-
-          git init .
-          git remote add origin https://github.com/JueZ/api.git
-          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
-          fetched_main="$(git rev-parse refs/remotes/origin/main)"
-          if [ "$fetched_main" != "$immutable_controller_ref" ]; then
-            echo "Fetched protected main does not equal the immutable preparation controller." >&2
-            exit 1
-          fi
-          git checkout --detach "$immutable_controller_ref"
-          git reset --hard "$immutable_controller_ref"
-          if [ "$(git rev-parse HEAD)" != "$immutable_controller_ref" ]; then
-            echo "Checked-out preparation controller does not equal the immutable caller SHA." >&2
-            exit 1
-          fi
-          if [ -n "$(git status --porcelain=v1 --untracked-files=all --ignored=matching)" ] ||
-             [ -n "$(git clean -ndx)" ]; then
-            echo "Preparation controller workspace contains content outside the exact commit." >&2
-            exit 1
-          fi
-      - name: Download exact accepted test provenance for storage preparation
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
-        with:
-          name: deploy-test-provenance-${{ inputs.sourceRef }}-${{ inputs.testDeliveryCorrelation }}
-          path: ${{ runner.temp }}/deploy-test-provenance
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.testDeliveryRunId }}
-      - name: Validate bounded preparation source and evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          : "${AZURE_CLIENT_ID:?AZURE_CLIENT_ID environment variable is required}"
-          : "${AZURE_TENANT_ID:?AZURE_TENANT_ID environment variable is required}"
-          : "${AZURE_SUBSCRIPTION_ID:?AZURE_SUBSCRIPTION_ID environment variable is required}"
-          : "${AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID:?AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID environment variable is required}"
-          : "${WLH_CATEGORY_BLOB_CONTAINER:?WLH_CATEGORY_BLOB_CONTAINER environment variable is required}"
-          : "${WLH_CATEGORY_BLOB_NAME:?WLH_CATEGORY_BLOB_NAME environment variable is required}"
-          : "${BRING_SESSION_CACHE_CONTAINER:?BRING_SESSION_CACHE_CONTAINER environment variable is required}"
-          : "${BRING_MUTATION_CONTAINER:?BRING_MUTATION_CONTAINER environment variable is required}"
-          : "${BRING_AUDIT_CONTAINER:?BRING_AUDIT_CONTAINER environment variable is required}"
-
-          deployment_ref="$SOURCE_REF"
-          # CONTROLLER_REF is assigned through the workflow job environment.
-          # shellcheck disable=SC2153
-          controller_ref="$CONTROLLER_REF"
-          checked_out_controller="$(git rev-parse HEAD)"
-          expected_title="Prepare Production Private Storage $deployment_ref $DELIVERY_CORRELATION"
-          if [ "$ENVIRONMENT_NAME" != "prod" ] ||
-             [ "$GITHUB_ENVIRONMENT_NAME" != "production" ] ||
-             [ "$AZURE_RESOURCE_GROUP" != "rg-api-prod" ] ||
-             [ "${DEPLOY_PRODUCTION_ENABLED:-false}" != "true" ] ||
-             [ "$GITHUB_RUN_ATTEMPT" != "1" ]; then
-            echo "Private-storage preparation is restricted to first-attempt guarded production runs." >&2
-            exit 1
-          fi
-          if [[ ! "$deployment_ref" =~ ^[0-9a-f]{40}$ ]] ||
-             [[ ! "$controller_ref" =~ ^[0-9a-f]{40}$ ]] ||
-             [ "$controller_ref" != "$CONTROLLER_WORKFLOW_SHA" ] ||
-             [ "$controller_ref" != "$GITHUB_SHA" ] ||
-             [ "$controller_ref" != "$checked_out_controller" ] ||
-             [ "$deployment_ref" != "$controller_ref" ]; then
-            echo "Preparation source and controller must equal the exact current-main workflow generation." >&2
-            exit 1
-          fi
-          if [[ ! "$DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]] ||
-             [[ ! "$CI_RUN_ID" =~ ^[0-9]+$ ]] ||
-             [[ ! "$CI_DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]] ||
-             [[ ! "$TEST_DELIVERY_RUN_ID" =~ ^[0-9]+$ ]] ||
-             [[ ! "$TEST_DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]; then
-            echo "Preparation requires exact CI/test run IDs and opaque correlations." >&2
-            exit 1
-          fi
-          if [ "$MIGRATION_CONFIRMATION" != "PREPARE_PRODUCTION_PRIVATE_STORAGE" ] ||
-             [ "$MIGRATION_SOURCE_STORAGE_ACCOUNT" != "stapicatalogueprodbfjsts" ] ||
-             [ "$MIGRATION_TARGET_STORAGE_ACCOUNT" != "stapicatalogueprodpbfjst" ] ||
-             [ "$MIGRATION_EXPECTED_SHA256" != "4b2651b8d842854716b4fb2e20ecd9482f59f2ea6ee2352401bec5d42e8c6ed0" ]; then
-            echo "The production preparation request does not match the approved one-blob cutover." >&2
-            exit 1
-          fi
-
-          current_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")"
-          if ! jq -e \
-            --arg run_id "$GITHUB_RUN_ID" \
-            --arg repository "$GITHUB_REPOSITORY" \
-            --arg controller_ref "$controller_ref" \
-            --arg title "$expected_title" \
-            '(.id | tostring) == $run_id
-              and .repository.full_name == $repository
-              and .head_sha == $controller_ref
-              and .head_branch == "main"
-              and .event == "repository_dispatch"
-              and .path == ".github/workflows/prepare-production-private-storage.yml"
-              and (.name == "Prepare Production Private Storage" or .name == $title)
-              and .display_title == $title
-              and .run_attempt == 1
-              and (.status == "queued" or .status == "in_progress")' \
-            <<<"$current_run_json" >/dev/null; then
-            echo "Current preparation run identity is not the exact trusted caller." >&2
-            exit 1
-          fi
-
-          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
-          [ "$controller_ref" = "$(git rev-parse origin/main)" ] || {
-            echo "Preparation controller is no longer current main." >&2
-            exit 1
-          }
-          echo "DEPLOYMENT_CONTROL_REF=$controller_ref" >> "$GITHUB_ENV"
-
-          ci_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}")"
-          expected_ci_title="CI $deployment_ref $CI_DELIVERY_CORRELATION"
-          if ! jq -e \
-            --arg run_id "$CI_RUN_ID" \
-            --arg repository "$GITHUB_REPOSITORY" \
-            --arg source_ref "$deployment_ref" \
-            --arg title "$expected_ci_title" \
-            '(.id | tostring) == $run_id
-              and .repository.full_name == $repository
-              and .path == ".github/workflows/ci.yml"
-              and (.name == "CI" or .name == $title)
-              and .event == "workflow_dispatch"
-              and .conclusion == "success"
-              and .head_branch == "main"
-              and .head_sha == $source_ref
-              and .display_title == $title
-              and .run_attempt == 1' \
-            <<<"$ci_run_json" >/dev/null; then
-            echo "Pinned CI evidence does not match exact current main." >&2
-            exit 1
-          fi
-
-          test_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TEST_DELIVERY_RUN_ID}")"
-          expected_test_title="Deploy Test $deployment_ref $TEST_DELIVERY_CORRELATION"
-          if ! jq -e \
-            --arg run_id "$TEST_DELIVERY_RUN_ID" \
-            --arg repository "$GITHUB_REPOSITORY" \
-            --arg source_ref "$deployment_ref" \
-            --arg title "$expected_test_title" \
-            '(.id | tostring) == $run_id
-              and .repository.full_name == $repository
-              and .path == ".github/workflows/deploy-test.yml"
-              and (.name == "Deploy Test" or .name == $title)
-              and .event == "repository_dispatch"
-              and .conclusion == "success"
-              and .head_branch == "main"
-              and .head_sha == $source_ref
-              and .display_title == $title
-              and .run_attempt == 1' \
-            <<<"$test_run_json" >/dev/null; then
-            echo "Pinned Deploy Test evidence does not match exact current main." >&2
-            exit 1
-          fi
-
-          provenance_file="${{ runner.temp }}/deploy-test-provenance/deploy-test-provenance.json"
-          if [ ! -f "$provenance_file" ] || [ -L "$provenance_file" ] ||
-             [ "$(find "${{ runner.temp }}/deploy-test-provenance" -mindepth 1 -maxdepth 1 -printf '%P\n')" != "deploy-test-provenance.json" ]; then
-            echo "Downloaded test evidence must contain only the exact regular provenance file." >&2
-            exit 1
-          fi
-          if ! jq -e \
-            --arg source_ref "$deployment_ref" \
-            --arg test_run_id "$TEST_DELIVERY_RUN_ID" \
-            --arg repository "$GITHUB_REPOSITORY" \
-            --arg correlation "$TEST_DELIVERY_CORRELATION" \
-            --arg ci_run_id "$CI_RUN_ID" \
-            --arg ci_correlation "$CI_DELIVERY_CORRELATION" \
-            '.environmentName == "test"
-              and .sourceRef == $source_ref
-              and .resolvedHead == $source_ref
-              and .runId == $test_run_id
-              and .workflow == "Deploy Test"
-              and .repository == $repository
-              and .deliveryCorrelation == $correlation
-              and .ciRunId == $ci_run_id
-              and .ciDeliveryCorrelation == $ci_correlation
-              and .runAttempt == "1"
-              and .deployFrontend == "true"
-              and .deployFunctions == "true"
-              and .eventName == "repository_dispatch"
-              and (.artifacts.functionappSha256 | test("^[0-9a-f]{64}$"))
-              and (.artifacts.sourceFrontendSha256 | test("^[0-9a-f]{64}$"))
-              and (.artifacts.frontendSha256 | test("^[0-9a-f]{64}$"))
-              and (.artifacts.sbomSha256 | test("^[0-9a-f]{64}$"))
-              and .authenticatedSmokeStatus == "passed"
-              and .telemetryStatus == "passed"' \
-            "$provenance_file" >/dev/null; then
-            echo "Pinned test provenance is not acceptable for production preparation." >&2
-            exit 1
-          fi
-      - name: Azure OIDC login
-        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # tag=v3
-        with:
-          client-id: ${{ env.AZURE_CLIENT_ID }}
-          tenant-id: ${{ env.AZURE_TENANT_ID }}
-          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
-      - name: Capture unchanged production runtime baseline
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t function_hosts < <(az functionapp list \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --query '[].defaultHostName' \
-            -o tsv)
-          if [ "${#function_hosts[@]}" -ne 1 ] || [ -z "${function_hosts[0]}" ]; then
-            echo "Expected exactly one production Function App hostname." >&2
-            exit 1
-          fi
-          production_function_host="${function_hosts[0]}"
-          curl --fail --silent --show-error --max-time 30 \
-            --retry 4 --retry-delay 5 --retry-all-errors \
-            "https://${production_function_host}/health" > "$RUNNER_TEMP/production-health-before.json"
-          jq -e '
-            .status == "ok"
-            and .environmentName == "prod"
-            and (.deployedCommitSha | test("^[0-9a-f]{40}$"))
-            and (.deploymentRunId | test("^[0-9]+$"))
-          ' "$RUNNER_TEMP/production-health-before.json" >/dev/null
-          echo "PRODUCTION_FUNCTION_HOST=$production_function_host" >> "$GITHUB_ENV"
-      - name: Preview bounded private-storage preparation
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/assert-current-main.mjs
-          expected_target_id="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/${MIGRATION_TARGET_STORAGE_ACCOUNT}"
-          az deployment group what-if \
-            --name "prepare-private-storage-prod-preview-${GITHUB_RUN_ID}" \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --template-file infra/prepare-private-storage.bicep \
-            --parameters environmentName=prod \
-              deploymentPrincipalObjectId="$AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID" \
-              wlhCategoryBlobContainer="$WLH_CATEGORY_BLOB_CONTAINER" \
-              bringSessionCacheContainer="$BRING_SESSION_CACHE_CONTAINER" \
-              bringMutationContainer="$BRING_MUTATION_CONTAINER" \
-              bringAuditContainer="$BRING_AUDIT_CONTAINER" \
-            --result-format ResourceIdOnly \
-            --no-pretty-print \
-            -o json > "$RUNNER_TEMP/private-storage-what-if.json"
-          jq -e --arg prefix "${expected_target_id,,}" '
-            [(.properties.changes // .changes // [])[]
-              | select(.changeType != "Ignore" and .changeType != "NoChange")]
-            | all(.[];
-                .changeType != "Delete"
-                and ((.resourceId // .id // "") | ascii_downcase | startswith($prefix)))
-          ' "$RUNNER_TEMP/private-storage-what-if.json" >/dev/null || {
-            echo "Private-storage what-if contained an out-of-bound or destructive resource change." >&2
-            exit 1
-          }
-      - name: Provision bounded private-storage boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/assert-current-main.mjs
-          deployment_outputs="$(az deployment group create \
-            --name "prepare-private-storage-prod-${GITHUB_RUN_ID}" \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --template-file infra/prepare-private-storage.bicep \
-            --parameters environmentName=prod \
-              deploymentPrincipalObjectId="$AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID" \
-              wlhCategoryBlobContainer="$WLH_CATEGORY_BLOB_CONTAINER" \
-              bringSessionCacheContainer="$BRING_SESSION_CACHE_CONTAINER" \
-              bringMutationContainer="$BRING_MUTATION_CONTAINER" \
-              bringAuditContainer="$BRING_AUDIT_CONTAINER" \
-            --query properties.outputs \
-            -o json)"
-          prepared_name="$(jq -r '.privateStorageAccountResourceName.value // empty' <<<"$deployment_outputs")"
-          prepared_id="$(jq -r '.privateStorageAccountResourceId.value // empty' <<<"$deployment_outputs")"
-          if [ "$prepared_name" != "$MIGRATION_TARGET_STORAGE_ACCOUNT" ] || [ -z "$prepared_id" ]; then
-            echo "Shared Bicep resolved an unexpected production private-storage target." >&2
-            exit 1
-          fi
-          {
-            echo "PREPARED_PRIVATE_STORAGE_ACCOUNT=$prepared_name"
-            echo "PREPARED_PRIVATE_STORAGE_ID=$prepared_id"
-          } >> "$GITHUB_ENV"
-      - name: Migrate one digest-pinned WLH reference blob
-        shell: bash
-        run: |
-          set -euo pipefail
-          migration_dir="$(mktemp -d)"
-          source_file="$migration_dir/source.bin"
-          target_file="$migration_dir/target.bin"
-          az storage blob download \
-            --auth-mode login \
-            --account-name "$MIGRATION_SOURCE_STORAGE_ACCOUNT" \
-            --container-name "$WLH_CATEGORY_BLOB_CONTAINER" \
-            --name "$WLH_CATEGORY_BLOB_NAME" \
-            --file "$source_file" \
-            --overwrite true \
-            -o none
-          source_digest="$(sha256sum "$source_file" | awk '{print $1}')"
-          [ "$source_digest" = "$MIGRATION_EXPECTED_SHA256" ] || {
-            echo "Production source blob digest does not match the approved digest." >&2
-            exit 1
-          }
-
-          target_exists=''
-          for _ in $(seq 1 18); do
-            if target_exists="$(az storage blob exists \
-              --auth-mode login \
-              --account-name "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
-              --container-name "$WLH_CATEGORY_BLOB_CONTAINER" \
-              --name "$WLH_CATEGORY_BLOB_NAME" \
-              --query exists \
-              -o tsv 2>/dev/null)"; then
-              break
-            fi
-            sleep 10
-          done
-          if [ "$target_exists" != "true" ] && [ "$target_exists" != "false" ]; then
-            echo "Azure RBAC did not become ready for the prepared private container." >&2
-            exit 1
-          fi
-          if [ "$target_exists" = "true" ]; then
-            migration_result='already-present'
-          else
-            node scripts/assert-current-main.mjs
-            az storage blob upload \
-              --auth-mode login \
-              --account-name "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
-              --container-name "$WLH_CATEGORY_BLOB_CONTAINER" \
-              --name "$WLH_CATEGORY_BLOB_NAME" \
-              --file "$source_file" \
-              --overwrite false \
-              -o none
-            migration_result='migrated'
-          fi
-
-          az storage blob download \
-            --auth-mode login \
-            --account-name "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
-            --container-name "$WLH_CATEGORY_BLOB_CONTAINER" \
-            --name "$WLH_CATEGORY_BLOB_NAME" \
-            --file "$target_file" \
-            --overwrite true \
-            -o none
-          target_digest="$(sha256sum "$target_file" | awk '{print $1}')"
-          [ "$target_digest" = "$MIGRATION_EXPECTED_SHA256" ] || {
-            echo "Prepared target blob digest does not match the approved digest." >&2
-            exit 1
-          }
-          exact_blob_count="$(az storage blob list \
-            --auth-mode login \
-            --account-name "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
-            --container-name "$WLH_CATEGORY_BLOB_CONTAINER" \
-            --prefix "$WLH_CATEGORY_BLOB_NAME" \
-            --query "[?name=='$WLH_CATEGORY_BLOB_NAME'] | length(@)" \
-            -o tsv)"
-          [ "$exact_blob_count" = "1" ] || {
-            echo "Expected exactly one approved WLH target blob." >&2
-            exit 1
-          }
-          echo "MIGRATION_RESULT=$migration_result" >> "$GITHUB_ENV"
-      - name: Verify private-storage policy and unchanged production runtime
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/assert-current-main.mjs
-          az storage account show \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
-            -o json > "$RUNNER_TEMP/private-storage-account.json"
-          jq -e '
-            .allowBlobPublicAccess == false
-            and .allowCrossTenantReplication == false
-            and .allowSharedKeyAccess == false
-            and .defaultToOAuthAuthentication == true
-            and .minimumTlsVersion == "TLS1_2"
-            and .publicNetworkAccess == "Enabled"
-            and .enableHttpsTrafficOnly == true
-            and .sku.name == "Standard_LRS"
-            and .kind == "StorageV2"
-            and .tags.environment == "prod"
-            and .tags.dataBoundary == "prod"
-            and .tags.purpose == "private-integration-state"
-            and .tags.managedBy == "bicep"
-          ' "$RUNNER_TEMP/private-storage-account.json" >/dev/null
-          az storage account blob-service-properties show \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --account-name "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
-            -o json > "$RUNNER_TEMP/private-storage-blob-policy.json"
-          jq -e '
-            .isVersioningEnabled == true
-            and .deleteRetentionPolicy.enabled == true
-            and .deleteRetentionPolicy.days == 30
-            and .containerDeleteRetentionPolicy.enabled == true
-            and .containerDeleteRetentionPolicy.days == 30
-          ' "$RUNNER_TEMP/private-storage-blob-policy.json" >/dev/null
-          for container in \
-            "$WLH_CATEGORY_BLOB_CONTAINER" \
-            "$BRING_SESSION_CACHE_CONTAINER" \
-            "$BRING_MUTATION_CONTAINER" \
-            "$BRING_AUDIT_CONTAINER"; do
-            container_id="${PREPARED_PRIVATE_STORAGE_ID}/blobServices/default/containers/${container}"
-            public_access="$(az resource show \
-              --ids "$container_id" \
-              --api-version 2023-05-01 \
-              --query properties.publicAccess \
-              -o tsv)"
-            [ "$public_access" = "None" ] || {
-              echo "Prepared private container does not deny public access." >&2
-              exit 1
-            }
-          done
-          wlh_container_id="${PREPARED_PRIVATE_STORAGE_ID}/blobServices/default/containers/${WLH_CATEGORY_BLOB_CONTAINER}"
-          writer_count="$(az role assignment list \
-            --assignee-object-id "$AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID" \
-            --scope "$wlh_container_id" \
-            --query "[?roleDefinitionName=='Storage Blob Data Contributor'] | length(@)" \
-            -o tsv)"
-          [ "$writer_count" = "1" ] || {
-            echo "Prepared WLH container lacks the exact deployment-writer role." >&2
-            exit 1
-          }
-
-          curl --fail --silent --show-error --max-time 30 \
-            --retry 4 --retry-delay 5 --retry-all-errors \
-            "https://${PRODUCTION_FUNCTION_HOST}/health" > "$RUNNER_TEMP/production-health-after.json"
-          jq -e --slurpfile before "$RUNNER_TEMP/production-health-before.json" '
-            .status == "ok"
-            and .environmentName == "prod"
-            and .deployedCommitSha == $before[0].deployedCommitSha
-            and .deployedSourceRef == $before[0].deployedSourceRef
-            and .deploymentRunId == $before[0].deploymentRunId
-          ' "$RUNNER_TEMP/production-health-after.json" >/dev/null
-
-          jq -n \
-            --arg environmentName "$ENVIRONMENT_NAME" \
-            --arg sourceRef "$SOURCE_REF" \
-            --arg controllerRef "$CONTROLLER_REF" \
-            --arg repository "$GITHUB_REPOSITORY" \
-            --arg runId "$GITHUB_RUN_ID" \
-            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
-            --arg deliveryCorrelation "$DELIVERY_CORRELATION" \
-            --arg ciRunId "$CI_RUN_ID" \
-            --arg ciDeliveryCorrelation "$CI_DELIVERY_CORRELATION" \
-            --arg testRunId "$TEST_DELIVERY_RUN_ID" \
-            --arg testDeliveryCorrelation "$TEST_DELIVERY_CORRELATION" \
-            --arg sourceStorageAccount "$MIGRATION_SOURCE_STORAGE_ACCOUNT" \
-            --arg targetStorageAccount "$PREPARED_PRIVATE_STORAGE_ACCOUNT" \
-            --arg container "$WLH_CATEGORY_BLOB_CONTAINER" \
-            --arg blobName "$WLH_CATEGORY_BLOB_NAME" \
-            --arg sha256 "$MIGRATION_EXPECTED_SHA256" \
-            --arg migrationResult "$MIGRATION_RESULT" \
-            --arg runtimeCommit "$(jq -r '.deployedCommitSha' "$RUNNER_TEMP/production-health-after.json")" \
-            --arg runtimeRunId "$(jq -r '.deploymentRunId' "$RUNNER_TEMP/production-health-after.json")" \
-            --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{
-              environmentName: $environmentName,
-              sourceRef: $sourceRef,
-              controllerRef: $controllerRef,
-              repository: $repository,
-              runId: $runId,
-              runAttempt: $runAttempt,
-              deliveryCorrelation: $deliveryCorrelation,
-              ciRunId: $ciRunId,
-              ciDeliveryCorrelation: $ciDeliveryCorrelation,
-              testRunId: $testRunId,
-              testDeliveryCorrelation: $testDeliveryCorrelation,
-              migration: {
-                sourceStorageAccount: $sourceStorageAccount,
-                targetStorageAccount: $targetStorageAccount,
-                container: $container,
-                blobName: $blobName,
-                sha256: $sha256,
-                result: $migrationResult,
-                status: "passed"
-              },
-              storagePolicyStatus: "passed",
-              productionRuntime: {
-                status: "unchanged",
-                deployedCommitSha: $runtimeCommit,
-                deploymentRunId: $runtimeRunId
-              },
-              verifiedAt: $verifiedAt
-            }' > "$RUNNER_TEMP/production-private-storage-evidence.json"
-      - name: Upload production private-storage evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
-        with:
-          name: production-private-storage-${{ inputs.sourceRef }}-${{ inputs.deliveryCorrelation }}
-          path: ${{ runner.temp }}/production-private-storage-evidence.json
-          if-no-files-found: error
-          retention-days: 90

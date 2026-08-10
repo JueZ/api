@@ -88,17 +88,16 @@ test('known-good selection requires one complete trusted pair and chooses the la
   );
 });
 
-test('legacy accepted production releases remain valid during bounded migration', () => {
-  const correlation = 'legacy-prod-1';
-  const artifacts = releasePair(30, correlation);
+test('removed legacy delivery workflows cannot be selected as known-good recovery evidence', () => {
+  const artifacts = releasePair(30, 'legacy-prod-1');
   const run = directRun(30, '2026-08-09T10:00:00Z', {
-    path: '.github/workflows/promote-production.yml',
+    path: '.github/workflows/legacy-delivery.yml',
     event: 'repository_dispatch',
-    display_title: `Promote Production ${previousSource} ${correlation}`,
+    display_title: `Legacy Delivery ${previousSource} legacy-prod-1`,
   });
-  assert.equal(
-    selectKnownGoodRelease({ artifacts, runs: [run], repository, sourceRef: previousSource, currentRunId: 99 }).runId,
-    30,
+  assert.throws(
+    () => selectKnownGoodRelease({ artifacts, runs: [run], repository, sourceRef: previousSource, currentRunId: 99 }),
+    /No complete trusted known-good production artifact/,
   );
 });
 

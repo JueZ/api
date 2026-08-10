@@ -170,8 +170,8 @@ Normal production promotion should happen through GitHub Actions, not from a loc
 Repository workflow promotion is allowed when:
 
 - `DEPLOY_PRODUCTION_ENABLED=true`
-- required CI and Policy Check gates pass
-- Deploy Test succeeds for the same source ref
+- `PR Gate` and `Security Gate` protected the merged source
+- Delivery v2 test deployment and verification succeed for the same source and build digests
 - production deployment is not skipped
 - production smoke/runtime-truth gates pass
 
@@ -212,7 +212,7 @@ Do not perform these unless explicitly requested:
 - remove authentication
 - weaken authorization
 - remove budget/cost guardrails
-- Do not bypass, remove, disable, or weaken CI, Policy Check, required status checks, deployment gates, telemetry gates, or smoke tests
+- Do not bypass, remove, disable, or weaken PR Gate, Security Gate, required status checks, deployment gates, telemetry gates, or smoke tests
 
 ## Final summary
 
