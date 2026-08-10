@@ -1,131 +1,45 @@
-version: 1
+version: 2
 
-# Exact content allowlist for the trusted workflow set. Any workflow byte change
-# requires a protected update to this canonical manifest.
-trustedWorkflowSha256:
-  agent-learning-status.yml: 293a481327ca638c06244a5d0ad7ecf288a692ab35193b33b4796ac3d866a6b3
-  bring-readonly-canary.yml: 9cd2cd547a3b36b1c1de1769730883e613dc370493d978c356d37d90f1e08898
-  ci.yml: a5bc491bff7af9e027921922ada6ceab6675709073a24e3ef2d47e3054c703af
-  codeql.yml: 8220b94fdc56f9b33d7db4111fd41e60beb814ef3f2fc99611a09dd71e910590
-  codex-automerge.yml: cb73e8d982468c58b77717213ceec6a23e7ed1e26863b663cff7a75e7d6d5054
-  codex-main-delivery.yml: 45e33b68c6feeed2778cb60817f2dfe12e1738c3530db186c3aae002ca07fc50
-  delivery-v2.yml: b5541b3eff0679f25271d714369a0dabf40df3d18184bc93a9a6e48fdb75b711
-  deploy-environment.yml: 1ce05e3ad90c24c095e327ac1e43d36fcfde1d15177c81e60c1ce88e7c5507b0
-  deploy-test.yml: be874930e0d375765afe67d50429744f5f629d129b944cae601e915ea16c7275
-  migrate-private-storage.yml: c5e8ba9e1379179ec4f1f3a6abcfaa7eb712b468e3f43e9c4606157a7ba8d31b
-  policy-check.yml: 553f5783cfbdb4dda498809b74265a9a247e5644663b74bacd1dd66c17fe23b2
-  pr-gate.yml: 77bc023650fb85060682af9cd12378f2887fde95213266942494cfe7170d3903
-  prepare-production-private-storage.yml: 74608a5ace6bd58f8a29796176bd6631b53c8e8eac03cc2127698a8779e9da27
-  promote-production.yml: eb87a6f7fd479226a68e0edd7f9867ce9b6c3bac853ffae0ed687734e0944387
-  repair-triage.yml: ff0b162a5cbaaa306833bc8ec9fc17a8a7954cc8384c237637932f41a3d23558
-  rollback-production.yml: 2aae30732058ba956f52a0fc5151e5ee236856464bb961dac576c9a033e49635
-  security-gate.yml: 81c1ab0b52042569362b3420c90f381ca957f159cf08a3cd06f8710476903ece
-  verify-azure-oidc.yml: 8f98932d92d84740df6573397fa2ad29678fd09f1c3fe44fd8a9910bfee424d7
-
-# This file is the canonical repository policy consumed by CI, the autonomous
-# governance workflow, documentation generation, and agent-instruction validation.
-# requiredChecks intentionally contains only stable protected-branch aggregates;
-# each owning workflow keeps its complete internal validation graph mandatory.
+# The only branch-required contexts. Internal jobs stay explicit in their owning
+# workflow aggregate; optional checks never become undeclared merge blockers.
 requiredChecks:
   - name: PR Gate
     appSlug: github-actions
   - name: Security Gate
     appSlug: github-actions
 
-agentLearning:
-  # Only normal codex-repair issues created at or after this immutable rollout
-  # boundary participate automatically. Earlier issues require exact-range backfill.
-  rolloutTimestamp: '2026-08-09T20:24:47Z'
-
-highRiskPaths:
-  # These files can redefine, exclude, or replace code executed by required
-  # checks and release construction. They must never receive low-risk approval.
-  - package.json
-  - package-lock.json
-  - angular.json
-  - tsconfig.json
-  - eslint.config.js
-  - .prettierignore
-  - .prettierrc.json
-  - apps/**
-  - scripts/**
-  - .github/workflows/**
-  - .github/actions/**
-  - .github/autonomous-policy.yml
-  - infra/**
-  - apps/api/src/shared/security/**
-  - apps/api/src/shared/config/**
-  - apps/api/src/application/authorization/**
-  - apps/api/src/application/auditing/**
-  - apps/api/src/application/idempotency/**
-  - apps/api/src/application/operations/**
-  - apps/api/src/mcp/**
-  - apps/api/src/shared/bring/**
-  - apps/api/src/functions/bring.ts
-  - contracts/**
-  - scripts/policy-guardrails.mjs
-  - scripts/autonomous-merge-controller.mjs
-  - scripts/check-architecture.mjs
-  - scripts/validate-agent-skills.mjs
-  - scripts/smoke-**
-  - scripts/check-telemetry.mjs
-  - scripts/runtime-truth.mjs
-  - scripts/write-release-ledger.mjs
-  - scripts/validate-release-ledger.mjs
-  - scripts/triage-repair-issues.mjs
-  - apps/api/src/shared/runtimeProvenance.ts
-  - apps/api/src/shared/smokeCorrelation.ts
-  - ops/release-ledger/**
-  - docs/security/**
-  - docs/architecture/**
-  - docs/adr/**
-  - AGENTS.md
-  - '**/AGENTS.md'
-  - .agents/skills/**
-  - evals/agent-tasks/**
-  - docs/agent-learning/**
-  - scripts/agent-learning/**
-  - scripts/agent-task-evals/**
-
-riskClasses:
-  supplyChain:
-    - package.json
-    - package-lock.json
-    - angular.json
-    - tsconfig.json
-    - eslint.config.js
-    - .prettierignore
-    - .prettierrc.json
-    - apps/**
-    - scripts/**
-  workflow:
-    - .github/workflows/**
-    - .github/actions/**
-    - scripts/autonomous-merge-controller.mjs
-  infrastructure:
-    - infra/**
-  authentication:
-    - apps/api/src/shared/security/**
-    - apps/api/src/application/authorization/**
-  destructiveIntegration:
-    - apps/api/src/shared/bring/**
-    - apps/api/src/functions/bring.ts
-    - apps/api/src/mcp/**
+# Human-readable profiles mirrored by the dependency-free path classifier.
+profiles:
+  documentation-only:
+    - README.md
+    - docs/**
+    - .github/**/*.md
+  api-backend:
+    - apps/api/**
+  frontend:
+    - apps/web/**
+  contracts-integrations:
     - contracts/**
-  agentGovernance:
-    - .github/autonomous-policy.yml
+  infrastructure-delivery:
+    - infra/**
+    - .github/workflows/**
+    - '**/*.sh'
+  privileged:
     - AGENTS.md
     - '**/AGENTS.md'
-    - .agents/skills/**
-    - evals/agent-tasks/**
-    - docs/agent-learning/**
-    - scripts/agent-learning/**
-    - scripts/agent-task-evals/**
-
-autonomousGovernance:
-  checkName: Autonomous review complete
-  evaluator: deterministic-protected-controller-v1
-  humanApprovalRequired: false
+    - .agents/**
+    - .github/autonomous-policy.yml
+    - .github/workflows/**
+    - .github/actions/**
+    - package.json
+    - package-lock.json
+    - scripts/**
+    - infra/**
+    - apps/api/src/shared/security/**
+    - apps/api/src/shared/config/**
+    - apps/api/src/application/authorization/**
+    - apps/api/src/application/auditing/**
+    - apps/api/src/application/idempotency/**
 
 merge:
   method: squash
@@ -135,9 +49,6 @@ merge:
   deleteHeadBranch: true
   allowedBranchPrefixes:
     - codex/
-    - codex-
-  allowedLabels:
-    - codex-automerge
   blockedLabels:
     - do-not-merge
     - security-hold
@@ -155,19 +66,34 @@ deployment:
   productionConcurrencyGroup: production-deployment
   buildOnce: true
   requireExactArtifactDigest: true
-  productionEnabledByDefault: false
-  # These paths can affect repository operation and therefore retain every PR
-  # and exact-main validation, but they do not alter deployed application,
-  # infrastructure, contract, or runtime configuration bytes.
+  impactPaths:
+    - apps/**
+    - contracts/**
+    - infra/**
+    - package.json
+    - package-lock.json
+    - angular.json
+    - tsconfig.json
+    - scripts/**
+    - .github/workflows/delivery-v2.yml
+    - .github/workflows/deploy-environment.yml
   runtimeNeutralPaths:
     - '*.md'
     - docs/**
     - .github/**/*.md
     - .agents/skills/**/*.md
-    - evals/agent-tasks/**
     - scripts/agent-learning/**
-    - scripts/agent-task-evals/**
     - scripts/test/agent-learning-*.test.mjs
+
+workflowSecurity:
+  actionsPinnedToFullSha: true
+  explicitPermissions: true
+  forbidPullRequestTarget: true
+  forbidSecretsInherit: true
+  forbidDynamicSecrets: true
+  forbidAlternateGitHubTokens: true
+  forbidUntrustedCodeWithWriteCredentials: true
+  forbidCheckRunWriters: true
 
 authorization:
   permissions:

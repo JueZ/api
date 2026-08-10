@@ -13,7 +13,7 @@ This skill is for:
 
 - Azure Functions 500/503 startup/runtime issues
 - failed smoke tests
-- failed Deploy Test, Promote Production, or Rollback Production runs
+- failed Delivery v2 test, production, or one-shot recovery jobs
 - Application Insights queries
 - Function App host/runtime state
 - Azure Monitor Activity Logs
@@ -41,7 +41,7 @@ Never:
 - print Key Vault values
 - dump full environment variables
 - weaken auth to make errors disappear
-- Do not bypass, remove, disable, or weaken CI, Policy Check, branch protection, required status checks, security scan, secret scan, telemetry gates, smoke tests, deployment gates, or guardrails
+- Do not bypass, remove, disable, or weaken PR Gate, Security Gate, branch protection, scans, telemetry gates, smoke tests, deployment gates, or guardrails
 
 If a command may expose secrets, replace it with a narrow query that returns only names, booleans, status, counts, resource IDs, timestamps, or sanitized error summaries.
 

@@ -1,0 +1,19 @@
+version: 2
+id: proportional-feature-validation
+fingerprint: delivery.proportional-feature-validation
+severity: medium
+invariant: Unrelated feature delivery runs only its applicable validation and never replays historical workflow evidence or unchanged broad local suites.
+scope:
+  - .agents/skills/autonomous-pr-delivery/SKILL.md
+  - scripts/lib/path-classifier.mjs
+  - .github/workflows/pr-gate.yml
+prevention:
+  - kind: skill
+    path: .agents/skills/autonomous-pr-delivery/SKILL.md
+  - kind: regression-test
+    path: scripts/test/path-classifier.test.mjs
+broken: 5f874d8bdbe51d7e69b2155e4b4aac977085bfcd
+fixed: efc0793657d6d5bb5f86375fad67ca0ce67c1c07
+repairPr: 395
+recurrenceCount: 2
+status: verified

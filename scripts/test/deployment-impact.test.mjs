@@ -41,10 +41,8 @@ test('documentation, scoped instruction, and non-shipped agent-governance change
   });
   assert.equal(classifyDeploymentImpact([file('.github/AGENTS.md')]).deploymentRequired, false);
   assert.equal(classifyDeploymentImpact([file('.agents/skills/example/SKILL.md')]).deploymentRequired, false);
-  assert.equal(classifyDeploymentImpact([file('evals/agent-tasks/example.yml')]).deploymentRequired, false);
-  assert.equal(classifyDeploymentImpact([file('scripts/agent-learning/status-report.mjs')]).deploymentRequired, false);
   assert.equal(
-    classifyDeploymentImpact([file('scripts/agent-task-evals/scorers/example.mjs')]).deploymentRequired,
+    classifyDeploymentImpact([file('scripts/agent-learning/validate-artifacts.mjs')]).deploymentRequired,
     false,
   );
   assert.equal(

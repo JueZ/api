@@ -31,12 +31,22 @@ test('delivery DAG builds and attests once before test, then reads main once bef
   assert.deepEqual(needs(workflow.jobs.attest), ['build']);
   assert.deepEqual(needs(workflow.jobs['deploy-test']), ['classify', 'build', 'attest']);
   assert.deepEqual(needs(workflow.jobs['current-main']), ['classify', 'deploy-test']);
-  assert.deepEqual(needs(workflow.jobs['promote-production']), ['classify', 'deploy-test', 'current-main']);
+  assert.deepEqual(needs(workflow.jobs['promote-production']), ['classify', 'build', 'deploy-test', 'current-main']);
   assert.equal((source.match(/build-release-artifacts\.sh/g) ?? []).length, 1);
   assert.equal((source.match(/git\/ref\/heads\/main/g) ?? []).length, 2);
   assert.match(workflow.jobs['current-main'].steps[0].name, /Read current main once/);
-  assert.equal(workflow.jobs['deploy-test'].with.deliveryMode, 'direct');
-  assert.equal(workflow.jobs['promote-production'].with.deliveryMode, 'direct');
+  assert.equal(workflow.jobs['deploy-test'].with.expectedFunctionDigest, '${{ needs.build.outputs.function_digest }}');
+  assert.equal(
+    workflow.jobs['promote-production'].with.expectedFunctionDigest,
+    '${{ needs.build.outputs.function_digest }}',
+  );
+  assert.equal(workflow.jobs['deploy-test'].with.expectedFrontendDigest, '${{ needs.build.outputs.frontend_digest }}');
+  assert.equal(
+    workflow.jobs['promote-production'].with.expectedFrontendDigest,
+    '${{ needs.build.outputs.frontend_digest }}',
+  );
+  assert.equal(workflow.jobs['deploy-test'].with.expectedSbomDigest, '${{ needs.build.outputs.sbom_digest }}');
+  assert.equal(workflow.jobs['promote-production'].with.expectedSbomDigest, '${{ needs.build.outputs.sbom_digest }}');
 });
 
 test('reusable deployment permissions fit every direct caller and centralize issue writes', () => {
@@ -76,7 +86,8 @@ test('direct environment mode preserves OIDC, exact artifact, smoke, telemetry, 
   }
   assert.match(environmentSource, /CURRENT_MAIN_CONFIRMED_REF/);
   assert.match(environmentSource, /\.github\/workflows\/delivery-v2\.yml/);
-  assert.match(environmentSource, /inputs\.deliveryMode == 'direct' && github\.run_id/);
+  assert.doesNotMatch(environmentSource, /repository_dispatch|deliveryMode|deploy-test-provenance/);
+  assert.match(environmentSource, /expectedFunctionDigest/);
 });
 
 test('delivery summary reports classification, duration, skips, identity, environments, and recovery', () => {

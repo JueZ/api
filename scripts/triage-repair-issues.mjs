@@ -28,10 +28,6 @@ export const TRUSTED_REPAIR_WORKFLOWS = Object.freeze({
     key: 'private-storage-migration',
     displayName: 'Private Storage Migration',
   }),
-  '.github/workflows/prepare-production-private-storage.yml': Object.freeze({
-    key: 'production-private-storage',
-    displayName: 'Prepare Production Private Storage',
-  }),
   '.github/workflows/verify-azure-oidc.yml': Object.freeze({
     key: 'azure-oidc',
     displayName: 'Verify Azure OIDC',

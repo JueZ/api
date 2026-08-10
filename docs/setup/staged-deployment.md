@@ -1,44 +1,39 @@
 # Staged deployment setup
 
-The deployment workflow is intentionally infrastructure-only until all bootstrap prerequisites are verified.
-
 ## GitHub
 
-Configure the exact required checks in `.github/autonomous-policy.yml`, squash merge, up-to-date branches, no direct/force push, no `main` deletion, and no admin bypass. Enable the trusted autonomous controller and repository `OPENAI_API_KEY` for independent high-risk review. Human approval is not required by the selected policy.
+Configure `main` with strict/up-to-date pull requests, admin enforcement, linear history, conversation resolution, force-push/deletion denial, and exactly `PR Gate` plus `Security Gate` from the GitHub Actions App. Enable repository-native auto-merge, squash merge only, and automatic head-branch deletion.
 
-Create `test` and `production` environments for variable separation and deployment history. Keep `DEPLOY_PRODUCTION_ENABLED=false` until test, identity, RBAC, migration, smoke, telemetry, and rollback posture are proven.
+Create `test` and `production` GitHub environments. Routine autonomous production delivery has no required reviewer; add one only as an intentional operator policy change. Keep test and production secrets scoped to their environments.
 
-## Azure OIDC and RBAC
+Set non-secret repository variables:
 
-Create a GitHub deployment identity with federated subjects for the trusted workflow/environment. Grant only:
+- `DELIVERY_V2_ENABLED=true` after the push workflow is verified;
+- `DEPLOY_PRODUCTION_ENABLED=true` only after test, OIDC, smoke, telemetry, and rollback readiness are verified;
+- the existing exact Azure tenant, subscription, app, resource-group, auth, CORS, MCP, and runtime configuration variables used by `deploy-environment.yml`.
 
-- resource-group deployment permission;
-- documented role-assignment ability needed by Bicep;
-- release/static/WLH-reference container writes scoped as narrowly as Azure supports.
+Do not configure a repository OpenAI key for governance or repair callbacks. `OPENAI_API_KEY`, when present, is an environment-scoped runtime secret only for bounded repairable-error analysis.
 
-Do not use a long-lived Azure client secret or subscription Owner. The Function uses its own managed identity for host/runtime storage and Key Vault.
+## Azure
 
-## Required configuration
+Use Entra federated credentials for the GitHub repository/environment subjects and grant only the documented resource-group deployment and narrow data-plane roles. Do not use a client secret or subscription Owner. Function Apps use managed identity and Key Vault references.
 
-Set exact OIDC/CORS/MCP values, granular permissions, environment-specific resource names, deployment identity object ID, operator alert email, and Bring flags/allowlists. Test Bring add/destructive flags must be false. Secrets include provider credentials, OpenAI API key, and Bring mutation HMAC/encryption keys; deployment stores/references them through Key Vault without printing values.
+Preserve separate Function-host, release, public-static, and private-integration storage boundaries with shared keys disabled. The combined budget intent remains €25 per month: €10 test and €15 production.
 
-The combined budget intent is €25: test €10 and production €15.
+## Cutover verification
 
-## Data migration
+Before enabling push delivery, run `Delivery v2` from current protected `main` in `test-only` mode and require:
 
-Before the first split-storage cutover, copy existing WLH reference/session data into the new private account/container using an authorized, logged, read-then-write migration. Verify hashes/counts and retain the old data until runtime validation succeeds. Do not make the normal deployment workflow guess or silently migrate private data.
+- immutable build and provenance;
+- test OIDC deployment;
+- exact source and digest identity;
+- public and authenticated smoke;
+- telemetry correlation;
+- release ledger;
+- production concurrency and known-good recovery tests.
 
-For the production WLH cutover, send the typed `prepare-production-private-storage` repository dispatch event. The default-branch `prepare-production-private-storage.yml` calls the existing workflow-bound deployment identity in storage-preparation-only mode. It requires exact current-main CI and accepted Deploy Test provenance pinned through the non-secret `PREP_CI_RUN_ID`, `PREP_CI_CORRELATION`, `PREP_TEST_RUN_ID`, and `PREP_TEST_CORRELATION` repository variables; the payload must contain the explicit confirmation. It previews a shared-Bicep storage-only change set, permits only the fixed approved source/target/blob/digest tuple, refuses overwrite, verifies the copied bytes and storage policy, and proves the production Function still reports the prior accepted runtime identity. Keep this workflow disabled outside its bounded preparation window.
+Then set `DELIVERY_V2_ENABLED=true`, disable all predecessor controllers, and confirm only one workflow can promote a protected-main SHA. Production remains automatic when `DEPLOY_PRODUCTION_ENABLED=true`.
 
-## Rollout
+Private storage migrations remain explicit operational workflows. Inventory, back up, copy, compare counts/digests, verify access, and retain a rollback boundary. Normal application-package recovery must never guess or reverse data migrations.
 
-1. Validate locally and in PR.
-2. Run Azure what-if against test.
-3. Deploy the exact main-CI artifact to test.
-4. Verify health SHA, auth, exact CORS/MCP origin, private/public storage boundaries, Key Vault references, Bring read-only policy, smokes, telemetry correlation, and release ledger.
-5. Optionally enable the GET-only Bring canary with its dedicated `bring.read` identity.
-6. Set `DEPLOY_PRODUCTION_ENABLED=true` only after test evidence and rollback readiness.
-7. Promote the identical test-proven Function, SBOM, and frontend-source digests; render and hash the production frontend configuration before deployment.
-8. Verify production runtime truth and keep the release ledger.
-
-Normal promotion uses `Codex Main Delivery` and passes the exact accepted main CI run ID/correlation and Deploy Test run ID/correlation through typed default-branch repository dispatch events; no caller may select a workflow ref or substitute another run. The controller accepts only first-attempt trigger/controller runs and consumes a duplicate event for the same trigger as an idempotent no-op. Every deployment binds the caller's immutable run/workflow SHA, checks out that exact controller, and fails if it is no longer current `main`. Each dispatch must be workflow attempt 1; reruns fail before mutation and must be replaced with a new dispatch/correlation. Production promotion and rollback require both Function and frontend deployment flags. Rollback uses only the `rollback-production` repository dispatch event with a known-good full `main` SHA plus the exact successful production run ID and delivery correlation for its accepted ledger and preserved release bundle. Current `main` supplies the rollback controller and validation logic, but rollback does not run Bicep or reconcile infrastructure/security settings. It discovers existing resources read-only, validates the complete Bicep-managed app-setting name set and all approved non-secret values plus the complete rendered frontend before mutation, requires the historical digest-addressed Function blob to exist, switches the Function package pointer/provenance without writing safety settings, and uploads the preserved rendered frontend bytes unchanged. The single Azure settings response is streamed directly into the validator; secret values are never persisted, emitted, or compared. Never deploy production from a local shell.
+Never deploy production from a local shell. Manual `workflow_dispatch` on Delivery v2 is limited to the exact current `main` and exists for dry-run, test-only, or full diagnostic execution—not for bypassing protected delivery.

@@ -156,7 +156,6 @@ function isPrivilegedPath(path) {
     path.startsWith('apps/api/src/shared/config/') ||
     path.startsWith('docs/security/') ||
     path.startsWith('docs/cost/') ||
-    path.startsWith('evals/agent-tasks/') ||
     path.startsWith('scripts/') ||
     isDependencyPath(path) ||
     ['angular.json', 'eslint.config.js', 'tsconfig.json', '.prettierignore', '.prettierrc.json'].includes(path)

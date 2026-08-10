@@ -297,27 +297,27 @@ test('runtime truth validates exact deployment workflow run metadata', () => {
   const options = {
     runId: ledger.workflowRunId,
     repo: 'JueZ/api',
-    workflow: 'promote-production.yml',
+    workflow: 'delivery-v2.yml',
     expectedSha: sha,
     expectedDeliveryCorrelation: ledger.deliveryCorrelation,
   };
   const run = {
     id: Number(ledger.workflowRunId),
     repository: { full_name: 'JueZ/api' },
-    path: '.github/workflows/promote-production.yml',
-    name: `Promote Production ${sha} ${ledger.deliveryCorrelation}`,
-    event: 'repository_dispatch',
+    path: '.github/workflows/delivery-v2.yml',
+    name: `Delivery v2 ${sha}`,
+    event: 'push',
     run_attempt: 1,
     conclusion: 'success',
     head_branch: 'main',
     head_sha: sha,
-    display_title: `Promote Production ${sha} ${ledger.deliveryCorrelation}`,
+    display_title: `Delivery v2 ${sha}`,
   };
   assert.deepEqual(validateWorkflowRunMetadata(run, options), []);
-  assert.deepEqual(validateWorkflowRunMetadata({ ...run, name: 'Promote Production' }, options), []);
+  assert.deepEqual(validateWorkflowRunMetadata({ ...run, name: 'Delivery v2' }, options), []);
   assert.ok(validateWorkflowRunMetadata({ ...run, head_sha: 'b'.repeat(40) }, options).length > 0);
   assert.ok(validateWorkflowRunMetadata({ ...run, name: 'unrelated workflow' }, options).length > 0);
-  assert.ok(validateWorkflowRunMetadata({ ...run, display_title: 'Promote Production' }, options).length > 0);
+  assert.ok(validateWorkflowRunMetadata({ ...run, display_title: 'Delivery v2' }, options).length > 0);
   assert.ok(validateWorkflowRunMetadata({ ...run, run_attempt: 2 }, options).length > 0);
 });
 
