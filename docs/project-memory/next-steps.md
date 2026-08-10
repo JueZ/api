@@ -1,4 +1,4 @@
-<!-- project-memory-asOf: 2026-08-09 -->
+<!-- project-memory-asOf: 2026-08-10 -->
 # Next steps
 
 ## Closed-loop agent-learning program
@@ -10,7 +10,8 @@
 - PR #389 archived and passed protected live verification of the public-safe Phase 2 record, merged as `c71db002a86ac82f1076f6e6fe031c4bbc2b91b7`, and completed Main Delivery `31330909296`, exact-main CI `31330924386`, Deploy Test `31331003596`, Promote Production `31331166859`, both smoke classes, telemetry, test provenance, and both release-ledger artifacts. Phase 2 is accepted. Issues #359 and #374 remain open only for their versioned durable-learning follow-ups; they do not reopen Phase 2 acceptance.
 - PR #393 delivered and fully exercised issue #392's operator-authorized runtime-neutral classifier as merge `0a85184c866fbea789b320e9559fe276c072fffa`; because that PR changed the controller itself, full test and production delivery correctly remained required. Use `[skip deploy]` only under the operator's explicit authorization when a high-risk repository-automation PR provably changes no deployed application, contract, infrastructure, or runtime configuration.
 - Phase 3 and Phase 4 are accepted from strict evidence under `docs/agent-learning/evidence/`. PR #395 merged as `efc0793657d6d5bb5f86375fad67ca0ce67c1c07`; exact-main CI passed and runtime-neutral delivery skipped Deploy Test and Promote Production. No real or paid agent task ran; optional execution remains explicitly blocked.
-- Complete the Phase 5 implementation PR from exact protected main `7ccc5ba85b17222cd7b98142de520629fe34f287`. After protected merge and exact-main CI, exercise `Agent Learning Status` once, archive a strict public-safe evidence capsule, and accept Phase 5 only through a later protected ledger update. No model or paid task evaluation is permitted; environment deployment is not applicable under the operator-authorized marker for this governance-only slice.
+- Phase 5 PR #398 merged as `4c4872e94b2b6e7771c11b132e9dcd66514ff7c9`; all four exact-head aggregates, Main Delivery, exact-main CI, and protected-main status run `31340620096` passed. The current protected slice must register strict evidence at `docs/agent-learning/evidence/phase-5-memory-freshness.json`, after which one ledger-only PR may mark Phase 5 accepted from the new protected-main verifier.
+- Keep the daily model-free status schedule and rollout-bounded repair triage active. Do not manufacture an incident, add another required context, restore model review, or claim historical task pass rates before explicitly authorized real results exist.
 
 ## Quality 10 program
 

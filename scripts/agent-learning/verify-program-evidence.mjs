@@ -23,6 +23,7 @@ export const PROGRAM_PATH = 'docs/agent-learning/program.md';
 export const PHASE_2_EVIDENCE_PATH = 'docs/agent-learning/evidence/phase-2-versioned-artifacts.json';
 export const PHASE_3_EVIDENCE_PATH = 'docs/agent-learning/evidence/phase-3-failure-conversion.json';
 export const PHASE_4_EVIDENCE_PATH = 'docs/agent-learning/evidence/phase-4-agent-task-evaluations.json';
+export const PHASE_5_EVIDENCE_PATH = 'docs/agent-learning/evidence/phase-5-memory-freshness.json';
 export const OPEN_PR_LEDGER_PATHS = Object.freeze([
   PROGRAM_PATH,
   'docs/project-memory/current-state.md',
@@ -34,6 +35,7 @@ export const PROGRAM_EVIDENCE = Object.freeze({
   2: PHASE_2_EVIDENCE_PATH,
   3: PHASE_3_EVIDENCE_PATH,
   4: PHASE_4_EVIDENCE_PATH,
+  5: PHASE_5_EVIDENCE_PATH,
 });
 export const PHASE_2_IMPLEMENTATION_IDENTITY = Object.freeze({
   pullRequestNumber: 349,
@@ -114,6 +116,13 @@ const PHASE_4_IMPLEMENTATION_IDENTITY = Object.freeze({
   headSha: '7f922c45c5ed81d0091c4d840f6054fc73efc27b',
   mergeSha: 'efc0793657d6d5bb5f86375fad67ca0ce67c1c07',
 });
+const PHASE_5_IMPLEMENTATION_IDENTITY = Object.freeze({
+  baseSha: '7ccc5ba85b17222cd7b98142de520629fe34f287',
+  branch: 'codex/agent-learning-phase-5-reporting',
+  pullRequest: 398,
+  headSha: 'a581189d34be41b1a7fda16497b251a0fd87902f',
+  mergeSha: '4c4872e94b2b6e7771c11b132e9dcd66514ff7c9',
+});
 const PHASE_3_LABELS = Object.freeze([
   'agent-learning',
   'learning-regression',
@@ -155,6 +164,17 @@ const PHASE_4_RUNS = Object.freeze({
   'Autonomous review complete': 31_338_454_226,
   mainDelivery: 31_338_579_706,
   exactMainCi: 31_338_595_876,
+});
+const PHASE_5_RUNS = Object.freeze({
+  'CI complete': 31_340_391_863,
+  'Policy complete': 31_340_391_858,
+  'CodeQL complete': 31_340_391_885,
+  'Autonomous review complete': 31_340_391_905,
+  mainDelivery: 31_340_499_592,
+  exactMainCi: 31_340_516_106,
+  statusWorkflow: 31_340_620_096,
+  statusJob: 93_313_663_181,
+  statusArtifact: 9_045_704_965,
 });
 
 function isRecord(value) {
@@ -1041,6 +1061,436 @@ export function phase4EvidenceShapeFindings(evidence) {
     /(?:authorization|client_secret|connection_string|accountkey)\s*[:=]/i,
   ]) {
     addFinding(findings, !pattern.test(serialized), 'phase4Evidence contains a secret-shaped value');
+  }
+  return findings;
+}
+
+export function phase5EvidenceShapeFindings(evidence) {
+  const findings = [];
+  findings.push(
+    ...exactKeysFindings(
+      evidence,
+      [
+        'schemaVersion',
+        'repository',
+        'phase',
+        'status',
+        'observedAt',
+        'boundary',
+        'implementation',
+        'exactHeadChecks',
+        'postMerge',
+        'statusWorkflow',
+        'validation',
+        'modelUsage',
+      ],
+      'phase5Evidence',
+    ),
+  );
+  if (!isRecord(evidence)) return findings;
+  addFinding(findings, evidence.schemaVersion === 1, 'phase5Evidence.schemaVersion must be 1');
+  addFinding(findings, evidence.repository === 'JueZ/api', 'phase5Evidence.repository must be JueZ/api');
+  addFinding(findings, evidence.phase === 5, 'phase5Evidence.phase must be 5');
+  addFinding(findings, evidence.status === 'accepted', 'phase5Evidence.status must be accepted');
+  addFinding(findings, !Number.isNaN(Date.parse(evidence.observedAt)), 'phase5Evidence.observedAt is invalid');
+  addFinding(
+    findings,
+    typeof evidence.boundary === 'string' && evidence.boundary.includes('merged PR alone is not runtime evidence'),
+    'phase5Evidence must preserve the runtime-evidence boundary',
+  );
+
+  const implementation = evidence.implementation;
+  findings.push(
+    ...exactKeysFindings(
+      implementation,
+      ['pullRequest', 'url', 'branch', 'baseSha', 'headSha', 'mergeSha', 'mergedAt'],
+      'phase5Evidence.implementation',
+    ),
+  );
+  if (isRecord(implementation)) {
+    for (const [key, expected] of Object.entries(PHASE_5_IMPLEMENTATION_IDENTITY)) {
+      addFinding(
+        findings,
+        implementation[key] === expected,
+        `phase5Evidence.implementation.${key} does not match the immutable Phase 5 identity`,
+      );
+    }
+    addFinding(
+      findings,
+      implementation.url === `https://github.com/JueZ/api/pull/${implementation.pullRequest}`,
+      'phase5Evidence implementation PR URL is not canonical',
+    );
+    addFinding(findings, !Number.isNaN(Date.parse(implementation.mergedAt)), 'phase5Evidence merge time is invalid');
+  }
+
+  const checks = Array.isArray(evidence.exactHeadChecks) ? evidence.exactHeadChecks : [];
+  addFinding(findings, checks.length === 4, 'phase5Evidence must contain four exact-head checks');
+  const contexts = new Set();
+  const runIds = new Set();
+  checks.forEach((record, index) => {
+    const label = `phase5Evidence.exactHeadChecks[${index}]`;
+    const keys =
+      record?.context === 'Autonomous review complete'
+        ? ['context', 'workflowRun', 'url', 'conclusion', 'evaluator']
+        : ['context', 'workflowRun', 'url', 'conclusion'];
+    findings.push(...exactKeysFindings(record, keys, label));
+    if (!isRecord(record)) return;
+    contexts.add(record.context);
+    runIds.add(record.workflowRun);
+    addFinding(findings, Object.hasOwn(EXPECTED_AGGREGATES, record.context), `${label}.context is unsupported`);
+    addFinding(
+      findings,
+      record.workflowRun === PHASE_5_RUNS[record.context],
+      `${label}.workflowRun does not match the accepted exact-head run`,
+    );
+    addFinding(
+      findings,
+      record.url === `https://github.com/JueZ/api/actions/runs/${record.workflowRun}`,
+      `${label}.url is not canonical`,
+    );
+    addFinding(findings, record.conclusion === 'success', `${label}.conclusion must be success`);
+    if (record.context === 'Autonomous review complete') {
+      addFinding(
+        findings,
+        record.evaluator === 'deterministic-protected-controller-v1',
+        `${label}.evaluator is invalid`,
+      );
+    }
+  });
+  addFinding(findings, contexts.size === 4, 'phase5Evidence aggregate contexts are not unique');
+  addFinding(findings, runIds.size === 4, 'phase5Evidence aggregate workflow runs are not unique');
+  for (const context of Object.keys(EXPECTED_AGGREGATES)) {
+    addFinding(findings, contexts.has(context), `phase5Evidence is missing ${context}`);
+  }
+
+  const postMerge = evidence.postMerge;
+  findings.push(
+    ...exactKeysFindings(
+      postMerge,
+      [
+        'mainDeliveryRun',
+        'mainDeliveryUrl',
+        'mainDeliveryConclusion',
+        'exactMainCiRun',
+        'exactMainCiUrl',
+        'exactMainCiHeadSha',
+        'exactMainCiConclusion',
+        'environmentDeployment',
+      ],
+      'phase5Evidence.postMerge',
+    ),
+  );
+  if (isRecord(postMerge)) {
+    for (const [runKey, urlKey, expectedRun] of [
+      ['mainDeliveryRun', 'mainDeliveryUrl', PHASE_5_RUNS.mainDelivery],
+      ['exactMainCiRun', 'exactMainCiUrl', PHASE_5_RUNS.exactMainCi],
+    ]) {
+      addFinding(
+        findings,
+        postMerge[runKey] === expectedRun,
+        `phase5Evidence.postMerge.${runKey} does not match the accepted run`,
+      );
+      addFinding(
+        findings,
+        postMerge[urlKey] === `https://github.com/JueZ/api/actions/runs/${postMerge[runKey]}`,
+        `phase5Evidence.postMerge.${urlKey} is not canonical`,
+      );
+    }
+    addFinding(findings, postMerge.mainDeliveryConclusion === 'success', 'Phase 5 Main Delivery did not succeed');
+    addFinding(findings, postMerge.exactMainCiConclusion === 'success', 'Phase 5 exact-main CI did not succeed');
+    addFinding(
+      findings,
+      postMerge.exactMainCiHeadSha === PHASE_5_IMPLEMENTATION_IDENTITY.mergeSha,
+      'Phase 5 exact-main CI does not bind the merge SHA',
+    );
+    const deployment = postMerge.environmentDeployment;
+    findings.push(
+      ...exactKeysFindings(
+        deployment,
+        [
+          'decision',
+          'reason',
+          'deployTest',
+          'promoteProduction',
+          'smoke',
+          'telemetry',
+          'releaseLedger',
+          'runtimeTruth',
+        ],
+        'phase5Evidence.postMerge.environmentDeployment',
+      ),
+    );
+    if (isRecord(deployment)) {
+      addFinding(findings, deployment.decision === 'skipped', 'Phase 5 deployment decision must be skipped');
+      addFinding(
+        findings,
+        deployment.reason === 'explicit PR marker or label',
+        'Phase 5 deployment skip reason is invalid',
+      );
+      for (const key of ['deployTest', 'promoteProduction']) {
+        addFinding(findings, deployment[key] === 'not_started', `Phase 5 ${key} must be not_started`);
+      }
+      for (const key of ['smoke', 'telemetry', 'releaseLedger', 'runtimeTruth']) {
+        addFinding(findings, deployment[key] === 'not_applicable', `Phase 5 ${key} must be not_applicable`);
+      }
+    }
+  }
+
+  const workflow = evidence.statusWorkflow;
+  findings.push(
+    ...exactKeysFindings(
+      workflow,
+      ['workflowPath', 'workflowRun', 'url', 'event', 'attempt', 'headSha', 'conclusion', 'job', 'artifact', 'report'],
+      'phase5Evidence.statusWorkflow',
+    ),
+  );
+  if (isRecord(workflow)) {
+    addFinding(
+      findings,
+      workflow.workflowPath === '.github/workflows/agent-learning-status.yml',
+      'Phase 5 status workflow path is invalid',
+    );
+    addFinding(findings, workflow.workflowRun === PHASE_5_RUNS.statusWorkflow, 'Phase 5 status run is invalid');
+    addFinding(
+      findings,
+      workflow.url === `https://github.com/JueZ/api/actions/runs/${workflow.workflowRun}`,
+      'Phase 5 status workflow URL is not canonical',
+    );
+    addFinding(findings, workflow.event === 'workflow_dispatch', 'Phase 5 status workflow event is invalid');
+    addFinding(findings, workflow.attempt === 1, 'Phase 5 status workflow must be first-attempt');
+    addFinding(
+      findings,
+      workflow.headSha === PHASE_5_IMPLEMENTATION_IDENTITY.mergeSha,
+      'Phase 5 status workflow does not bind the implementation merge',
+    );
+    addFinding(findings, workflow.conclusion === 'success', 'Phase 5 status workflow did not succeed');
+    findings.push(
+      ...exactKeysFindings(workflow.job, ['id', 'name', 'url', 'conclusion'], 'phase5Evidence.statusWorkflow.job'),
+    );
+    if (isRecord(workflow.job)) {
+      addFinding(findings, workflow.job.id === PHASE_5_RUNS.statusJob, 'Phase 5 status job ID is invalid');
+      addFinding(
+        findings,
+        workflow.job.name === 'report agent learning and memory freshness',
+        'Phase 5 status job name is invalid',
+      );
+      addFinding(
+        findings,
+        workflow.job.url === `${workflow.url}/job/${workflow.job.id}`,
+        'Phase 5 status job URL is not canonical',
+      );
+      addFinding(findings, workflow.job.conclusion === 'success', 'Phase 5 status job did not succeed');
+    }
+    findings.push(
+      ...exactKeysFindings(
+        workflow.artifact,
+        ['id', 'name', 'sizeBytes', 'digest', 'expiresAt'],
+        'phase5Evidence.statusWorkflow.artifact',
+      ),
+    );
+    if (isRecord(workflow.artifact)) {
+      addFinding(
+        findings,
+        workflow.artifact.id === PHASE_5_RUNS.statusArtifact,
+        'Phase 5 status artifact ID is invalid',
+      );
+      addFinding(
+        findings,
+        workflow.artifact.name === `agent-learning-status-${workflow.workflowRun}`,
+        'Phase 5 status artifact name is invalid',
+      );
+      addFinding(
+        findings,
+        exactPositiveInteger(workflow.artifact.sizeBytes),
+        'Phase 5 status artifact size is invalid',
+      );
+      addFinding(findings, EXACT_DIGEST.test(workflow.artifact.digest), 'Phase 5 status artifact digest is invalid');
+      addFinding(
+        findings,
+        !Number.isNaN(Date.parse(workflow.artifact.expiresAt)),
+        'Phase 5 status artifact expiry is invalid',
+      );
+    }
+  }
+
+  const report = workflow?.report;
+  findings.push(
+    ...exactKeysFindings(
+      report,
+      [
+        'status',
+        'significantFailuresSinceRollout',
+        'learningCandidateCount',
+        'dispositionCoverage',
+        'verifiedArtifactCount',
+        'waivedArtifactCount',
+        'recurringFingerprints',
+        'openLearningIssues',
+        'historicalTaskPassRateByContext',
+        'taskEvaluationResultCount',
+        'liveEvidenceStatus',
+        'memoryFreshness',
+        'staleMemoryIssue',
+        'missingOrStaleEvidence',
+        'invokedModel',
+        'rewroteMemory',
+      ],
+      'phase5Evidence.statusWorkflow.report',
+    ),
+  );
+  if (isRecord(report)) {
+    addFinding(findings, report.status === 'passing', 'Phase 5 report did not pass');
+    for (const key of ['significantFailuresSinceRollout', 'learningCandidateCount', 'waivedArtifactCount']) {
+      addFinding(findings, report[key] === 0, `Phase 5 report ${key} must be zero`);
+    }
+    addFinding(findings, report.verifiedArtifactCount === 4, 'Phase 5 verified artifact count is invalid');
+    addFinding(
+      findings,
+      Array.isArray(report.recurringFingerprints) && report.recurringFingerprints.length === 0,
+      'Phase 5 recurring fingerprints are invalid',
+    );
+    addFinding(
+      findings,
+      Array.isArray(report.openLearningIssues) && report.openLearningIssues.length === 0,
+      'Phase 5 open learning issues are invalid',
+    );
+    findings.push(
+      ...exactKeysFindings(
+        report.dispositionCoverage,
+        ['covered', 'total', 'rate'],
+        'phase5Evidence.statusWorkflow.report.dispositionCoverage',
+      ),
+    );
+    if (isRecord(report.dispositionCoverage)) {
+      addFinding(
+        findings,
+        report.dispositionCoverage.covered === 0 &&
+          report.dispositionCoverage.total === 0 &&
+          report.dispositionCoverage.rate === null,
+        'Phase 5 disposition coverage is invalid',
+      );
+    }
+    const contexts = report.historicalTaskPassRateByContext;
+    findings.push(
+      ...exactKeysFindings(
+        contexts,
+        ['historical', 'current-agent-context', 'current-without-skills'],
+        'phase5Evidence.statusWorkflow.report.historicalTaskPassRateByContext',
+      ),
+    );
+    if (isRecord(contexts)) {
+      for (const context of ['historical', 'current-agent-context', 'current-without-skills']) {
+        findings.push(
+          ...exactKeysFindings(
+            contexts[context],
+            ['passed', 'total', 'rate'],
+            `phase5Evidence.statusWorkflow.report.historicalTaskPassRateByContext.${context}`,
+          ),
+        );
+        addFinding(
+          findings,
+          contexts[context]?.passed === 0 && contexts[context]?.total === 0 && contexts[context]?.rate === null,
+          `Phase 5 clean-run task rate for ${context} is invalid`,
+        );
+      }
+    }
+    addFinding(findings, report.taskEvaluationResultCount === 0, 'Phase 5 clean run must not claim task results');
+    addFinding(findings, report.liveEvidenceStatus === 'available', 'Phase 5 live evidence was unavailable');
+    findings.push(
+      ...exactKeysFindings(
+        report.memoryFreshness,
+        ['status', 'offlineFindings', 'liveStatus', 'liveClaimsChecked', 'liveContradictions'],
+        'phase5Evidence.statusWorkflow.report.memoryFreshness',
+      ),
+    );
+    if (isRecord(report.memoryFreshness)) {
+      addFinding(
+        findings,
+        report.memoryFreshness.status === 'passing' &&
+          report.memoryFreshness.offlineFindings === 0 &&
+          report.memoryFreshness.liveStatus === 'passing' &&
+          report.memoryFreshness.liveClaimsChecked === 0 &&
+          report.memoryFreshness.liveContradictions === 0,
+        'Phase 5 memory freshness summary is invalid',
+      );
+    }
+    findings.push(
+      ...exactKeysFindings(
+        report.staleMemoryIssue,
+        ['status', 'issue'],
+        'phase5Evidence.statusWorkflow.report.staleMemoryIssue',
+      ),
+    );
+    if (isRecord(report.staleMemoryIssue)) {
+      addFinding(
+        findings,
+        report.staleMemoryIssue.status === 'not_applicable' && report.staleMemoryIssue.issue === null,
+        'Phase 5 stale-memory issue decision is invalid',
+      );
+    }
+    addFinding(
+      findings,
+      JSON.stringify(report.missingOrStaleEvidence) ===
+        JSON.stringify(['no local historical agent-task result records']),
+      'Phase 5 missing-evidence statement is invalid',
+    );
+    addFinding(findings, report.invokedModel === false, 'Phase 5 report claims a model invocation');
+    addFinding(findings, report.rewroteMemory === false, 'Phase 5 report claims an automatic memory rewrite');
+  }
+
+  const validation = evidence.validation;
+  const validationFields = [
+    'offlineMemory',
+    'liveMemory',
+    'statusReport',
+    'staleIssueDeduplication',
+    'promptInjectionSanitization',
+    'secretLogExclusion',
+    'workflowLeastPrivilege',
+    'workflowNonRequired',
+    'fixedPathCi',
+    'architectureCiWorkflowRun',
+    'deterministicTests',
+  ];
+  findings.push(...exactKeysFindings(validation, validationFields, 'phase5Evidence.validation'));
+  if (isRecord(validation)) {
+    for (const key of validationFields.slice(0, 9)) {
+      addFinding(findings, validation[key] === 'passed', `Phase 5 ${key} validation did not pass`);
+    }
+    addFinding(
+      findings,
+      validation.architectureCiWorkflowRun === PHASE_5_RUNS['CI complete'],
+      'Phase 5 architecture CI does not bind the implementation head',
+    );
+    addFinding(findings, validation.deterministicTests === 10, 'Phase 5 deterministic test count is invalid');
+  }
+
+  const modelUsage = evidence.modelUsage;
+  findings.push(
+    ...exactKeysFindings(
+      modelUsage,
+      ['modelInvoked', 'paidAgentTaskEvaluationInvoked', 'transcriptsArchived'],
+      'phase5Evidence.modelUsage',
+    ),
+  );
+  if (isRecord(modelUsage)) {
+    addFinding(findings, modelUsage.modelInvoked === false, 'Phase 5 evidence reports model invocation');
+    addFinding(
+      findings,
+      modelUsage.paidAgentTaskEvaluationInvoked === false,
+      'Phase 5 evidence reports a paid task evaluation',
+    );
+    addFinding(findings, modelUsage.transcriptsArchived === false, 'Phase 5 evidence reports transcripts');
+  }
+
+  const serialized = JSON.stringify(evidence);
+  for (const pattern of [
+    /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/i,
+    /\b(?:gh[pousr]_|github_pat_|sk-(?:proj-)?)[A-Za-z0-9_-]{16,}\b/,
+    /(?:sig|se|sp)=[^&\s]+/i,
+    /(?:authorization|client_secret|connection_string|accountkey)\s*[:=]/i,
+  ]) {
+    addFinding(findings, !pattern.test(serialized), 'phase5Evidence contains a secret-shaped value');
   }
   return findings;
 }
@@ -2072,6 +2522,7 @@ export async function verifyOfflineProgramEvidence({ repositoryRoot = REPOSITORY
     [PHASE_2_EVIDENCE_PATH, phase2EvidenceShapeFindings],
     [PHASE_3_EVIDENCE_PATH, phase3EvidenceShapeFindings],
     [PHASE_4_EVIDENCE_PATH, phase4EvidenceShapeFindings],
+    [PHASE_5_EVIDENCE_PATH, phase5EvidenceShapeFindings],
   ]) {
     const absoluteEvidencePath = join(repositoryRoot, evidencePath);
     if (!existsSync(absoluteEvidencePath)) continue;

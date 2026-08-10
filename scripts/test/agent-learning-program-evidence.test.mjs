@@ -10,6 +10,7 @@ import {
   PHASE_2_EVIDENCE_PATH,
   PHASE_3_EVIDENCE_PATH,
   PHASE_4_EVIDENCE_PATH,
+  PHASE_5_EVIDENCE_PATH,
   PROGRAM_PATH,
   acceptedPhaseEvidenceFindings,
   canonicalWorkflowRunFindings,
@@ -23,6 +24,7 @@ import {
   phase2ImplementationIdentityFindings,
   phase3EvidenceShapeFindings,
   phase4EvidenceShapeFindings,
+  phase5EvidenceShapeFindings,
   phaseEvidenceNeedsLiveVerification,
   protectedMainControllerFindings,
   governanceEvidenceFindings,
@@ -479,6 +481,22 @@ test('Phase 4 evidence schema is strict, exact-head bound, and model-free', asyn
   assert.ok(findings.some((finding) => finding.includes('timeoutCleanup')));
   assert.ok(findings.some((finding) => finding.includes('model invocation')));
   assert.ok(findings.some((finding) => finding.includes('secret-shaped')));
+});
+
+test('Phase 5 evidence schema is strict, live-status bound, and model-free', async () => {
+  const evidence = JSON.parse(await readFile(join(process.cwd(), PHASE_5_EVIDENCE_PATH), 'utf8'));
+  assert.deepEqual(phase5EvidenceShapeFindings(evidence), []);
+  evidence.statusWorkflow.report.memoryFreshness.liveStatus = 'blocked';
+  evidence.statusWorkflow.report.invokedModel = true;
+  evidence.statusWorkflow.report.missingOrStaleEvidence = [];
+  evidence.validation.workflowLeastPrivilege = 'skipped';
+  evidence.rawIssueBody = 'untrusted';
+  const findings = phase5EvidenceShapeFindings(evidence);
+  assert.ok(findings.some((finding) => finding.includes('rawIssueBody is not allowed')));
+  assert.ok(findings.some((finding) => finding.includes('memory freshness summary')));
+  assert.ok(findings.some((finding) => finding.includes('model invocation')));
+  assert.ok(findings.some((finding) => finding.includes('missing-evidence statement')));
+  assert.ok(findings.some((finding) => finding.includes('workflowLeastPrivilege')));
 });
 
 test('Phase 2 evidence is pinned to the reviewed implementation identity', () => {
