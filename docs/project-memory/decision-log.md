@@ -503,3 +503,9 @@ Entries are reverse chronological.
 - **Decision:** Cache unofficial Bring! authentication sessions in a versioned private blob in the existing deployment storage account, with process-local deduplication and last-write-wins persistence.
 - **Reason:** This avoids repeated technical-account logins without adding paid/always-on infrastructure or storage keys. Cache failures fall back to login and never fail an otherwise successful shopping operation.
 - **Risk:** Bring!'s API is undocumented and may drift. The integration exposes normalized DTOs only and classifies response drift separately so rollback or protocol repair can be performed safely.
+# 2026-08-10 — Bound routine agent context and monitoring
+
+- **Decision:** Keep routine Codex instructions and active project memory concise, load historical detail only when relevant, run one proportional local validation set per unchanged diff, and monitor GitHub through bounded state-transition queries instead of repetitive watchers or successful-log downloads.
+- **Reason:** Long duplicated guidance, historical status snapshots, repeated local checks, and verbose polling consumed time and tokens without adding independent evidence.
+- **Consequences:** Protected PR aggregates, exact-head validation, deterministic governance, branch protection, and applicable delivery/runtime proof remain mandatory. Terminal workflow metadata stays authoritative, so routine successful run IDs do not require a separate bookkeeping PR.
+- **Status:** Active.
