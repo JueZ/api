@@ -29,6 +29,18 @@ source:
     - kind: workflow_run
       locator: JueZ/api/actions/runs/31383958260
       url: https://github.com/JueZ/api/actions/runs/31383958260
+    - kind: pull_request
+      locator: JueZ/api#406
+      url: https://github.com/JueZ/api/pull/406
+    - kind: commit
+      locator: 35d7438155e64d16c28dce6d1365b41d4b8bbd7b
+      url: https://github.com/JueZ/api/commit/35d7438155e64d16c28dce6d1365b41d4b8bbd7b
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31384910775
+      url: https://github.com/JueZ/api/actions/runs/31384910775
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31384871300
+      url: https://github.com/JueZ/api/actions/runs/31384871300
 classification:
   failureArea: post-merge-delivery-efficiency
   severity: medium

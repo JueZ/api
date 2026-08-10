@@ -81,7 +81,7 @@ Artifacts: 8. candidate: 0; implemented: 4; verified: 4; waived: 0; superseded: 
 ## [runtime-neutral-delivery-classification](artifacts/runtime-neutral-delivery-classification.yml)
 
 - Title: Skip environment deployment only for proven runtime-neutral changes
-- Source: user_correction — JueZ/api#392, JueZ/api#391, JueZ/api/actions/runs/31332272018, JueZ/api/actions/runs/31332564172, JueZ/api#405, JueZ/api#404, JueZ/api/actions/runs/31383919993, JueZ/api/actions/runs/31383958260
+- Source: user_correction — JueZ/api#392, JueZ/api#391, JueZ/api/actions/runs/31332272018, JueZ/api/actions/runs/31332564172, JueZ/api#405, JueZ/api#404, JueZ/api/actions/runs/31383919993, JueZ/api/actions/runs/31383958260, JueZ/api#406, 35d7438155e64d16c28dce6d1365b41d4b8bbd7b, JueZ/api/actions/runs/31384910775, JueZ/api/actions/runs/31384871300
 - Disposition: regression-test
 - Status: implemented
 - Durable artifacts:
