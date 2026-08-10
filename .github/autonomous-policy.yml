@@ -26,13 +26,9 @@ trustedWorkflowSha256:
 # requiredChecks intentionally contains only stable protected-branch aggregates;
 # each owning workflow keeps its complete internal validation graph mandatory.
 requiredChecks:
-  - name: CI complete
+  - name: PR Gate
     appSlug: github-actions
-  - name: Policy complete
-    appSlug: github-actions
-  - name: CodeQL complete
-    appSlug: github-actions
-  - name: Autonomous review complete
+  - name: Security Gate
     appSlug: github-actions
 
 agentLearning:
@@ -132,6 +128,7 @@ autonomousGovernance:
 
 merge:
   method: squash
+  nativeAutoMerge: true
   exactHeadSha: true
   requireUpToDate: true
   deleteHeadBranch: true
@@ -145,8 +142,11 @@ merge:
     - security-hold
   allowForks: false
   allowAdminBypass: false
-  waitSeconds: 3600
-  pollSeconds: 15
+
+repair:
+  maxCommitsPerPullRequest: 3
+  repeatedFingerprintStop: 2
+  externalReruns: 1
 
 deployment:
   controllerWorkflow: codex-main-delivery.yml
