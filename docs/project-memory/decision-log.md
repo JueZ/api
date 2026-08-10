@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-08-10 — Parallelize immutable release construction without weakening CI
+
+- Decision: Start `release artifacts` after the standalone `install` job instead of serializing it behind every independent lint, test, build, architecture, security, dependency, workflow, Bicep, and OpenAPI job.
+- Fail-closed boundary: `CI complete` still has explicit `needs` coverage for every merge-relevant internal job, including release construction, and rejects every non-success result. Deployments continue to accept artifacts only from the exact successful first-attempt main CI run and retain digest, provenance, smoke, telemetry, and ledger validation.
+- Rationale: Recent successful PR and exact-main runs spent roughly 38–43 seconds constructing the release only after all independent validation had finished. The release job performs its own fixed `npm ci --ignore-scripts` and does not consume outputs from those jobs, so the serial dependency added latency without strengthening the aggregate or delivery boundary.
+- Tradeoff: If installation succeeds but a later independent validation fails, an unusable release artifact may still be built and retained. It cannot pass `CI complete` or reach deployment; this exchanges some failed-run compute for approximately 40–45 seconds less critical-path latency on successful runs.
+
 ## 2026-08-09 — Keep memory reporting model-free and deployment proportional
 
 - Decision: Validate memory syntax offline and query only bounded GitHub PR/run/issue metadata in authenticated live mode. Report unavailable evidence as blocked, never rewrite memory automatically, and create at most one sanitized marker-deduplicated learning issue for a proven contradiction.
