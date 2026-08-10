@@ -1,5 +1,11 @@
 # Incident log
 
+## 2026-08-10 — Runtime-neutral classifier lacked its execution dependency
+
+- Impact: PR #404 was runtime-neutral, but Main Delivery `31383919993` selected full exact-main CI and would have continued to environment deployment. Full CI `31383958260` passed; the delivery controller was cancelled before any Azure deployment.
+- Root cause: `scripts/classify-deployment-impact.mjs` imported the policy module, which imports the external `yaml` package, while Main Delivery intentionally checks out trusted code without installing repository dependencies. The classifier failed closed as `malformed-classifier-result`.
+- Prevention: Keep the delivery classifier in a Node.js-built-in-only module, validate its patterns against the canonical YAML policy in normal protected CI, and execute it in an isolated checkout with no `node_modules` as a regression. Learning issue #405 retains the recurrence fingerprint and protected implementation link.
+
 ## 2026-08-02 — Dynamic workflow run name skipped Main Delivery
 
 - Impact: PR #319 merged through protected main after all authoritative exact-head gates passed, and push CI `30745774623` succeeded, but Main Delivery run `30745842177` skipped its only job before test or production dispatch.

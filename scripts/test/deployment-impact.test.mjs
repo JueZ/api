@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
 import {
   classifyDeploymentImpact,
@@ -12,6 +14,8 @@ import {
 import { classifyDeploymentImpactFile } from '../classify-deployment-impact.mjs';
 
 const file = (filename, status = 'modified', extra = {}) => ({ filename, status, ...extra });
+const execFileAsync = promisify(execFile);
+const repositoryRoot = resolve(import.meta.dirname, '../..');
 
 test('runtime-neutral deployment paths are exact protected policy', () => {
   const policy = loadAutonomousPolicy();
@@ -108,6 +112,34 @@ test('fixed classifier script reads only the supplied JSON file', async () => {
     assert.equal((await classifyDeploymentImpactFile(path)).deploymentRequired, false);
     await writeFile(path, JSON.stringify([file('apps/api/src/index.ts')]));
     assert.equal((await classifyDeploymentImpactFile(path)).deploymentRequired, true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('delivery classifier runs in a dependency-free trusted checkout', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dependency-free-deployment-impact-'));
+  try {
+    await mkdir(join(directory, 'scripts/lib'), { recursive: true });
+    await Promise.all([
+      copyFile(
+        join(repositoryRoot, 'scripts/classify-deployment-impact.mjs'),
+        join(directory, 'scripts/classify-deployment-impact.mjs'),
+      ),
+      copyFile(
+        join(repositoryRoot, 'scripts/lib/deployment-impact.mjs'),
+        join(directory, 'scripts/lib/deployment-impact.mjs'),
+      ),
+    ]);
+    const path = join(directory, 'files.json');
+    await writeFile(path, JSON.stringify([file('docs/project-memory/current-state.md')]));
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [join(directory, 'scripts/classify-deployment-impact.mjs'), path],
+      { cwd: directory, env: {}, timeout: 5_000 },
+    );
+    assert.equal(JSON.parse(stdout).reason, 'runtime-neutral-only');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

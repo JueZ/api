@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises';
-import { classifyDeploymentImpact } from './lib/autonomous-policy.mjs';
+import { classifyDeploymentImpact } from './lib/deployment-impact.mjs';
 
 export async function classifyDeploymentImpactFile(path) {
   if (typeof path !== 'string' || path.length === 0) {
