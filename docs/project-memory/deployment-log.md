@@ -1,10 +1,10 @@
 # Deployment log
 
-## 2026-08-10 — Phase 5 implementation evidence completed without environment deployment
+## 2026-08-10 — Phase 5 accepted without environment deployment
 
 - Source: PR #398 exact head `a581189d34be41b1a7fda16497b251a0fd87902f` passed CI `31340391863`, Policy Check `31340391858`, CodeQL `31340391885`, and deterministic governance `31340391905`, then merged as `4c4872e94b2b6e7771c11b132e9dcd66514ff7c9` with zero repair pushes.
 - Main delivery: controller `31340499592` and exact-main CI `31340516106` passed. The explicit operator-authorized runtime-neutral marker skipped Deploy Test and Promote Production, so no smoke, telemetry, release-ledger, or runtime-truth result is claimed.
-- Evidence: protected-main model-free status run `31340620096` passed and published sanitized artifact `9045704965` with digest `sha256:dce09ab20d18c615ae0fb0aad1042c77e70b18938639ed5b1a4fad6db0bf00b4`. The current protected slice registers the strict evidence at `docs/agent-learning/evidence/phase-5-memory-freshness.json`; program acceptance remains pending a later ledger-only PR. A merged PR alone was not treated as runtime evidence.
+- Evidence: protected-main model-free status run `31340620096` passed and published sanitized artifact `9045704965` with digest `sha256:dce09ab20d18c615ae0fb0aad1042c77e70b18938639ed5b1a4fad6db0bf00b4`. Evidence-registration PR #399 head `4a0ba61e0afe25fc89256704282eb95ae7f3eadf` then passed all four aggregates, merged as `659a6be8d3ce5b026551a01f295ff70396158963`, and passed Main Delivery `31372447788` plus exact-main CI `31372485791`; deployment was skipped again. Strict evidence is protected at `docs/agent-learning/evidence/phase-5-memory-freshness.json`. A merged PR alone was not treated as runtime evidence.
 
 ## 2026-08-09 — Phase 2 historical evidence accepted through production
 
