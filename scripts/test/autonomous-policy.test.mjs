@@ -229,6 +229,7 @@ test('protected program evidence is part of the stable autonomous governance agg
 
 test('stable aggregate jobs cover every merge-relevant internal validation and fail closed', () => {
   const ciComplete = ciWorkflowDefinition.jobs['ci-complete'];
+  const releaseArtifacts = ciWorkflowDefinition.jobs['release-artifacts'];
   assert.equal(ciComplete.name, 'CI complete');
   assert.equal(ciComplete.if, 'always()');
   assert.deepEqual(normalizedNeeds(ciComplete), MERGE_RELEVANT_CI_JOBS);
@@ -239,6 +240,12 @@ test('stable aggregate jobs cover every merge-relevant internal validation and f
     MERGE_RELEVANT_CI_JOBS,
   );
   assert.match(ciWorkflowDefinition.jobs['attest-release-artifacts'].if, /github\.event_name == 'push'/);
+  assert.deepEqual(normalizedNeeds(releaseArtifacts), ['install']);
+  assert.match(
+    releaseArtifacts.steps.find((step) => step.name === 'Install dependencies')?.run ?? '',
+    /^npm ci --ignore-scripts$/,
+  );
+  assert.ok(normalizedNeeds(ciComplete).includes('release-artifacts'));
   assert.equal(
     runAggregateStep(ciWorkflowDefinition, 'ci-complete', workflowResults(MERGE_RELEVANT_CI_JOBS)).status,
     0,
@@ -246,6 +253,14 @@ test('stable aggregate jobs cover every merge-relevant internal validation and f
   assert.notEqual(
     runAggregateStep(ciWorkflowDefinition, 'ci-complete', workflowResults(MERGE_RELEVANT_CI_JOBS, { lint: 'failure' }))
       .status,
+    0,
+  );
+  assert.notEqual(
+    runAggregateStep(
+      ciWorkflowDefinition,
+      'ci-complete',
+      workflowResults(MERGE_RELEVANT_CI_JOBS, { 'release-artifacts': 'failure' }),
+    ).status,
     0,
   );
 
