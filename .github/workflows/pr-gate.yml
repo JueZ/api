@@ -1,0 +1,301 @@
+name: PR Gate
+run-name: PR Gate ${{ github.event.pull_request.head.sha || github.sha }}
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  classify:
+    name: classify changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      profile: ${{ steps.classify.outputs.profile }}
+      reason: ${{ steps.classify.outputs.reason }}
+      base_sha: ${{ steps.classify.outputs.base_sha }}
+      head_sha: ${{ steps.classify.outputs.head_sha }}
+      flags_json: ${{ steps.classify.outputs.flags_json }}
+      started_at_epoch: ${{ steps.classify.outputs.started_at_epoch }}
+      backend: ${{ steps.classify.outputs.backend }}
+      frontend: ${{ steps.classify.outputs.frontend }}
+      contracts: ${{ steps.classify.outputs.contracts }}
+      dependencies: ${{ steps.classify.outputs.dependencies }}
+      infrastructure: ${{ steps.classify.outputs.infrastructure }}
+      workflow: ${{ steps.classify.outputs.workflow }}
+      privileged: ${{ steps.classify.outputs.privileged }}
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify changed paths
+        id: classify
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = 'workflow_dispatch' ]; then
+            BASE_SHA=$(git rev-parse "$HEAD_SHA^")
+          fi
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = '0000000000000000000000000000000000000000' ]; then
+            BASE_SHA="$HEAD_SHA"
+            node scripts/classify-pr-paths.mjs --base "$BASE_SHA" --head "$HEAD_SHA" --full missing-base-sha --output "$GITHUB_OUTPUT"
+          else
+            node scripts/classify-pr-paths.mjs --base "$BASE_SHA" --head "$HEAD_SHA" --output "$GITHUB_OUTPUT"
+          fi
+      - name: Summarize classification
+        shell: bash
+        env:
+          PROFILE: ${{ steps.classify.outputs.profile }}
+          REASON: ${{ steps.classify.outputs.reason }}
+          EXACT_SHA: ${{ steps.classify.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo '### Changed-path classification'
+            echo "- Profile: $PROFILE"
+            echo "- Reason: $REASON"
+            echo "- Exact SHA: $EXACT_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  policy:
+    name: policy and diff sanity
+    needs: classify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ needs.classify.outputs.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install policy and formatting dependencies
+        run: npm ci --ignore-scripts
+      - name: Check exact diff and changed-file formatting
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.classify.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.classify.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          git diff --check "$BASE_SHA...$HEAD_SHA"
+          mapfile -d '' changed_files < <(git diff --name-only --diff-filter=ACMR -z "$BASE_SHA...$HEAD_SHA")
+          format_files=()
+          for file in "${changed_files[@]}"; do
+            case "$file" in
+              *.css|*.html|*.js|*.json|*.md|*.mjs|*.ts|*.yaml|*.yml) format_files+=("$file") ;;
+            esac
+          done
+          if [ "${#format_files[@]}" -gt 0 ]; then
+            ./node_modules/.bin/prettier --check "${format_files[@]}"
+          fi
+      - name: Validate deterministic repository policy
+        shell: bash
+        env:
+          BASE_REF: ${{ needs.classify.outputs.base_sha }}
+          PRIVILEGED: ${{ needs.classify.outputs.privileged }}
+        run: |
+          set -euo pipefail
+          npm run ops:validate-autonomous-policy
+          node scripts/policy-guardrails.mjs
+          node --test scripts/test/path-classifier.test.mjs scripts/test/gate-aggregate.test.mjs
+          if [ "$PRIVILEGED" = 'true' ]; then
+            node scripts/check-architecture.mjs
+            node scripts/validate-agent-skills.mjs
+          fi
+      - name: Enforce cost and dependency policy when applicable
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.classify.outputs.base_sha }}
+          DEPENDENCIES: ${{ needs.classify.outputs.dependencies }}
+          INFRASTRUCTURE: ${{ needs.classify.outputs.infrastructure }}
+          WORKFLOW: ${{ needs.classify.outputs.workflow }}
+        run: |
+          set -euo pipefail
+          if [ "$DEPENDENCIES" = 'true' ]; then
+            BASE_REF="$BASE_SHA" node scripts/check-lockfile-policy.mjs
+          fi
+          if [ "$INFRASTRUCTURE" != 'true' ] && [ "$WORKFLOW" != 'true' ]; then
+            exit 0
+          fi
+          paid_patterns='Microsoft.Sql|Microsoft.DocumentDB|Microsoft.ApiManagement|Microsoft.Cdn/profiles|Microsoft.Network/frontDoors|Microsoft.Search|Microsoft.CognitiveServices|Microsoft.MachineLearningServices|Microsoft.ContainerService|Microsoft.App/managedEnvironments'
+          if git diff "$BASE_SHA" HEAD -- . ':!docs/cost/**' | grep -E "^\+.*(resource[[:space:]].*'($paid_patterns)|['\"]type['\"]?[[:space:]]*[:=][[:space:]]*['\"]?($paid_patterns))"; then
+            git diff --name-only "$BASE_SHA" HEAD | grep -q '^docs/cost/'
+          fi
+
+  backend:
+    name: backend and contracts
+    if: needs.classify.outputs.backend == 'true' || needs.classify.outputs.contracts == 'true'
+    needs: classify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ needs.classify.outputs.head_sha }}
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Lint, compile once, and run affected API tests
+        shell: bash
+        env:
+          BACKEND: ${{ needs.classify.outputs.backend }}
+        run: |
+          set -euo pipefail
+          if [ "$BACKEND" = 'true' ]; then
+            ./node_modules/.bin/eslint apps/api --max-warnings 0
+          fi
+          ./node_modules/.bin/tsc -p apps/api/tsconfig.json
+          if [ "$BACKEND" = 'true' ]; then
+            node --test apps/api/test/*.test.mjs
+          fi
+      - name: Validate API contracts and operation drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t specs < <(find contracts -type f \( -iname '*openapi*.yml' -o -iname '*openapi*.yaml' -o -iname '*openapi*.json' \) -print)
+          for spec in "${specs[@]}"; do
+            ./node_modules/.bin/redocly lint "$spec"
+          done
+          node scripts/check-openapi-route-drift.mjs
+          node scripts/check-operation-contract-drift.mjs
+
+  frontend:
+    name: frontend validation
+    if: needs.classify.outputs.frontend == 'true'
+    needs: classify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ needs.classify.outputs.head_sha }}
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Lint, test, type-check, and build Angular once
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/eslint apps/web --max-warnings 0
+          node --test apps/web/test/*.test.mjs
+          ./node_modules/.bin/ng build --configuration production --no-progress
+
+  infrastructure:
+    name: Bicep validation
+    if: needs.classify.outputs.infrastructure == 'true'
+    needs: classify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ needs.classify.outputs.head_sha }}
+          persist-credentials: false
+      - name: Setup Azure CLI
+        uses: azure/CLI@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # tag=v2
+        with:
+          inlineScript: az version
+      - name: Build Bicep templates
+        shell: bash
+        run: |
+          set -euo pipefail
+          az bicep install
+          while IFS= read -r -d '' file; do
+            az bicep build --file "$file" --stdout >/dev/null
+          done < <(find infra -type f -name '*.bicep' -print0)
+
+  workflow:
+    name: workflow and shell validation
+    if: needs.classify.outputs.workflow == 'true'
+    needs: classify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ needs.classify.outputs.head_sha }}
+          persist-credentials: false
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # tag=v6
+        with:
+          go-version: 'stable'
+          cache: false
+      - name: Validate workflows and shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          actionlint -shellcheck=shellcheck
+          mapfile -d '' shell_files < <(find scripts -type f -name '*.sh' -print0)
+          if [ "${#shell_files[@]}" -gt 0 ]; then
+            shellcheck "${shell_files[@]}"
+          fi
+
+  aggregate:
+    name: PR Gate
+    if: always()
+    needs:
+      - classify
+      - policy
+      - backend
+      - frontend
+      - infrastructure
+      - workflow
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ needs.classify.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify explicit PR Gate dependencies
+        env:
+          EXACT_SHA: ${{ needs.classify.outputs.head_sha }}
+          FLAGS_JSON: ${{ needs.classify.outputs.flags_json }}
+          GATE: pr
+          NEEDS_JSON: ${{ toJson(needs) }}
+          PROFILE: ${{ needs.classify.outputs.profile }}
+          STARTED_AT_EPOCH: ${{ needs.classify.outputs.started_at_epoch }}
+        run: node scripts/verify-gate-results.mjs
