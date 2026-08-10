@@ -1,5 +1,12 @@
 # Decision log
 
+## 2026-08-10 — Reuse exact-head validation for an identical runtime-neutral main tree
+
+- Decision: Keep every PR validation unchanged, then allow protected Main Delivery to request exact-main validation reuse only when the mandatory CI verifier authenticates the successful first-attempt governance artifact, merged PR/head/main identities, complete runtime-neutral file list, stable protected-main generation, and identical PR-head/squash-merge Git tree.
+- Fail-closed boundary: `CI complete` accepts skipped full-validation jobs only for that verified profile and requires every one of them to be skipped. Manual or malformed requests, unavailable evidence, file/history drift, runtime-impacting paths, and tree mismatches fail; full validation remains the default. Deployment cannot consume a reuse run because it has no release artifact.
+- Rationale: A squash merge changes commit identity but not tree content. Rebuilding and retesting identical non-shipped bytes on main repeats the already protected exact-head PR proof without adding runtime evidence.
+- Maintenance: Model-free agent-learning status and repair triage move from daily to weekly schedules while retaining manual dispatch and all existing permissions, rollout, deduplication, and closure controls.
+
 ## 2026-08-10 — Parallelize immutable release construction without weakening CI
 
 - Decision: Start `release artifacts` after the standalone `install` job instead of serializing it behind every independent lint, test, build, architecture, security, dependency, workflow, Bicep, and OpenAPI job.

@@ -3,19 +3,19 @@ version: 1
 # Exact content allowlist for the trusted workflow set. Any workflow byte change
 # requires a protected update to this canonical manifest.
 trustedWorkflowSha256:
-  agent-learning-status.yml: b2185acf6e8e60e7bc6f9273c3c49b42804f9c63fa547bdb12fdd66f39ff5760
+  agent-learning-status.yml: 9bd60db1a21e4c177b9ac8ef2e4bca0c8578a5a4bf89981cd52fbb77652c05a7
   bring-readonly-canary.yml: 9cd2cd547a3b36b1c1de1769730883e613dc370493d978c356d37d90f1e08898
-  ci.yml: df638df0d0240bacc1c7f44eac353585da52bab6516bf06b5689f56b5457a32e
+  ci.yml: e1851b4e606e5068a8aa5a1d474349cc582d000042455c63fe563e5b64bd1ebe
   codeql.yml: 8220b94fdc56f9b33d7db4111fd41e60beb814ef3f2fc99611a09dd71e910590
   codex-automerge.yml: 2effc1d073bc1d47fd53e2d97a83f034cacb9fc74c5d6ce6834562382992a5da
-  codex-main-delivery.yml: 9b72f84a2639d5fd5c55f82f700174d910fc4c5772e90c74ae7f09bba3f6c9c6
+  codex-main-delivery.yml: 92695362d0b7dab220847f13e4be261be83192708b005c8466d7a175db7f258f
   deploy-environment.yml: cd36744ebf07c466d407ca4ecd83751e2f6445263a7bab90145c69326d844be9
   deploy-test.yml: be874930e0d375765afe67d50429744f5f629d129b944cae601e915ea16c7275
   migrate-private-storage.yml: c5e8ba9e1379179ec4f1f3a6abcfaa7eb712b468e3f43e9c4606157a7ba8d31b
   policy-check.yml: 553f5783cfbdb4dda498809b74265a9a247e5644663b74bacd1dd66c17fe23b2
   prepare-production-private-storage.yml: 62b7d4a413ea2ed57f5ebeb63b54adfb46e42abcf825e94be3f2f049f501277e
   promote-production.yml: eb87a6f7fd479226a68e0edd7f9867ce9b6c3bac853ffae0ed687734e0944387
-  repair-triage.yml: b799572fb5a4aee67a39d6e8bf8d31bb9963337abc308895cc505afff9c9fd58
+  repair-triage.yml: f428e6f3f866505493468349db9622687390e35fd4e26975711b34ad1c895521
   rollback-production.yml: 2aae30732058ba956f52a0fc5151e5ee236856464bb961dac576c9a033e49635
   verify-azure-oidc.yml: 8f98932d92d84740df6573397fa2ad29678fd09f1c3fe44fd8a9910bfee424d7
 

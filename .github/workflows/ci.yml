@@ -12,6 +12,26 @@ on:
         description: Unique delivery-controller correlation value.
         required: false
         type: string
+      validation_profile:
+        description: Protected Main Delivery may request exact-head runtime-neutral validation reuse.
+        required: false
+        default: full
+        type: choice
+        options:
+          - full
+          - runtime-neutral-reuse
+      source_pr_number:
+        description: Exact merged pull request for protected validation reuse.
+        required: false
+        type: string
+      source_pr_head_sha:
+        description: Fully validated pull-request head for protected validation reuse.
+        required: false
+        type: string
+      governance_run_id:
+        description: Trusted exact-head governance workflow run for validation reuse.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -21,8 +41,75 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validation-profile:
+    name: validation profile
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      profile: ${{ steps.reuse.outputs.profile || steps.full.outputs.profile }}
+      reason: ${{ steps.reuse.outputs.reason || steps.full.outputs.reason }}
+    steps:
+      - name: Select full validation
+        id: full
+        if: inputs.validation_profile != 'runtime-neutral-reuse'
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo 'profile=full'
+            echo 'reason=full-validation-required'
+          } >> "$GITHUB_OUTPUT"
+      - name: Checkout protected exact-main verifier
+        if: inputs.validation_profile == 'runtime-neutral-reuse'
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          persist-credentials: false
+      - name: Setup Node.js for protected verifier
+        if: inputs.validation_profile == 'runtime-neutral-reuse'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install protected verifier dependencies
+        if: inputs.validation_profile == 'runtime-neutral-reuse'
+        shell: bash
+        run: npm ci --ignore-scripts
+      - name: Verify trusted exact-main validation reuse
+        id: reuse
+        if: inputs.validation_profile == 'runtime-neutral-reuse'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/resolve-main-ci-profile.mjs \
+            --repository "${{ github.repository }}" \
+            --main-sha "${{ github.sha }}" \
+            --pr "${{ inputs.source_pr_number }}" \
+            --pr-head-sha "${{ inputs.source_pr_head_sha }}" \
+            --governance-run-id "${{ inputs.governance_run_id }}"
+      - name: Summarize validation profile
+        if: always()
+        shell: bash
+        env:
+          RESOLVED_PROFILE: ${{ steps.reuse.outputs.profile || steps.full.outputs.profile }}
+          RESOLVED_REASON: ${{ steps.reuse.outputs.reason || steps.full.outputs.reason }}
+        run: |
+          set -euo pipefail
+          {
+            echo '### CI validation profile'
+            echo "- Profile: ${RESOLVED_PROFILE:-invalid}"
+            echo "- Reason: ${RESOLVED_REASON:-verification-failed}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   install:
     name: install
+    if: inputs.validation_profile != 'runtime-neutral-reuse'
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
@@ -164,6 +251,7 @@ jobs:
 
   openapi-validation:
     name: OpenAPI validation
+    if: inputs.validation_profile != 'runtime-neutral-reuse'
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
@@ -198,6 +286,7 @@ jobs:
 
   bicep-validation:
     name: Bicep validation
+    if: inputs.validation_profile != 'runtime-neutral-reuse'
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
@@ -223,6 +312,7 @@ jobs:
 
   workflow-and-shell-lint:
     name: workflow and shell lint
+    if: inputs.validation_profile != 'runtime-neutral-reuse'
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
@@ -249,6 +339,7 @@ jobs:
 
   architecture-validation:
     name: architecture and agent validation
+    if: inputs.validation_profile != 'runtime-neutral-reuse'
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
@@ -290,6 +381,7 @@ jobs:
 
   security-scan:
     name: security scan
+    if: inputs.validation_profile != 'runtime-neutral-reuse'
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
@@ -305,6 +397,7 @@ jobs:
 
   secret-scan:
     name: secret scan
+    if: inputs.validation_profile != 'runtime-neutral-reuse'
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
@@ -318,6 +411,7 @@ jobs:
 
   dependency-audit:
     name: dependency audit
+    if: inputs.validation_profile != 'runtime-neutral-reuse'
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
@@ -402,6 +496,7 @@ jobs:
     timeout-minutes: 5
     runs-on: ubuntu-latest
     needs:
+      - validation-profile
       - install
       - lint
       - type-check
@@ -424,10 +519,22 @@ jobs:
         run: |
           set -euo pipefail
           results='${{ toJson(needs) }}'
+          profile='${{ needs.validation-profile.outputs.profile }}'
           echo "$results"
-          if echo "$results" | jq -e 'to_entries | all(.value.result == "success")' >/dev/null; then
-            echo "All CI checks passed."
+          if [ "$profile" = 'runtime-neutral-reuse' ] &&
+             echo "$results" | jq -e '
+               .["validation-profile"].result == "success"
+               and (to_entries | all(
+                 if .key == "validation-profile"
+                 then .value.result == "success"
+                 else .value.result == "skipped"
+                 end
+               ))' >/dev/null; then
+            echo "Trusted exact-main validation reuse passed; every full-validation job was explicitly not applicable."
+          elif [ "$profile" = 'full' ] &&
+               echo "$results" | jq -e 'to_entries | all(.value.result == "success")' >/dev/null; then
+            echo "All full CI checks passed."
           else
-            echo "One or more CI checks failed."
+            echo "CI results do not match the verified validation profile."
             exit 1
           fi

@@ -284,6 +284,7 @@ test('rollout and exact-range backfill controls prevent a historical flood', () 
 test('repair-triage workflow keeps least privilege, dry-run backfill, write-enabled schedule, and no model', () => {
   const source = readFileSync(new URL('../../.github/workflows/repair-triage.yml', import.meta.url), 'utf8');
   const workflow = parse(source);
+  assert.deepEqual(workflow.on.schedule, [{ cron: '17 5 * * 1' }]);
   assert.deepEqual(workflow.permissions, {
     contents: 'read',
     issues: 'write',

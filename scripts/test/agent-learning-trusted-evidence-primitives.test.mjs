@@ -88,6 +88,7 @@ test('trusted GitHub reads use fixed repository paths, no redirects, and bounded
   const client = trustedClient({ fetchImpl });
 
   assert.deepEqual(await client.getPullRequest(41), { id: 41 });
+  assert.deepEqual(await client.getGitCommit(SHA_A), { id: 41 });
   assert.equal(
     await client.getFile('.github/workflows/ci.yml', SHA_A, ['.github/workflows/ci.yml']),
     content.toString('utf8'),
@@ -102,6 +103,7 @@ test('trusted GitHub reads use fixed repository paths, no redirects, and bounded
     requests.map(({ url }) => url),
     [
       'https://api.github.com/repos/JueZ/api/pulls/41',
+      `https://api.github.com/repos/JueZ/api/git/commits/${SHA_A}`,
       `https://api.github.com/repos/JueZ/api/contents/.github/workflows/ci.yml?ref=${SHA_A}`,
       `https://api.github.com/repos/JueZ/api/contents/.github/workflows/ci.yml?ref=${SHA_A}`,
     ],
