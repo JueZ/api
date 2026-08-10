@@ -1111,6 +1111,19 @@ test('Phase 2 live verification triggers only for its evidence or authoritative 
     phaseEvidenceNeedsLiveVerification({
       phase: 2,
       changedPaths: [PROGRAM_PATH],
+      previousProgramText: current,
+      currentProgramText: current.replace(
+        `| 2 | Artifacts | \`accepted\` | PR | ${PHASE_2_EVIDENCE_PATH} | pending |`,
+        `| 2     | Artifacts     | \`accepted\`    | PR   | ${PHASE_2_EVIDENCE_PATH}     | pending        |`,
+      ),
+    }),
+    false,
+    'Markdown table padding must not activate an unrelated live evidence audit',
+  );
+  assert.equal(
+    phaseEvidenceNeedsLiveVerification({
+      phase: 2,
+      changedPaths: [PROGRAM_PATH],
       previousProgramText: previous,
       currentProgramText: current,
     }),
