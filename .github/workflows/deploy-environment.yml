@@ -1840,27 +1840,6 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "::notice title=Production values resolved::Smoke tests passed for $EFFECTIVE_BASE_URL using Function App $EFFECTIVE_FUNCTIONAPP_NAME and static storage account $EFFECTIVE_STATIC_STORAGE_ACCOUNT."
-      - name: Create production issue on failed deploy or smoke
-        if: ${{ failure() && inputs.environmentName == 'prod' }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # tag=v9.0.0
-        with:
-          script: |
-            const title = `Production deployment failed for ${context.sha.substring(0, 7)}`;
-            const body = [
-              'Production deployment or smoke tests failed.',
-              '',
-              `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-              `Commit: ${context.sha}`,
-              '',
-              'Automation must fail closed. Investigate logs and create a bounded repair PR if safe.'
-            ].join('\n');
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title,
-              body,
-              labels: ['production-failure', 'codex-repair']
-            });
 
   prepare-private-storage:
     if: ${{ inputs.preparePrivateStorageOnly }}
@@ -2398,24 +2377,3 @@ jobs:
           path: ${{ runner.temp }}/production-private-storage-evidence.json
           if-no-files-found: error
           retention-days: 90
-      - name: Create production preparation issue on failure
-        if: ${{ failure() }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # tag=v9.0.0
-        with:
-          script: |
-            const title = `Production private-storage preparation failed for ${context.sha.substring(0, 7)}`;
-            const body = [
-              'Production private-storage preparation or digest verification failed.',
-              '',
-              `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-              `Commit: ${context.sha}`,
-              '',
-              'No application deployment is authorized by this workflow. Investigate the bounded storage preparation evidence.'
-            ].join('\n');
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title,
-              body,
-              labels: ['production-failure', 'codex-repair']
-            });

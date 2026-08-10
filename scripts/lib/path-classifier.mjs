@@ -8,6 +8,7 @@ export const VALIDATION_FLAGS = Object.freeze([
   'infrastructure',
   'workflow',
   'dependencies',
+  'learning',
   'privileged',
   'codeqlJavascript',
   'codeqlActions',
@@ -90,6 +91,16 @@ export function parseGitNameStatus(buffer) {
 }
 
 function classifyPath(path, flags, profiles) {
+  if (isLearningPath(path)) {
+    flags.learning = true;
+    profiles.add('learning-governance');
+    if (path.startsWith('scripts/agent-learning/')) {
+      applyPrivileged(flags, profiles);
+    } else {
+      flags.documentation = true;
+    }
+    return true;
+  }
   if (isPrivilegedPath(path)) {
     applyPrivileged(flags, profiles);
     if (isWorkflowPath(path)) flags.workflow = true;
@@ -156,6 +167,10 @@ function isDocumentationPath(path) {
   return path === 'README.md' || path.startsWith('docs/') || /^\.github\/.*\.md$/i.test(path);
 }
 
+function isLearningPath(path) {
+  return path.startsWith('docs/agent-learning/') || path.startsWith('scripts/agent-learning/');
+}
+
 function isBackendPath(path) {
   return path.startsWith('apps/api/');
 }
@@ -217,6 +232,7 @@ function orderedProfiles(profiles) {
     'frontend',
     'contracts-integrations',
     'infrastructure-delivery',
+    'learning-governance',
     'privileged',
   ];
   return order.filter((profile) => profiles.has(profile));

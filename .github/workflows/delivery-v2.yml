@@ -233,7 +233,6 @@ jobs:
       actions: read
       contents: read
       id-token: write
-      issues: write
     uses: ./.github/workflows/deploy-environment.yml
     with:
       environmentName: test
@@ -326,7 +325,6 @@ jobs:
       actions: read
       contents: read
       id-token: write
-      issues: write
     uses: ./.github/workflows/deploy-environment.yml
     with:
       environmentName: prod
@@ -415,7 +413,6 @@ jobs:
       actions: read
       contents: read
       id-token: write
-      issues: write
     uses: ./.github/workflows/deploy-environment.yml
     with:
       environmentName: prod

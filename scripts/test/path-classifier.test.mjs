@@ -13,6 +13,21 @@ test('documentation-only fixture avoids every application and delivery job', () 
   }
 });
 
+test('learning records validate independently without application or historical program work', () => {
+  const artifact = classifyChangedFiles([file('docs/agent-learning/artifacts/runtime-neutral.yml')]);
+  assert.deepEqual(artifact.profiles, ['learning-governance']);
+  assert.equal(artifact.flags.learning, true);
+  assert.equal(artifact.flags.documentation, true);
+  for (const flag of ['backend', 'frontend', 'contracts', 'infrastructure', 'workflow', 'dependencies', 'privileged']) {
+    assert.equal(artifact.flags[flag], false, flag);
+  }
+
+  const validator = classifyChangedFiles([file('scripts/agent-learning/validate-artifacts.mjs')]);
+  assert.deepEqual(validator.profiles, ['learning-governance', 'privileged']);
+  assert.equal(validator.flags.learning, true);
+  assert.equal(validator.flags.privileged, true);
+});
+
 test('API, frontend, contract, and infrastructure fixtures select only their relevant work', () => {
   const api = classifyChangedFiles([file('apps/api/src/functions/hello.ts')]);
   assert.deepEqual(api.profiles, ['api-backend']);

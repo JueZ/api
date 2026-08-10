@@ -1,76 +1,73 @@
-name: Repair Issue Triage
+name: Repair and Learning Queue
+run-name: Repair queue for ${{ github.event.workflow_run.id || inputs.source_run_id }}
 
 on:
+  workflow_run:
+    workflows:
+      - PR Gate
+      - Security Gate
+      - Delivery v2
+      - Bring Read-Only Canary
+      - Private Storage Migration
+      - Prepare Production Private Storage
+      - Verify Azure OIDC
+    types: [completed]
   workflow_dispatch:
     inputs:
-      mode:
-        description: Normal rollout-bounded triage or an exact-range historical backfill.
+      source_run_id:
+        description: Exact trusted failed workflow run ID to inspect.
         required: true
-        default: triage
-        type: choice
-        options:
-          - triage
-          - backfill
+        type: string
       dry_run:
-        description: Report intended mutations without creating labels, comments, candidates, or closures.
+        description: Produce a sanitized plan without mutating issues or labels.
         required: true
         default: true
         type: boolean
-      backfill_start:
-        description: First exact issue number for backfill mode (required only for backfill).
-        required: false
-        default: ''
-        type: string
-      backfill_end:
-        description: Last exact issue number for backfill mode (required only for backfill).
-        required: false
-        default: ''
-        type: string
-      close_resolved:
-        description: Close codex-repair issues only when evidence proves they are resolved.
-        required: false
-        default: false
-        type: boolean
-      api_base_url:
-        description: Optional API base URL for live /health verification.
-        required: false
-        default: ''
-        type: string
-  schedule:
-    - cron: '17 5 * * 1'
 
 permissions:
+  actions: read
   contents: read
   issues: write
   pull-requests: read
-  actions: read
+
+concurrency:
+  group: repair-learning-${{ github.event.workflow_run.id || inputs.source_run_id }}
+  cancel-in-progress: false
 
 jobs:
-  repair-triage:
-    name: triage codex-repair issues
-    timeout-minutes: 20
+  queue:
+    name: queue bounded repair and learning
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion != 'success' &&
+       github.event.workflow_run.conclusion != 'skipped' &&
+       github.event.workflow_run.conclusion != 'neutral')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+      - name: Checkout trusted protected-main queue
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: main
+          persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - name: Install dependencies
-        shell: bash
-        run: npm ci --ignore-scripts
-      - name: Triage repair issues
+          cache: false
+      - name: Queue exact failure fingerprint
+        id: queue
         env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
           GH_TOKEN: ${{ github.token }}
-          # Scheduled triage can create/update idempotent learning candidates but
-          # cannot close repairs because close_resolved is always false on schedule.
-          DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dry_run }}
-          REPAIR_TRIAGE_CLOSE_RESOLVED: ${{ github.event_name == 'workflow_dispatch' && inputs.close_resolved || 'false' }}
-          REPAIR_TRIAGE_REQUIRE_LEDGER_FOR_PROD: 'true'
-          AGENT_LEARNING_BACKFILL: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'backfill' && 'true' || 'false' }}
-          AGENT_LEARNING_BACKFILL_START: ${{ inputs.backfill_start || '' }}
-          AGENT_LEARNING_BACKFILL_END: ${{ inputs.backfill_end || '' }}
-          API_BASE_URL: ${{ inputs.api_base_url || '' }}
+          REPAIR_SUMMARY_PATH: ${{ runner.temp }}/repair-learning-summary.json
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id || inputs.source_run_id }}
         run: node scripts/triage-repair-issues.mjs
+      - name: Upload bounded sanitized result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
+        with:
+          name: repair-learning-${{ github.event.workflow_run.id || inputs.source_run_id }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/repair-learning-summary.json
+          if-no-files-found: warn
+          retention-days: 30

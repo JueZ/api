@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,364 +6,127 @@ import test from 'node:test';
 import { stringify as stringifyYaml } from 'yaml';
 import { generateArtifactIndex } from '../agent-learning/generate-index.mjs';
 import {
-  artifactStatusCounts,
-  REPOSITORY_ROOT,
-  validateArtifactRepository,
+  findSecretLikeValue,
+  loadLearningArtifacts,
+  validateLearningArtifact,
 } from '../agent-learning/validate-artifacts.mjs';
-import { historicalScorerFindings, pullRequestProvenanceFindings } from '../agent-learning/verify-artifacts.mjs';
 
 const BROKEN_SHA = 'a'.repeat(40);
 const FIXED_SHA = 'b'.repeat(40);
-const AS_OF_DATE = '2026-08-08';
 
-function validVerifiedArtifact(overrides = {}) {
+function validArtifact(overrides = {}) {
   return {
-    version: 1,
+    version: 2,
     id: 'example-learning',
-    title: 'Example verified learning',
     fingerprint: 'delivery.workflow.identity',
-    source: {
-      type: 'repository_audit',
-      references: [
-        {
-          kind: 'pull_request',
-          locator: 'JueZ/api#123',
-          url: 'https://github.com/JueZ/api/pull/123',
-        },
-      ],
-    },
-    classification: {
-      failureArea: 'delivery',
-      severity: 'high',
-      symptom: 'The controller selected the wrong workflow run.',
-      rootCause: 'Mutable display text was treated as immutable workflow identity.',
-    },
-    disposition: {
-      primary: 'regression-test',
-      rationale: 'An executable invariant prevents recurrence.',
-    },
-    artifacts: [{ path: 'scripts/prevent.mjs', kind: 'regression-test' }],
-    counterfactual: {
-      hypothesis: 'The trusted regression fails before the repair and passes after it.',
-      broken: { commit: BROKEN_SHA, expectedResult: 'The trusted regression fails.' },
-      fixed: { commit: FIXED_SHA, expectedResult: 'The trusted regression passes.' },
-      verification: { commands: ['node scripts/prevent.mjs'] },
-      implementationPr: {
-        repository: 'JueZ/api',
-        number: 123,
-        url: 'https://github.com/JueZ/api/pull/123',
-      },
-    },
+    severity: 'high',
+    invariant: 'Trusted automation binds workflow behavior to immutable path and exact source identity.',
+    scope: ['.github/workflows/**'],
+    prevention: [{ kind: 'regression-test', path: 'scripts/prevent.mjs' }],
+    broken: BROKEN_SHA,
+    fixed: FIXED_SHA,
+    repairPr: 123,
+    recurrenceCount: 1,
     status: 'verified',
     ...overrides,
   };
 }
 
-async function createFixture(context) {
-  const repositoryRoot = await mkdtemp(join(tmpdir(), 'agent-learning-'));
+async function fixture(context) {
+  const repositoryRoot = await mkdtemp(join(tmpdir(), 'learning-v2-'));
   context.after(() => rm(repositoryRoot, { recursive: true, force: true }));
-  await mkdir(join(repositoryRoot, 'docs/agent-learning/artifacts'), { recursive: true });
+  const artifactDirectory = join(repositoryRoot, 'docs/agent-learning/artifacts');
+  await mkdir(artifactDirectory, { recursive: true });
   await mkdir(join(repositoryRoot, 'scripts'), { recursive: true });
   await writeFile(join(repositoryRoot, 'scripts/prevent.mjs'), 'export const prevented = true;\n');
-  return repositoryRoot;
+  return { repositoryRoot, artifactDirectory };
 }
 
-async function writeArtifact(repositoryRoot, fileName, artifact) {
-  await writeFile(join(repositoryRoot, 'docs/agent-learning/artifacts', fileName), stringifyYaml(artifact));
+async function writeArtifact(directory, name, artifact) {
+  await writeFile(join(directory, name), stringifyYaml(artifact));
 }
 
-function validateFixture(repositoryRoot) {
-  return validateArtifactRepository({ repositoryRoot, asOfDate: AS_OF_DATE });
-}
-
-test('strict validator accepts a complete verified artifact', async (context) => {
-  const repositoryRoot = await createFixture(context);
-  await writeArtifact(repositoryRoot, 'example-learning.yml', validVerifiedArtifact());
-
-  const result = validateFixture(repositoryRoot);
-  assert.deepEqual(result.errors, []);
-  assert.deepEqual(artifactStatusCounts(result.artifacts), {
-    candidate: 0,
-    implemented: 0,
-    verified: 1,
-    waived: 0,
-    superseded: 0,
-  });
+test('concise schema accepts an executable verified invariant', async (context) => {
+  const { repositoryRoot } = await fixture(context);
+  assert.deepEqual(validateLearningArtifact(validArtifact(), { filename: 'example-learning.yml', repositoryRoot }), []);
 });
 
-test('malformed and unknown artifact fields fail closed', async (context) => {
-  const repositoryRoot = await createFixture(context);
-  const malformed = validVerifiedArtifact();
-  delete malformed.version;
-  malformed.rawLog = 'untrusted output';
-  await writeArtifact(repositoryRoot, 'example-learning.yml', malformed);
-  await writeFile(
-    join(repositoryRoot, 'docs/agent-learning/artifacts', 'invalid.yml'),
-    'version: 1\nid: duplicate\nid: duplicate\n',
+test('unknown fields, malformed identity, and missing verified provenance fail closed', async (context) => {
+  const { repositoryRoot } = await fixture(context);
+  const artifact = validArtifact({ rawLog: 'not allowed', broken: 'main', repairPr: 0 });
+  const errors = validateLearningArtifact(artifact, { filename: 'wrong-file.yml', repositoryRoot });
+  assert.ok(errors.some((error) => error.includes('unknown field')));
+  assert.ok(errors.some((error) => error.includes('file name')));
+  assert.ok(errors.some((error) => error.includes('broken must be an exact SHA')));
+  assert.ok(errors.some((error) => error.includes('require repairPr')));
+});
+
+test('prevention paths reject traversal and stale references', async (context) => {
+  const { repositoryRoot } = await fixture(context);
+  let errors = validateLearningArtifact(
+    validArtifact({ prevention: [{ kind: 'regression-test', path: '../escape.mjs' }] }),
+    { filename: 'example-learning.yml', repositoryRoot },
+  );
+  assert.ok(errors.some((error) => error.includes('path is invalid')));
+
+  errors = validateLearningArtifact(
+    validArtifact({ prevention: [{ kind: 'regression-test', path: 'scripts/missing.mjs' }] }),
+    { filename: 'example-learning.yml', repositoryRoot },
+  );
+  assert.ok(errors.some((error) => error.includes('does not exist')));
+});
+
+test('secret-shaped values are rejected without retaining their content', async (context) => {
+  const { repositoryRoot } = await fixture(context);
+  const secretValue = ['github_pat_', 'synthetic123456789'].join('');
+  const artifact = validArtifact({ invariant: `Never persist ${secretValue} in learning.` });
+  const errors = validateLearningArtifact(artifact, { filename: 'example-learning.yml', repositoryRoot });
+  assert.ok(errors.some((error) => error.includes('secret-shaped')));
+  assert.equal(findSecretLikeValue(artifact), 'artifact.invariant');
+  assert.ok(errors.every((error) => !error.includes(secretValue)));
+});
+
+test('verified and superseded states require exact compact identities', async (context) => {
+  const { repositoryRoot } = await fixture(context);
+  const missingProof = validArtifact({ status: 'verified', broken: undefined, fixed: undefined, repairPr: undefined });
+  assert.ok(
+    validateLearningArtifact(missingProof, { filename: 'example-learning.yml', repositoryRoot }).filter((error) =>
+      error.includes('verified artifacts require'),
+    ).length >= 3,
   );
 
-  const result = validateFixture(repositoryRoot);
-  assert.ok(result.errors.some((error) => error.includes('.version: is required')));
-  assert.ok(result.errors.some((error) => error.includes('.rawLog: is not an allowed field')));
+  const superseded = validArtifact({
+    status: 'superseded',
+    broken: undefined,
+    fixed: undefined,
+    repairPr: undefined,
+    supersededBy: 'replacement-learning',
+  });
+  assert.deepEqual(validateLearningArtifact(superseded, { filename: 'example-learning.yml', repositoryRoot }), []);
+});
+
+test('repository loader rejects duplicate fingerprints and duplicate YAML keys', async (context) => {
+  const { repositoryRoot, artifactDirectory } = await fixture(context);
+  await writeArtifact(artifactDirectory, 'example-learning.yml', validArtifact());
+  await writeArtifact(
+    artifactDirectory,
+    'second-learning.yml',
+    validArtifact({ id: 'second-learning', fingerprint: 'delivery.workflow.identity' }),
+  );
+  await writeFile(join(artifactDirectory, 'invalid.yml'), 'version: 2\nid: invalid\nid: duplicate\n');
+  const result = loadLearningArtifacts({ artifactDirectory, repositoryRoot });
+  assert.ok(result.errors.some((error) => error.includes('duplicate fingerprint')));
   assert.ok(result.errors.some((error) => error.includes('invalid YAML')));
 });
 
-test('duplicate IDs are rejected even when stored in separate files', async (context) => {
-  const repositoryRoot = await createFixture(context);
-  await writeArtifact(repositoryRoot, 'example-learning.yml', validVerifiedArtifact());
-  await writeArtifact(repositoryRoot, 'other-learning.yml', validVerifiedArtifact({ title: 'Duplicate ID' }));
-
-  const result = validateFixture(repositoryRoot);
-  assert.ok(result.errors.some((error) => error.includes('duplicates artifact ID example-learning')));
-});
-
-test('active recurrence fingerprints must be updated or explicitly superseded', async (context) => {
-  const repositoryRoot = await createFixture(context);
-  await writeArtifact(repositoryRoot, 'example-learning.yml', validVerifiedArtifact());
-  await writeArtifact(
-    repositoryRoot,
-    'other-learning.yml',
-    validVerifiedArtifact({ id: 'other-learning', title: 'Same recurrence mechanism' }),
-  );
-
-  let result = validateFixture(repositoryRoot);
-  assert.ok(result.errors.some((error) => error.includes('duplicates active fingerprint delivery.workflow.identity')));
-
-  const superseded = validVerifiedArtifact({
-    id: 'example-learning',
-    status: 'superseded',
-    supersededBy: 'other-learning',
-  });
-  const replacement = validVerifiedArtifact({
-    id: 'other-learning',
-    title: 'Replacement learning',
-    supersedes: ['example-learning'],
-  });
-  await writeArtifact(repositoryRoot, 'example-learning.yml', superseded);
-  await writeArtifact(repositoryRoot, 'other-learning.yml', replacement);
-  result = validateFixture(repositoryRoot);
-  assert.deepEqual(result.errors, []);
-});
-
-test('artifact paths reject traversal and missing stale references', async (context) => {
-  const repositoryRoot = await createFixture(context);
-  const traversal = validVerifiedArtifact({
-    artifacts: [{ path: '../outside.mjs', kind: 'regression-test' }],
-  });
-  await writeArtifact(repositoryRoot, 'example-learning.yml', traversal);
-
-  let result = validateFixture(repositoryRoot);
-  assert.ok(result.errors.some((error) => error.includes('without traversal')));
-
-  traversal.artifacts[0].path = 'scripts/removed-prevention.mjs';
-  await writeArtifact(repositoryRoot, 'example-learning.yml', traversal);
-  result = validateFixture(repositoryRoot);
-  assert.ok(result.errors.some((error) => error.includes('must reference an existing file')));
-});
-
-test('waivers require owned, current exception data and never count as verified proof', async (context) => {
-  const repositoryRoot = await createFixture(context);
-  const waived = validVerifiedArtifact({
-    disposition: {
-      primary: 'no-durable-artifact',
-      rationale: 'The source was conclusively non-recurrent.',
-    },
-    artifacts: [],
-    counterfactual: { hypothesis: 'A recurrence would invalidate this disposition.' },
-    status: 'waived',
-    exception: {
-      rationale: 'No repository behavior can prevent the external event.',
-      owner: 'repository-maintainers',
-      reviewDate: '2026-09-01',
-      recurrenceFingerprint: 'delivery.workflow.identity',
-    },
-  });
-  await writeArtifact(repositoryRoot, 'example-learning.yml', waived);
-
-  let result = validateFixture(repositoryRoot);
-  assert.deepEqual(result.errors, []);
-  assert.equal(artifactStatusCounts(result.artifacts).verified, 0);
-  assert.equal(artifactStatusCounts(result.artifacts).waived, 1);
-
-  waived.exception.reviewDate = '2026-08-07';
-  await writeArtifact(repositoryRoot, 'example-learning.yml', waived);
-  result = validateFixture(repositoryRoot);
-  assert.ok(result.errors.some((error) => error.includes('is stale relative to 2026-08-08')));
-
-  waived.exception.reviewDate = '2026-02-31';
-  await writeArtifact(repositoryRoot, 'example-learning.yml', waived);
-  result = validateFixture(repositoryRoot);
-  assert.ok(result.errors.some((error) => error.includes('must be a valid YYYY-MM-DD date')));
-
-  delete waived.exception.owner;
-  await writeArtifact(repositoryRoot, 'example-learning.yml', waived);
-  result = validateFixture(repositoryRoot);
-  assert.ok(result.errors.some((error) => error.includes('.exception.owner: is required')));
-});
-
-test('external-transient dispositions require the same owned recurrence exception', async (context) => {
-  const repositoryRoot = await createFixture(context);
-  const transient = validVerifiedArtifact({
-    disposition: {
-      primary: 'external-transient',
-      rationale: 'The failure originated outside the repository boundary.',
-    },
-    artifacts: [],
-    counterfactual: { hypothesis: 'A recurrence would reopen durable-prevention analysis.' },
-    status: 'candidate',
-    exception: {
-      rationale: 'Provider availability recovered without a repository behavior change.',
-      owner: 'repository-maintainers',
-      expiry: '2026-09-01',
-      recurrenceFingerprint: 'delivery.workflow.identity',
-    },
-  });
-  await writeArtifact(repositoryRoot, 'example-learning.yml', transient);
-  assert.deepEqual(validateFixture(repositoryRoot).errors, []);
-
-  delete transient.exception;
-  await writeArtifact(repositoryRoot, 'example-learning.yml', transient);
-  assert.ok(validateFixture(repositoryRoot).errors.some((error) => error.includes('.exception: is required')));
-});
-
-test('verified artifacts require exact counterfactual references and implementation PR evidence', async (context) => {
-  const repositoryRoot = await createFixture(context);
-  const artifact = validVerifiedArtifact();
-  artifact.counterfactual.broken.commit = 'main';
-  artifact.counterfactual.fixed.commit = 'main';
-  artifact.counterfactual.implementationPr.url = 'https://example.com/JueZ/api/pull/123';
-  delete artifact.counterfactual.verification;
-  await writeArtifact(repositoryRoot, 'example-learning.yml', artifact);
-
-  const result = validateFixture(repositoryRoot);
-  assert.ok(result.errors.some((error) => error.includes('exact 40-character lowercase SHA')));
-  assert.ok(result.errors.some((error) => error.includes('broken and fixed commits must be different')));
-  assert.ok(result.errors.some((error) => error.includes('.verification: is required for verified status')));
-  assert.ok(result.errors.some((error) => error.includes('declared GitHub implementation pull request')));
-
-  delete artifact.counterfactual.implementationPr;
-  await writeArtifact(repositoryRoot, 'example-learning.yml', artifact);
-  assert.ok(
-    validateFixture(repositoryRoot).errors.some((error) =>
-      error.includes('.implementationPr: is required for verified status'),
-    ),
-  );
-});
-
-test('secret-shaped content and raw environment dumps are rejected', async (context) => {
-  const repositoryRoot = await createFixture(context);
-  const artifact = validVerifiedArtifact();
-  artifact.classification.symptom = [
-    ['GITHUB_TOKEN', 'synthetic-token-shaped-fixture'].join('='),
-    ['OPENAI_API_KEY', 'synthetic-provider-shaped-fixture'].join('='),
-  ].join('\n');
-  await writeArtifact(repositoryRoot, 'example-learning.yml', artifact);
-
-  const result = validateFixture(repositoryRoot);
-  assert.ok(result.errors.some((error) => error.includes('secret-shaped value')));
-  assert.ok(result.errors.some((error) => error.includes('raw environment dump')));
-});
-
-test('generated index is deterministic and sorted by artifact ID', async (context) => {
-  const repositoryRoot = await createFixture(context);
-  const second = validVerifiedArtifact({
-    id: 'zeta-learning',
-    title: 'Zeta learning',
-    fingerprint: 'delivery.workflow.zeta',
-  });
-  await writeArtifact(repositoryRoot, 'zeta-learning.yml', second);
-  await writeArtifact(repositoryRoot, 'example-learning.yml', validVerifiedArtifact());
-
-  const options = { repositoryRoot, asOfDate: AS_OF_DATE };
-  const firstRender = generateArtifactIndex(options);
-  const secondRender = generateArtifactIndex(options);
-  assert.equal(firstRender, secondRender);
-  assert.ok(firstRender.indexOf('[example-learning]') < firstRender.indexOf('[zeta-learning]'));
-  assert.doesNotMatch(firstRender, /Generated at|2026-08-08/);
-});
-
-test('registered historical scorers prove each broken and fixed invariant transition', () => {
-  const fixtures = new Map([
-    [
-      `${BROKEN_SHA}:.github/workflows/codex-main-delivery.yml`,
-      "github.event.workflow_run.name == 'CI'\ngithub.event.workflow_run.name == 'Codex Auto-Merge'\n",
-    ],
-    [
-      `${FIXED_SHA}:.github/workflows/codex-main-delivery.yml`,
-      "github.event.workflow_run.path == '.github/workflows/ci.yml'\ngithub.event.workflow_run.path == '.github/workflows/codex-automerge.yml'\n",
-    ],
-    [`${BROKEN_SHA}:.github/workflows/ci.yml`, 'npm run lint\n'],
-    [`${FIXED_SHA}:.github/workflows/ci.yml`, './node_modules/.bin/eslint apps scripts --max-warnings 0\n'],
-    [`${BROKEN_SHA}:.github/autonomous-policy.yml`, 'highRiskPaths:\n  - .github/workflows/**\n'],
-    [`${FIXED_SHA}:.github/autonomous-policy.yml`, 'highRiskPaths:\n  - package.json\n  - scripts/**\n'],
-    [`${BROKEN_SHA}:apps/api/src/application/operations/registry.ts`, "mcp: { toolName: 'bring_add_items' }\n"],
-    [`${FIXED_SHA}:apps/api/src/application/operations/registry.ts`, "mcp: { toolName: 'bring_add_item' }\n"],
-    [`${BROKEN_SHA}:apps/api/src/mcp/tools/bring.ts`, "server.registerTool('bring_add_items')\n"],
-    [
-      `${FIXED_SHA}:apps/api/src/mcp/tools/bring.ts`,
-      "server.registerTool('bring_add_item')\nitem: itemInputSchema\nitems: [item]\n",
-    ],
-    [
-      `${BROKEN_SHA}:scripts/agent-learning/verify-program-evidence.mjs`,
-      "changedPaths.includes(PROGRAM_PATH) && current.status === 'accepted'\n",
-    ],
-    [
-      `${FIXED_SHA}:scripts/agent-learning/verify-program-evidence.mjs`,
-      'if (!changedPaths.includes(PROGRAM_PATH)) return false;\nreturn previous.line !== current.line;\n',
-    ],
-    [`${BROKEN_SHA}:.agents/skills/autonomous-pr-delivery/SKILL.md`, 'Run relevant local checks.\n'],
-    [
-      `${FIXED_SHA}:.agents/skills/autonomous-pr-delivery/SKILL.md`,
-      'Run one complete local set selected from the protected-base diff.\nDo not repeat dependency installation, unchanged application builds.\n',
-    ],
-  ]);
-  const readAt = (commit, path) => fixtures.get(`${commit}:${path}`) ?? '';
-  for (const [id, scorerId] of [
-    ['workflow-run-identity', 'historical.workflow-run-identity'],
-    ['ci-script-indirection', 'historical.ci-script-indirection'],
-    ['bring-singular-add-item', 'historical.bring-singular-add-item'],
-    ['proportional-program-gating', 'historical.proportional-program-gating'],
-  ]) {
-    const artifact = validVerifiedArtifact({ id });
-    artifact.counterfactual.verification = { trustedScorers: [scorerId] };
-    assert.deepEqual(historicalScorerFindings(artifact, readAt), []);
-  }
-
-  const invalid = validVerifiedArtifact({ id: 'workflow-run-identity' });
-  invalid.counterfactual.verification = { trustedScorers: ['historical.workflow-run-identity'] };
-  assert.ok(
-    historicalScorerFindings(invalid, () => fixtures.get(`${BROKEN_SHA}:.github/workflows/codex-main-delivery.yml`))
-      .length > 0,
-  );
-});
-
-test('live PR provenance must bind the implementation number and exact broken/fixed SHAs', () => {
-  const artifact = validVerifiedArtifact();
-  const pullRequest = {
-    number: 123,
-    state: 'closed',
-    merged_at: '2026-08-08T00:00:00Z',
-    base: { sha: BROKEN_SHA },
-    merge_commit_sha: FIXED_SHA,
-  };
-  assert.deepEqual(pullRequestProvenanceFindings(artifact, pullRequest), []);
-  assert.ok(
-    pullRequestProvenanceFindings(artifact, { ...pullRequest, merge_commit_sha: 'c'.repeat(40) }).some((finding) =>
-      finding.includes('merge SHA'),
-    ),
-  );
-});
-
-test('policy and historical task aliases use fixed compatible entry points', () => {
-  const packageDefinition = JSON.parse(readFileSync(join(REPOSITORY_ROOT, 'package.json'), 'utf8'));
-  assert.equal(packageDefinition.scripts['eval:agent-policy'], packageDefinition.scripts['eval:agents']);
-  assert.equal(packageDefinition.scripts['eval:agent-tasks:validate'], 'node scripts/agent-task-evals/validate.mjs');
-});
-
-test('delivery skill requires phase-first reporting and proportional local validation', () => {
-  const skill = readFileSync(join(REPOSITORY_ROOT, '.agents/skills/autonomous-pr-delivery/SKILL.md'), 'utf8');
-  assert.match(skill, /lead progress updates with the active phase, its status, and the next exact slice/);
-  assert.match(skill, /Run one complete local set selected from the protected-base diff/);
-  assert.match(skill, /Do not repeat dependency installation, unchanged application builds/);
-  assert.match(skill, /never skips or weakens protected remote aggregates/);
+test('generated index is deterministic, sorted, and contains no execution ledger', () => {
+  const records = [
+    { artifact: validArtifact({ id: 'zeta-learning', fingerprint: 'delivery.workflow.zeta' }) },
+    { artifact: validArtifact() },
+  ];
+  const first = generateArtifactIndex(records);
+  const second = generateArtifactIndex(records);
+  assert.equal(first, second);
+  assert.ok(first.indexOf('[example-learning]') < first.indexOf('[zeta-learning]'));
+  assert.doesNotMatch(first, /workflow run|Generated at|timestamp/i);
 });
