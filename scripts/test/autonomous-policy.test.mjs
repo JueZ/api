@@ -259,6 +259,14 @@ test('stable aggregate jobs cover every merge-relevant internal validation and f
     'pull-requests': 'read',
   });
   assert.equal(
+    validationProfile.steps.some((step) => step.name === 'Install protected verifier dependencies'),
+    false,
+  );
+  assert.equal(
+    validationProfile.steps.find((step) => step.name === 'Setup Node.js for protected verifier')?.with?.cache,
+    undefined,
+  );
+  assert.equal(
     runAggregateStep(ciWorkflowDefinition, 'ci-complete', workflowResults(MERGE_RELEVANT_CI_JOBS)).status,
     0,
   );

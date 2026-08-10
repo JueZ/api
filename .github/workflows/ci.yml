@@ -73,12 +73,6 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - name: Install protected verifier dependencies
-        if: inputs.validation_profile == 'runtime-neutral-reuse'
-        shell: bash
-        run: npm ci --ignore-scripts
       - name: Verify trusted exact-main validation reuse
         id: reuse
         if: inputs.validation_profile == 'runtime-neutral-reuse'
