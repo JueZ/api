@@ -1,4 +1,4 @@
-<!-- project-memory-asOf: 2026-08-09 -->
+<!-- project-memory-asOf: 2026-08-10 -->
 # Known issues and unresolved risks
 
 ## First genuine post-rollout learning candidate has not occurred
@@ -6,6 +6,12 @@
 - Phase 3 is accepted from protected PR #394, exact-main CI, one exact-range dry run, two idempotent write-enabled rollout runs, and strict registered evidence. The six labels exist and the rollout timestamp prevented a historical flood.
 - No significant `codex-repair` issue has been created after the rollout timestamp, so live candidate creation, same-fingerprint recurrence, and link persistence await the first genuine event. Deterministic tests and the protected dry-run proposal cover those paths; do not manufacture an incident or treat the absence of a real source as a failure.
 - Historical backfill remains manually dispatched, exact-range, bounded to 100 issue numbers, and dry-run by default. Scheduled triage cannot close repairs.
+
+## Historical real-agent context comparison remains unavailable
+
+- Phase 4's deterministic harness and fake-adapter integration are accepted, but no real or paid agent-task evaluation has been authorized or run.
+- Phase 5 status run `31340620096` correctly reports zero result files and null pass rates for `historical`, `current-agent-context`, and `current-without-skills`. This is missing evidence, not a failure and not a passing claim.
+- Do not use a production/provider credential or required CI for these evaluations. A future run requires separate explicit operator authorization and the existing isolated, sanitized harness boundary.
 
 ## Main Delivery artifact contract incident is resolved
 
