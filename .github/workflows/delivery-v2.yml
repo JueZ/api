@@ -1,0 +1,543 @@
+name: Delivery v2
+run-name: Delivery v2 ${{ github.sha }}
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Classify only, exercise test, or run the complete protected-main delivery.
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - test-only
+          - full
+
+permissions:
+  contents: read
+
+jobs:
+  classify:
+    name: classify protected-main change
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run_mode: ${{ steps.classify.outputs.run_mode }}
+      should_deploy: ${{ steps.classify.outputs.should_deploy }}
+      deployment_required: ${{ steps.classify.outputs.deployment_required }}
+      reason: ${{ steps.classify.outputs.reason }}
+      file_count: ${{ steps.classify.outputs.file_count }}
+      impact_path_count: ${{ steps.classify.outputs.impact_path_count }}
+      base_sha: ${{ steps.classify.outputs.base_sha }}
+      head_sha: ${{ steps.classify.outputs.head_sha }}
+      started_at_epoch: ${{ steps.classify.outputs.started_at_epoch }}
+    steps:
+      - name: Checkout exact protected main
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify deployment impact
+        id: classify
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          DELIVERY_V2_ENABLED: ${{ vars.DELIVERY_V2_ENABLED }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.sha }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          if [ "$EVENT_NAME" = "push" ]; then
+            if [ "${DELIVERY_V2_ENABLED:-false}" = "true" ]; then
+              run_mode="full"
+            else
+              run_mode="shadow"
+            fi
+            base_sha="$BEFORE_SHA"
+          else
+            if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+              echo "Manual delivery may run only from protected main." >&2
+              exit 1
+            fi
+            current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+            if [ "$current_main" != "$HEAD_SHA" ]; then
+              echo "Manual delivery must use the exact current protected-main SHA." >&2
+              exit 1
+            fi
+            run_mode="$REQUESTED_MODE"
+            base_sha="$(git rev-parse "$HEAD_SHA^")"
+          fi
+          case "$run_mode" in
+            shadow|dry-run|test-only|full) ;;
+            *) echo "Unsupported delivery mode: $run_mode" >&2; exit 1 ;;
+          esac
+
+          classification_output="$RUNNER_TEMP/deployment-classification.out"
+          if [ -z "$base_sha" ] || [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
+            base_sha="$HEAD_SHA"
+            node scripts/classify-deployment-impact.mjs \
+              --base "$base_sha" \
+              --head "$HEAD_SHA" \
+              --full missing-base-sha \
+              --output "$classification_output"
+          else
+            node scripts/classify-deployment-impact.mjs \
+              --base "$base_sha" \
+              --head "$HEAD_SHA" \
+              --output "$classification_output"
+          fi
+          cat "$classification_output" >> "$GITHUB_OUTPUT"
+          deployment_required="$(sed -n 's/^deployment_required=//p' "$classification_output")"
+          if [ "$run_mode" = "test-only" ] ||
+             { [ "$run_mode" = "full" ] && [ "$deployment_required" = "true" ]; }; then
+            should_deploy="true"
+          else
+            should_deploy="false"
+          fi
+          {
+            echo "run_mode=$run_mode"
+            echo "should_deploy=$should_deploy"
+          } >> "$GITHUB_OUTPUT"
+      - name: Summarize delivery classification
+        shell: bash
+        env:
+          DEPLOYMENT_REQUIRED: ${{ steps.classify.outputs.deployment_required }}
+          EXACT_SHA: ${{ steps.classify.outputs.head_sha }}
+          FILE_COUNT: ${{ steps.classify.outputs.file_count }}
+          REASON: ${{ steps.classify.outputs.reason }}
+          RUN_MODE: ${{ steps.classify.outputs.run_mode }}
+          SHOULD_DEPLOY: ${{ steps.classify.outputs.should_deploy }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Delivery classification"
+            echo "- Mode: $RUN_MODE"
+            echo "- Exact SHA: $EXACT_SHA"
+            echo "- Reason: $REASON"
+            echo "- Changed files: $FILE_COUNT"
+            echo "- Deployment impact: $DEPLOYMENT_REQUIRED"
+            echo "- Build and deploy applicable: $SHOULD_DEPLOY"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: build immutable release once
+    if: ${{ needs.classify.outputs.should_deploy == 'true' }}
+    needs: classify
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      release_digest: ${{ steps.identity.outputs.release_digest }}
+      function_digest: ${{ steps.identity.outputs.function_digest }}
+      frontend_digest: ${{ steps.identity.outputs.frontend_digest }}
+      sbom_digest: ${{ steps.identity.outputs.sbom_digest }}
+    steps:
+      - name: Checkout exact protected main
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ needs.classify.outputs.head_sha }}
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install release dependencies
+        run: npm ci --ignore-scripts
+      - name: Build and verify immutable release
+        shell: bash
+        env:
+          SOURCE_REF: ${{ needs.classify.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/ng build --configuration production --no-progress
+          ./node_modules/.bin/tsc -p apps/api/tsconfig.json
+          bash scripts/build-release-artifacts.sh "$RUNNER_TEMP/release"
+          node scripts/verify-release-artifacts.mjs "$RUNNER_TEMP/release" "$SOURCE_REF"
+      - name: Record release identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="$RUNNER_TEMP/release"
+          {
+            echo "release_digest=$(sha256sum "$release_dir/release-manifest.json" | awk '{print $1}')"
+            echo "function_digest=$(jq -r '.artifacts.functionapp.sha256' "$release_dir/release-manifest.json")"
+            echo "frontend_digest=$(jq -r '.artifacts.frontend.sha256' "$release_dir/release-manifest.json")"
+            echo "sbom_digest=$(jq -r '.artifacts.sbom.sha256' "$release_dir/release-manifest.json")"
+          } >> "$GITHUB_OUTPUT"
+      - name: Upload immutable release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
+        with:
+          name: release-${{ needs.classify.outputs.head_sha }}
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+          retention-days: 90
+      - name: Summarize immutable build
+        shell: bash
+        env:
+          FUNCTION_DIGEST: ${{ steps.identity.outputs.function_digest }}
+          FRONTEND_DIGEST: ${{ steps.identity.outputs.frontend_digest }}
+          RELEASE_DIGEST: ${{ steps.identity.outputs.release_digest }}
+          SBOM_DIGEST: ${{ steps.identity.outputs.sbom_digest }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Immutable release built once"
+            echo "- Manifest digest: $RELEASE_DIGEST"
+            echo "- Function digest: $FUNCTION_DIGEST"
+            echo "- Environment-neutral frontend digest: $FRONTEND_DIGEST"
+            echo "- SBOM digest: $SBOM_DIGEST"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  attest:
+    name: attest immutable release
+    if: ${{ needs.build.result == 'success' }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Download immutable release
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        with:
+          name: release-${{ github.sha }}
+          path: ${{ runner.temp }}/release
+      - name: Attest protected-main release
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # tag=v2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/release/functionapp.zip
+            ${{ runner.temp }}/release/frontend.tar.gz
+            ${{ runner.temp }}/release/sbom.cdx.json
+
+  deploy-test:
+    name: deploy and verify test
+    if: ${{ always() && needs.classify.outputs.should_deploy == 'true' && needs.build.result == 'success' && needs.attest.result == 'success' }}
+    needs: [classify, build, attest]
+    concurrency:
+      group: deploy-test
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      issues: write
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environmentName: test
+      azureResourceGroup: rg-api-test
+      githubEnvironment: test
+      deliveryMode: direct
+      deployFrontend: true
+      deployFunctions: true
+      sourceRef: ${{ github.sha }}
+      controllerRef: ${{ github.sha }}
+      controllerWorkflowSha: ${{ github.workflow_sha }}
+      deliveryCorrelation: test-${{ github.run_id }}-${{ github.run_attempt }}
+      ciRunId: ${{ format('{0}', github.run_id) }}
+      ciDeliveryCorrelation: build-${{ github.run_id }}-${{ github.run_attempt }}
+    secrets:
+      REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
+      BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
+      BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
+      BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
+      BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
+      BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
+
+  current-main:
+    name: one-shot current-main gate
+    if: ${{ always() && needs.classify.outputs.run_mode == 'full' && needs.deploy-test.result == 'success' }}
+    needs: [classify, deploy-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      confirmed_sha: ${{ steps.gate.outputs.confirmed_sha }}
+      previous_production_sha: ${{ steps.gate.outputs.previous_production_sha }}
+      promote: ${{ steps.gate.outputs.promote }}
+      superseded: ${{ steps.gate.outputs.superseded }}
+    steps:
+      - name: Read current main once before production
+        id: gate
+        shell: bash
+        env:
+          DELIVERY_SHA: ${{ needs.classify.outputs.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [ "$current_main" != "$DELIVERY_SHA" ]; then
+            {
+              echo "confirmed_sha=$current_main"
+              echo "previous_production_sha="
+              echo "promote=false"
+              echo "superseded=true"
+            } >> "$GITHUB_OUTPUT"
+            echo "Newer protected main $current_main supersedes $DELIVERY_SHA; production promotion is skipped." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          : "${PRODUCTION_BASE_URL:?PRODUCTION_BASE_URL is required before production promotion}"
+          production_health="$(curl --fail --show-error --silent --max-time 20 "${PRODUCTION_BASE_URL%/}/health")"
+          previous_production_sha="$(jq -r '.deployedSourceRef // .deployedCommitSha // ""' <<<"$production_health" | tr '[:upper:]' '[:lower:]')"
+          if ! [[ "$previous_production_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Production health did not report an immutable source SHA." >&2
+            exit 1
+          fi
+          if [ "$previous_production_sha" = "$DELIVERY_SHA" ]; then
+            promote="false"
+          else
+            promote="true"
+          fi
+          {
+            echo "confirmed_sha=$current_main"
+            echo "previous_production_sha=$previous_production_sha"
+            echo "promote=$promote"
+            echo "superseded=false"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### One-shot production gate"
+            echo "- Confirmed current main: $current_main"
+            echo "- Previous verified production source: $previous_production_sha"
+            echo "- Promotion required: $promote"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  promote-production:
+    name: promote and verify production
+    if: ${{ always() && needs.current-main.result == 'success' && needs.current-main.outputs.promote == 'true' }}
+    needs: [classify, deploy-test, current-main]
+    concurrency:
+      group: production-deployment
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      issues: write
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environmentName: prod
+      azureResourceGroup: rg-api-prod
+      githubEnvironment: production
+      deliveryMode: direct
+      deployFrontend: true
+      deployFunctions: true
+      sourceRef: ${{ github.sha }}
+      controllerRef: ${{ github.sha }}
+      controllerWorkflowSha: ${{ github.workflow_sha }}
+      currentMainConfirmedRef: ${{ needs.current-main.outputs.confirmed_sha }}
+      updateProductionVariables: true
+      deliveryCorrelation: prod-${{ github.run_id }}-${{ github.run_attempt }}
+      testDeliveryCorrelation: test-${{ github.run_id }}-${{ github.run_attempt }}
+      testDeliveryRunId: ${{ format('{0}', github.run_id) }}
+      ciRunId: ${{ format('{0}', github.run_id) }}
+      ciDeliveryCorrelation: build-${{ github.run_id }}-${{ github.run_attempt }}
+    secrets:
+      REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
+      BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
+      BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
+      BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
+      BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
+      BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
+
+  resolve-rollback:
+    name: resolve bounded production recovery
+    if: ${{ always() && needs.current-main.outputs.promote == 'true' && needs.promote-production.result == 'failure' }}
+    needs: [classify, current-main, promote-production]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      recovery_state: ${{ steps.resolve.outputs.recovery_state }}
+      rollback_required: ${{ steps.resolve.outputs.rollback_required }}
+      rollback_source_ref: ${{ steps.resolve.outputs.rollback_source_ref }}
+      rollback_run_id: ${{ steps.resolve.outputs.rollback_run_id }}
+      rollback_correlation: ${{ steps.resolve.outputs.rollback_correlation }}
+    steps:
+      - name: Checkout trusted recovery resolver
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ needs.classify.outputs.head_sha }}
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        with:
+          node-version: '22'
+      - name: Resolve exact previous known-good artifact
+        id: resolve
+        shell: bash
+        env:
+          FAILED_SOURCE: ${{ needs.classify.outputs.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_SOURCE: ${{ needs.current-main.outputs.previous_production_sha }}
+          PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+        run: |
+          set -euo pipefail
+          : "${PRODUCTION_BASE_URL:?PRODUCTION_BASE_URL is required for recovery}"
+          observed_health="$(curl --fail --show-error --silent --max-time 20 "${PRODUCTION_BASE_URL%/}/health")"
+          observed_source="$(jq -r '.deployedSourceRef // .deployedCommitSha // ""' <<<"$observed_health" | tr '[:upper:]' '[:lower:]')"
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            | jq '[.[] | .artifacts[]]' > "$RUNNER_TEMP/production-artifacts.json"
+          node scripts/resolve-known-good-release.mjs \
+            --failed-source "$FAILED_SOURCE" \
+            --previous-source "$PREVIOUS_SOURCE" \
+            --observed-source "$observed_source" \
+            --artifacts "$RUNNER_TEMP/production-artifacts.json" \
+            --repository "$GITHUB_REPOSITORY" \
+            --current-run "$GITHUB_RUN_ID" \
+            --output "$GITHUB_OUTPUT"
+
+  rollback-production:
+    name: restore and verify previous production
+    if: ${{ always() && needs.resolve-rollback.result == 'success' && needs.resolve-rollback.outputs.rollback_required == 'true' }}
+    needs: [classify, current-main, promote-production, resolve-rollback]
+    concurrency:
+      group: production-deployment
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      issues: write
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environmentName: prod
+      azureResourceGroup: rg-api-prod
+      githubEnvironment: production
+      deliveryMode: direct
+      deployFrontend: true
+      deployFunctions: true
+      sourceRef: ${{ needs.resolve-rollback.outputs.rollback_source_ref }}
+      controllerRef: ${{ github.sha }}
+      controllerWorkflowSha: ${{ github.workflow_sha }}
+      currentMainConfirmedRef: ${{ needs.current-main.outputs.confirmed_sha }}
+      allowRollback: true
+      deliveryCorrelation: rollback-${{ github.run_id }}-${{ github.run_attempt }}
+      rollbackReleaseRunId: ${{ needs.resolve-rollback.outputs.rollback_run_id }}
+      rollbackReleaseCorrelation: ${{ needs.resolve-rollback.outputs.rollback_correlation }}
+    secrets:
+      REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
+      BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
+      BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
+      BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
+      BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
+      BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
+
+  summary:
+    name: delivery summary
+    if: always()
+    needs:
+      - classify
+      - build
+      - attest
+      - deploy-test
+      - current-main
+      - promote-production
+      - resolve-rollback
+      - rollback-production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Write concise delivery summary
+        shell: bash
+        env:
+          ARTIFACT_DIGEST: ${{ needs.build.outputs.release_digest }}
+          ATTEST_RESULT: ${{ needs.attest.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          DEPLOYMENT_REQUIRED: ${{ needs.classify.outputs.deployment_required }}
+          EXACT_SHA: ${{ needs.classify.outputs.head_sha }}
+          FILE_COUNT: ${{ needs.classify.outputs.file_count }}
+          PREVIOUS_PRODUCTION_SHA: ${{ needs.current-main.outputs.previous_production_sha }}
+          PROD_FUNCTION_DIGEST: ${{ needs.promote-production.outputs.functionArtifactSha256 }}
+          PROD_RENDERED_FRONTEND_DIGEST: ${{ needs.promote-production.outputs.frontendArtifactSha256 }}
+          PROD_SBOM_DIGEST: ${{ needs.promote-production.outputs.sbomSha256 }}
+          PROD_SOURCE_FRONTEND_DIGEST: ${{ needs.promote-production.outputs.sourceFrontendArtifactSha256 }}
+          PRODUCTION_RESULT: ${{ needs.promote-production.result }}
+          REASON: ${{ needs.classify.outputs.reason }}
+          RECOVERY_STATE: ${{ needs.resolve-rollback.outputs.recovery_state }}
+          ROLLBACK_RESULT: ${{ needs.rollback-production.result }}
+          RUN_MODE: ${{ needs.classify.outputs.run_mode }}
+          STARTED_AT_EPOCH: ${{ needs.classify.outputs.started_at_epoch }}
+          SUPERSEDED: ${{ needs.current-main.outputs.superseded }}
+          TEST_FUNCTION_DIGEST: ${{ needs.deploy-test.outputs.functionArtifactSha256 }}
+          TEST_RENDERED_FRONTEND_DIGEST: ${{ needs.deploy-test.outputs.frontendArtifactSha256 }}
+          TEST_SBOM_DIGEST: ${{ needs.deploy-test.outputs.sbomSha256 }}
+          TEST_SOURCE_FRONTEND_DIGEST: ${{ needs.deploy-test.outputs.sourceFrontendArtifactSha256 }}
+          TEST_RESULT: ${{ needs.deploy-test.result }}
+        run: |
+          set -euo pipefail
+          duration="$(( $(date +%s) - STARTED_AT_EPOCH ))"
+          if [ "$TEST_RESULT" = "success" ]; then test_verification="passed"; else test_verification="$TEST_RESULT"; fi
+          if [ "$PRODUCTION_RESULT" = "success" ]; then production_verification="passed"; else production_verification="$PRODUCTION_RESULT"; fi
+          if [ "$TEST_RESULT" = "success" ] && [ "$PRODUCTION_RESULT" = "success" ]; then
+            if [ "$TEST_FUNCTION_DIGEST" != "$PROD_FUNCTION_DIGEST" ] ||
+               [ "$TEST_SOURCE_FRONTEND_DIGEST" != "$PROD_SOURCE_FRONTEND_DIGEST" ] ||
+               [ "$TEST_SBOM_DIGEST" != "$PROD_SBOM_DIGEST" ]; then
+              echo "Test and production did not consume identical application digests." >&2
+              exit 1
+            fi
+          fi
+          {
+            echo "### Delivery v2 result"
+            echo "- Mode: $RUN_MODE"
+            echo "- Classification: $REASON ($FILE_COUNT files, deployment=$DEPLOYMENT_REQUIRED)"
+            echo "- Exact SHA: $EXACT_SHA"
+            echo "- Duration: ${duration}s"
+            echo "- Immutable build: $BUILD_RESULT"
+            echo "- Attestation: $ATTEST_RESULT"
+            echo "- Artifact manifest digest: ${ARTIFACT_DIGEST:-not-applicable}"
+            echo "- Test Function/source-frontend/SBOM digests: ${TEST_FUNCTION_DIGEST:-not-applicable} / ${TEST_SOURCE_FRONTEND_DIGEST:-not-applicable} / ${TEST_SBOM_DIGEST:-not-applicable}"
+            echo "- Production Function/source-frontend/SBOM digests: ${PROD_FUNCTION_DIGEST:-not-applicable} / ${PROD_SOURCE_FRONTEND_DIGEST:-not-applicable} / ${PROD_SBOM_DIGEST:-not-applicable}"
+            echo "- Test/production rendered frontend digests: ${TEST_RENDERED_FRONTEND_DIGEST:-not-applicable} / ${PROD_RENDERED_FRONTEND_DIGEST:-not-applicable}"
+            echo "- Test deployment, smoke, authenticated smoke, telemetry, SHA and digest: $test_verification"
+            echo "- Production deployment, smoke, authenticated smoke, telemetry, SHA and digest: $production_verification"
+            echo "- Previous production SHA: ${PREVIOUS_PRODUCTION_SHA:-not-read}"
+            echo "- Superseded before production: ${SUPERSEDED:-false}"
+            echo "- Recovery state: ${RECOVERY_STATE:-not-required}"
+            echo "- Rollback verification: $ROLLBACK_RESULT"
+            echo "- Repair attempts: 0"
+          } >> "$GITHUB_STEP_SUMMARY"
+          jq -n \
+            --arg sha "$EXACT_SHA" \
+            --arg mode "$RUN_MODE" \
+            --arg reason "$REASON" \
+            --arg artifactDigest "$ARTIFACT_DIGEST" \
+            --arg functionDigest "$TEST_FUNCTION_DIGEST" \
+            --arg sourceFrontendDigest "$TEST_SOURCE_FRONTEND_DIGEST" \
+            --arg sbomDigest "$TEST_SBOM_DIGEST" \
+            --arg testRenderedFrontendDigest "$TEST_RENDERED_FRONTEND_DIGEST" \
+            --arg productionRenderedFrontendDigest "$PROD_RENDERED_FRONTEND_DIGEST" \
+            --arg testResult "$TEST_RESULT" \
+            --arg productionResult "$PRODUCTION_RESULT" \
+            --arg superseded "$SUPERSEDED" \
+            --arg recoveryState "$RECOVERY_STATE" \
+            --arg rollbackResult "$ROLLBACK_RESULT" \
+            --argjson durationSeconds "$duration" \
+            '{schemaVersion:1,sha:$sha,mode:$mode,classification:$reason,artifactDigest:$artifactDigest,applicationDigests:{function:$functionDigest,sourceFrontend:$sourceFrontendDigest,sbom:$sbomDigest},renderedFrontendDigests:{test:$testRenderedFrontendDigest,production:$productionRenderedFrontendDigest},test:$testResult,production:$productionResult,superseded:($superseded=="true"),recovery:$recoveryState,rollback:$rollbackResult,durationSeconds:$durationSeconds,repairAttempts:0}' \
+            > "$RUNNER_TEMP/delivery-summary.json"
+      - name: Upload bounded delivery summary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
+        with:
+          name: delivery-summary-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/delivery-summary.json
+          if-no-files-found: error
+          retention-days: 30

@@ -28,6 +28,7 @@ const ALLOWED_WORKFLOW_SECRET_NAMES = new Set([
   'BRING_MUTATION_ENCRYPTION_KEY',
 ]);
 const OPENAI_RUNTIME_WORKFLOWS = new Set([
+  'delivery-v2.yml',
   'deploy-environment.yml',
   'deploy-test.yml',
   'prepare-production-private-storage.yml',
