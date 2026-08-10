@@ -119,6 +119,25 @@ function runAggregateStep(workflow, aggregateJobId, results, profile = 'full') {
   return spawnSync('bash', ['-c', script], { encoding: 'utf8' });
 }
 
+function ineligibleAutomergeResolutionFindings(workflowSource) {
+  const definition = parseYaml(workflowSource);
+  const script = definition?.jobs?.resolve?.steps?.find((step) => step.id === 'resolve')?.run;
+  if (typeof script !== 'string') return ['auto-merge resolver script is missing'];
+  const start = script.indexOf('if [ "$eligible" != "true" ]; then');
+  const end = start >= 0 ? script.indexOf('\nfi', start) : -1;
+  if (start < 0 || end < 0) return ['ineligible auto-merge branch is missing'];
+  const branch = script.slice(start, end);
+  const denialIndex = branch.indexOf("-f conclusion='failure'");
+  const exitIndex = branch.indexOf('exit 1');
+  const findings = [];
+  if (denialIndex < 0) findings.push('ineligible auto-merge does not publish a failure check');
+  if (exitIndex < 0) findings.push('ineligible auto-merge can leave the workflow successful');
+  if (exitIndex >= 0 && denialIndex >= 0 && exitIndex < denialIndex) {
+    findings.push('ineligible auto-merge exits before publishing its failure check');
+  }
+  return findings;
+}
+
 function pullRequest(overrides = {}) {
   return {
     state: 'open',
@@ -228,6 +247,17 @@ test('protected program evidence is part of the stable autonomous governance agg
   const exactHeadGate = codexAutomergeDefinition.jobs['exact-head-gate'];
   const exactHeadScripts = exactHeadGate.steps.map((step) => step.run ?? '').join('\n');
   assert.doesNotMatch(exactHeadScripts, /verify-program-evidence\.mjs/);
+});
+
+test('ineligible auto-merge publishes its denial and cannot trigger Main Delivery', () => {
+  assert.deepEqual(ineligibleAutomergeResolutionFindings(codexAutomergeWorkflow), []);
+  const brokenWorkflow = codexAutomergeWorkflow.replace(
+    '            echo "The pull request is not eligible for autonomous merge; the denial check was published." >&2\n            exit 1\n',
+    '            echo "The pull request is not eligible for autonomous merge; the denial check was published." >&2\n',
+  );
+  assert.deepEqual(ineligibleAutomergeResolutionFindings(brokenWorkflow), [
+    'ineligible auto-merge can leave the workflow successful',
+  ]);
 });
 
 test('stable aggregate jobs cover every merge-relevant internal validation and fail closed', () => {
@@ -418,6 +448,10 @@ test('Codex auto-merge completion dispatches exact main CI through one delivery 
   assert.match(mainDeliveryWorkflow, /-f governance_run_id="\$GOVERNANCE_RUN_ID"/);
   assert.match(mainDeliveryWorkflow, /wait_for_dispatch ci\.yml "\$ci_title" "\$ci_started_at" "\$SOURCE_REF" "CI"/);
   assert.match(mainDeliveryWorkflow, /Dispatch correlation matched more than one/);
+  assert.equal(mainDeliveryWorkflow.match(/Waiting for \$description to start\./g)?.length, 1);
+  assert.doesNotMatch(mainDeliveryWorkflow, /Waiting for .*attempt \$attempt/);
+  assert.match(mainDeliveryWorkflow, /\[ "\$status" != "\$last_status" \]/);
+  assert.match(mainDeliveryWorkflow, /status changed to '\$\{status:-unknown\}'/);
   assert.match(mainDeliveryWorkflow, /\.path == \$path/);
   assert.match(mainDeliveryWorkflow, /\(\.name == \$workflow_name or \.name == \$title\)/);
   assert.match(mainDeliveryWorkflow, /github\.run_attempt == 1/);

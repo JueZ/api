@@ -85,6 +85,8 @@ jobs:
               -f 'output[title]=Autonomous governance ineligible' \
               -f 'output[summary]=The pull request is draft, forked, outside the allowed branch/label policy, or carries a blocking label.' \
               >/dev/null
+            echo "The pull request is not eligible for autonomous merge; the denial check was published." >&2
+            exit 1
           fi
 
   autonomous-governance:

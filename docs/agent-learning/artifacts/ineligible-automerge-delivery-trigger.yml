@@ -1,0 +1,45 @@
+version: 1
+id: ineligible-automerge-delivery-trigger
+title: Prevent ineligible auto-merge runs from triggering Main Delivery
+fingerprint: delivery.automerge.ineligible-success-trigger
+source:
+  type: repository_audit
+  references:
+    - kind: issue
+      locator: JueZ/api#410
+      url: https://github.com/JueZ/api/issues/410
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31398796811
+      url: https://github.com/JueZ/api/actions/runs/31398796811
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31398817234
+      url: https://github.com/JueZ/api/actions/runs/31398817234
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31399367798
+      url: https://github.com/JueZ/api/actions/runs/31399367798
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31399389178
+      url: https://github.com/JueZ/api/actions/runs/31399389178
+classification:
+  failureArea: post-merge-delivery-triggering
+  severity: high
+  symptom: Ineligible auto-merge runs published a failure check but still completed successfully, triggering Main Delivery without a merge and consuming or failing the serialized delivery queue.
+  rootCause: The resolver encoded ineligibility only as a custom check conclusion and did not make its own job non-successful, while Main Delivery used the successful controller conclusion as its post-merge signal.
+disposition:
+  primary: regression-test
+  rationale: The controller now fails after publishing the denial, and a structural counterfactual proves that removing the terminal failure reintroduces the false successful trigger.
+artifacts:
+  - path: .github/workflows/codex-automerge.yml
+    kind: workflow
+  - path: .github/workflows/codex-main-delivery.yml
+    kind: workflow
+  - path: scripts/test/autonomous-policy.test.mjs
+    kind: regression-test
+  - path: docs/autonomous-delivery.md
+    kind: architecture-documentation
+counterfactual:
+  hypothesis: The regression fails when an ineligible resolver can return success after publishing its denial and passes only when the resolver exits nonzero after publishing the denial.
+  verification:
+    commands:
+      - node --test scripts/test/autonomous-policy.test.mjs
+status: implemented
