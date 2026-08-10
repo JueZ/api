@@ -1101,7 +1101,9 @@ test('RedditThreadService aborts an in-flight expansion at its server-owned dead
   process.env.REDDIT_CLIENT_SECRET = config.secret;
   process.env.REDDIT_USER_AGENT = config.userAgent;
   let moreCalls = 0;
+  let currentTimeMs = 0;
   const service = new RedditThreadService({
+    now: () => currentTimeMs,
     expansionTimeoutBudgetMs: 25,
     fetchImpl: async (input, init) => {
       if (String(input).includes('/api/v1/access_token')) {
@@ -1116,7 +1118,10 @@ test('RedditThreadService aborts an in-flight expansion at its server-owned dead
         return new Promise((_, reject) => {
           init.signal.addEventListener(
             'abort',
-            () => reject(init.signal.reason ?? new DOMException('Aborted', 'AbortError')),
+            () => {
+              currentTimeMs = 25;
+              reject(init.signal.reason ?? new DOMException('Aborted', 'AbortError'));
+            },
             { once: true },
           );
         });
