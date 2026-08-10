@@ -10,6 +10,7 @@ const environmentSource = readFileSync(
   new URL('../../.github/workflows/deploy-environment.yml', import.meta.url),
   'utf8',
 );
+const environmentWorkflow = parseYaml(environmentSource);
 
 function needs(job) {
   return Array.isArray(job.needs) ? job.needs : job.needs ? [job.needs] : [];
@@ -36,6 +37,19 @@ test('delivery DAG builds and attests once before test, then reads main once bef
   assert.match(workflow.jobs['current-main'].steps[0].name, /Read current main once/);
   assert.equal(workflow.jobs['deploy-test'].with.deliveryMode, 'direct');
   assert.equal(workflow.jobs['promote-production'].with.deliveryMode, 'direct');
+});
+
+test('reusable deployment permissions fit every direct caller and centralize issue writes', () => {
+  assert.deepEqual(environmentWorkflow.permissions, {
+    contents: 'read',
+    'id-token': 'write',
+    actions: 'read',
+  });
+  for (const jobName of ['deploy-test', 'promote-production', 'rollback-production']) {
+    assert.deepEqual(workflow.jobs[jobName].permissions, environmentWorkflow.permissions, jobName);
+  }
+  assert.doesNotMatch(environmentSource, /issues:\s*write/);
+  assert.doesNotMatch(source, /issues:\s*write/);
 });
 
 test('production and rollback share one bounded concurrency group and exact known-good recovery', () => {

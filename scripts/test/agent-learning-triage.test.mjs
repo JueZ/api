@@ -259,6 +259,7 @@ test('workflow callback is bounded, trusted-main checked out, and cannot self-tr
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /retention-days: 30/);
   assert.doesNotMatch(workflow, /schedule:/);
+  assert.doesNotMatch(workflow, /cache:\s*false|npm ci/);
   assert.doesNotMatch(workflow, /Repair and Learning Queue\n\s+-/);
   assert.doesNotMatch(workflow, /secrets:\s*inherit|OPENAI_API_KEY|@codex/i);
 });
