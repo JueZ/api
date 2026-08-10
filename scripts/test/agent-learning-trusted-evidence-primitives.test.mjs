@@ -37,9 +37,21 @@ function trustedClient(overrides = {}) {
 
 test('strict JSON rejects malformed and duplicate-key documents', () => {
   assert.deepEqual(parseStrictJson('{"ok":true}', 'fixture'), { ok: true });
+  assert.deepEqual(parseStrictJson('{"same":true,"nested":{"same":false}}', 'fixture'), {
+    same: true,
+    nested: { same: false },
+  });
   assert.throws(() => parseStrictJson('{broken', 'fixture'), /fixture must be strict JSON/);
   assert.throws(
     () => parseStrictJson('{"same":true,"same":false}', 'fixture'),
+    /fixture contains duplicate or invalid keys/,
+  );
+  assert.throws(
+    () => parseStrictJson('{"nested":{"same":true,"same":false}}', 'fixture'),
+    /fixture contains duplicate or invalid keys/,
+  );
+  assert.throws(
+    () => parseStrictJson('{"same":true,"\\u0073ame":false}', 'fixture'),
     /fixture contains duplicate or invalid keys/,
   );
 });

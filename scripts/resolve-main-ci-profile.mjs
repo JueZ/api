@@ -1,19 +1,26 @@
 import { appendFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import { validateAutonomousGovernance } from './autonomous-merge-controller.mjs';
-import { classifyDeploymentImpact, loadAutonomousPolicy } from './lib/autonomous-policy.mjs';
 import {
   createTrustedGithubClient,
   readSingleJsonArchive,
   TRUSTED_EVIDENCE_REPOSITORY,
   verifyArtifactArchiveDigest,
 } from './agent-learning/trusted-evidence-primitives.mjs';
+import {
+  AUTONOMOUS_GOVERNANCE_EVALUATOR,
+  validateAutonomousGovernanceEvidence,
+} from './lib/autonomous-governance-evidence.mjs';
+import { classifyDeploymentImpact, RUNTIME_NEUTRAL_DEPLOYMENT_PATHS } from './lib/deployment-impact.mjs';
 
 const EXACT_SHA = /^[0-9a-f]{40}$/;
 const EXACT_DIGEST = /^sha256:[0-9a-f]{64}$/;
 const GOVERNANCE_WORKFLOW_PATH = '.github/workflows/codex-automerge.yml';
 const GOVERNANCE_WORKFLOW_NAME = 'Codex Auto-Merge';
 const GOVERNANCE_ARTIFACT_ENTRY = 'autonomous-governance.json';
+const DEFAULT_REUSE_POLICY = Object.freeze({
+  autonomousGovernance: Object.freeze({ evaluator: AUTONOMOUS_GOVERNANCE_EVALUATOR }),
+  deployment: Object.freeze({ runtimeNeutralPaths: RUNTIME_NEUTRAL_DEPLOYMENT_PATHS }),
+});
 
 function positiveInteger(value, label) {
   const number = Number(value);
@@ -85,7 +92,7 @@ async function readGovernanceEvidence(github, { governanceRunId, prHeadSha }, ru
   return readArchive(archive, GOVERNANCE_ARTIFACT_ENTRY, { label: 'governance artifact' });
 }
 
-export async function resolveTrustedMainCiProfile(input, github, policy = loadAutonomousPolicy(), runtime = {}) {
+export async function resolveTrustedMainCiProfile(input, github, policy = DEFAULT_REUSE_POLICY, runtime = {}) {
   const repository = input?.repository;
   if (repository !== TRUSTED_EVIDENCE_REPOSITORY) {
     throw new Error(`main CI reuse is repository-bound to ${TRUSTED_EVIDENCE_REPOSITORY}`);
@@ -110,14 +117,14 @@ export async function resolveTrustedMainCiProfile(input, github, policy = loadAu
   const workflowRun = await github.getWorkflowRun(governanceRunId);
   validateWorkflowRun(workflowRun, { repository, governanceRunId, prHeadSha });
   const evidence = await readGovernanceEvidence(github, { governanceRunId, prHeadSha }, runtime);
-  const governance = validateAutonomousGovernance(evidence, prHeadSha, policy);
+  const governance = validateAutonomousGovernanceEvidence(evidence, prHeadSha, policy?.autonomousGovernance?.evaluator);
   if (!governance.ok) {
     throw new Error(`exact-head governance artifact is invalid: ${governance.errors.join('; ')}`);
   }
 
   const files = await github.getPullRequestFiles(prNumber, prHeadSha, pullRequest.base.sha);
   if (files.length !== pullRequest.changed_files) throw new Error('authenticated pull-request file count changed');
-  const impact = classifyDeploymentImpact(files, policy);
+  const impact = classifyDeploymentImpact(files, policy?.deployment?.runtimeNeutralPaths);
   if (!impact.valid || impact.deploymentRequired || impact.reason !== 'runtime-neutral-only') {
     throw new Error(`pull request is not eligible for runtime-neutral validation reuse: ${impact.reason}`);
   }

@@ -4,6 +4,7 @@ import { appendFile, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
 import { parse as parseYaml } from 'yaml';
+import { validateAutonomousGovernanceEvidence } from './lib/autonomous-governance-evidence.mjs';
 import { classifyRisk, isAutomergeCandidate, loadAutonomousPolicy } from './lib/autonomous-policy.mjs';
 
 const CONTROLLER_WORKFLOW = 'codex-automerge.yml';
@@ -134,36 +135,7 @@ export function evaluateCompleteCheckRollup(checkRuns, commitStatuses, headSha, 
 }
 
 export function validateAutonomousGovernance(evidence, expectedHeadSha, policy) {
-  const errors = [];
-  if (!isRecord(evidence)) return { ok: false, errors: ['governance evidence must be an object'] };
-  const expectedKeys = new Set(['decision', 'verifiedHeadSha', 'summary', 'findings', 'risk', 'evaluator']);
-  for (const key of expectedKeys) {
-    if (!Object.hasOwn(evidence, key)) errors.push(`governance evidence is missing ${key}`);
-  }
-  for (const key of Object.keys(evidence)) {
-    if (!expectedKeys.has(key)) errors.push(`governance evidence contains unsupported field ${key}`);
-  }
-  if (evidence.decision !== 'approve') errors.push('autonomous governance did not approve the exact head');
-  if (evidence.verifiedHeadSha !== expectedHeadSha) errors.push('governance evidence does not match expected head SHA');
-  if (!isBoundedString(evidence.summary, 2000)) errors.push('governance evidence summary is invalid');
-  if (!Array.isArray(evidence.findings) || evidence.findings.length !== 0) {
-    errors.push('successful deterministic governance evidence must contain no findings');
-  }
-  if (!validRiskClassification(evidence.risk)) errors.push('governance risk classification is invalid');
-  if (evidence.evaluator !== policy.autonomousGovernance.evaluator) {
-    errors.push('governance evaluator identity is invalid');
-  }
-  return { ok: errors.length === 0, errors };
-}
-
-function validRiskClassification(risk) {
-  return (
-    isRecord(risk) &&
-    typeof risk.highRisk === 'boolean' &&
-    Array.isArray(risk.highRiskPaths) &&
-    risk.highRiskPaths.every((path) => typeof path === 'string' && path.length > 0) &&
-    isRecord(risk.classes)
-  );
+  return validateAutonomousGovernanceEvidence(evidence, expectedHeadSha, policy?.autonomousGovernance?.evaluator);
 }
 
 export function evaluatePullRequestState(
@@ -666,10 +638,6 @@ async function assertFreeExactHeadChecks(
 
 function freeRequiredChecks(policy) {
   return policy.requiredChecks.filter((required) => required.name !== policy.autonomousGovernance.checkName);
-}
-
-function isBoundedString(value, maximumLength) {
-  return typeof value === 'string' && value.length >= 1 && value.length <= maximumLength;
 }
 
 function delay(milliseconds) {

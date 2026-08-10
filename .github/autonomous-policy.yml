@@ -5,7 +5,7 @@ version: 1
 trustedWorkflowSha256:
   agent-learning-status.yml: 9bd60db1a21e4c177b9ac8ef2e4bca0c8578a5a4bf89981cd52fbb77652c05a7
   bring-readonly-canary.yml: 9cd2cd547a3b36b1c1de1769730883e613dc370493d978c356d37d90f1e08898
-  ci.yml: e1851b4e606e5068a8aa5a1d474349cc582d000042455c63fe563e5b64bd1ebe
+  ci.yml: a5bc491bff7af9e027921922ada6ceab6675709073a24e3ef2d47e3054c703af
   codeql.yml: 8220b94fdc56f9b33d7db4111fd41e60beb814ef3f2fc99611a09dd71e910590
   codex-automerge.yml: 2effc1d073bc1d47fd53e2d97a83f034cacb9fc74c5d6ce6834562382992a5da
   codex-main-delivery.yml: 92695362d0b7dab220847f13e4be261be83192708b005c8466d7a175db7f258f

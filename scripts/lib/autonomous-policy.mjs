@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
+import { AUTONOMOUS_GOVERNANCE_EVALUATOR } from './autonomous-governance-evidence.mjs';
 import {
   classifyDeploymentImpact as classifyDeploymentImpactWithPatterns,
   matchesPolicyGlob,
@@ -121,8 +122,8 @@ export function validateAutonomousPolicy(policy) {
   if (policy.autonomousGovernance?.checkName !== 'Autonomous review complete') {
     errors.push('autonomousGovernance.checkName must be "Autonomous review complete"');
   }
-  if (policy.autonomousGovernance?.evaluator !== 'deterministic-protected-controller-v1') {
-    errors.push('autonomousGovernance.evaluator must be "deterministic-protected-controller-v1"');
+  if (policy.autonomousGovernance?.evaluator !== AUTONOMOUS_GOVERNANCE_EVALUATOR) {
+    errors.push(`autonomousGovernance.evaluator must be "${AUTONOMOUS_GOVERNANCE_EVALUATOR}"`);
   }
   if (policy.autonomousGovernance?.humanApprovalRequired !== false) {
     errors.push('autonomousGovernance.humanApprovalRequired must be false for the selected autonomous policy');

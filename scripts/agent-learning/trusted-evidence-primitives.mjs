@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseDocument } from 'yaml';
 
 export const TRUSTED_EVIDENCE_REPOSITORY = 'JueZ/api';
 export const TRUSTED_RUNTIME_HOSTS = Object.freeze({
@@ -69,9 +68,105 @@ export function parseStrictJson(source, label = 'JSON document') {
   } catch {
     throw new Error(`${label} must be strict JSON`);
   }
-  const document = parseDocument(source, { strict: true, uniqueKeys: true });
-  if (document.errors.length > 0) throw new Error(`${label} contains duplicate or invalid keys`);
+  try {
+    assertUniqueJsonObjectKeys(source);
+  } catch {
+    throw new Error(`${label} contains duplicate or invalid keys`);
+  }
   return value;
+}
+
+function assertUniqueJsonObjectKeys(source) {
+  let index = 0;
+
+  function skipWhitespace() {
+    while (index < source.length && /\s/.test(source[index])) index += 1;
+  }
+
+  function readString() {
+    const start = index;
+    index += 1;
+    while (index < source.length) {
+      if (source[index] === '\\') {
+        index += 2;
+        continue;
+      }
+      if (source[index] === '"') {
+        index += 1;
+        return JSON.parse(source.slice(start, index));
+      }
+      index += 1;
+    }
+    throw new Error('unterminated JSON string');
+  }
+
+  function readScalar() {
+    const start = index;
+    while (index < source.length && !/[\s,\]}]/.test(source[index])) index += 1;
+    if (index === start) throw new Error('invalid JSON scalar');
+  }
+
+  function readArray() {
+    index += 1;
+    skipWhitespace();
+    if (source[index] === ']') {
+      index += 1;
+      return;
+    }
+    while (index < source.length) {
+      readValue();
+      skipWhitespace();
+      if (source[index] === ']') {
+        index += 1;
+        return;
+      }
+      if (source[index] !== ',') throw new Error('invalid JSON array');
+      index += 1;
+      skipWhitespace();
+    }
+    throw new Error('unterminated JSON array');
+  }
+
+  function readObject() {
+    const keys = new Set();
+    index += 1;
+    skipWhitespace();
+    if (source[index] === '}') {
+      index += 1;
+      return;
+    }
+    while (index < source.length) {
+      if (source[index] !== '"') throw new Error('invalid JSON object key');
+      const key = readString();
+      if (keys.has(key)) throw new Error('duplicate JSON object key');
+      keys.add(key);
+      skipWhitespace();
+      if (source[index] !== ':') throw new Error('invalid JSON object separator');
+      index += 1;
+      readValue();
+      skipWhitespace();
+      if (source[index] === '}') {
+        index += 1;
+        return;
+      }
+      if (source[index] !== ',') throw new Error('invalid JSON object');
+      index += 1;
+      skipWhitespace();
+    }
+    throw new Error('unterminated JSON object');
+  }
+
+  function readValue() {
+    skipWhitespace();
+    if (source[index] === '{') readObject();
+    else if (source[index] === '[') readArray();
+    else if (source[index] === '"') readString();
+    else readScalar();
+  }
+
+  readValue();
+  skipWhitespace();
+  if (index !== source.length) throw new Error('unexpected JSON content');
 }
 
 export async function readBoundedResponseText(response, maximumBytes, label) {

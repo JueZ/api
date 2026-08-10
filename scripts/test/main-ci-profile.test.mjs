@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { loadAutonomousPolicy } from '../lib/autonomous-policy.mjs';
 import { resolveTrustedMainCiProfile } from '../resolve-main-ci-profile.mjs';
@@ -11,6 +15,7 @@ const treeSha = 'd'.repeat(40);
 const governanceRunId = 1234;
 const prNumber = 42;
 const policy = loadAutonomousPolicy();
+const repositoryRoot = resolve(import.meta.dirname, '../..');
 
 const governanceEvidence = {
   decision: 'approve',
@@ -111,6 +116,29 @@ test('trusted exact-main profile reuses validation only for an identical runtime
     treeSha,
     fileCount: 1,
   });
+});
+
+test('trusted exact-main verifier imports and runs without installed packages', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'dependency-free-main-ci-profile-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const paths = [
+    'scripts/resolve-main-ci-profile.mjs',
+    'scripts/agent-learning/trusted-evidence-primitives.mjs',
+    'scripts/lib/autonomous-governance-evidence.mjs',
+    'scripts/lib/deployment-impact.mjs',
+  ];
+  for (const path of paths) {
+    const target = join(directory, path);
+    await mkdir(dirname(target), { recursive: true });
+    await copyFile(join(repositoryRoot, path), target);
+  }
+
+  const dependencyFreeModule = await import(
+    `${pathToFileURL(join(directory, 'scripts/resolve-main-ci-profile.mjs')).href}?isolated=1`
+  );
+  const result = await dependencyFreeModule.resolveTrustedMainCiProfile(input(), github(), undefined, runtime);
+  assert.equal(result.profile, 'runtime-neutral-reuse');
+  assert.equal(result.treeSha, treeSha);
 });
 
 test('main profile rejects malformed identifiers and a stale protected-main generation', async () => {
