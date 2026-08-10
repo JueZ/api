@@ -15,6 +15,7 @@ Autonomous delivery is allowed only when controls fail closed.
 - The final merge boundary re-reads every latest exact-head check run and legacy commit-status context. It permits GitHub aggregate `unstable` only when every external result is terminal-passing and exactly one pending `merge exact PR head` check is bound to the current trusted controller run; unrelated pending or failing results remain denied.
 - Forks, stale/behind heads, conflicts, blocked labels, and admin bypass are denied.
 - Post-merge `workflow_run` authorization binds the exact trusted workflow file path; display/run names are never used as the security identity because `run-name` can replace the observed `.name` value.
+- An ineligible auto-merge resolver publishes the exact-head denial and then exits nonzero. It cannot leave the controller workflow successful and therefore cannot authorize Main Delivery when no protected merge occurred.
 
 High-risk paths remain classified by `.github/autonomous-policy.yml` for proportional validation, governance reporting, and agent-learning controls. They do not trigger an independent model review. The controller waits for all free exact-head aggregates, verifies the immutable workflow set and exclusive check-writer policy, rechecks the mutable PR head after file collection, writes bounded deterministic evidence, and never receives `OPENAI_API_KEY` or calls a model.
 

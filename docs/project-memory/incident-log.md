@@ -1,5 +1,12 @@
 # Incident log
 
+## 2026-08-10 — Ineligible auto-merge runs amplified the Main Delivery queue
+
+- Impact: Fourteen of the latest fifteen failed Main Delivery runs were triggered by successful Codex Auto-Merge workflows that had denied ineligible pull requests and performed no merge. Representative pairs are auto-merge `31398796811` to delivery `31398817234` and recurrence `31399367798` to `31399389178`.
+- Root cause: The resolver published a failing `Autonomous review complete` check for an ineligible pull request but returned success. The remaining controller jobs skipped, so the overall workflow concluded success and satisfied Main Delivery's `workflow_run` trigger even though protected `main` was unchanged.
+- Prevention: After publishing the denial, the resolver now exits nonzero. A counterfactual regression removes that exit and proves the false-success path returns. Main Delivery also logs only polling state changes while retaining its exact-run authorization, polling intervals, and timeouts.
+- Resolution: The protected implementation linked from learning issue #410 contains the durable workflow and regression artifacts. It changes governance orchestration only and does not alter application runtime bytes; terminal GitHub workflow metadata remains the authoritative live recurrence evidence.
+
 ## 2026-08-10 — Runtime-neutral classifier lacked its execution dependency
 
 - Impact: PR #404 was runtime-neutral, but Main Delivery `31383919993` selected full exact-main CI and would have continued to environment deployment. Full CI `31383958260` passed; the delivery controller was cancelled before any Azure deployment.

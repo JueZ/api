@@ -7,8 +7,8 @@ trustedWorkflowSha256:
   bring-readonly-canary.yml: 9cd2cd547a3b36b1c1de1769730883e613dc370493d978c356d37d90f1e08898
   ci.yml: a5bc491bff7af9e027921922ada6ceab6675709073a24e3ef2d47e3054c703af
   codeql.yml: 8220b94fdc56f9b33d7db4111fd41e60beb814ef3f2fc99611a09dd71e910590
-  codex-automerge.yml: 2effc1d073bc1d47fd53e2d97a83f034cacb9fc74c5d6ce6834562382992a5da
-  codex-main-delivery.yml: 92695362d0b7dab220847f13e4be261be83192708b005c8466d7a175db7f258f
+  codex-automerge.yml: cb73e8d982468c58b77717213ceec6a23e7ed1e26863b663cff7a75e7d6d5054
+  codex-main-delivery.yml: 45e33b68c6feeed2778cb60817f2dfe12e1738c3530db186c3aae002ca07fc50
   deploy-environment.yml: cd36744ebf07c466d407ca4ecd83751e2f6445263a7bab90145c69326d844be9
   deploy-test.yml: be874930e0d375765afe67d50429744f5f629d129b944cae601e915ea16c7275
   migrate-private-storage.yml: c5e8ba9e1379179ec4f1f3a6abcfaa7eb712b468e3f43e9c4606157a7ba8d31b

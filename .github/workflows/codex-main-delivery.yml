@@ -79,6 +79,7 @@ jobs:
             local conclusion=""
             local url=""
             local description="$expected_workflow_name: $expected_title"
+            local last_status=""
 
             for attempt in {1..60}; do
               runs_json="$(gh run list \
@@ -106,7 +107,9 @@ jobs:
                 run_id="$(jq -r '.[0].databaseId' <<<"$matches_json")"
                 break
               fi
-              echo "Waiting for $description to start (attempt $attempt/60)."
+              if [ "$attempt" -eq 1 ]; then
+                echo "Waiting for $description to start."
+              fi
               sleep 10
             done
             if ! [[ "$run_id" =~ ^[0-9]+$ ]]; then
@@ -142,6 +145,7 @@ jobs:
               conclusion="$(jq -r '.conclusion // ""' <<<"$run_json")"
               url="$(jq -r '.html_url // ""' <<<"$run_json")"
               if [ "$status" = "completed" ] && [ "$conclusion" = "success" ]; then
+                echo "$description run $run_id completed successfully."
                 printf '%s' "$url" > "$RUNNER_TEMP/${workflow_file}.url"
                 printf '%s' "$run_id" > "$RUNNER_TEMP/${workflow_file}.id"
                 return 0
@@ -150,7 +154,10 @@ jobs:
                 echo "$description run $run_id concluded '$conclusion': $url" >&2
                 return 1
               fi
-              echo "Waiting for pinned $description run $run_id (status $status, attempt $attempt/180)."
+              if [ "$status" != "$last_status" ]; then
+                echo "Pinned $description run $run_id status changed to '${status:-unknown}'."
+                last_status="$status"
+              fi
               sleep 10
             done
             echo "Timed out waiting for pinned $description run $run_id." >&2
