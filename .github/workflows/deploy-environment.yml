@@ -30,6 +30,11 @@ on:
         required: false
         default: ''
         type: string
+      deliveryMode:
+        description: Legacy dispatched delivery or the direct protected-main DAG.
+        required: false
+        default: legacy
+        type: string
       controllerRef:
         description: Immutable caller run head SHA containing the deployment workflow generation.
         required: true
@@ -37,6 +42,11 @@ on:
       controllerWorkflowSha:
         description: Immutable caller workflow definition SHA; must equal controllerRef.
         required: true
+        type: string
+      currentMainConfirmedRef:
+        description: One-shot protected-main confirmation required before direct production mutation.
+        required: false
+        default: ''
         type: string
       updateProductionVariables:
         description: Report resolved production values after successful smoke tests.
@@ -150,6 +160,18 @@ on:
       releaseStorageAccountName:
         description: Resolved immutable-release Azure Storage account name.
         value: ${{ jobs.deploy.outputs.releaseStorageAccountName }}
+      functionArtifactSha256:
+        description: Exact immutable Function package digest.
+        value: ${{ jobs.deploy.outputs.functionArtifactSha256 }}
+      sourceFrontendArtifactSha256:
+        description: Exact environment-neutral frontend package digest.
+        value: ${{ jobs.deploy.outputs.sourceFrontendArtifactSha256 }}
+      frontendArtifactSha256:
+        description: Exact environment-rendered frontend package digest.
+        value: ${{ jobs.deploy.outputs.frontendArtifactSha256 }}
+      sbomSha256:
+        description: Exact SBOM digest.
+        value: ${{ jobs.deploy.outputs.sbomSha256 }}
 
 permissions:
   contents: read
@@ -171,6 +193,10 @@ jobs:
       functionAppName: ${{ steps.resolve.outputs.function_app_name }}
       storageAccountName: ${{ steps.resolve.outputs.storage_account_name }}
       releaseStorageAccountName: ${{ steps.resolve.outputs.release_storage_account_name }}
+      functionArtifactSha256: ${{ steps.artifacts.outputs.function_artifact_sha256 }}
+      sourceFrontendArtifactSha256: ${{ steps.artifacts.outputs.source_frontend_artifact_sha256 }}
+      frontendArtifactSha256: ${{ steps.frontend.outputs.frontend_artifact_sha256 || steps.artifacts.outputs.source_frontend_artifact_sha256 }}
+      sbomSha256: ${{ steps.artifacts.outputs.sbom_sha256 }}
     env:
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
@@ -181,8 +207,10 @@ jobs:
       DEPLOY_FRONTEND: ${{ inputs.deployFrontend }}
       DEPLOY_FUNCTIONS: ${{ inputs.deployFunctions }}
       SOURCE_REF: ${{ inputs.sourceRef }}
+      DELIVERY_MODE: ${{ inputs.deliveryMode }}
       CONTROLLER_REF: ${{ inputs.controllerRef }}
       CONTROLLER_WORKFLOW_SHA: ${{ inputs.controllerWorkflowSha }}
+      CURRENT_MAIN_CONFIRMED_REF: ${{ inputs.currentMainConfirmedRef }}
       DELIVERY_CORRELATION: ${{ inputs.deliveryCorrelation }}
       CI_RUN_ID: ${{ inputs.ciRunId }}
       CI_DELIVERY_CORRELATION: ${{ inputs.ciDeliveryCorrelation }}
@@ -247,9 +275,20 @@ jobs:
       ALLOW_ROLLBACK: >-
         ${{
           inputs.allowRollback &&
-          github.workflow_ref == format('{0}/.github/workflows/rollback-production.yml@refs/heads/main', github.repository) &&
-          github.ref == 'refs/heads/main' &&
-          github.event_name == 'repository_dispatch'
+          (
+            (
+              inputs.deliveryMode == 'direct' &&
+              github.workflow_ref == format('{0}/.github/workflows/delivery-v2.yml@refs/heads/main', github.repository) &&
+              github.ref == 'refs/heads/main' &&
+              (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+            ) ||
+            (
+              inputs.deliveryMode == 'legacy' &&
+              github.workflow_ref == format('{0}/.github/workflows/rollback-production.yml@refs/heads/main', github.repository) &&
+              github.ref == 'refs/heads/main' &&
+              github.event_name == 'repository_dispatch'
+            )
+          )
         }}
       APPLICATIONINSIGHTS_NAME: ${{ vars.APPLICATIONINSIGHTS_NAME }}
       TEST_SERVICE_AUTH_CLIENT_ID: ${{ vars.TEST_SERVICE_AUTH_CLIENT_ID }}
@@ -281,10 +320,17 @@ jobs:
 
           git init .
           git remote add origin https://github.com/JueZ/api.git
-          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
-          fetched_main="$(git rev-parse refs/remotes/origin/main)"
-          if [ "$fetched_main" != "$immutable_controller_ref" ]; then
-            echo "Fetched protected main does not equal the immutable deployment controller." >&2
+          if [ "$DELIVERY_MODE" = "direct" ]; then
+            git fetch --no-tags --prune origin "$immutable_controller_ref"
+          elif [ "$DELIVERY_MODE" = "legacy" ]; then
+            git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
+            fetched_main="$(git rev-parse refs/remotes/origin/main)"
+            if [ "$fetched_main" != "$immutable_controller_ref" ]; then
+              echo "Fetched protected main does not equal the immutable deployment controller." >&2
+              exit 1
+            fi
+          else
+            echo "deliveryMode must be direct or legacy." >&2
             exit 1
           fi
           git checkout --detach "$immutable_controller_ref"
@@ -315,7 +361,7 @@ jobs:
           path: ${{ runner.temp }}/deploy-test-provenance
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.testDeliveryRunId }}
+          run-id: ${{ inputs.deliveryMode == 'direct' && github.run_id || inputs.testDeliveryRunId }}
       - name: Validate deployment source
         id: source
         shell: bash
@@ -333,6 +379,7 @@ jobs:
             echo "sourceRef must be a full 40-character commit SHA from the main branch." >&2
             exit 1
           fi
+          deployment_ref="${deployment_ref,,}"
           if [[ ! "$controller_ref" =~ ^[0-9a-f]{40}$ ]] ||
              [[ ! "$CONTROLLER_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] ||
              [ "$GITHUB_RUN_ATTEMPT" != "1" ] ||
@@ -343,48 +390,80 @@ jobs:
             exit 1
           fi
           current_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")"
-          if [ "$ENVIRONMENT_NAME" = "test" ]; then
-            expected_caller_path=".github/workflows/deploy-test.yml"
-            expected_caller_name="Deploy Test"
-          elif [ "$ROLLBACK_REQUESTED" = "true" ]; then
-            expected_caller_path=".github/workflows/rollback-production.yml"
-            expected_caller_name="Rollback Production"
+          if [ "$DELIVERY_MODE" = "direct" ]; then
+            expected_caller_path=".github/workflows/delivery-v2.yml"
+            expected_caller_name="Delivery v2"
+            expected_caller_title="Delivery v2 $controller_ref"
+            if ! jq -e \
+              --arg run_id "$GITHUB_RUN_ID" \
+              --arg repository "$GITHUB_REPOSITORY" \
+              --arg controller_ref "$controller_ref" \
+              --arg path "$expected_caller_path" \
+              --arg workflow_name "$expected_caller_name" \
+              --arg title "$expected_caller_title" \
+              '(.id | tostring) == $run_id
+                and .repository.full_name == $repository
+                and .head_sha == $controller_ref
+                and .head_branch == "main"
+                and (.event == "push" or .event == "workflow_dispatch")
+                and .path == $path
+                and (.name == $workflow_name or .name == $title)
+                and .display_title == $title
+                and .run_attempt == 1
+                and (.status == "queued" or .status == "in_progress")' \
+              <<<"$current_run_json" >/dev/null; then
+              echo "Direct delivery run identity does not match protected delivery-v2.yml." >&2
+              exit 1
+            fi
           else
-            expected_caller_path=".github/workflows/promote-production.yml"
-            expected_caller_name="Promote Production"
-          fi
-          expected_caller_title="$expected_caller_name $deployment_ref $DELIVERY_CORRELATION"
-          # GitHub has exposed either the static workflow name or resolved
-          # run-name in .name; path and display_title remain exact identity gates.
-          if ! jq -e \
-            --arg run_id "$GITHUB_RUN_ID" \
-            --arg repository "$GITHUB_REPOSITORY" \
-            --arg controller_ref "$controller_ref" \
-            --arg path "$expected_caller_path" \
-            --arg workflow_name "$expected_caller_name" \
-            --arg title "$expected_caller_title" \
-            '(.id | tostring) == $run_id
-              and .repository.full_name == $repository
-              and .head_sha == $controller_ref
-              and .head_branch == "main"
-              and .event == "repository_dispatch"
-              and .path == $path
-              and (.name == $workflow_name or .name == $title)
-              and .display_title == $title
-              and .run_attempt == 1
-              and (.status == "queued" or .status == "in_progress")' \
-            <<<"$current_run_json" >/dev/null; then
-            echo "Current deployment run identity does not match its immutable caller workflow generation." >&2
-            exit 1
-          fi
-          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
-          current_main="$(git rev-parse origin/main)"
-          if [ "$controller_ref" != "$current_main" ]; then
-            echo "The immutable deployment controller is no longer current main; redispatch from the new main." >&2
-            exit 1
+            if [ "$ENVIRONMENT_NAME" = "test" ]; then
+              expected_caller_path=".github/workflows/deploy-test.yml"
+              expected_caller_name="Deploy Test"
+            elif [ "$ROLLBACK_REQUESTED" = "true" ]; then
+              expected_caller_path=".github/workflows/rollback-production.yml"
+              expected_caller_name="Rollback Production"
+            else
+              expected_caller_path=".github/workflows/promote-production.yml"
+              expected_caller_name="Promote Production"
+            fi
+            expected_caller_title="$expected_caller_name $deployment_ref $DELIVERY_CORRELATION"
+            # GitHub has exposed either the static workflow name or resolved
+            # run-name in .name; path and display_title remain exact identity gates.
+            if ! jq -e \
+              --arg run_id "$GITHUB_RUN_ID" \
+              --arg repository "$GITHUB_REPOSITORY" \
+              --arg controller_ref "$controller_ref" \
+              --arg path "$expected_caller_path" \
+              --arg workflow_name "$expected_caller_name" \
+              --arg title "$expected_caller_title" \
+              '(.id | tostring) == $run_id
+                and .repository.full_name == $repository
+                and .head_sha == $controller_ref
+                and .head_branch == "main"
+                and .event == "repository_dispatch"
+                and .path == $path
+                and (.name == $workflow_name or .name == $title)
+                and .display_title == $title
+                and .run_attempt == 1
+                and (.status == "queued" or .status == "in_progress")' \
+              <<<"$current_run_json" >/dev/null; then
+              echo "Current deployment run identity does not match its immutable caller workflow generation." >&2
+              exit 1
+            fi
           fi
           echo "DEPLOYMENT_CONTROL_REF=$controller_ref" >> "$GITHUB_ENV"
-          if ! git merge-base --is-ancestor "$deployment_ref" origin/main; then
+          if [ "$DELIVERY_MODE" = "direct" ]; then
+            history_ref="$controller_ref"
+          else
+            git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
+            current_main="$(git rev-parse origin/main)"
+            if [ "$controller_ref" != "$current_main" ]; then
+              echo "The immutable deployment controller is no longer current main; redispatch from the new main." >&2
+              exit 1
+            fi
+            history_ref="origin/main"
+          fi
+          if ! git merge-base --is-ancestor "$deployment_ref" "$history_ref"; then
             echo "sourceRef must point to a commit already present in the main branch history." >&2
             exit 1
           fi
@@ -409,27 +488,34 @@ jobs:
               echo "Normal deployment requires one exact main CI run ID and correlation." >&2
               exit 1
             fi
-            ci_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}")"
-            expected_ci_title="CI $deployment_ref $CI_DELIVERY_CORRELATION"
-            if ! jq -e \
-              --arg run_id "$CI_RUN_ID" \
-              --arg repository "$GITHUB_REPOSITORY" \
-              --arg source_ref "$deployment_ref" \
-              --arg workflow_name "CI" \
-              --arg title "$expected_ci_title" \
-              '(.id | tostring) == $run_id
-                and .repository.full_name == $repository
-                and .path == ".github/workflows/ci.yml"
-                and (.name == $workflow_name or .name == $title)
-                and (.event == "push" or .event == "workflow_dispatch")
-                and .conclusion == "success"
-                and .head_branch == "main"
-                and .head_sha == $source_ref
-                and .display_title == $title
-                and .run_attempt == 1' \
-              <<<"$ci_run_json" >/dev/null; then
-              echo "Pinned CI run does not match the exact first-attempt main release authorization." >&2
-              exit 1
+            if [ "$DELIVERY_MODE" = "direct" ]; then
+              if [ "$CI_RUN_ID" != "$GITHUB_RUN_ID" ]; then
+                echo "Direct delivery artifacts must come from the current immutable DAG run." >&2
+                exit 1
+              fi
+            else
+              ci_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}")"
+              expected_ci_title="CI $deployment_ref $CI_DELIVERY_CORRELATION"
+              if ! jq -e \
+                --arg run_id "$CI_RUN_ID" \
+                --arg repository "$GITHUB_REPOSITORY" \
+                --arg source_ref "$deployment_ref" \
+                --arg workflow_name "CI" \
+                --arg title "$expected_ci_title" \
+                '(.id | tostring) == $run_id
+                  and .repository.full_name == $repository
+                  and .path == ".github/workflows/ci.yml"
+                  and (.name == $workflow_name or .name == $title)
+                  and (.event == "push" or .event == "workflow_dispatch")
+                  and .conclusion == "success"
+                  and .head_branch == "main"
+                  and .head_sha == $source_ref
+                  and .display_title == $title
+                  and .run_attempt == 1' \
+                <<<"$ci_run_json" >/dev/null; then
+                echo "Pinned CI run does not match the exact first-attempt main release authorization." >&2
+                exit 1
+              fi
             fi
             echo "ci_run_id=$CI_RUN_ID" >> "$GITHUB_OUTPUT"
           fi
@@ -464,22 +550,32 @@ jobs:
               fi
               rollback_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ROLLBACK_RELEASE_RUN_ID}")"
               expected_rollback_title="Promote Production $deployment_ref $ROLLBACK_RELEASE_CORRELATION"
+              expected_direct_title="Delivery v2 $deployment_ref"
               if ! jq -e \
                 --arg source_ref "$deployment_ref" \
                 --arg run_id "$ROLLBACK_RELEASE_RUN_ID" \
                 --arg repository "$GITHUB_REPOSITORY" \
                 --arg workflow_name "Promote Production" \
                 --arg title "$expected_rollback_title" \
+                --arg direct_title "$expected_direct_title" \
                 '(.id | tostring) == $run_id
                   and .repository.full_name == $repository
-                  and .path == ".github/workflows/promote-production.yml"
-                  and (.name == $workflow_name or .name == $title)
-                  and (.event == "repository_dispatch" or .event == "workflow_dispatch")
                   and .conclusion == "success"
                   and .head_branch == "main"
                   and .head_sha == $source_ref
-                  and .display_title == $title
-                  and .run_attempt == 1' \
+                  and .run_attempt == 1
+                  and (
+                    (
+                      .path == ".github/workflows/promote-production.yml"
+                      and (.name == $workflow_name or .name == $title)
+                      and (.event == "repository_dispatch" or .event == "workflow_dispatch")
+                      and .display_title == $title
+                    ) or (
+                      .path == ".github/workflows/delivery-v2.yml"
+                      and (.event == "push" or .event == "workflow_dispatch")
+                      and .display_title == $direct_title
+                    )
+                  )' \
                 <<<"$rollback_run_json" >/dev/null; then
                 echo "Rollback release run identity does not match the requested historical source and correlation." >&2
                 exit 1
@@ -525,25 +621,45 @@ jobs:
               fi
               test_run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TEST_DELIVERY_RUN_ID}")"
               expected_test_title="Deploy Test $deployment_ref $TEST_DELIVERY_CORRELATION"
-              if ! jq -e \
-                --arg source_ref "$deployment_ref" \
-                --arg run_id "$TEST_DELIVERY_RUN_ID" \
-                --arg repository "$GITHUB_REPOSITORY" \
-                --arg workflow_name "Deploy Test" \
-                --arg title "$expected_test_title" \
-                '(.id | tostring) == $run_id
-                  and .repository.full_name == $repository
-                  and .path == ".github/workflows/deploy-test.yml"
-                  and (.name == $workflow_name or .name == $title)
-                  and .event == "repository_dispatch"
-                  and .conclusion == "success"
-                  and .head_branch == "main"
-                  and .head_sha == $source_ref
-                  and .display_title == $title
-                  and .run_attempt == 1' \
-                <<<"$test_run_json" >/dev/null; then
-                echo "Deploy Test run identity does not match the exact source and correlation being promoted." >&2
-                exit 1
+              if [ "$DELIVERY_MODE" = "direct" ]; then
+                if [ "$TEST_DELIVERY_RUN_ID" != "$GITHUB_RUN_ID" ] ||
+                   ! jq -e \
+                    --arg source_ref "$deployment_ref" \
+                    --arg run_id "$TEST_DELIVERY_RUN_ID" \
+                    --arg repository "$GITHUB_REPOSITORY" \
+                    --arg title "Delivery v2 $deployment_ref" \
+                    '(.id | tostring) == $run_id
+                      and .repository.full_name == $repository
+                      and .path == ".github/workflows/delivery-v2.yml"
+                      and (.event == "push" or .event == "workflow_dispatch")
+                      and (.status == "queued" or .status == "in_progress")
+                      and .head_branch == "main"
+                      and .head_sha == $source_ref
+                      and .display_title == $title
+                      and .run_attempt == 1' \
+                    <<<"$test_run_json" >/dev/null; then
+                  echo "Direct production promotion must consume test evidence from the current DAG run." >&2
+                  exit 1
+                fi
+              elif ! jq -e \
+                  --arg source_ref "$deployment_ref" \
+                  --arg run_id "$TEST_DELIVERY_RUN_ID" \
+                  --arg repository "$GITHUB_REPOSITORY" \
+                  --arg workflow_name "Deploy Test" \
+                  --arg title "$expected_test_title" \
+                  '(.id | tostring) == $run_id
+                    and .repository.full_name == $repository
+                    and .path == ".github/workflows/deploy-test.yml"
+                    and (.name == $workflow_name or .name == $title)
+                    and .event == "repository_dispatch"
+                    and .conclusion == "success"
+                    and .head_branch == "main"
+                    and .head_sha == $source_ref
+                    and .display_title == $title
+                    and .run_attempt == 1' \
+                  <<<"$test_run_json" >/dev/null; then
+                  echo "Deploy Test run identity does not match the exact source and correlation being promoted." >&2
+                  exit 1
               fi
               provenance_file="${{ runner.temp }}/deploy-test-provenance/deploy-test-provenance.json"
               if [ ! -f "$provenance_file" ] || [ -L "$provenance_file" ] ||
@@ -558,11 +674,11 @@ jobs:
                 --arg correlation "$TEST_DELIVERY_CORRELATION" \
                 --arg ci_run_id "$CI_RUN_ID" \
                 --arg ci_correlation "$CI_DELIVERY_CORRELATION" \
+                --arg delivery_mode "$DELIVERY_MODE" \
                 '.environmentName == "test"
                   and .sourceRef == $source_ref
                   and .resolvedHead == $source_ref
                   and .runId == $test_run_id
-                  and .workflow == "Deploy Test"
                   and .repository == $repository
                   and .deliveryCorrelation == $correlation
                   and .ciRunId == $ci_run_id
@@ -570,7 +686,17 @@ jobs:
                   and .runAttempt == "1"
                   and .deployFrontend == "true"
                   and .deployFunctions == "true"
-                  and .eventName == "repository_dispatch"
+                  and (
+                    (
+                      $delivery_mode == "direct"
+                      and .workflow == "Delivery v2"
+                      and (.eventName == "push" or .eventName == "workflow_dispatch")
+                    ) or (
+                      $delivery_mode == "legacy"
+                      and .workflow == "Deploy Test"
+                      and .eventName == "repository_dispatch"
+                    )
+                  )
                   and (.artifacts.functionappSha256 | test("^[0-9a-f]{64}$"))
                   and (.artifacts.sourceFrontendSha256 | test("^[0-9a-f]{64}$"))
                   and (.artifacts.frontendSha256 | test("^[0-9a-f]{64}$"))
@@ -606,6 +732,17 @@ jobs:
             test|prod) ;;
             *) echo "environmentName must be test or prod." >&2; exit 1 ;;
           esac
+          case "$DELIVERY_MODE" in
+            direct|legacy) ;;
+            *) echo "deliveryMode must be direct or legacy." >&2; exit 1 ;;
+          esac
+          if [ "$DELIVERY_MODE" = "direct" ] && [ "$ENVIRONMENT_NAME" = "prod" ]; then
+            if [[ ! "$CURRENT_MAIN_CONFIRMED_REF" =~ ^[0-9a-f]{40}$ ]] ||
+               [ "$CURRENT_MAIN_CONFIRMED_REF" != "$CONTROLLER_REF" ]; then
+              echo "Direct production requires the exact one-shot current-main confirmation." >&2
+              exit 1
+            fi
+          fi
           if [[ ! "$DELIVERY_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]; then
             echo "deliveryCorrelation must be an opaque 8-128 character identifier." >&2
             exit 1
@@ -713,7 +850,7 @@ jobs:
           path: ${{ runner.temp }}/release
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ steps.source.outputs.ci_run_id }}
+          run-id: ${{ inputs.deliveryMode == 'direct' && github.run_id || steps.source.outputs.ci_run_id }}
       - name: Download exact accepted production release bundle
         if: ${{ inputs.allowRollback }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
@@ -724,6 +861,7 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.rollbackReleaseRunId }}
       - name: Verify immutable release bundle
+        id: artifacts
         shell: bash
         env:
           APPROVED_FUNCTION_DIGEST: ${{ steps.source.outputs.approved_function_digest }}
@@ -742,6 +880,11 @@ jobs:
             echo "FRONTEND_ARTIFACT_SHA256=$frontend_digest"
             echo "SBOM_SHA256=$sbom_digest"
           } >> "$GITHUB_ENV"
+          {
+            echo "function_artifact_sha256=$function_digest"
+            echo "source_frontend_artifact_sha256=$frontend_digest"
+            echo "sbom_sha256=$sbom_digest"
+          } >> "$GITHUB_OUTPUT"
           if [ "$ENVIRONMENT_NAME" = "prod" ]; then
             # APPROVED_* values are assigned through the workflow step environment.
             # shellcheck disable=SC2153
@@ -1123,6 +1266,7 @@ jobs:
             exit 1
           fi
       - name: Prepare exact deployable frontend bundle
+        id: frontend
         if: ${{ inputs.deployFrontend }}
         shell: bash
         run: |
@@ -1145,6 +1289,7 @@ jobs:
               exit 1
             fi
             echo "Rollback preserves the previously accepted production frontend archive byte-for-byte."
+            echo "frontend_artifact_sha256=$FRONTEND_ARTIFACT_SHA256" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -1189,6 +1334,7 @@ jobs:
           )
           node scripts/verify-release-artifacts.mjs "$release_dir" "${SOURCE_REF:-${GITHUB_SHA}}" > "$RUNNER_TEMP/release-manifest-rendered.json"
           echo "FRONTEND_ARTIFACT_SHA256=$frontend_digest" >> "$GITHUB_ENV"
+          echo "frontend_artifact_sha256=$frontend_digest" >> "$GITHUB_OUTPUT"
       - name: Package and deploy Azure Functions
         if: ${{ inputs.deployFunctions }}
         shell: bash

@@ -11,7 +11,7 @@ import {
   RUNTIME_NEUTRAL_DEPLOYMENT_PATHS,
   validateAutonomousPolicy,
 } from '../lib/autonomous-policy.mjs';
-import { classifyDeploymentImpactFile } from '../classify-deployment-impact.mjs';
+import { classifyDeploymentGitRange, classifyDeploymentImpactFile } from '../classify-deployment-impact.mjs';
 
 const file = (filename, status = 'modified', extra = {}) => ({ filename, status, ...extra });
 const execFileAsync = promisify(execFile);
@@ -130,6 +130,10 @@ test('delivery classifier runs in a dependency-free trusted checkout', async () 
         join(repositoryRoot, 'scripts/lib/deployment-impact.mjs'),
         join(directory, 'scripts/lib/deployment-impact.mjs'),
       ),
+      copyFile(
+        join(repositoryRoot, 'scripts/lib/path-classifier.mjs'),
+        join(directory, 'scripts/lib/path-classifier.mjs'),
+      ),
     ]);
     const path = join(directory, 'files.json');
     await writeFile(path, JSON.stringify([file('docs/project-memory/current-state.md')]));
@@ -140,6 +144,35 @@ test('delivery classifier runs in a dependency-free trusted checkout', async () 
       { cwd: directory, env: {}, timeout: 5_000 },
     );
     assert.equal(JSON.parse(stdout).reason, 'runtime-neutral-only');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('protected-main git ranges classify runtime-neutral and deployment-impacting commits without API metadata', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'main-deployment-impact-'));
+  try {
+    await execFileAsync('git', ['init', '-q'], { cwd: directory });
+    await execFileAsync('git', ['config', 'user.name', 'Test'], { cwd: directory });
+    await execFileAsync('git', ['config', 'user.email', 'test@example.com'], { cwd: directory });
+    await writeFile(join(directory, 'README.md'), '# Baseline\n');
+    await execFileAsync('git', ['add', 'README.md'], { cwd: directory });
+    await execFileAsync('git', ['commit', '-q', '-m', 'baseline'], { cwd: directory });
+    const base = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: directory })).stdout.trim();
+
+    await mkdir(join(directory, 'docs'));
+    await writeFile(join(directory, 'docs', 'change.md'), '# Documentation\n');
+    await execFileAsync('git', ['add', 'docs/change.md'], { cwd: directory });
+    await execFileAsync('git', ['commit', '-q', '-m', 'docs'], { cwd: directory });
+    const docsHead = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: directory })).stdout.trim();
+    assert.equal(classifyDeploymentGitRange(base, docsHead, directory).deploymentRequired, false);
+
+    await mkdir(join(directory, 'apps/api/src'), { recursive: true });
+    await writeFile(join(directory, 'apps/api/src/index.ts'), 'export {};\n');
+    await execFileAsync('git', ['add', 'apps/api/src/index.ts'], { cwd: directory });
+    await execFileAsync('git', ['commit', '-q', '-m', 'api'], { cwd: directory });
+    const apiHead = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: directory })).stdout.trim();
+    assert.equal(classifyDeploymentGitRange(docsHead, apiHead, directory).deploymentRequired, true);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

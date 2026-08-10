@@ -118,6 +118,7 @@ jobs:
         env:
           BASE_REF: ${{ needs.classify.outputs.base_sha }}
           PRIVILEGED: ${{ needs.classify.outputs.privileged }}
+          WORKFLOW: ${{ needs.classify.outputs.workflow }}
         run: |
           set -euo pipefail
           npm run ops:validate-autonomous-policy
@@ -126,6 +127,13 @@ jobs:
           if [ "$PRIVILEGED" = 'true' ]; then
             node scripts/check-architecture.mjs
             node scripts/validate-agent-skills.mjs
+          fi
+          if [ "$WORKFLOW" = 'true' ]; then
+            node --test \
+              scripts/test/deployment-impact.test.mjs \
+              scripts/test/deployment-generation.test.mjs \
+              scripts/test/delivery-v2-workflow.test.mjs \
+              scripts/test/known-good-release.test.mjs
           fi
       - name: Enforce cost and dependency policy when applicable
         shell: bash
