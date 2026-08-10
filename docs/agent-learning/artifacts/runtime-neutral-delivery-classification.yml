@@ -17,15 +17,29 @@ source:
     - kind: workflow_run
       locator: JueZ/api/actions/runs/31332564172
       url: https://github.com/JueZ/api/actions/runs/31332564172
+    - kind: issue
+      locator: JueZ/api#405
+      url: https://github.com/JueZ/api/issues/405
+    - kind: pull_request
+      locator: JueZ/api#404
+      url: https://github.com/JueZ/api/pull/404
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31383919993
+      url: https://github.com/JueZ/api/actions/runs/31383919993
+    - kind: workflow_run
+      locator: JueZ/api/actions/runs/31383958260
+      url: https://github.com/JueZ/api/actions/runs/31383958260
 classification:
   failureArea: post-merge-delivery-efficiency
   severity: medium
-  symptom: A project-memory-only merge rebuilt and redeployed unchanged application code through test and production.
-  rootCause: The protected delivery controller recognized only explicit skip markers and did not classify deployment impact from the authenticated complete pull-request file list.
+  symptom: Runtime-neutral merges either rebuilt and redeployed unchanged application code or fell back to that full path when the classifier could not start.
+  rootCause: The original controller lacked authenticated deployment-impact classification; its first implementation then imported an external policy-parser dependency that was unavailable in the dependency-free trusted delivery checkout.
 disposition:
   primary: regression-test
-  rationale: Protected-main code now validates the exact runtime-neutral allowlist, authenticates and counts the complete paginated PR file list, considers both sides of renames, and fails closed to full delivery for every ambiguous or deployment-impacting change.
+  rationale: Protected-main code validates the exact runtime-neutral allowlist, authenticates and counts the complete paginated PR file list, considers both sides of renames, and now proves the classifier executes without installed packages while ambiguous or deployment-impacting changes still fail closed to full delivery.
 artifacts:
+  - path: scripts/lib/deployment-impact.mjs
+    kind: implementation
   - path: scripts/lib/autonomous-policy.mjs
     kind: implementation
   - path: scripts/classify-deployment-impact.mjs
@@ -39,5 +53,5 @@ artifacts:
   - path: .github/autonomous-policy.yml
     kind: policy
 counterfactual:
-  hypothesis: Project-memory-only and other allowlisted documentation changes skip environment deployment after exact-main CI, while mixed, malformed, traversing, incomplete, renamed-from-code, or deployment-impacting changes still require full delivery.
+  hypothesis: The classifier starts in the trusted dependency-free delivery checkout and lets allowlisted changes reuse validation and skip environment deployment, while mixed, malformed, traversing, incomplete, renamed-from-code, or deployment-impacting changes still require the full path.
 status: implemented
