@@ -19,3 +19,6 @@ local.settings.json
 local-data/
 categories-marketplace*.json
 categories-marketplace*.json.gz
+
+.codex-eval-results/
+.agent-runtime/
