@@ -41,7 +41,15 @@
     "eval:codex:validate": "node scripts/codex-evals/validate.mjs",
     "eval:codex:test": "node --test scripts/codex-evals/test/*.test.mjs",
     "eval:codex": "node scripts/codex-evals/run.mjs",
-    "eval:codex:report": "node scripts/codex-evals/report.mjs"
+    "eval:codex:report": "node scripts/codex-evals/report.mjs",
+    "agent:env": "node scripts/agent-env/cli.mjs start",
+    "agent:env:start": "node scripts/agent-env/cli.mjs start",
+    "agent:env:status": "node scripts/agent-env/cli.mjs status",
+    "agent:env:logs": "node scripts/agent-env/cli.mjs logs",
+    "agent:env:reset": "node scripts/agent-env/cli.mjs reset",
+    "agent:env:stop": "node scripts/agent-env/cli.mjs stop",
+    "agent:verify": "node scripts/agent-env/cli.mjs verify",
+    "agent:env:test": "node --test scripts/agent-env/test/*.test.mjs"
   },
   "packageManager": "npm@10.9.8",
   "dependencies": {
