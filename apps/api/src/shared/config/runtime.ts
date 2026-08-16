@@ -17,15 +17,17 @@ const canonicalPermissions = [
 ] as const;
 const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const deployedEnvironmentProblem = 'DEPLOYED_ENVIRONMENT_NAME must be explicitly local, test, or prod';
 
 export function getDeployedEnvironmentName(env: NodeJS.ProcessEnv = process.env): DeployedEnvironmentName {
-  const value = env['DEPLOYED_ENVIRONMENT_NAME']?.trim().toLowerCase();
-  if (value === 'test' || value === 'prod') return value;
-  return 'local';
+  const environment = parseDeployedEnvironmentName(env['DEPLOYED_ENVIRONMENT_NAME']);
+  if (environment) return environment;
+  throw new RuntimeConfigurationError([deployedEnvironmentProblem]);
 }
 
 export function validateRuntimeSafety(env: NodeJS.ProcessEnv = process.env): string[] {
-  const environment = getDeployedEnvironmentName(env);
+  const environment = parseDeployedEnvironmentName(env['DEPLOYED_ENVIRONMENT_NAME']);
+  if (!environment) return [deployedEnvironmentProblem];
   if (environment === 'local') return [];
 
   const problems = [];
@@ -157,4 +159,8 @@ function parseCsv(value: string | undefined): string[] {
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function parseDeployedEnvironmentName(value: string | undefined): DeployedEnvironmentName | undefined {
+  return value === 'local' || value === 'test' || value === 'prod' ? value : undefined;
 }

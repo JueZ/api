@@ -1,0 +1,19 @@
+version: 2
+id: auth-trust-boundaries-fail-closed
+fingerprint: auth.entra.environment-token-discovery-fail-open
+severity: high
+invariant: Runtime environment, user-versus-service token type, tenant, and discovered JWKS trust are accepted only from explicit unambiguous evidence; missing or malformed inputs never acquire local or service privileges.
+scope:
+  - apps/api/src/shared/config/runtime.ts
+  - apps/api/src/shared/security/auth.ts
+  - scripts/agent-env/**
+prevention:
+  - kind: regression-test
+    path: apps/api/test/runtime-config.test.mjs
+  - kind: regression-test
+    path: apps/api/test/auth.test.mjs
+  - kind: regression-test
+    path: scripts/agent-env/test/agent-env.test.mjs
+broken: 21051b4146e6fb8f24013867a377258f106f8313
+recurrenceCount: 1
+status: active

@@ -64,7 +64,12 @@ async function start() {
       'api',
       'func',
       ['start', '--script-root', join(root, 'apps/api'), '--port', String(p.api)],
-      { ...process.env, AUTH_ENABLED: 'false', WLH_BASE_URL: m.urls.fixture },
+      {
+        ...process.env,
+        DEPLOYED_ENVIRONMENT_NAME: 'local',
+        AUTH_ENABLED: 'false',
+        WLH_BASE_URL: m.urls.fixture,
+      },
       m,
     );
     m.processes.web = spawnService(

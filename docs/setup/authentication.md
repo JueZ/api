@@ -49,6 +49,7 @@ The repository does not include a service-identity setup, repair, rotation, or a
 Set non-secret values through repository/environment variables and secrets through the deployment/Key Vault path. At minimum:
 
 ```text
+DEPLOYED_ENVIRONMENT_NAME=<local|test|prod>
 AUTH_ENABLED=true
 OIDC_ISSUER=<exact issuer list>
 OIDC_AUDIENCE=api://<api-app-id>
@@ -57,6 +58,8 @@ OIDC_ALLOWED_OBJECT_IDS=<operator object id>
 OIDC_ALLOWED_TENANTS=<allowed tenant ids>
 OIDC_ALLOWED_DELEGATED_CLIENT_IDS=<spa,gpt client ids>
 ```
+
+The environment name must be an exact explicit value. Missing, blank, differently cased, or unknown values fail startup instead of activating local-development permissions. Local development must set `DEPLOYED_ENVIRONMENT_NAME=local` explicitly.
 
 Run `scripts/check-auth-config.sh` using only safely sourced configuration. It validates names/granular scope shape without printing values.
 

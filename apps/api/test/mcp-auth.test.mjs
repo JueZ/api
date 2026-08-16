@@ -16,6 +16,7 @@ const baseEnv = {
   OIDC_ALLOWED_APP_OBJECT_IDS: '',
   OIDC_ALLOWED_CLIENT_IDS: '',
   OIDC_ALLOWED_DELEGATED_CLIENT_IDS: 'allowed-client-id',
+  OIDC_ALLOWED_TENANTS: 'allowed-tenant-id',
   MCP_RESOURCE_ORIGIN: 'https://mcp.example.test',
   MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
 };
@@ -172,6 +173,7 @@ test('AUTH_ENABLED=true plus a valid signed JWT can call hello_authenticated', a
       assert.deepEqual(response.jsonBody.result.structuredContent.user, {
         subject: 'allowed-subject',
         objectId: 'allowed-oid',
+        tenantId: 'allowed-tenant-id',
       });
       assert.doesNotMatch(JSON.stringify(response.jsonBody), tokenRegex(token));
     });
@@ -381,7 +383,7 @@ async function withEnv(values, fn) {
 }
 
 async function signToken(privateKey, kid, issuer, claims, audience = 'api://catalogue-test') {
-  return new SignJWT({ azp: 'allowed-client-id', ...claims })
+  return new SignJWT({ azp: 'allowed-client-id', tid: 'allowed-tenant-id', ...claims })
     .setProtectedHeader({ alg: 'RS256', kid })
     .setIssuer(issuer)
     .setAudience(audience)

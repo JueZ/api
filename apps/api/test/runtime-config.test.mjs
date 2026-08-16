@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateRuntimeSafety } from '../dist/shared/config/runtime.js';
+import {
+  getDeployedEnvironmentName,
+  RuntimeConfigurationError,
+  validateRuntimeSafety,
+} from '../dist/shared/config/runtime.js';
 
 const userObjectId = '11111111-1111-4111-8111-111111111111';
 const tenantId = '22222222-2222-4222-8222-222222222222';
@@ -26,6 +30,17 @@ const validTestEnvironment = {
 
 test('deployed runtime safety accepts complete exact test configuration', () => {
   assert.deepEqual(validateRuntimeSafety(validTestEnvironment), []);
+});
+
+test('runtime environment classification requires an explicit exact value', () => {
+  assert.equal(getDeployedEnvironmentName({ DEPLOYED_ENVIRONMENT_NAME: 'local' }), 'local');
+  assert.deepEqual(validateRuntimeSafety({ DEPLOYED_ENVIRONMENT_NAME: 'local' }), []);
+
+  for (const value of [undefined, '', 'LOCAL', ' local ', 'production', 'staging']) {
+    const env = value === undefined ? {} : { DEPLOYED_ENVIRONMENT_NAME: value };
+    assert.throws(() => getDeployedEnvironmentName(env), RuntimeConfigurationError);
+    assert.deepEqual(validateRuntimeSafety(env), ['DEPLOYED_ENVIRONMENT_NAME must be explicitly local, test, or prod']);
+  }
 });
 
 test('deployed runtime safety accepts Entra GUIDs without RFC UUID version markers', () => {

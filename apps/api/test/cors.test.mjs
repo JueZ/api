@@ -19,7 +19,7 @@ function context() {
 
 async function withEnv(values, fn) {
   const previous = {};
-  for (const [key, value] of Object.entries(values)) {
+  for (const [key, value] of Object.entries({ DEPLOYED_ENVIRONMENT_NAME: 'local', ...values })) {
     previous[key] = process.env[key];
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
@@ -62,7 +62,13 @@ test('createCorsHeaders omits Access-Control-Allow-Origin for disallowed origins
 });
 
 test('createCorsHeaders preserves explicit wildcard fallback for unconfigured local environments', () => {
-  const headers = createCorsHeaders(request('OPTIONS', evilOrigin), { methods: ['GET', 'OPTIONS'] }, {});
+  const headers = createCorsHeaders(
+    request('OPTIONS', evilOrigin),
+    { methods: ['GET', 'OPTIONS'] },
+    {
+      DEPLOYED_ENVIRONMENT_NAME: 'local',
+    },
+  );
 
   assert.equal(headers['Access-Control-Allow-Origin'], '*');
 });

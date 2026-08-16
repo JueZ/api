@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { freePort, owned, redact, worktreeId } from '../core.mjs';
@@ -27,4 +27,8 @@ test('runtime manifests contain no environment or credentials', () => {
   const text = JSON.stringify(manifest);
   assert.doesNotMatch(text, /TOKEN|PASSWORD|SECRET|CODEX_HOME/);
   writeFileSync(join(dir, 'manifest.json'), text);
+});
+test('local Functions startup declares the explicit local runtime environment', () => {
+  const source = readFileSync(new URL('../cli.mjs', import.meta.url), 'utf8');
+  assert.match(source, /DEPLOYED_ENVIRONMENT_NAME:\s*'local'/);
 });

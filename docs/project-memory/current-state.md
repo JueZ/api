@@ -1,4 +1,4 @@
-<!-- project-memory-asOf: 2026-08-10 -->
+<!-- project-memory-asOf: 2026-08-16 -->
 # Current state
 
 ## Repository delivery
@@ -13,6 +13,7 @@
 ## Runtime and security
 
 - Test and production use Azure OIDC, managed identity/Key Vault boundaries, exact release SHA/digests, public and authenticated smoke, telemetry correlation, provenance, and compact release ledgers.
+- Authentication requires an explicit `local`, `test`, or `prod` runtime identity. Non-local tenant allowlists are enforced again at the request boundary; delegated `scp` and app-role service permissions are classified separately; and discovered JWKS metadata is issuer-bound, redirect-free, and same-origin while an explicit JWKS URI remains an operator-managed pin.
 - Authentication, authorization, operation permissions, audit, idempotency, destructive confirmation, allowlists, and provider-data minimization remain fail closed.
 - Optional OpenAI use is restricted to bounded sanitized runtime repairable-error analysis. Pull-request governance, repair callbacks, and required checks use no provider key.
 
