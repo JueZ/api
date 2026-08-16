@@ -927,7 +927,7 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
         "403":
-          description: Authenticated caller is not authorized for Bring operations.
+          description: Authenticated caller is not authorized, or the confirmation is invalid, expired, or bound to another identity.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
@@ -975,7 +975,7 @@ paths:
     post:
       operationId: bringAddItems
       summary: Idempotently add a batch of Bring! items
-      description: Adds 1-50 items to an explicitly allowlisted own list. Generate a new UUID for `operationId`; retry an identical request with the same UUID.
+      description: Adds 1-50 items to an explicitly allowlisted own list. Generate a new UUID for `operationId`; retry only the identical action, list, payload, and tenant-bound principal with the same UUID.
       tags: [Bring]
       security:
         - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.write]
@@ -1006,7 +1006,12 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
         "409":
-          description: Idempotency conflict, stale list version, or ambiguous prior outcome.
+          description: Idempotency or legacy-record conflict, stale list version, or ambiguous prior outcome.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
+        "410":
+          description: The stored successful-result replay window has expired.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
@@ -1021,7 +1026,7 @@ paths:
     post:
       operationId: bringPrepareItemMutation
       summary: Prepare a destructive Bring! item mutation
-      description: Validates a complete or remove request without changing Bring! and returns a five-minute confirmation token.
+      description: Validates a complete or remove request without changing Bring! and returns a five-minute token bound to the tenant-aware principal, action, list, payload, nonce, and expiry. Never reuse the operation ID for another action.
       tags: [Bring]
       security:
         - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.complete]
@@ -1053,7 +1058,12 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
         "409":
-          description: Idempotency conflict or stale list version.
+          description: Action/input/identity idempotency conflict, legacy-record conflict, or stale list version.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
+        "410":
+          description: The prepared confirmation replay window has expired.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
@@ -1063,7 +1073,7 @@ paths:
     post:
       operationId: bringApplyItemMutation
       summary: Apply a confirmed destructive Bring! item mutation
-      description: Applies a prepared complete or remove operation using its identity- and payload-bound confirmation token.
+      description: Applies a prepared complete or remove operation using its tenant-aware identity-, action-, list-, and payload-bound confirmation token. After success, only the exact consumed token can replay the recorded result without another upstream mutation.
       tags: [Bring]
       security:
         - entraOAuth2: [api://97df847a-3e44-4aa7-82ea-557f3dfe0203/bring.complete]
@@ -1075,12 +1085,12 @@ paths:
             schema: { $ref: "#/components/schemas/BringApplyMutationRequest" }
       responses:
         "200":
-          description: Batch removal accepted by Bring!.
+          description: Mutation applied, or the exact consumed-token result replayed without another upstream call.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BringMutationResponse" }
         "400":
-          description: Invalid batch or UUID.
+          description: Invalid UUID, malformed confirmation token, or operation ID from an unsupported legacy integrity record.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
@@ -1095,7 +1105,12 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
         "409":
-          description: Expired confirmation, idempotency conflict, or ambiguous prior outcome.
+          description: Idempotency conflict or ambiguous prior outcome.
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/RepairableProblem" }
+        "410":
+          description: The stored successful-result replay window has expired.
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/RepairableProblem" }
@@ -1155,7 +1170,10 @@ components:
       additionalProperties: false
       required: [operationId, operation, items]
       properties:
-        operationId: { type: string, format: uuid }
+        operationId:
+          type: string
+          format: uuid
+          description: Action-, payload-, list-, and principal-bound idempotency key; never reuse it for another action.
         expectedListVersion: { type: string, pattern: "^[0-9a-f]{64}$" }
         operation: { type: string, enum: [complete, remove] }
         items: { $ref: "#/components/schemas/BringMutationItems" }
@@ -1165,7 +1183,11 @@ components:
       required: [operationId, confirmationToken]
       properties:
         operationId: { type: string, format: uuid }
-        confirmationToken: { type: string, minLength: 1, maxLength: 4096 }
+        confirmationToken:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Opaque token returned by prepare. The exact consumed token is required for a successful-result replay.
     BringListSummary:
       type: object
       additionalProperties: false
@@ -1215,7 +1237,9 @@ components:
         listPseudonym: { type: string }
         itemCount: { type: integer, minimum: 1, maximum: 50 }
         expiresAt: { type: string, format: date-time }
-        confirmationToken: { type: string }
+        confirmationToken:
+          type: string
+          description: Opaque five-minute token bound to tenant-aware principal, action, list, payload, nonce, and expiry.
         replayed: { type: boolean }
     BringMutationResponse:
       type: object

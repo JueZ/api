@@ -24,7 +24,7 @@ export interface BringMutationAuditEvent {
 }
 
 export interface BringMutationRecord {
-  version: 1;
+  version: 1 | 2;
   operationId: string;
   operation: BringMutationOperation;
   state: BringMutationState;
@@ -36,6 +36,7 @@ export interface BringMutationRecord {
   updatedAt: string;
   confirmationExpiresAt?: string;
   confirmationNonceHash?: string;
+  confirmationTokenHmac?: string;
   replayUntil: string;
   encryptedPayload?: EncryptedBringPayload;
   result?: BringMutationResult;

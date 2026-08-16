@@ -35,4 +35,6 @@ Workflow files, policy, dependencies, scripts, agent instructions, authenticatio
 
 Authentication, JWT/JWKS validation, user/service-token separation, operation permissions, the Martin/user allowlist while required, audit, idempotency, confirmation, and provider-data minimization fail closed. Expensive operations remain authenticated and bounded. Secrets, tokens, private provider payloads, authorization headers, and sensitive full environment output must never enter logs, issues, artifacts, or repository memory.
 
+Bring destructive confirmations use a versioned canonical tenant-aware identity, action/list/payload-bound tokens, record-bound encryption, ETag transitions, and exact consumed-token result replay. Legacy or structurally inconsistent mutation records are retained only as non-replayable evidence and must never trigger a provider call.
+
 The repair queue treats workflow output and GitHub text as untrusted evidence. It stores only sanitized identity and fingerprint metadata. A candidate cannot rewrite code, tests, policy, instructions, skills, or production configuration; every repair and learning promotion uses the normal protected PR path.

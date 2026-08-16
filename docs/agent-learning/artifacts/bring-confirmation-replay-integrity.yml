@@ -1,0 +1,16 @@
+version: 2
+id: bring-confirmation-replay-integrity
+fingerprint: bring.confirmation.replay-identity-domain-separation
+severity: high
+invariant: Bring mutation replay and destructive confirmation remain canonically bound to tenant-aware principal, action, list, payload, durable record, and exact consumed token; legacy or conflicting identities never invoke the provider.
+scope:
+  - apps/api/src/application/idempotency/bringMutation.ts
+  - apps/api/src/application/operations/bring/**
+  - apps/api/src/functions/bring.ts
+  - apps/api/src/infrastructure/azure/bringMutationStore.ts
+prevention:
+  - kind: regression-test
+    path: apps/api/test/bring.test.mjs
+broken: 52568a9939b6216c0c6c95285831d0f18c90b682
+recurrenceCount: 1
+status: active

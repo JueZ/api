@@ -23,7 +23,7 @@ POST /api/bring/lists/{listUuid}/items
 { operationId, expectedListVersion?, items }
 ```
 
-`operationId` is a caller-generated UUID. Durable state is retained for 30 days. An identical retry returns the recorded result; reusing the UUID with different input or identity fails. If the upstream result is ambiguous, state becomes `outcome_unknown` and automatic replay is permanently blocked. Read the list before deciding on a new operation.
+`operationId` is a caller-generated UUID. Durable state is retained for 30 days. An identical retry returns the recorded result; reusing the UUID with a different action, list, version, item payload, or tenant-bound principal fails. If the upstream result is ambiguous, state becomes `outcome_unknown` and automatic replay is permanently blocked. Read the list before deciding on a new operation.
 
 Complete and remove use two phases:
 
@@ -35,9 +35,11 @@ POST /api/bring/lists/{listUuid}/mutations/apply
 { operationId, confirmationToken }
 ```
 
-Prepare validates policy, input, current list membership, sharing status, and optional optimistic concurrency without calling the mutation endpoint. It returns an HMAC list pseudonym, item count, expiry, and a five-minute token bound to the principal, operation ID, list, operation, and encrypted payload. Apply verifies that binding before one upstream call.
+Prepare validates policy, input, current list membership, sharing status, and optional optimistic concurrency without calling the mutation endpoint. It returns an HMAC list pseudonym, item count, expiry, and a five-minute v2 token bound to the operation ID, action, list, payload fingerprint, nonce, and a canonical principal identity consisting of token type, tenant, delegated client, and tagged object-ID-or-subject identity. Apply authorizes the action from the current durable record and verifies the complete signed binding before one upstream call. A successful result may be replayed through the 30-day window only with the exact consumed token; this result replay does not call Bring again.
 
-MCP exposes only `bring_list_lists` and `bring_get_items`. Mutations stay on the authenticated REST/web-explorer path so provider-controlled Reddit, Willhaben, or Bring content cannot ask the same model session to replay a write or confirmation token. The explorer keeps a prepared confirmation token only in private in-memory state, redacts it from rendered results and generated curl commands, and clears it after use or sign-out.
+Confirmation tokens and durable mutation records created before integrity format v2 are intentionally non-replayable because their principal pseudonyms did not bind a tenant. They remain retained for audit/lifecycle policy and are never rewritten or decrypted as a compatibility fallback. On a legacy conflict, re-read the list and inspect its current state; use a fresh operation ID only when an operator deliberately determines that another mutation is still required. Never resubmit a destructive operation automatically.
+
+MCP exposes `bring_list_lists`, `bring_get_items`, and the controlled singular `bring_add_item` operation. Destructive complete/remove mutations stay on the authenticated REST/web-explorer path so provider-controlled Reddit, Willhaben, or Bring content cannot ask the same model session to replay a destructive write or confirmation token. The explorer keeps a prepared confirmation token only in private in-memory state, redacts it from rendered results and generated curl commands, and clears it after use or sign-out.
 
 ## Storage, encryption, and audit
 
@@ -47,7 +49,7 @@ The Function managed identity accesses separate private blob containers for:
 - encrypted durable mutation state;
 - append-only audit events.
 
-Prepared item payloads use AES-256-GCM with `BRING_MUTATION_ENCRYPTION_KEY`. Confirmation/list/principal pseudonyms use `BRING_CONFIRMATION_HMAC_KEY`. Key material and provider credentials are Key Vault references in Function settings. Audit events contain operation, state, item count, pseudonyms, correlation ID, timestamp, and deployed commit—not item text. Lifecycle policy retains audit data for 365 days and mutation/replay state for at least 30 days.
+Prepared item payloads use AES-256-GCM with `BRING_MUTATION_ENCRYPTION_KEY`; v2 authenticated data binds the ciphertext to immutable record metadata, and apply recomputes the action-aware payload fingerprint after decryption. Confirmation, list, principal, nonce, and consumed-token HMACs use separate canonical domains under `BRING_CONFIRMATION_HMAC_KEY`. Durable state stores only the nonce digest while prepared and a one-way full-token HMAC after consumption—never the token or nonce. Key material and provider credentials are Key Vault references in Function settings. Audit events contain operation, state, item count, pseudonyms, correlation ID, timestamp, and deployed commit—not item text. Lifecycle policy retains audit data for 365 days and mutation/replay state for at least 30 days.
 
 The provider wire adapter remains isolated in `shared/bring/client.ts`. It maps normalized operations to the observed private `{ changes, sender }` request, accepts valid empty `204` responses, and streams provider responses through a fixed byte budget. Every write rechecks current list membership even when a list summary already says the list is shared. Mutation endpoints authenticate before reading their bounded request bodies.
 

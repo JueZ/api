@@ -98,9 +98,9 @@ export function createBringHandler(
 
       const command = parseApplyCommand(rawBody, route.listUuid);
       const application = getApplication(context);
-      const operation = application.getConfirmationOperation(command.confirmationToken);
+      const operation = await application.getMutationOperation(command.operationId);
       if (!operation) {
-        throw new BringInputError('confirmationToken is malformed or unsupported.', 'confirmationToken');
+        throw new BringInputError('operationId does not identify a current prepared mutation.', 'operationId');
       }
       const authOperationId =
         operation === 'complete' ? OPERATION_IDS.bringApplyComplete : OPERATION_IDS.bringApplyRemove;
@@ -221,6 +221,9 @@ function parseApplyCommand(body: Record<string, unknown>, listUuid: string): App
   const confirmationToken = requiredString(body, 'confirmationToken');
   if (confirmationToken.length > 4096) {
     throw new BringInputError('confirmationToken exceeds the maximum length.', 'confirmationToken');
+  }
+  if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(confirmationToken)) {
+    throw new BringInputError('confirmationToken is malformed or unsupported.', 'confirmationToken');
   }
   return {
     operationId: requiredString(body, 'operationId'),
