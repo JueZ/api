@@ -28,7 +28,6 @@ export interface BringApplicationPort {
     correlationId: string,
   ): Promise<BringMutationResult>;
   getMutationOperation(operationId: string): Promise<'complete' | 'remove' | undefined>;
-  getConfirmationOperation(confirmationToken: string): 'complete' | 'remove' | undefined;
 }
 
 export class BringApplication implements BringApplicationPort {
@@ -71,10 +70,6 @@ export class BringApplication implements BringApplicationPort {
 
   getMutationOperation(operationId: string): Promise<'complete' | 'remove' | undefined> {
     return this.requireMutationCoordinator().getMutationOperation(operationId);
-  }
-
-  getConfirmationOperation(confirmationToken: string): 'complete' | 'remove' | undefined {
-    return this.requireMutationCoordinator().getConfirmationOperation(confirmationToken);
   }
 
   private requireMutationCoordinator(): BringMutationCoordinator {

@@ -631,11 +631,6 @@ function stubServices(calls = []) {
         replayed: false,
       }),
       getMutationOperation: async () => 'remove',
-      getConfirmationOperation: (confirmationToken) => {
-        if (confirmationToken.startsWith('complete.')) return 'complete';
-        if (confirmationToken.startsWith('remove.')) return 'remove';
-        return undefined;
-      },
     },
   };
 }

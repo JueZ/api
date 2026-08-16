@@ -1,0 +1,16 @@
+version: 2
+id: gitleaks-runtime-fixture-canary
+fingerprint: security.gitleaks.secret-shaped-test-fixture-history
+severity: high
+invariant: Secret-shaped regression canaries are assembled at runtime so no synthetic credential literal enters Git history; the required Gitleaks guard scans the complete pull-request commit range and remains authoritative.
+scope:
+  - apps/api/test/**
+  - .github/workflows/security-gate.yml
+prevention:
+  - kind: deterministic-guard
+    path: .github/workflows/security-gate.yml
+  - kind: regression-test
+    path: apps/api/test/bring.test.mjs
+broken: fde242c5b1afd1299688ce6dd9ce8477fd2d604a
+recurrenceCount: 1
+status: active

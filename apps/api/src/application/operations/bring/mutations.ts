@@ -81,10 +81,10 @@ export class BringMutationCoordinator {
     const normalized = normalizeAddCommand(command);
     const payload = toPayload(normalized);
     const identity = this.identity(principal, normalized.listUuid);
-    const payloadHash = this.security.payloadHash(payload);
+    const payloadHash = this.security.payloadHash('add', payload);
     const existing = await this.store.get(normalized.operationId);
     if (existing) {
-      return this.replayResult(existing.record, payloadHash, identity.principalPseudonym);
+      return this.replayResult(existing.record, 'add', payloadHash, identity);
     }
 
     await this.service.validateMutationTarget(
@@ -107,7 +107,7 @@ export class BringMutationCoordinator {
     const created = await this.createOrReplay(record);
     const stored = created.stored;
     if (!created.created) {
-      return this.replayResult(stored.record, payloadHash, identity.principalPseudonym);
+      return this.replayResult(stored.record, 'add', payloadHash, identity);
     }
     await this.appendLatestAudit(record);
 
@@ -138,10 +138,10 @@ export class BringMutationCoordinator {
     const normalized = normalizePrepareCommand(command);
     const payload = toPayload(normalized);
     const identity = this.identity(principal, normalized.listUuid);
-    const payloadHash = this.security.payloadHash(payload);
+    const payloadHash = this.security.payloadHash(normalized.operation, payload);
     const existing = await this.store.get(normalized.operationId);
     if (existing) {
-      return this.replayPrepared(existing, payloadHash, identity.principalPseudonym, correlationId);
+      return this.replayPrepared(existing, normalized.operation, payloadHash, identity, correlationId);
     }
 
     await this.service.validateMutationTarget(
@@ -167,7 +167,10 @@ export class BringMutationCoordinator {
     const created = await this.createOrReplay(record);
     const stored = created.stored;
     if (!created.created) {
-      return this.replayPrepared(stored, payloadHash, identity.principalPseudonym, correlationId);
+      this.assertReplayIdentity(stored.record, normalized.operation, payloadHash, identity);
+      throw new BringIdempotencyConflictError(
+        'operationId was prepared concurrently; retry only the identical prepare request.',
+      );
     }
     await this.appendLatestAudit(record);
     return preparedResponse(record, confirmation.token, false);
@@ -189,14 +192,22 @@ export class BringMutationCoordinator {
     }
     const stored = await this.store.get(operationId);
     if (!stored) throw new BringConfirmationError('Prepared mutation was not found.');
-    const principalPseudonym = this.security.principalPseudonym(principal);
-    this.assertSamePrincipal(stored.record, principalPseudonym);
-    if (stored.record.listPseudonym !== this.security.listPseudonym(listUuid)) {
+    if (stored.record.version !== 2) {
+      throw new BringConfirmationError(
+        'Prepared mutation uses a legacy integrity version; re-read the list before preparing a new operationId.',
+      );
+    }
+    const identity = this.identity(principal, listUuid);
+    this.assertSamePrincipal(stored.record, identity.principalPseudonym);
+    if (stored.record.listPseudonym !== identity.listPseudonym) {
       throw new BringConfirmationError('Prepared mutation belongs to another list.');
     }
 
     if (stored.record.state === 'succeeded') {
-      return this.replayResult(stored.record, stored.record.payloadHash, principalPseudonym);
+      if (!this.security.verifyConsumedConfirmation(command.confirmationToken, stored.record)) {
+        throw new BringConfirmationError('Confirmation token does not match the applied mutation.');
+      }
+      return this.replayResult(stored.record, stored.record.operation, stored.record.payloadHash, identity);
     }
     if (stored.record.state === 'applying' || stored.record.state === 'outcome_unknown') {
       throw new BringMutationOutcomeUnknownError('Mutation outcome is unknown and must not be replayed automatically.');
@@ -211,12 +222,24 @@ export class BringMutationCoordinator {
       throw new BringConfirmationError('Prepared mutation payload is unavailable.');
     }
 
-    const payload = this.security.decryptPayload(stored.record.encryptedPayload);
-    if (payload.listUuid !== listUuid) {
-      throw new BringConfirmationError('Prepared mutation payload does not match the requested list.');
+    let payload: BringMutationPayload;
+    try {
+      payload = this.security.decryptPayload(stored.record.encryptedPayload, stored.record);
+    } catch {
+      throw new BringConfirmationError('Prepared mutation payload integrity check failed.');
+    }
+    if (
+      payload.listUuid !== listUuid ||
+      this.security.listPseudonym(payload.listUuid) !== stored.record.listPseudonym ||
+      this.security.payloadHash(stored.record.operation, payload) !== stored.record.payloadHash ||
+      payload.items.length !== stored.record.itemCount
+    ) {
+      throw new BringConfirmationError('Prepared mutation payload integrity check failed.');
     }
     const applying = this.transition(stored.record, 'applying', correlationId, undefined, {
       confirmationNonceHash: undefined,
+      confirmationExpiresAt: undefined,
+      confirmationTokenHmac: this.security.confirmationTokenHmac(command.confirmationToken),
     });
     let applyingStored: StoredBringMutation;
     try {
@@ -253,22 +276,27 @@ export class BringMutationCoordinator {
 
   async getMutationOperation(operationId: string): Promise<BringDestructiveOperation | undefined> {
     const stored = await this.store.get(normalizeOperationId(operationId));
-    return stored && stored.record.operation !== 'add' ? stored.record.operation : undefined;
-  }
-
-  getConfirmationOperation(confirmationToken: string): BringDestructiveOperation | undefined {
-    return this.security.peekConfirmationOperation(confirmationToken);
+    if (
+      stored?.record.version === 2 &&
+      (stored.record.operation === 'complete' || stored.record.operation === 'remove')
+    ) {
+      return stored.record.operation;
+    }
+    return undefined;
   }
 
   private async replayPrepared(
     stored: StoredBringMutation,
+    operation: BringDestructiveOperation,
     payloadHash: string,
-    principalPseudonym: string,
+    identity: { principalPseudonym: string; listPseudonym: string },
     correlationId: string,
   ): Promise<PreparedBringMutation | BringMutationResult> {
-    this.assertReplayIdentity(stored.record, payloadHash, principalPseudonym);
+    this.assertReplayIdentity(stored.record, operation, payloadHash, identity);
     if (stored.record.state === 'succeeded') {
-      return this.replayResult(stored.record, payloadHash, principalPseudonym);
+      throw new BringIdempotencyConflictError(
+        'A succeeded destructive mutation can be replayed only through apply with its consumed confirmation token.',
+      );
     }
     if (stored.record.state !== 'prepared') {
       this.throwForNonReplayableState(stored.record.state);
@@ -289,22 +317,41 @@ export class BringMutationCoordinator {
       confirmationNonceHash: confirmation.nonceHash,
       updatedAt: this.now().toISOString(),
     };
-    await this.store.replace(refreshed, stored.etag);
+    try {
+      await this.store.replace(refreshed, stored.etag);
+    } catch (error) {
+      if (error instanceof BringMutationStoreConflictError) {
+        throw new BringIdempotencyConflictError(
+          'Prepared mutation changed concurrently; retry only the identical prepare request.',
+          { cause: error },
+        );
+      }
+      throw error;
+    }
     await this.appendLatestAudit(refreshed);
     return preparedResponse(refreshed, confirmation.token, true);
   }
 
   private replayResult(
     record: BringMutationRecord,
+    operation: BringMutationOperation,
     payloadHash: string,
-    principalPseudonym: string,
+    identity: { principalPseudonym: string; listPseudonym: string },
   ): BringMutationResult {
-    this.assertReplayIdentity(record, payloadHash, principalPseudonym);
+    this.assertReplayIdentity(record, operation, payloadHash, identity);
     if (Date.parse(record.replayUntil) <= this.now().getTime()) {
       throw new BringMutationExpiredError('Mutation replay window expired.');
     }
     if (record.state !== 'succeeded' || !record.result) {
       this.throwForNonReplayableState(record.state);
+    }
+    if (
+      record.result.operationId !== record.operationId ||
+      record.result.operation !== record.operation ||
+      record.result.itemCount !== record.itemCount ||
+      this.security.listPseudonym(record.result.listUuid) !== record.listPseudonym
+    ) {
+      throw new BringIdempotencyConflictError('Stored mutation result integrity check failed.');
     }
     return { ...record.result, replayed: true };
   }
@@ -378,7 +425,7 @@ export class BringMutationCoordinator {
   }): BringMutationRecord {
     const timestamp = options.timestamp.toISOString();
     const record: BringMutationRecord = {
-      version: 1,
+      version: 2,
       operationId: options.command.operationId,
       operation: options.operation,
       state: options.state,
@@ -390,9 +437,9 @@ export class BringMutationCoordinator {
       updatedAt: timestamp,
       ...(options.confirmationExpiresAt ? { confirmationExpiresAt: options.confirmationExpiresAt } : {}),
       replayUntil: new Date(options.timestamp.getTime() + replayWindowMilliseconds).toISOString(),
-      encryptedPayload: this.security.encryptPayload(options.payload),
       auditTrail: [],
     };
+    record.encryptedPayload = this.security.encryptPayload(options.payload, record);
     record.auditTrail.push(this.auditEvent(record, options.correlationId));
     return record;
   }
@@ -481,8 +528,23 @@ export class BringMutationCoordinator {
     };
   }
 
-  private assertReplayIdentity(record: BringMutationRecord, payloadHash: string, principalPseudonym: string): void {
-    if (record.payloadHash !== payloadHash || record.principalPseudonym !== principalPseudonym) {
+  private assertReplayIdentity(
+    record: BringMutationRecord,
+    operation: BringMutationOperation,
+    payloadHash: string,
+    identity: { principalPseudonym: string; listPseudonym: string },
+  ): void {
+    if (record.version !== 2) {
+      throw new BringIdempotencyConflictError(
+        'operationId belongs to a legacy mutation record; re-read the list before choosing a new operationId.',
+      );
+    }
+    if (
+      record.operation !== operation ||
+      record.payloadHash !== payloadHash ||
+      record.principalPseudonym !== identity.principalPseudonym ||
+      record.listPseudonym !== identity.listPseudonym
+    ) {
       throw new BringIdempotencyConflictError('operationId was already used with different input or identity.');
     }
   }

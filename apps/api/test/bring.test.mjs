@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import test from 'node:test';
 import { InMemoryBringAuditSink } from '../dist/application/auditing/bringAudit.js';
 import { InMemoryBringMutationStore } from '../dist/application/idempotency/bringMutation.js';
@@ -8,9 +9,15 @@ import {
   BringConfirmationError,
   BringIdempotencyConflictError,
   BringMutationCoordinator,
+  BringMutationExpiredError,
   BringMutationOutcomeUnknownError,
 } from '../dist/application/operations/bring/mutations.js';
 import { BringMutationSecurity } from '../dist/application/operations/bring/mutationSecurity.js';
+import { getOperationDefinition, OPERATION_IDS } from '../dist/application/operations/registry.js';
+import {
+  AzureBlobBringMutationStore,
+  parseBringMutationRecord,
+} from '../dist/infrastructure/azure/bringMutationStore.js';
 import { createBringHandler } from '../dist/functions/bring.js';
 import { BringClient, BringUpstreamError } from '../dist/shared/bring/client.js';
 import { BringConfigError, fingerprintBringAccount, readBringConfig } from '../dist/shared/bring/config.js';
@@ -25,6 +32,8 @@ const sharedListUuid = '22222222-2222-4222-8222-222222222222';
 const unlistedListUuid = '33333333-3333-4333-8333-333333333333';
 const operationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const secondOperationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const thirdOperationId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const fourthOperationId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const hmacKey = 'bring-test-hmac-key-that-is-at-least-32-bytes';
 const encryptionKey = Buffer.alloc(32, 7).toString('base64');
 const cfg = {
@@ -62,6 +71,8 @@ const login = {
 const principal = {
   subject: 'user-subject',
   objectId: 'allowed-user',
+  tenantId: 'allowed-tenant',
+  clientId: 'allowed-client',
   tokenType: 'user',
   scopes: ['bring.read', 'bring.write', 'bring.complete', 'bring.remove'],
   roles: [],
@@ -558,6 +569,183 @@ test('item input bounds, lengths, UUIDs, and unknown fields fail closed', () => 
   }
 });
 
+test('Bring v2 pseudonyms canonically bind tenant, principal shape, and HMAC purpose', () => {
+  const security = new BringMutationSecurity(hmacKey, encryptionKey);
+  const sameIdentifiers = {
+    ...principal,
+    subject: 'shared-subject',
+    objectId: 'shared-object',
+    clientId: 'shared-client',
+  };
+  const tenantA = security.principalPseudonym({ ...sameIdentifiers, tenantId: 'tenant-a' });
+  const tenantB = security.principalPseudonym({ ...sameIdentifiers, tenantId: 'tenant-b' });
+  assert.notEqual(tenantA, tenantB);
+
+  const delimiterA = security.principalPseudonym({
+    ...principal,
+    subject: 'b:c',
+    objectId: undefined,
+    clientId: 'a',
+  });
+  const delimiterB = security.principalPseudonym({
+    ...principal,
+    subject: 'c',
+    objectId: undefined,
+    clientId: 'a:b',
+  });
+  assert.notEqual(delimiterA, delimiterB);
+
+  const service = security.principalPseudonym({
+    ...sameIdentifiers,
+    tokenType: 'service',
+    scopes: [],
+    roles: ['bring.remove'],
+  });
+  assert.notEqual(service, security.principalPseudonym(sameIdentifiers));
+  for (const operation of [
+    OPERATION_IDS.bringPrepareComplete,
+    OPERATION_IDS.bringPrepareRemove,
+    OPERATION_IDS.bringApplyComplete,
+    OPERATION_IDS.bringApplyRemove,
+  ]) {
+    assert.deepEqual(getOperationDefinition(operation).allowedTokenTypes, ['user']);
+  }
+
+  assert.equal(tenantA.length, 64);
+  assert.equal(security.listPseudonym(listUuid).length, 64);
+  assert.notEqual(security.listPseudonym(listUuid), tenantA);
+});
+
+test('mutation replay identity rejects action and mutation-type swaps without provider work', async () => {
+  for (const [firstOperation, secondOperation, selectedOperationId] of [
+    ['complete', 'remove', thirdOperationId],
+    ['remove', 'complete', fourthOperationId],
+  ]) {
+    let providerCalls = 0;
+    const { coordinator } = mutationHarness({
+      mutateItems: async () => {
+        providerCalls += 1;
+        return { listUuid, operation: firstOperation, itemCount: 1 };
+      },
+    });
+    const command = {
+      operationId: selectedOperationId,
+      listUuid,
+      operation: firstOperation,
+      items: [{ name: 'Milk' }],
+    };
+    await coordinator.prepare(principal, command, 'trace-action-first');
+    await assert.rejects(
+      coordinator.prepare(principal, { ...command, operation: secondOperation }, 'trace-action-conflict'),
+      BringIdempotencyConflictError,
+    );
+    assert.equal(providerCalls, 0);
+  }
+
+  {
+    let providerCalls = 0;
+    const { coordinator } = mutationHarness({
+      mutateItems: async (operation, selectedListUuid, items) => {
+        providerCalls += 1;
+        return { listUuid: selectedListUuid, operation, itemCount: items.length };
+      },
+    });
+    const items = [{ name: 'Milk' }];
+    await coordinator.prepare(
+      principal,
+      { operationId: secondOperationId, listUuid, operation: 'remove', items },
+      'trace-prepare-before-add',
+    );
+    await assert.rejects(
+      coordinator.addItems(principal, { operationId: secondOperationId, listUuid, items }, 'trace-add-conflict'),
+      BringIdempotencyConflictError,
+    );
+    assert.equal(providerCalls, 0);
+  }
+
+  {
+    let providerCalls = 0;
+    const { coordinator } = mutationHarness({
+      mutateItems: async (operation, selectedListUuid, items) => {
+        providerCalls += 1;
+        return { listUuid: selectedListUuid, operation, itemCount: items.length };
+      },
+    });
+    const items = [{ name: 'Milk' }];
+    await coordinator.addItems(principal, { operationId, listUuid, items }, 'trace-add-before-prepare');
+    await assert.rejects(
+      coordinator.prepare(principal, { operationId, listUuid, operation: 'complete', items }, 'trace-prepare-conflict'),
+      BringIdempotencyConflictError,
+    );
+    assert.equal(providerCalls, 1);
+  }
+});
+
+test('cross-tenant and delimiter-collision principals cannot replay or apply confirmations', async () => {
+  let providerCalls = 0;
+  const { coordinator } = mutationHarness({
+    mutateItems: async (operation, selectedListUuid, items) => {
+      providerCalls += 1;
+      return { listUuid: selectedListUuid, operation, itemCount: items.length };
+    },
+  });
+  const tenantA = {
+    ...principal,
+    subject: 'shared-subject',
+    objectId: 'shared-object',
+    tenantId: 'tenant-a',
+  };
+  const tenantB = { ...tenantA, tenantId: 'tenant-b' };
+  const command = {
+    operationId: secondOperationId,
+    listUuid,
+    operation: 'remove',
+    items: [{ name: 'Milk' }],
+  };
+  const prepared = await coordinator.prepare(tenantA, command, 'trace-tenant-a');
+  await assert.rejects(coordinator.prepare(tenantB, command, 'trace-tenant-b-prepare'), BringIdempotencyConflictError);
+  await assert.rejects(
+    coordinator.apply(
+      tenantB,
+      { operationId: secondOperationId, listUuid, confirmationToken: prepared.confirmationToken },
+      'trace-tenant-b-apply',
+    ),
+    BringConfirmationError,
+  );
+  assert.equal(providerCalls, 0);
+
+  const collisionA = {
+    ...principal,
+    subject: 'b:c',
+    objectId: undefined,
+    clientId: 'a',
+  };
+  const collisionB = {
+    ...principal,
+    subject: 'c',
+    objectId: undefined,
+    clientId: 'a:b',
+  };
+  const { coordinator: collisionCoordinator } = mutationHarness({
+    mutateItems: async () => {
+      providerCalls += 1;
+      return { listUuid, operation: 'complete', itemCount: 1 };
+    },
+  });
+  const collisionCommand = {
+    operationId: thirdOperationId,
+    listUuid,
+    operation: 'complete',
+    items: [{ name: 'Bread' }],
+  };
+  await collisionCoordinator.prepare(collisionA, collisionCommand, 'trace-collision-a');
+  await assert.rejects(
+    collisionCoordinator.prepare(collisionB, collisionCommand, 'trace-collision-b'),
+    BringIdempotencyConflictError,
+  );
+  assert.equal(providerCalls, 0);
+});
+
 test('add is idempotent by operation ID and rejects payload reuse', async () => {
   const calls = [];
   const { coordinator, store, audit } = mutationHarness({
@@ -805,6 +993,457 @@ test('destructive mutations require a fresh principal-bound confirmation and exe
   assert.ok(audit.events.every((event) => event.listPseudonym.length === 64));
 });
 
+test('v2 durable records persist only hashes and reject malformed current structures', async () => {
+  let providerCalls = 0;
+  const { coordinator, store } = mutationHarness({
+    mutateItems: async (operation, selectedListUuid, items) => {
+      providerCalls += 1;
+      return { listUuid: selectedListUuid, operation, itemCount: items.length };
+    },
+  });
+  const prepared = await coordinator.prepare(
+    principal,
+    {
+      operationId: secondOperationId,
+      listUuid,
+      operation: 'remove',
+      items: [{ name: 'Milk' }],
+    },
+    'trace-record-prepare',
+  );
+  const claims = decodeConfirmationClaims(prepared.confirmationToken);
+  const preparedStored = await store.get(secondOperationId);
+  const preparedSerialized = JSON.stringify(preparedStored.record);
+  assert.equal(preparedStored.record.version, 2);
+  assert.doesNotMatch(preparedSerialized, new RegExp(escapeRegex(prepared.confirmationToken)));
+  assert.doesNotMatch(preparedSerialized, new RegExp(escapeRegex(claims.nonce)));
+  assert.match(preparedStored.record.confirmationNonceHash, /^[0-9a-f]{64}$/);
+  assert.equal(parseBringMutationRecord(preparedSerialized).version, 2);
+
+  await coordinator.apply(
+    principal,
+    {
+      operationId: secondOperationId,
+      listUuid,
+      confirmationToken: prepared.confirmationToken,
+    },
+    'trace-record-apply',
+  );
+  const succeededStored = await store.get(secondOperationId);
+  const succeededSerialized = JSON.stringify(succeededStored.record);
+  assert.doesNotMatch(succeededSerialized, new RegExp(escapeRegex(prepared.confirmationToken)));
+  assert.doesNotMatch(succeededSerialized, new RegExp(escapeRegex(claims.nonce)));
+  assert.match(succeededStored.record.confirmationTokenHmac, /^[0-9a-f]{64}$/);
+  assert.equal(succeededStored.record.confirmationNonceHash, undefined);
+  assert.equal(succeededStored.record.encryptedPayload, undefined);
+  assert.equal(parseBringMutationRecord(succeededSerialized).version, 2);
+  assert.equal(providerCalls, 1);
+
+  for (const malformed of [
+    { ...succeededStored.record, operation: 'delete' },
+    { ...succeededStored.record, payloadHash: 'short' },
+    { ...succeededStored.record, confirmationToken: prepared.confirmationToken },
+    { ...succeededStored.record, auditTrail: [] },
+    {
+      ...succeededStored.record,
+      result: { ...succeededStored.record.result, operationId: thirdOperationId },
+    },
+    {
+      ...succeededStored.record,
+      auditTrail: [{ ...succeededStored.record.auditTrail[0], principalPseudonym: 'f'.repeat(64) }],
+    },
+  ]) {
+    assert.throws(() => parseBringMutationRecord(JSON.stringify(malformed)), /invalid/);
+  }
+  assert.equal(
+    parseBringMutationRecord(JSON.stringify({ version: 1, operationId: secondOperationId, opaque: true })).version,
+    1,
+  );
+
+  const azureStore = Object.create(AzureBlobBringMutationStore.prototype);
+  azureStore.container = {
+    getBlockBlobClient: () => ({
+      download: async () => ({
+        etag: 'etag',
+        readableStreamBody: Readable.from([succeededSerialized]),
+      }),
+    }),
+  };
+  await assert.rejects(azureStore.get(thirdOperationId), /does not match its operation key/);
+
+  await store.replace(
+    {
+      ...succeededStored.record,
+      result: { ...succeededStored.record.result, listUuid: sharedListUuid },
+    },
+    succeededStored.etag,
+  );
+  await assert.rejects(
+    coordinator.apply(
+      principal,
+      {
+        operationId: secondOperationId,
+        listUuid,
+        confirmationToken: prepared.confirmationToken,
+      },
+      'trace-result-integrity-replay',
+    ),
+    BringIdempotencyConflictError,
+  );
+  assert.equal(providerCalls, 1);
+});
+
+test('legacy mutation records and confirmation tokens are retained but never replayed', async () => {
+  let providerCalls = 0;
+  const { coordinator, store } = mutationHarness({
+    mutateItems: async (operation, selectedListUuid, items) => {
+      providerCalls += 1;
+      return { listUuid: selectedListUuid, operation, itemCount: items.length };
+    },
+  });
+  const command = {
+    operationId: secondOperationId,
+    listUuid,
+    operation: 'remove',
+    items: [{ name: 'Milk' }],
+  };
+  const prepared = await coordinator.prepare(principal, command, 'trace-legacy-prepare');
+  const stored = await store.get(secondOperationId);
+  const legacyToken = createLegacyConfirmationToken(stored.record);
+  await store.replace({ ...stored.record, version: 1 }, stored.etag);
+
+  assert.equal(await coordinator.getMutationOperation(secondOperationId), undefined);
+  await assert.rejects(
+    coordinator.prepare(principal, command, 'trace-legacy-prepare-replay'),
+    BringIdempotencyConflictError,
+  );
+  await assert.rejects(
+    coordinator.apply(
+      principal,
+      { operationId: secondOperationId, listUuid, confirmationToken: legacyToken },
+      'trace-legacy-apply',
+    ),
+    BringConfirmationError,
+  );
+  await assert.rejects(
+    coordinator.apply(
+      principal,
+      { operationId: secondOperationId, listUuid, confirmationToken: prepared.confirmationToken },
+      'trace-current-token-legacy-record',
+    ),
+    BringConfirmationError,
+  );
+  assert.equal(providerCalls, 0);
+
+  const addHarness = mutationHarness({
+    mutateItems: async (operation, selectedListUuid, items) => {
+      providerCalls += 1;
+      return { listUuid: selectedListUuid, operation, itemCount: items.length };
+    },
+  });
+  const addCommand = { operationId, listUuid, items: [{ name: 'Bread' }] };
+  await addHarness.coordinator.addItems(principal, addCommand, 'trace-legacy-add');
+  const completed = await addHarness.store.get(operationId);
+  await addHarness.store.replace({ ...completed.record, version: 1 }, completed.etag);
+  await assert.rejects(
+    addHarness.coordinator.addItems(principal, addCommand, 'trace-legacy-add-replay'),
+    BringIdempotencyConflictError,
+  );
+  assert.equal(providerCalls, 1);
+});
+
+test('confirmation tamper matrix and consumed-token replay fail closed', async () => {
+  let now = new Date('2026-07-26T12:00:00.000Z');
+  let providerCalls = 0;
+  const { coordinator } = mutationHarness({
+    now: () => now,
+    mutateItems: async (operation, selectedListUuid, items) => {
+      providerCalls += 1;
+      return { listUuid: selectedListUuid, operation, itemCount: items.length };
+    },
+  });
+  const prepared = await coordinator.prepare(
+    principal,
+    {
+      operationId: secondOperationId,
+      listUuid,
+      operation: 'remove',
+      items: [{ name: 'Milk' }],
+    },
+    'trace-tamper-prepare',
+  );
+  const claims = decodeConfirmationClaims(prepared.confirmationToken);
+  const [encoded, signature] = prepared.confirmationToken.split('.');
+  const tamperedClaims = [
+    { ...claims, operationId: thirdOperationId },
+    { ...claims, operation: 'complete' },
+    { ...claims, payloadHash: '0'.repeat(64) },
+    { ...claims, principalPseudonym: '1'.repeat(64) },
+    { ...claims, listPseudonym: '2'.repeat(64) },
+    { ...claims, nonce: 'tampered-nonce' },
+    { ...claims, expiresAt: '2026-07-26T12:30:00.000Z' },
+    { ...claims, purpose: 'different-purpose' },
+    { ...claims, version: 1 },
+  ].map((value) => `${Buffer.from(JSON.stringify(value)).toString('base64url')}.${signature}`);
+  const signedUnknownClaim = createV2ConfirmationToken({ ...claims, unexpected: true });
+  const duplicatedVersionJson = JSON.stringify(claims).replace('"version":2', '"version":2,"version":2');
+  const duplicateSemanticClaim = createV2ConfirmationTokenFromJson(duplicatedVersionJson);
+  const invalidTokens = [
+    '',
+    'not-base64.not-a-signature',
+    `${encoded}.${signature}.extra`,
+    ...tamperedClaims,
+    signedUnknownClaim,
+    duplicateSemanticClaim,
+    createLegacyConfirmationTokenFromClaims(claims),
+  ];
+
+  for (const token of invalidTokens) {
+    await assert.rejects(
+      coordinator.apply(
+        principal,
+        { operationId: secondOperationId, listUuid, confirmationToken: token },
+        'trace-tamper-reject',
+      ),
+      token === '' ? BringInputError : BringConfirmationError,
+    );
+  }
+  assert.equal(providerCalls, 0);
+
+  const result = await coordinator.apply(
+    principal,
+    {
+      operationId: secondOperationId,
+      listUuid,
+      confirmationToken: prepared.confirmationToken,
+    },
+    'trace-tamper-apply',
+  );
+  assert.equal(result.replayed, false);
+
+  const foreign = await coordinator.prepare(
+    principal,
+    {
+      operationId: thirdOperationId,
+      listUuid,
+      operation: 'complete',
+      items: [{ name: 'Milk' }],
+    },
+    'trace-foreign-prepare',
+  );
+  for (const token of [
+    foreign.confirmationToken,
+    createV2ConfirmationToken({ ...claims, nonce: 'unsigned-looking-foreign' }),
+    'eyJ2ZXJzaW9uIjoyLCJvcGVyYXRpb24iOiJjb21wbGV0ZSJ9.invalid',
+  ]) {
+    await assert.rejects(
+      coordinator.apply(
+        principal,
+        { operationId: secondOperationId, listUuid, confirmationToken: token },
+        'trace-consumed-token-reject',
+      ),
+      BringConfirmationError,
+    );
+  }
+
+  now = new Date('2026-07-26T12:10:00.000Z');
+  const replay = await coordinator.apply(
+    principal,
+    {
+      operationId: secondOperationId,
+      listUuid,
+      confirmationToken: prepared.confirmationToken,
+    },
+    'trace-consumed-token-replay',
+  );
+  assert.equal(replay.replayed, true);
+  assert.equal(providerCalls, 1);
+});
+
+test('confirmation and result replay windows fail closed at their exact boundaries', async () => {
+  let now = new Date('2026-07-26T12:00:00.000Z');
+  let providerCalls = 0;
+  const { coordinator, store } = mutationHarness({
+    now: () => now,
+    mutateItems: async (operation, selectedListUuid, items) => {
+      providerCalls += 1;
+      return { listUuid: selectedListUuid, operation, itemCount: items.length };
+    },
+  });
+
+  const expired = await coordinator.prepare(
+    principal,
+    {
+      operationId: secondOperationId,
+      listUuid,
+      operation: 'remove',
+      items: [{ name: 'Milk' }],
+    },
+    'trace-exact-confirmation-expiry-prepare',
+  );
+  now = new Date(expired.expiresAt);
+  await assert.rejects(
+    coordinator.apply(
+      principal,
+      {
+        operationId: secondOperationId,
+        listUuid,
+        confirmationToken: expired.confirmationToken,
+      },
+      'trace-exact-confirmation-expiry-apply',
+    ),
+    BringConfirmationError,
+  );
+  assert.equal(providerCalls, 0);
+
+  const consumed = await coordinator.prepare(
+    principal,
+    {
+      operationId: thirdOperationId,
+      listUuid,
+      operation: 'complete',
+      items: [{ name: 'Bread' }],
+    },
+    'trace-exact-result-expiry-prepare',
+  );
+  const applied = await coordinator.apply(
+    principal,
+    {
+      operationId: thirdOperationId,
+      listUuid,
+      confirmationToken: consumed.confirmationToken,
+    },
+    'trace-exact-result-expiry-apply',
+  );
+  assert.equal(applied.replayed, false);
+  assert.equal(providerCalls, 1);
+
+  const succeeded = await store.get(thirdOperationId);
+  now = new Date(Date.parse(succeeded.record.replayUntil) - 1);
+  const finalReplay = await coordinator.apply(
+    principal,
+    {
+      operationId: thirdOperationId,
+      listUuid,
+      confirmationToken: consumed.confirmationToken,
+    },
+    'trace-result-replay-before-boundary',
+  );
+  assert.equal(finalReplay.replayed, true);
+  assert.equal(providerCalls, 1);
+
+  now = new Date(succeeded.record.replayUntil);
+  await assert.rejects(
+    coordinator.apply(
+      principal,
+      {
+        operationId: thirdOperationId,
+        listUuid,
+        confirmationToken: consumed.confirmationToken,
+      },
+      'trace-result-replay-at-boundary',
+    ),
+    BringMutationExpiredError,
+  );
+  assert.equal(providerCalls, 1);
+});
+
+test('encrypted payload transplant fails AAD and fingerprint checks before provider work', async () => {
+  let providerCalls = 0;
+  const { coordinator, store } = mutationHarness({
+    mutateItems: async (operation, selectedListUuid, items) => {
+      providerCalls += 1;
+      return { listUuid: selectedListUuid, operation, itemCount: items.length };
+    },
+  });
+  const first = await coordinator.prepare(
+    principal,
+    {
+      operationId: secondOperationId,
+      listUuid,
+      operation: 'remove',
+      items: [{ name: 'Milk' }],
+    },
+    'trace-transplant-first',
+  );
+  await coordinator.prepare(
+    principal,
+    {
+      operationId: thirdOperationId,
+      listUuid,
+      operation: 'remove',
+      items: [{ name: 'Bread' }],
+    },
+    'trace-transplant-second',
+  );
+  const firstStored = await store.get(secondOperationId);
+  const secondStored = await store.get(thirdOperationId);
+  await store.replace(
+    { ...firstStored.record, encryptedPayload: secondStored.record.encryptedPayload },
+    firstStored.etag,
+  );
+
+  await assert.rejects(
+    coordinator.apply(
+      principal,
+      { operationId: secondOperationId, listUuid, confirmationToken: first.confirmationToken },
+      'trace-transplant-apply',
+    ),
+    BringConfirmationError,
+  );
+  assert.equal(providerCalls, 0);
+});
+
+test('concurrent prepares leave one usable action-bound confirmation', async () => {
+  for (const operations of [
+    ['remove', 'remove'],
+    ['remove', 'complete'],
+  ]) {
+    let providerCalls = 0;
+    const { coordinator, store } = mutationHarness({
+      mutateItems: async (operation, selectedListUuid, items) => {
+        providerCalls += 1;
+        return { listUuid: selectedListUuid, operation, itemCount: items.length };
+      },
+    });
+    const results = await Promise.allSettled(
+      operations.map((operation, index) =>
+        coordinator.prepare(
+          principal,
+          {
+            operationId: fourthOperationId,
+            listUuid,
+            operation,
+            items: [{ name: 'Milk' }],
+          },
+          `trace-concurrent-prepare-${index}`,
+        ),
+      ),
+    );
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    assert.equal(fulfilled.length, 1);
+    assert.equal(rejected.length, 1);
+    assert.ok(rejected[0].reason instanceof BringIdempotencyConflictError);
+    assert.equal((await store.get(fourthOperationId)).record.operation, fulfilled[0].value.operation);
+    assert.equal(providerCalls, 0);
+
+    if (operations[0] === operations[1]) {
+      const applied = await coordinator.apply(
+        principal,
+        {
+          operationId: fourthOperationId,
+          listUuid,
+          confirmationToken: fulfilled[0].value.confirmationToken,
+        },
+        'trace-concurrent-prepare-apply',
+      );
+      assert.equal(applied.replayed, false);
+      assert.equal(providerCalls, 1);
+    }
+  }
+});
+
 test('concurrent confirmation apply uses optimistic concurrency and calls the provider once', async () => {
   let providerCalls = 0;
   const { coordinator } = mutationHarness({
@@ -909,7 +1548,7 @@ test('HTTP handler uses the breaking add/prepare/apply contract through one appl
         listPseudonym: 'a'.repeat(64),
         itemCount: command.items.length,
         expiresAt: new Date(Date.now() + 300_000).toISOString(),
-        confirmationToken: 'safe-token',
+        confirmationToken: 'safe.token',
         replayed: false,
       };
     },
@@ -926,7 +1565,6 @@ test('HTTP handler uses the breaking add/prepare/apply contract through one appl
       };
     },
     getMutationOperation: async () => 'remove',
-    getConfirmationOperation: (token) => (token === 'safe-token' ? 'remove' : undefined),
   };
   const handler = createBringHandler({ getApplication: () => application });
 
@@ -970,7 +1608,7 @@ test('HTTP handler uses the breaking add/prepare/apply contract through one appl
         `https://api.test/api/bring/lists/${listUuid}/mutations/apply`,
         {
           operationId: secondOperationId,
-          confirmationToken: 'safe-token',
+          confirmationToken: 'safe.token',
         },
         { listUuid },
       ),
@@ -993,7 +1631,100 @@ test('HTTP handler uses the breaking add/prepare/apply contract through one appl
   assert.equal(calls[0][1].operationId, operationId);
   assert.equal(calls[1][1].operation, 'remove');
   assert.equal(calls[2][1].listUuid, listUuid);
-  assert.equal(calls[2][1].confirmationToken, 'safe-token');
+  assert.equal(calls[2][1].confirmationToken, 'safe.token');
+});
+
+test('HTTP apply authorizes only a current durable operation and safely rejects the legacy boundary', async () => {
+  const legacyTokenCanary = [Buffer.from('legacy').toString('base64url'), 'signature-canary'].join('.');
+  let lookups = 0;
+  let applies = 0;
+  const handler = createBringHandler({
+    getApplication: () => ({
+      getMutationOperation: async (selectedOperationId) => {
+        lookups += 1;
+        assert.equal(selectedOperationId, secondOperationId);
+        return undefined;
+      },
+      applyMutation: async () => {
+        applies += 1;
+        throw new Error('legacy confirmation must not reach apply');
+      },
+    }),
+  });
+
+  await withEnv({ AUTH_ENABLED: 'false', DEPLOYED_ENVIRONMENT_NAME: 'local' }, async () => {
+    const response = await handler(
+      request(
+        'POST',
+        `https://api.test/api/bring/lists/${listUuid}/mutations/apply`,
+        {
+          operationId: secondOperationId,
+          confirmationToken: legacyTokenCanary,
+        },
+        { listUuid },
+      ),
+      context({ functionName: 'bringApplyMutation' }),
+    );
+    assert.equal(response.status, 400);
+    assert.doesNotMatch(JSON.stringify(response.jsonBody), new RegExp(escapeRegex(legacyTokenCanary)));
+  });
+  assert.equal(lookups, 1);
+  assert.equal(applies, 0);
+});
+
+test('HTTP apply maps exact confirmation expiry to 403 without provider work', async () => {
+  let now = new Date('2026-07-26T12:00:00.000Z');
+  let providerCalls = 0;
+  const { coordinator } = mutationHarness({
+    now: () => now,
+    mutateItems: async (operation, selectedListUuid, items) => {
+      providerCalls += 1;
+      return { listUuid: selectedListUuid, operation, itemCount: items.length };
+    },
+  });
+  const localPrincipal = {
+    subject: 'local-dev-placeholder',
+    tokenType: 'user',
+    scopes: ['bring.complete'],
+    roles: [],
+  };
+  const prepared = await coordinator.prepare(
+    localPrincipal,
+    {
+      operationId: secondOperationId,
+      listUuid,
+      operation: 'complete',
+      items: [{ name: 'Milk' }],
+    },
+    'trace-http-exact-expiry-prepare',
+  );
+  now = new Date(prepared.expiresAt);
+  const handler = createBringHandler({
+    getApplication: () => ({
+      getMutationOperation: (selectedOperationId) => coordinator.getMutationOperation(selectedOperationId),
+      applyMutation: (authenticatedPrincipal, command, correlationId) =>
+        coordinator.apply(authenticatedPrincipal, command, correlationId),
+    }),
+  });
+
+  await withEnv({ AUTH_ENABLED: 'false', DEPLOYED_ENVIRONMENT_NAME: 'local' }, async () => {
+    const response = await handler(
+      request(
+        'POST',
+        `https://api.test/api/bring/lists/${listUuid}/mutations/apply`,
+        {
+          operationId: secondOperationId,
+          confirmationToken: prepared.confirmationToken,
+        },
+        { listUuid },
+      ),
+      context({ functionName: 'bringApplyMutation' }),
+    );
+    assert.equal(response.status, 403);
+    assert.equal(response.jsonBody?.title, 'Bring confirmation rejected');
+    assert.equal(response.jsonBody?.operation_id, 'bringApplyItemMutation');
+  });
+  assert.equal(providerCalls, 0);
 });
 
 test('Bring mutation handlers authenticate before reading request bodies and cap authenticated payloads', async () => {
@@ -1040,10 +1771,58 @@ test('Bring mutation handlers authenticate before reading request bodies and cap
   });
 });
 
+function decodeConfirmationClaims(token) {
+  const encoded = token.split('.')[0];
+  return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+}
+
+function createV2ConfirmationToken(claims) {
+  return createV2ConfirmationTokenFromJson(JSON.stringify(claims));
+}
+
+function createV2ConfirmationTokenFromJson(json) {
+  const encoded = Buffer.from(json).toString('base64url');
+  const signature = createHmac('sha256', hmacKey)
+    .update(JSON.stringify(['juez/api/bring/confirmation-signature/v2', [['claims', encoded]]]))
+    .digest('base64url');
+  return `${encoded}.${signature}`;
+}
+
+function createLegacyConfirmationToken(record) {
+  return createLegacyConfirmationTokenFromClaims({
+    operationId: record.operationId,
+    operation: record.operation,
+    payloadHash: record.payloadHash,
+    principalPseudonym: record.principalPseudonym,
+    nonce: 'legacy-confirmation-nonce',
+    expiresAt: record.confirmationExpiresAt,
+  });
+}
+
+function createLegacyConfirmationTokenFromClaims(claims) {
+  const legacyClaims = {
+    version: 1,
+    operationId: claims.operationId,
+    operation: claims.operation,
+    payloadHash: claims.payloadHash,
+    principalPseudonym: claims.principalPseudonym,
+    nonce: claims.nonce,
+    expiresAt: claims.expiresAt,
+  };
+  const encoded = Buffer.from(JSON.stringify(legacyClaims)).toString('base64url');
+  const signature = createHmac('sha256', hmacKey).update(encoded).digest('base64url');
+  return `${encoded}.${signature}`;
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function mutationHarness({
   mutateItems,
   store = new InMemoryBringMutationStore(),
   audit = new InMemoryBringAuditSink(),
+  now = () => new Date('2026-07-26T12:00:00.000Z'),
   warn = () => undefined,
 }) {
   const service = {
@@ -1054,16 +1833,8 @@ function mutationHarness({
     mutateItems,
   };
   const security = new BringMutationSecurity(hmacKey, encryptionKey);
-  const coordinator = new BringMutationCoordinator(
-    service,
-    store,
-    audit,
-    security,
-    () => new Date('2026-07-26T12:00:00.000Z'),
-    'test-commit',
-    warn,
-  );
-  return { coordinator, store, audit };
+  const coordinator = new BringMutationCoordinator(service, store, audit, security, now, 'test-commit', warn);
+  return { coordinator, store, audit, security };
 }
 
 function bringFixtureFetch({ lists, list, calls = [], membersByList = {} } = {}) {
