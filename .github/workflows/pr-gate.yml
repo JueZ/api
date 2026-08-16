@@ -151,6 +151,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$DEPENDENCIES" = 'true' ]; then
+            node --test scripts/test/dependency-supply-chain.test.mjs
             BASE_REF="$BASE_SHA" node scripts/check-lockfile-policy.mjs
           fi
           if [ "$INFRASTRUCTURE" != 'true' ] && [ "$WORKFLOW" != 'true' ]; then

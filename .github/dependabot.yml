@@ -22,6 +22,20 @@ updates:
       - dependency-name: '@types/node'
         update-types:
           - 'version-update:semver-major'
+  - package-ecosystem: 'npm'
+    directory: '/apps/api'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '08:45'
+      timezone: 'Etc/UTC'
+    open-pull-requests-limit: 5
+    versioning-strategy: increase-if-necessary
+    commit-message:
+      prefix: 'deps(npm-api)'
+    labels:
+      - 'dependencies'
+      - 'npm'
   - package-ecosystem: 'github-actions'
     directory: '/'
     schedule:

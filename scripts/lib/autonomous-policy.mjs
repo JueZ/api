@@ -32,6 +32,8 @@ const REQUIRED_PRIVILEGED_PATTERNS = Object.freeze([
   '.github/actions/**',
   'package.json',
   'package-lock.json',
+  'apps/api/package.json',
+  'apps/api/package-lock.json',
   'scripts/**',
   'infra/**',
   'apps/api/src/shared/security/**',

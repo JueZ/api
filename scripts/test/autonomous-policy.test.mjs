@@ -47,9 +47,20 @@ test('policy validation rejects changed gate, profile, repair, and workflow-secu
 });
 
 test('privileged path matching is deterministic and unknown risk is not silently downgraded', () => {
-  const risk = classifyRisk(['README.md', 'scripts/policy-guardrails.mjs', 'apps/api/src/shared/security/auth.ts']);
+  const risk = classifyRisk([
+    'README.md',
+    'scripts/policy-guardrails.mjs',
+    'apps/api/package.json',
+    'apps/api/package-lock.json',
+    'apps/api/src/shared/security/auth.ts',
+  ]);
   assert.equal(risk.privileged, true);
-  assert.deepEqual(risk.privilegedPaths, ['scripts/policy-guardrails.mjs', 'apps/api/src/shared/security/auth.ts']);
+  assert.deepEqual(risk.privilegedPaths, [
+    'scripts/policy-guardrails.mjs',
+    'apps/api/package.json',
+    'apps/api/package-lock.json',
+    'apps/api/src/shared/security/auth.ts',
+  ]);
   assert.deepEqual(Object.keys(risk.profiles), ['documentation-only', 'api-backend', 'privileged']);
   assert.equal(matchesPolicyGlob('apps/api/src/functions/hello.ts', 'apps/**'), true);
   assert.equal(matchesPolicyGlob('../apps/api/src/index.ts', 'apps/**'), false);

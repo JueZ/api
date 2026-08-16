@@ -183,7 +183,13 @@ function isWorkflowPath(path) {
 }
 
 function isDependencyPath(path) {
-  return path === 'package.json' || path === 'package-lock.json' || path === '.github/dependabot.yml';
+  return (
+    path === 'package.json' ||
+    path === 'package-lock.json' ||
+    path === 'apps/api/package.json' ||
+    path === 'apps/api/package-lock.json' ||
+    path === '.github/dependabot.yml'
+  );
 }
 
 function applyPrivileged(flags, profiles) {

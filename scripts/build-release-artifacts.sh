@@ -24,7 +24,7 @@ rm -f \
   "$output_dir/SHA256SUMS" \
   "$output_dir/release-manifest.json"
 
-function_stage="$release_temp/function-package"
+function_stage="$release_temp/api-catalogue-functions"
 mkdir -p "$function_stage"
 cp \
   "$repository_root/apps/api/host.json" \
@@ -33,6 +33,14 @@ cp \
   "$function_stage/"
 cp -R "$repository_root/apps/api/dist" "$function_stage/dist"
 npm ci --omit=dev --ignore-scripts --prefix "$function_stage"
+
+(
+  cd "$function_stage"
+  npm sbom --sbom-format cyclonedx --sbom-type application --omit=dev > "$output_dir/sbom.cdx.json"
+)
+node "$repository_root/scripts/verify-function-sbom.mjs" \
+  "$output_dir/sbom.cdx.json" \
+  "$repository_root/apps/api/package-lock.json"
 
 (
   cd "$function_stage"
@@ -55,11 +63,6 @@ tar \
   -czf "$output_dir/frontend.tar.gz" \
   -C "$frontend_root" \
   .
-
-(
-  cd "$repository_root"
-  npm sbom --sbom-format cyclonedx > "$output_dir/sbom.cdx.json"
-)
 
 (
   cd "$output_dir"

@@ -13,7 +13,7 @@ Both are native GitHub Actions job contexts. No controller creates check runs or
 
 `PR Gate` checks out the exact candidate, classifies the complete base/head diff, and aggregates explicit jobs with `if: always()`. Missing or malformed paths use the privileged profile. Documentation-only work runs formatting and policy only. Backend, frontend, contract, infrastructure, workflow, dependency, and learning changes run only their applicable checks; mixed changes run the union. Pull requests never build release artifacts.
 
-`Security Gate` always runs Gitleaks. Dependency audit, JavaScript/TypeScript CodeQL, Actions CodeQL, and Trivy are path-selected, with scheduled complete coverage. Its aggregate rejects any unexplained skip or failed applicable job.
+`Security Gate` always runs Gitleaks. Dependency audit covers both the root build/frontend lock and the standalone deployed Function lock. JavaScript/TypeScript CodeQL, Actions CodeQL, and Trivy are path-selected, with scheduled complete coverage. Its aggregate rejects any unexplained skip or failed applicable job.
 
 Codex monitors both gates, repairs ordinary failures on the same PR within three meaningful repair commits, and retains or re-enables exact-head auto-merge after every new head. The same fingerprint occurring twice without progress stops repair; one unchanged rerun is allowed only for a demonstrated external or flaky failure.
 
@@ -34,7 +34,7 @@ classify protected-main diff
 
 A diff composed entirely of the small runtime-neutral allowlist finishes successfully without application build or environment mutation. Ambiguous classification deploys.
 
-The immutable release contains the Function package, environment-neutral frontend bundle, CycloneDX SBOM, checksums, and source manifest. Test and production verify the same Function/frontend-source/SBOM digests. Environment-specific frontend configuration is rendered after verification and recorded separately.
+The immutable release contains the Function package, environment-neutral frontend bundle, CycloneDX SBOM, checksums, and source manifest. The SBOM is generated from the exact installed production Function stage; the compiled frontend/build graph remains covered by the root lock audit, Dependabot, CodeQL, and Trivy rather than being misrepresented as a second installed runtime tree. A separate compiled-frontend component inventory remains a future concern only if release-level frontend inventory is needed. Test and production verify the same Function/frontend-source/SBOM digests. Environment-specific frontend configuration is rendered after verification and recorded separately.
 
 Both environments use Azure OIDC and require exact source SHA, artifact identity, public smoke, authenticated `GET /api/hello` and `POST /api/reddit/thread` smoke, telemetry correlation, and a compact release ledger. Before production, one current-main read marks an older run superseded without polling. Production promotion and rollback share one concurrency group.
 
