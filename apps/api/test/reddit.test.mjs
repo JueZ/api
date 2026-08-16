@@ -639,6 +639,36 @@ test('RedditOAuthClient raises RedditFetchError with content type and preview fo
   );
 });
 
+test('RedditFetchError exposes only bounded sanitized internal metadata', () => {
+  const canary = 'PROVIDER-PREVIEW-CANARY-0ed1';
+  const error = new RedditFetchError(`provider ${canary}`, {
+    input: `https://www.reddit.com/comments/abc123?sig=${canary}`,
+    normalized_post_id: 'ABC123',
+    request_url: `https://oauth.reddit.com/comments/abc123?sig=${canary}#${canary}`,
+    final_url: `https://attacker.example/${canary}`,
+    status: 502,
+    reason: canary,
+    content_type: `text/html; boundary=${canary}`,
+    response_preview: canary,
+    redirect_chain: [`https://www.reddit.com/comments/abc123?sig=${canary}`, `https://attacker.example/${canary}`],
+    retryable: true,
+  });
+
+  const metadata = error.toJSON();
+  assert.deepEqual(metadata, {
+    normalized_post_id: 'abc123',
+    request_url: 'https://oauth.reddit.com/comments/abc123',
+    status: 502,
+    content_type: 'text/html',
+    redirect_chain: ['https://www.reddit.com/comments/abc123'],
+    retryable: true,
+  });
+  assert.doesNotMatch(
+    JSON.stringify(metadata),
+    /PROVIDER-PREVIEW-CANARY|attacker\.example|response_preview|reason|input/,
+  );
+});
+
 test('RedditOAuthClient rejects oversized JSON responses before parsing', async () => {
   const client = new RedditOAuthClient(
     config,
@@ -652,6 +682,88 @@ test('RedditOAuthClient rejects oversized JSON responses before parsing', async 
     client.getAccessToken(),
     (error) => error instanceof RedditUpstreamError && error.status === 502,
   );
+});
+
+test('Reddit OAuth provider payloads never reach public problems or captured logs', async () => {
+  const providerCanary = 'PROVIDER-OAUTH-CANARY-74b1';
+  const connectionCanary = 'AccountKey=FAKE-CONNECTION-CANARY-93ca';
+  const sasCanary = 'sig=FAKE-SAS-CANARY-a015';
+  const warnings = [];
+  await withEnv(
+    {
+      AUTH_ENABLED: 'false',
+      REPAIRABLE_ERRORS_LLM_ENABLED: 'false',
+      REDDIT_CLIENT_ID: config.clientId,
+      REDDIT_CLIENT_SECRET: config.secret,
+      REDDIT_USER_AGENT: config.userAgent,
+    },
+    async () => {
+      setRedditThreadServiceForTesting(
+        new RedditThreadService({
+          fetchImpl: async (input) => {
+            assert.match(String(input), /api\/v1\/access_token/);
+            return jsonResponse(
+              {
+                error: providerCanary,
+                message: `${connectionCanary}&${sasCanary}`,
+              },
+              401,
+            );
+          },
+        }),
+      );
+
+      const response = await redditThreadHandler(
+        requestWithJson({ post: 'abc123' }),
+        contextStub({ warn: (...args) => warnings.push(args) }),
+      );
+      const serialized = JSON.stringify({ response, warnings });
+
+      assert.equal(response.status, 502);
+      assert.equal(response.jsonBody.detail, 'Reddit upstream request failed.');
+      assert.doesNotMatch(serialized, /PROVIDER-OAUTH-CANARY|FAKE-CONNECTION-CANARY|FAKE-SAS-CANARY|AccountKey/);
+    },
+  );
+});
+
+test('Reddit fetch logs discard sensitive caller URL data without changing response semantics', async () => {
+  const sasCanary = 'FAKE-SAS-QUERY-CANARY-20fc';
+  const connectionCanary = 'FAKE-CONNECTION-QUERY-CANARY-6a0b';
+  const bearerCanary = 'FAKE-BEARER-PATH-CANARY-f450';
+  const input = `https://www.reddit.com/r/test/comments/abc123/${sasCanary}-AccountKey-${connectionCanary}-${bearerCanary}/?sig=${sasCanary}&connection=${connectionCanary}#${sasCanary}`;
+  const infoLogs = [];
+  const originalConsoleInfo = console.info;
+  process.env.REDDIT_CLIENT_ID = config.clientId;
+  process.env.REDDIT_CLIENT_SECRET = config.secret;
+  process.env.REDDIT_USER_AGENT = config.userAgent;
+  console.info = (...args) => infoLogs.push(args);
+  try {
+    const service = new RedditThreadService({
+      fetchImpl: async (url) => {
+        if (String(url).includes('/api/v1/access_token'))
+          return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+        if (String(url).includes('/comments/abc123'))
+          return jsonResponse(threadFixtureWithoutMore('abc123'), 200, rateHeaders(1));
+        throw new Error(`unexpected URL ${String(url)}`);
+      },
+    });
+
+    const response = await service.fetchThread({ post: input, maxComments: 10, maxMoreChildrenRequests: 0 });
+    const serializedLogs = JSON.stringify(infoLogs);
+
+    assert.equal(response.input, input);
+    assert.doesNotMatch(
+      serializedLogs,
+      /FAKE-SAS-QUERY-CANARY|FAKE-CONNECTION-QUERY-CANARY|FAKE-BEARER-PATH-CANARY|AccountKey|[?&]sig=|#FAKE/,
+    );
+    const fetchLog = infoLogs.find(([event]) => event === 'reddit_thread_fetch');
+    assert.ok(fetchLog);
+    assert.equal(fetchLog[1].original_input, undefined);
+    assert.doesNotMatch(fetchLog[1].request_url, /[?#]/);
+    assert.doesNotMatch(fetchLog[1].final_url, /[?#]/);
+  } finally {
+    console.info = originalConsoleInfo;
+  }
 });
 
 test('RedditOAuthClient retries retryable upstream responses and marks final invalid JSON 429 retryable', async () => {
@@ -1734,25 +1846,41 @@ async function withEnv(values, fn) {
 }
 
 function requestThatThrowsJson(authorization = null) {
+  return requestWithText('{', authorization);
+}
+
+function requestWithJson(body, authorization = null) {
+  return requestWithText(JSON.stringify(body), authorization);
+}
+
+function requestWithText(text, authorization = null) {
+  const headers = new Headers({
+    'content-type': 'application/json',
+    'content-length': String(Buffer.byteLength(text)),
+  });
+  if (authorization) headers.set('authorization', authorization);
   return {
     method: 'POST',
-    headers: { get: (name) => (name.toLowerCase() === 'authorization' ? authorization : null) },
+    url: 'https://api.test/api/reddit/thread',
+    headers,
+    body: bodyStream([new TextEncoder().encode(text)]),
     json: async () => {
-      throw new Error('invalid json');
+      throw new Error('Reddit handlers must use the bounded body reader.');
     },
   };
 }
 
-function requestWithJson(body, authorization = null) {
-  return {
-    method: 'POST',
-    headers: { get: (name) => (name.toLowerCase() === 'authorization' ? authorization : null) },
-    json: async () => body,
-  };
+function bodyStream(chunks) {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
 }
 
-function contextStub() {
-  return { invocationId: 'invocation-test', warn: () => undefined };
+function contextStub(overrides = {}) {
+  return { invocationId: 'invocation-test', warn: () => undefined, ...overrides };
 }
 
 async function fetchThreadFromShareHtml({ html, status = 200 }) {

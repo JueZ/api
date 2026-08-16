@@ -2,12 +2,21 @@
 
 Application authorization is not a substitute for bounded resource use. Anonymous transports reject or cap work before allocating in proportion to caller input, and authenticated provider operations use server-owned budgets.
 
+## Authenticated provider JSON
+
+- Every Reddit and WLH POST route authenticates and authorizes the operation before reading its body.
+- Bodies are streamed through one shared 64 KiB limit. A declared or streamed overage returns deterministic HTTP 413 `application/problem+json`; malformed bounded JSON returns the existing deterministic HTTP 400 contract.
+- Rejected bodies never invoke Reddit or WLH providers and never enter optional model-assisted diagnostics.
+- Reddit OAuth/provider response text is untrusted. Public errors use stable server-owned messages; internal fetch metadata is bounded to normalized IDs, statuses, media types, and query/fragment-free Reddit URLs.
+- Fetch telemetry omits raw caller input and records only normalized identifiers plus route-normalized allowlisted Reddit URLs. The documented successful `input` field remains caller-supplied response data and is not copied into logs or error diagnostics.
+
 ## MCP transport
 
 - Outside explicit local development, every MCP request requires a syntactically valid bearer header before a POST body is read.
 - MCP POST bodies are streamed through a 256 KiB byte limit. A declared or streamed overage returns HTTP 413 before JSON parsing or SDK transport dispatch.
 - The gateway forwards the already bounded raw JSON text. It does not serialize a second complete copy of a parsed caller object.
-- Host, forwarded-host/scheme, browser-origin, JWT, delegated-client, user, tenant, and per-tool permission checks remain mandatory.
+- In deployed environments, `MCP_RESOURCE_ORIGIN` is one non-localhost, non-IP HTTPS origin. The request URL authority, Host, optional forwarded host/scheme, and exact browser Origin must agree with configured trust; comma-separated or otherwise ambiguous header values are rejected.
+- JWT, delegated-client, user, tenant, and per-tool permission checks remain mandatory. Only explicit loopback HTTP/HTTPS requests retain the local-development origin exception.
 
 ## Reddit expansion
 

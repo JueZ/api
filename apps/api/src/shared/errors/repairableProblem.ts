@@ -374,25 +374,65 @@ export function buildFallbackRepairableProblem(args: {
   let invalid_fields: InvalidField[] | undefined;
   let correct_request_example: unknown;
 
-  if (status === 400) {
+  if (status === 413) {
+    classification = 'caller_contract_violation';
+    repairable = true;
+    retryPolicy = { can_retry: true, same_request: false, idempotency_required: false };
+    title = 'Request body is too large';
+    callerInstruction = 'Reduce the JSON request body to the documented endpoint limit and retry.';
+    repair_plan = [
+      {
+        action: 'retry_with_modified_request',
+        reason: 'The request body exceeded the server-owned byte limit.',
+      },
+    ];
+  } else if (status === 400) {
     classification = 'caller_contract_violation';
     repairable = true;
     retryPolicy = { can_retry: true, same_request: false, idempotency_required: false };
     title = 'Request contract violation';
-    callerInstruction =
-      'Send valid JSON with a post field containing a Reddit article ID, t3 fullname, redd.it URL, or canonical reddit.com /comments/<id> URL.';
-    invalid_fields = [
-      { path: '/post', problem: 'The Reddit thread request must include a valid post value.', expected: 'string' },
-    ];
-    correct_request_example = { post: 'abc123', sort: 'confidence', maxComments: 10000, maxMoreChildrenRequests: 0 };
-    repair_plan = [
-      {
-        action: 'provide_missing_value',
-        path: '/post',
-        value_hint: 'Reddit article ID, t3 fullname, redd.it URL, or canonical /comments/<id> URL',
-        reason: 'The endpoint needs a post identifier to fetch a thread.',
-      },
-    ];
+    if (code === 'INVALID_JSON' && args.operation_id === 'postRedditCommentsBatch') {
+      callerInstruction = 'Send a syntactically valid JSON object matching this endpoint contract and retry.';
+      repair_plan = [
+        {
+          action: 'retry_with_modified_request',
+          reason: 'The request body must parse as JSON before endpoint fields can be validated.',
+        },
+      ];
+    } else if (args.operation_id === 'postRedditCommentsBatch') {
+      callerInstruction = 'Send valid JSON with an ids array containing Reddit comment IDs.';
+      invalid_fields = [
+        {
+          path: '/ids',
+          problem: 'The Reddit comments batch request must include valid comment IDs.',
+          expected: 'array',
+        },
+      ];
+      correct_request_example = { ids: ['abc123'], fields: ['id', 'body'], maxBytes: 65536 };
+      repair_plan = [
+        {
+          action: 'provide_missing_value',
+          path: '/ids',
+          value_hint: 'array of Reddit comment IDs',
+          reason: 'The endpoint needs at least one comment identifier.',
+        },
+      ];
+    } else {
+      callerInstruction =
+        'Send valid JSON with a post field containing a Reddit article ID, t3 fullname, redd.it URL, or canonical reddit.com /comments/<id> URL.';
+      invalid_fields = [
+        { path: '/post', problem: 'The Reddit thread request must include a valid post value.', expected: 'string' },
+      ];
+      correct_request_example = { post: 'abc123', sort: 'confidence', maxComments: 10000, maxMoreChildrenRequests: 0 };
+      repair_plan = [
+        {
+          action: 'provide_missing_value',
+          path: '/post',
+          value_hint: 'Reddit article ID, t3 fullname, redd.it URL, or canonical /comments/<id> URL',
+          reason: 'The endpoint needs a post identifier to fetch a thread.',
+        },
+      ];
+    }
     if (isShareUrl) {
       detail =
         'Reddit /s/ share URLs must resolve to a canonical comments URL before this endpoint can fetch the thread.';

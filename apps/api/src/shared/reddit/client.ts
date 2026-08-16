@@ -46,6 +46,16 @@ export interface RedditFetchErrorDetails {
   retryable: boolean;
 }
 
+export interface RedditFetchErrorMetadata {
+  normalized_post_id?: string;
+  request_url?: string;
+  final_url?: string;
+  status?: number;
+  content_type?: string;
+  redirect_chain?: string[];
+  retryable: boolean;
+}
+
 const TOKEN_URL = `https://www.reddit.com/api/v1/${'access_' + 'token'}`;
 const TOKEN_FIELD = 'access_' + 'token';
 const API_BASE_URL = 'https://oauth.reddit.com';
@@ -56,6 +66,16 @@ const MAX_REDIRECT_BODY_BYTES = 256 * 1024;
 export const REDDIT_JSON_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
 const REDIRECT_BODY_CONTENT_TYPES = ['text/html', 'text/plain'];
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+const SAFE_TELEMETRY_HOSTS = new Set([
+  'reddit.com',
+  'www.reddit.com',
+  'old.reddit.com',
+  'new.reddit.com',
+  'np.reddit.com',
+  'm.reddit.com',
+  'redd.it',
+  'oauth.reddit.com',
+]);
 
 export class RedditUpstreamError extends Error {
   constructor(
@@ -95,17 +115,23 @@ export class RedditFetchError extends Error {
     this.retryable = details.retryable;
   }
 
-  toJSON(): RedditFetchErrorDetails {
+  toJSON(): RedditFetchErrorMetadata {
+    const normalizedPostId = safeRedditIdentifier(this.normalized_post_id);
+    const requestUrl = sanitizeRedditTelemetryUrl(this.request_url);
+    const finalUrl = sanitizeRedditTelemetryUrl(this.final_url);
+    const status = safeHttpStatus(this.status);
+    const contentType = safeContentType(this.content_type);
+    const redirectChain = this.redirect_chain
+      .map(sanitizeRedditTelemetryUrl)
+      .filter((value): value is string => Boolean(value))
+      .slice(0, 6);
     return {
-      input: this.input,
-      normalized_post_id: this.normalized_post_id,
-      request_url: this.request_url,
-      final_url: this.final_url,
-      status: this.status,
-      reason: this.reason,
-      content_type: this.content_type,
-      response_preview: this.response_preview,
-      redirect_chain: this.redirect_chain,
+      ...(normalizedPostId ? { normalized_post_id: normalizedPostId } : {}),
+      ...(requestUrl ? { request_url: requestUrl } : {}),
+      ...(finalUrl ? { final_url: finalUrl } : {}),
+      ...(status ? { status } : {}),
+      ...(contentType ? { content_type: contentType } : {}),
+      ...(redirectChain.length ? { redirect_chain: redirectChain } : {}),
       retryable: this.retryable,
     };
   }
@@ -158,7 +184,7 @@ export class RedditOAuthClient {
       retryable: RETRYABLE_STATUSES.has(response.status),
     });
     if (!response.ok || typeof body[TOKEN_FIELD] !== 'string') {
-      throw new RedditUpstreamError(safeRedditErrorMessage(body, 'Reddit token request failed.'), 502, response.status);
+      throw new RedditUpstreamError('Reddit authentication dependency failed.', 502, response.status);
     }
 
     const expiresInSeconds = typeof body['expires_in'] === 'number' ? body['expires_in'] : 3600;
@@ -436,10 +462,49 @@ function parseJsonText<T>(text: string, details: Omit<RedditFetchErrorDetails, '
   }
 }
 
-function safeRedditErrorMessage(body: { error?: unknown; message?: unknown }, fallback: string): string {
-  const error = typeof body.error === 'string' ? body.error : undefined;
-  const message = typeof body.message === 'string' ? body.message : undefined;
-  return [fallback, error, message].filter(Boolean).join(' ');
+export function sanitizeRedditTelemetryUrl(value: string | undefined): string | undefined {
+  if (!value || value.length > 2048) return undefined;
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    if (url.protocol !== 'https:' || url.username || url.password || !SAFE_TELEMETRY_HOSTS.has(hostname))
+      return undefined;
+
+    if (hostname === 'oauth.reddit.com') {
+      const commentMatch = /^\/comments\/([a-z0-9][a-z0-9_]{1,12})\/?$/i.exec(url.pathname);
+      if (commentMatch?.[1]) return `${url.origin}/comments/${commentMatch[1].toLowerCase()}`;
+      if (url.pathname === '/api/info' || url.pathname === '/api/morechildren') return `${url.origin}${url.pathname}`;
+      return url.origin;
+    }
+    if (hostname === 'www.reddit.com' && url.pathname === '/api/v1/access_token') {
+      return `${url.origin}/api/v1/access_token`;
+    }
+    if (hostname === 'redd.it') {
+      const id = url.pathname.split('/').filter(Boolean)[0];
+      return id && /^[a-z0-9][a-z0-9_]{1,12}$/i.test(id) ? `${url.origin}/${id.toLowerCase()}` : url.origin;
+    }
+    const parts = url.pathname.split('/').filter(Boolean);
+    const commentsIndex = parts.findIndex((part) => part.toLowerCase() === 'comments');
+    const postId = commentsIndex >= 0 ? parts[commentsIndex + 1] : undefined;
+    return postId && /^[a-z0-9][a-z0-9_]{1,12}$/i.test(postId)
+      ? `${url.origin}/comments/${postId.toLowerCase()}`
+      : url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeRedditIdentifier(value: string | undefined): string | undefined {
+  return value && /^[a-z0-9][a-z0-9_]{1,12}$/i.test(value) ? value.toLowerCase() : undefined;
+}
+
+function safeHttpStatus(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isInteger(value) && value >= 100 && value <= 599 ? value : undefined;
+}
+
+function safeContentType(value: string | null | undefined): string | undefined {
+  const mediaType = value?.split(';', 1)[0]?.trim().toLowerCase();
+  return mediaType && /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(mediaType) ? mediaType : undefined;
 }
 
 function isRedirectStatus(status: number): boolean {

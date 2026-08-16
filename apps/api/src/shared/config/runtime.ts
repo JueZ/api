@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+
 export type DeployedEnvironmentName = 'local' | 'test' | 'prod';
 
 export class RuntimeConfigurationError extends Error {
@@ -70,9 +72,9 @@ export function validateRuntimeSafety(env: NodeJS.ProcessEnv = process.env): str
     problems.push(`API_CORS_ALLOWED_ORIGINS must contain only exact HTTPS origins in ${environment}`);
   }
 
-  const mcpOrigin = validHttpsOrigin(env['MCP_RESOURCE_ORIGIN']);
+  const mcpOrigin = validDeployedMcpOrigin(env['MCP_RESOURCE_ORIGIN']);
   if (!mcpOrigin) {
-    problems.push(`MCP_RESOURCE_ORIGIN must be an absolute HTTPS origin in ${environment}`);
+    problems.push(`MCP_RESOURCE_ORIGIN must be a non-localhost, non-IP HTTPS origin in ${environment}`);
   }
 
   const mcpAllowedOrigins = parseCsv(env['MCP_ALLOWED_ORIGINS']);
@@ -143,6 +145,14 @@ function validHttpsOrigin(value: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function validDeployedMcpOrigin(value: string | undefined): string | undefined {
+  const origin = validHttpsOrigin(value);
+  if (!origin) return undefined;
+  const hostname = new URL(origin).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (hostname === 'localhost' || hostname.endsWith('.localhost') || isIP(hostname) !== 0) return undefined;
+  return origin;
 }
 
 function validHttpsUrl(value: string): boolean {

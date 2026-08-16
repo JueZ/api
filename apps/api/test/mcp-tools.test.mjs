@@ -394,13 +394,16 @@ test('MCP validation rejects invalid Reddit and WLH arguments with safe tool err
 });
 
 test('external service exceptions become safe MCP tool errors without sensitive material', async () => {
-  const secretNeedles = /Bearer|token|claims|headers|cookie|secret|password|Authorization/i;
+  const secretNeedles =
+    /Bearer|token|claims|headers|cookie|secret|password|Authorization|FAKE-CONNECTION-CANARY|FAKE-SAS-CANARY|AccountKey|[?&]sig=/i;
   const services = stubServices();
   services.reddit.fetchThread = async () => {
-    throw new Error('upstream exploded with Authorization: Bearer SHOULD_NOT_LEAK and stack trace');
+    throw new Error(
+      'upstream exploded with Authorization: Bearer SHOULD_NOT_LEAK AccountKey=FAKE-CONNECTION-CANARY&sig=FAKE-SAS-CANARY',
+    );
   };
   services.wlh.search = async () => {
-    const error = new Error('rate-limited with cookie SHOULD_NOT_LEAK');
+    const error = new Error('rate-limited with cookie SHOULD_NOT_LEAK?sig=FAKE-SAS-CANARY');
     error.status = 429;
     throw error;
   };
