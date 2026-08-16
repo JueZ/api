@@ -97,9 +97,13 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            apps/api/package-lock.json
       - name: Audit registry dependencies
-        run: npm audit --audit-level=high
+        run: |
+          npm audit --audit-level=high
+          npm --prefix apps/api audit --omit=dev --audit-level=high
 
   codeqlJavascript:
     name: CodeQL javascript-typescript

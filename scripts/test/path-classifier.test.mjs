@@ -52,7 +52,12 @@ test('API, frontend, contract, and infrastructure fixtures select only their rel
 });
 
 test('workflow and dependency fixtures use the privileged broad profile', () => {
-  for (const filename of ['.github/workflows/pr-gate.yml', 'package-lock.json']) {
+  for (const filename of [
+    '.github/workflows/pr-gate.yml',
+    'package-lock.json',
+    'apps/api/package.json',
+    'apps/api/package-lock.json',
+  ]) {
     const result = classifyChangedFiles([file(filename)]);
     assert.deepEqual(result.profiles, ['privileged']);
     assert.equal(result.flags.privileged, true);
@@ -105,6 +110,20 @@ test('renames classify both old and new locations', () => {
   ]);
   assert.deepEqual(result.profiles, ['documentation-only', 'api-backend']);
   assert.equal(result.flags.backend, true);
+});
+
+test('removed and renamed Function manifests retain privileged dependency coverage', () => {
+  const removed = classifyChangedFiles([file('apps/api/package-lock.json', 'removed')]);
+  assert.deepEqual(removed.profiles, ['privileged']);
+  assert.equal(removed.flags.dependencies, true);
+
+  const renamed = classifyChangedFiles([
+    file('docs/retired-package-lock.json', 'renamed', {
+      previous_filename: 'apps/api/package-lock.json',
+    }),
+  ]);
+  assert.deepEqual(renamed.profiles, ['documentation-only', 'privileged']);
+  assert.equal(renamed.flags.dependencies, true);
 });
 
 test('git name-status parsing preserves rename identity and rejects malformed status', () => {

@@ -6,6 +6,7 @@
 - Protected `main` requires exactly `PR Gate` and `Security Gate` from GitHub Actions, with strict/up-to-date PRs, admin enforcement, linear history, conversation resolution, force-push denial, and deletion denial.
 - Repository-native exact-head squash auto-merge is enabled. No custom merge controller, check-run writer, arbitrary status rollup, or required model review exists.
 - `PR Gate` and `Security Gate` use one fail-closed path classifier. Pull requests run proportional validation and never build release artifacts.
+- The root/build and standalone `apps/api` Function manifests are independent dependency projects. Both receive pair-local lock policy, audit, Dependabot, CodeQL, and Trivy coverage; the release CycloneDX SBOM describes the exact installed production Function stage.
 - `Delivery v2` is the sole normal controller. A push to protected `main` classifies runtime impact, builds one immutable release when applicable, verifies test, promotes the same application digests to production, and verifies production.
 - `DELIVERY_V2_ENABLED=true` and `DEPLOY_PRODUCTION_ENABLED=true`. Production and one-shot package rollback share `production-deployment` concurrency.
 - The repair queue creates or updates one sanitized issue per exact run/fingerprint. It cannot invoke Codex or rewrite repository files.

@@ -25,7 +25,8 @@ Workflow files, policy, dependencies, scripts, agent instructions, authenticatio
 
 ## Runtime and supply chain
 
-- Releases are built once from protected `main`, checksummed, SBOM-described, attested, and uploaded immutably.
+- Root/build dependencies and the standalone deployed Function dependencies are classified, lock-policy checked, audited, and updated as independent npm projects.
+- Releases are built once from protected `main`, checksummed, attested, and uploaded immutably; the CycloneDX SBOM is generated from the exact installed production Function stage.
 - Azure deployment uses GitHub Actions OIDC, scoped identities, Key Vault references, and no long-lived client secret.
 - Test and production require the same application digests, exact source identity, public/authenticated smoke, telemetry correlation, and release ledger validation.
 - Production cannot promote a superseded main generation. Production and rollback serialize through one concurrency group.
