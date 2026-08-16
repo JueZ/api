@@ -1553,7 +1553,9 @@ test('buildRedditDiagnosticCapsule records request shape without raw token-like 
 
 test('redditThreadHandler returns 401 before reading body when unauthenticated', async () => {
   const originalAuthEnabled = process.env.AUTH_ENABLED;
+  const originalEnvironment = process.env.DEPLOYED_ENVIRONMENT_NAME;
   process.env.AUTH_ENABLED = 'true';
+  process.env.DEPLOYED_ENVIRONMENT_NAME = 'local';
   try {
     const response = await redditThreadHandler(
       {
@@ -1572,6 +1574,11 @@ test('redditThreadHandler returns 401 before reading body when unauthenticated',
       delete process.env.AUTH_ENABLED;
     } else {
       process.env.AUTH_ENABLED = originalAuthEnabled;
+    }
+    if (originalEnvironment === undefined) {
+      delete process.env.DEPLOYED_ENVIRONMENT_NAME;
+    } else {
+      process.env.DEPLOYED_ENVIRONMENT_NAME = originalEnvironment;
     }
   }
 });
@@ -1695,7 +1702,7 @@ function baseRepairableProblem(expected) {
 
 async function withEnv(values, fn) {
   const previous = {};
-  for (const [key, value] of Object.entries(values)) {
+  for (const [key, value] of Object.entries({ DEPLOYED_ENVIRONMENT_NAME: 'local', ...values })) {
     previous[key] = process.env[key];
     if (value === undefined) {
       delete process.env[key];

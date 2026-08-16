@@ -1133,7 +1133,7 @@ function context(extra = {}) {
 
 async function withEnv(values, fn) {
   const previous = {};
-  for (const [key, value] of Object.entries(values)) {
+  for (const [key, value] of Object.entries({ DEPLOYED_ENVIRONMENT_NAME: 'local', ...values })) {
     previous[key] = process.env[key];
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;

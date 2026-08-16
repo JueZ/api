@@ -148,8 +148,15 @@ export async function authenticateBearerToken(
   config: AuthConfig = readAuthConfig(),
   verifier: JwtVerifier = verifyJwtWithJose,
 ): Promise<AuthorizationResult> {
+  let environment: ReturnType<typeof getDeployedEnvironmentName>;
+  try {
+    environment = getDeployedEnvironmentName();
+  } catch (error) {
+    logAuthFailure(context, 'missing_config', config.debug, error);
+    return unauthorized('Authentication is not configured.');
+  }
+
   if (!config.enabled) {
-    const environment = getDeployedEnvironmentName();
     if (environment !== 'local') {
       logAuthFailure(context, 'missing_config', config.debug);
       return unauthorized('Authentication is not configured.');
@@ -165,7 +172,7 @@ export async function authenticateBearerToken(
     };
   }
 
-  const configError = validateConfig(config);
+  const configError = validateConfig(config, environment);
   if (configError) {
     logAuthFailure(context, 'missing_config', config.debug);
     return unauthorized('Authentication is not configured.');
@@ -190,21 +197,31 @@ export async function authenticateBearerToken(
     return unauthorized('Invalid bearer token.');
   }
 
-  const tenantId = typeof payload['tid'] === 'string' ? payload['tid'] : undefined;
+  const tokenClaims = readTokenIdentityClaims(payload);
+  if (!tokenClaims.valid) {
+    return forbidden('Token claim shape is not supported.');
+  }
+
+  const { tenantId, objectId, subject, clientId } = tokenClaims;
   if (config.allowedTenants.length > 0 && (!tenantId || !config.allowedTenants.includes(tenantId))) {
     return forbidden('Tenant is not allowed.');
   }
 
   const tokenAccess = getTokenAccess(payload);
+  if (!tokenAccess.valid) {
+    return forbidden('Token claim shape is not supported.');
+  }
 
-  const objectId = typeof payload['oid'] === 'string' ? payload['oid'] : undefined;
-  const subject = typeof payload.sub === 'string' ? payload.sub : undefined;
   if (!subject) {
     return forbidden('Subject claim is missing.');
   }
 
-  const clientId = getClientId(payload);
-  if (isServiceToken(payload, config, tokenAccess, objectId, clientId)) {
+  const tokenType = classifyToken(payload, config, tokenAccess, objectId);
+  if (tokenType === 'invalid') {
+    return forbidden('Token claim shape is not supported.');
+  }
+
+  if (tokenType === 'service') {
     if (!isAllowedServiceClient(objectId, clientId, config)) {
       return forbidden('Service client is not allowed.');
     }
@@ -217,7 +234,7 @@ export async function authenticateBearerToken(
         tenantId,
         clientId,
         tokenType: 'service',
-        scopes: tokenAccess.scopes,
+        scopes: [],
         roles: normalizeServiceRoles(tokenAccess.roles),
       },
     };
@@ -240,34 +257,47 @@ export async function authenticateBearerToken(
       clientId,
       tokenType: 'user',
       scopes: tokenAccess.scopes,
-      roles: tokenAccess.roles,
+      roles: [],
     },
   };
 }
 
 export async function verifyJwtWithJose(token: string, config: AuthConfig): Promise<JWTPayload> {
-  const issuers = configuredIssuers(config);
-  if (issuers.length === 0 || !config.audience) {
+  const issuerSources = configuredIssuerSources(config);
+  const acceptedIssuers = configuredIssuers(config);
+  if (issuerSources.length === 0 || !config.audience) {
     throw new Error('OIDC issuer and audience are required.');
+  }
+  if (issuerSources.some((issuer) => !isSupportedOidcUrl(issuer))) {
+    throw new Error('OIDC issuer URL is not supported.');
   }
 
   if (config.jwksUri) {
+    if (!isSupportedOidcUrl(config.jwksUri)) {
+      throw new Error('OIDC JWKS URL is not supported.');
+    }
+    // An explicit JWKS URI is a protected operator pin and may intentionally use
+    // a different origin. Discovery metadata below is untrusted and is therefore
+    // bound to the configured issuer and its own origin.
     const jwks = getJwks(config.jwksUri);
     const result = await jwtVerify(token, jwks, {
-      issuer: issuers.length === 1 ? issuers[0] : issuers,
+      issuer: acceptedIssuers.length === 1 ? acceptedIssuers[0] : acceptedIssuers,
       audience: config.audience,
+      requiredClaims: ['exp'],
     });
 
     return result.payload;
   }
 
-  for (const issuer of issuers) {
+  for (const issuer of issuerSources) {
+    const issuerAliases = uniqueStrings([issuer, ...deriveMicrosoftEntraV1IssuerAliases([issuer])]);
     try {
-      const jwksUri = await discoverJwksUri(issuer);
+      const jwksUri = await discoverJwksUri(issuer, fetch, { allowedIssuers: issuerAliases });
       const jwks = getJwks(jwksUri);
       const result = await jwtVerify(token, jwks, {
-        issuer,
+        issuer: issuerAliases.length === 1 ? issuerAliases[0] : issuerAliases,
         audience: config.audience,
+        requiredClaims: ['exp'],
       });
 
       return result.payload;
@@ -279,15 +309,25 @@ export async function verifyJwtWithJose(token: string, config: AuthConfig): Prom
   throw new Error('JWT verification failed for all configured issuers.');
 }
 
-function validateConfig(config: AuthConfig): string | undefined {
-  if (configuredIssuers(config).length === 0) {
+function validateConfig(
+  config: AuthConfig,
+  environment: ReturnType<typeof getDeployedEnvironmentName>,
+): string | undefined {
+  const issuerSources = configuredIssuerSources(config);
+  if (issuerSources.length === 0 || issuerSources.some((issuer) => !isSupportedOidcUrl(issuer))) {
     return 'OIDC_ISSUER';
   }
   if (!config.audience) {
     return 'OIDC_AUDIENCE';
   }
+  if (config.jwksUri && !isSupportedOidcUrl(config.jwksUri)) {
+    return 'OIDC_JWKS_URI';
+  }
   if (config.requiredScopes.length === 0) {
     return 'OIDC_REQUIRED_SCOPES';
+  }
+  if (environment !== 'local' && config.allowedTenants.length === 0) {
+    return 'OIDC_ALLOWED_TENANTS';
   }
   if (
     config.allowedObjectIds.length === 0 &&
@@ -301,17 +341,28 @@ function validateConfig(config: AuthConfig): string | undefined {
 }
 
 interface TokenAccess {
+  valid: boolean;
   scopes: string[];
   roles: string[];
 }
 
 function getTokenAccess(payload: JWTPayload): TokenAccess {
-  const scopeClaim = typeof payload['scp'] === 'string' ? payload['scp'] : '';
-  const scopes = scopeClaim.split(' ').filter(Boolean);
+  const scopeClaim = payload['scp'];
+  if (scopeClaim !== undefined && (typeof scopeClaim !== 'string' || scopeClaim.trim().length === 0)) {
+    return { valid: false, scopes: [], roles: [] };
+  }
+  const scopes = typeof scopeClaim === 'string' ? scopeClaim.split(' ').filter(Boolean) : [];
   const rolesClaim = payload['roles'];
-  const roles = Array.isArray(rolesClaim) ? rolesClaim.filter((role): role is string => typeof role === 'string') : [];
+  if (
+    rolesClaim !== undefined &&
+    (!Array.isArray(rolesClaim) || rolesClaim.some((role) => typeof role !== 'string' || role.length === 0))
+  ) {
+    return { valid: false, scopes: [], roles: [] };
+  }
+  const roles = Array.isArray(rolesClaim) ? (rolesClaim as string[]) : [];
 
   return {
+    valid: true,
     scopes,
     roles,
   };
@@ -321,46 +372,107 @@ function normalizeServiceRoles(roles: string[]): string[] {
   return [...new Set(roles.map((role) => serviceRolePermissionAliases.get(role) ?? role))];
 }
 
-function isServiceToken(
+type TokenClassification = 'user' | 'service' | 'invalid';
+
+function classifyToken(
   payload: JWTPayload,
   config: AuthConfig,
   tokenAccess: TokenAccess,
   objectId: string | undefined,
-  clientId: string | undefined,
-): boolean {
-  if (payload['idtyp'] === 'app') {
-    return true;
+): TokenClassification {
+  const idtyp = payload['idtyp'];
+  if (idtyp !== undefined && idtyp !== 'app' && idtyp !== 'user') {
+    return 'invalid';
+  }
+
+  const credentialEvidence = getClientCredentialEvidence(payload);
+  if (!credentialEvidence.valid) {
+    return 'invalid';
+  }
+
+  if (idtyp === 'app') {
+    if (tokenAccess.scopes.length > 0 || credentialEvidence.publicClient) return 'invalid';
+    return 'service';
+  }
+
+  if (idtyp === 'user' || tokenAccess.scopes.length > 0) {
+    return 'user';
   }
 
   // Microsoft Entra app-only access tokens are documented to carry application
   // permissions in the `roles` claim, but not all token versions include the
-  // optional `idtyp: app` marker. Treat a roles-only token as service auth only
-  // when it also matches the explicit service-client allowlists. Delegated user
-  // tokens with `scp` keep the user path and still require the user allowlist.
-  return (
-    tokenAccess.scopes.length === 0 &&
+  // optional `idtyp: app` marker. For that compatibility path, require a
+  // confidential-client marker and the service principal's object ID. A client
+  // ID alone is not enough because it can also identify a delegated OAuth app.
+  if (
     tokenAccess.roles.length > 0 &&
-    hasClientCredentialAuthMethod(payload) &&
-    isAllowedServiceClient(objectId, clientId, config)
-  );
-}
-
-function hasClientCredentialAuthMethod(payload: JWTPayload): boolean {
-  return typeof payload['azpacr'] === 'string' || typeof payload['appidacr'] === 'string';
-}
-
-function getClientId(payload: JWTPayload): string | undefined {
-  const azp = payload['azp'];
-  if (typeof azp === 'string' && azp.length > 0) {
-    return azp;
+    credentialEvidence.confidentialClient &&
+    objectId !== undefined &&
+    config.allowedAppObjectIds.includes(objectId)
+  ) {
+    return 'service';
   }
 
-  const appId = payload['appid'];
-  if (typeof appId === 'string' && appId.length > 0) {
-    return appId;
+  return 'user';
+}
+
+interface ClientCredentialEvidence {
+  valid: boolean;
+  confidentialClient: boolean;
+  publicClient: boolean;
+}
+
+function getClientCredentialEvidence(payload: JWTPayload): ClientCredentialEvidence {
+  const markers = [payload['azpacr'], payload['appidacr']].filter((value) => value !== undefined);
+  if (
+    markers.some((value) => typeof value !== 'string' || !['0', '1', '2'].includes(value)) ||
+    new Set(markers).size > 1
+  ) {
+    return { valid: false, confidentialClient: false, publicClient: false };
   }
 
-  return undefined;
+  const marker = markers[0];
+  return {
+    valid: true,
+    confidentialClient: marker === '1' || marker === '2',
+    publicClient: marker === '0',
+  };
+}
+
+interface TokenIdentityClaims {
+  valid: boolean;
+  tenantId?: string;
+  objectId?: string;
+  subject?: string;
+  clientId?: string;
+}
+
+function readTokenIdentityClaims(payload: JWTPayload): TokenIdentityClaims {
+  const tenant = readOptionalNonEmptyStringClaim(payload, 'tid');
+  const object = readOptionalNonEmptyStringClaim(payload, 'oid');
+  const subject = readOptionalNonEmptyStringClaim(payload, 'sub');
+  const authorizedParty = readOptionalNonEmptyStringClaim(payload, 'azp');
+  const application = readOptionalNonEmptyStringClaim(payload, 'appid');
+  if (!tenant.valid || !object.valid || !subject.valid || !authorizedParty.valid || !application.valid) {
+    return { valid: false };
+  }
+  if (authorizedParty.value && application.value && authorizedParty.value !== application.value) {
+    return { valid: false };
+  }
+
+  return {
+    valid: true,
+    tenantId: tenant.value,
+    objectId: object.value,
+    subject: subject.value,
+    clientId: authorizedParty.value ?? application.value,
+  };
+}
+
+function readOptionalNonEmptyStringClaim(payload: JWTPayload, name: string): { valid: boolean; value?: string } {
+  const value = payload[name];
+  if (value === undefined) return { valid: true };
+  return typeof value === 'string' && value.length > 0 ? { valid: true, value } : { valid: false };
 }
 
 function isAllowedServiceClient(
@@ -388,6 +500,7 @@ function isAllowedDelegatedClient(clientId: string | undefined, config: AuthConf
 }
 
 export interface OidcDiscoveryOptions {
+  allowedIssuers?: readonly string[];
   timeoutMs?: number;
   maxAttempts?: number;
   cacheTtlMs?: number;
@@ -401,23 +514,29 @@ export async function discoverJwksUri(
   fetchImpl: typeof fetch = fetch,
   options: OidcDiscoveryOptions = {},
 ): Promise<string> {
-  const normalizedIssuer = issuer.replace(/\/$/, '');
+  const normalizedIssuer = normalizeSupportedOidcUrl(issuer, 'issuer');
+  const allowedIssuers = uniqueStrings(
+    (options.allowedIssuers ?? [normalizedIssuer, ...deriveMicrosoftEntraV1IssuerAliases([normalizedIssuer])]).map(
+      (allowedIssuer) => normalizeSupportedOidcUrl(allowedIssuer, 'metadata issuer'),
+    ),
+  );
+  const cacheKey = `${normalizedIssuer}\n${[...allowedIssuers].sort().join(',')}`;
   const now = options.now ?? Date.now;
-  const cached = discoveryCache.get(normalizedIssuer);
+  const cached = discoveryCache.get(cacheKey);
   if (cached && cached.expiresAt > now()) return cached.promise;
-  if (cached) discoveryCache.delete(normalizedIssuer);
+  if (cached) discoveryCache.delete(cacheKey);
 
-  const promise = discoverJwksUriWithRetry(normalizedIssuer, fetchImpl, options);
+  const promise = discoverJwksUriWithRetry(normalizedIssuer, allowedIssuers, fetchImpl, options);
   const entry = {
     promise,
     expiresAt: now() + (options.cacheTtlMs ?? 10 * 60_000),
   };
-  discoveryCache.set(normalizedIssuer, entry);
+  discoveryCache.set(cacheKey, entry);
   try {
     return await promise;
   } catch (error) {
-    if (discoveryCache.get(normalizedIssuer)?.promise === promise) {
-      discoveryCache.delete(normalizedIssuer);
+    if (discoveryCache.get(cacheKey)?.promise === promise) {
+      discoveryCache.delete(cacheKey);
     }
     throw error;
   }
@@ -430,6 +549,7 @@ export function clearOidcCachesForTesting(): void {
 
 async function discoverJwksUriWithRetry(
   normalizedIssuer: string,
+  allowedIssuers: readonly string[],
   fetchImpl: typeof fetch,
   options: OidcDiscoveryOptions,
 ): Promise<string> {
@@ -439,24 +559,33 @@ async function discoverJwksUriWithRetry(
   const sleep =
     options.sleep ?? ((milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   let lastError: unknown;
+  const discoveryUrl = new URL(`${normalizedIssuer}/.well-known/openid-configuration`);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const response = await fetchImpl(`${normalizedIssuer}/.well-known/openid-configuration`, {
+      const response = await fetchImpl(discoveryUrl, {
         headers: { Accept: 'application/json' },
+        redirect: 'error',
         signal: AbortSignal.timeout(timeoutMs),
       });
+      if (response.redirected || (response.url && response.url !== discoveryUrl.toString())) {
+        throw new Error('OIDC discovery redirects are not allowed.');
+      }
       if (!response.ok) throw new Error(`OIDC discovery returned HTTP ${response.status}.`);
-      const metadata = (await response.json()) as { jwks_uri?: unknown };
+      const metadata = (await response.json()) as { issuer?: unknown; jwks_uri?: unknown };
+      if (typeof metadata.issuer !== 'string' || metadata.issuer.length === 0) {
+        throw new Error('OIDC discovery did not return issuer.');
+      }
+      const metadataIssuer = normalizeSupportedOidcUrl(metadata.issuer, 'metadata issuer');
+      if (!allowedIssuers.includes(metadataIssuer)) {
+        throw new Error('OIDC discovery issuer does not match the configured issuer.');
+      }
       if (typeof metadata.jwks_uri !== 'string' || metadata.jwks_uri.length === 0) {
         throw new Error('OIDC discovery did not return jwks_uri.');
       }
-      const jwksUrl = new URL(metadata.jwks_uri);
-      if (
-        jwksUrl.protocol !== 'https:' &&
-        !(jwksUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(jwksUrl.hostname))
-      ) {
-        throw new Error('OIDC discovery returned an unsupported jwks_uri.');
+      const jwksUrl = new URL(normalizeSupportedOidcUrl(metadata.jwks_uri, 'jwks_uri'));
+      if (jwksUrl.origin !== discoveryUrl.origin) {
+        throw new Error('OIDC discovery returned a cross-origin jwks_uri.');
       }
       return jwksUrl.toString();
     } catch (error) {
@@ -592,8 +721,12 @@ function logAuthFailure(context: InvocationContext, reason: string, debug: boole
 }
 
 function configuredIssuers(config: AuthConfig): string[] {
-  const issuers = config.issuers && config.issuers.length > 0 ? config.issuers : config.issuer ? [config.issuer] : [];
+  const issuers = configuredIssuerSources(config);
   return uniqueStrings([...issuers, ...deriveMicrosoftEntraV1IssuerAliases(issuers)]);
+}
+
+function configuredIssuerSources(config: AuthConfig): string[] {
+  return config.issuers && config.issuers.length > 0 ? config.issuers : config.issuer ? [config.issuer] : [];
 }
 
 function deriveMicrosoftEntraV1IssuerAliases(issuers: string[]): string[] {
@@ -638,4 +771,37 @@ function normalizeOptionalUrl(value: string | undefined): string | undefined {
 
 function normalizeUrl(value: string): string {
   return value.trim().replace(/\/$/, '');
+}
+
+function isSupportedOidcUrl(value: string): boolean {
+  try {
+    normalizeSupportedOidcUrl(value, 'URL');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeSupportedOidcUrl(value: string, label: string): string {
+  if (value !== value.trim()) {
+    throw new Error(`OIDC ${label} URL is malformed.`);
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`OIDC ${label} URL is malformed.`);
+  }
+  const loopbackHttp =
+    parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname.toLowerCase());
+  if (
+    (parsed.protocol !== 'https:' && !loopbackHttp) ||
+    parsed.username.length > 0 ||
+    parsed.password.length > 0 ||
+    parsed.search.length > 0 ||
+    parsed.hash.length > 0
+  ) {
+    throw new Error(`OIDC ${label} URL is unsupported.`);
+  }
+  return parsed.toString().replace(/\/$/, '');
 }

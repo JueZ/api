@@ -10,6 +10,15 @@ import {
   verifyJwtWithJose,
 } from '../dist/shared/security/auth.js';
 
+const originalDeployedEnvironmentName = process.env.DEPLOYED_ENVIRONMENT_NAME;
+test.before(() => {
+  process.env.DEPLOYED_ENVIRONMENT_NAME = 'local';
+});
+test.after(() => {
+  if (originalDeployedEnvironmentName === undefined) delete process.env.DEPLOYED_ENVIRONMENT_NAME;
+  else process.env.DEPLOYED_ENVIRONMENT_NAME = originalDeployedEnvironmentName;
+});
+
 const baseConfig = Object.freeze({
   enabled: true,
   issuer: 'https://login.example.test/tenant/v2.0',
@@ -56,7 +65,8 @@ async function authorize(authorization, payload, overrides = {}, policy) {
 
 async function withDeployedEnvironment(environment, action) {
   const previous = process.env.DEPLOYED_ENVIRONMENT_NAME;
-  process.env.DEPLOYED_ENVIRONMENT_NAME = environment;
+  if (environment === undefined) delete process.env.DEPLOYED_ENVIRONMENT_NAME;
+  else process.env.DEPLOYED_ENVIRONMENT_NAME = environment;
   try {
     return await action();
   } finally {
@@ -91,6 +101,23 @@ test('disabled authentication fails closed outside local development', async () 
   assert.equal(result.ok, false);
   assert.equal(result.response.status, 401);
   assert.equal(result.response.jsonBody.error.message, 'Authentication is not configured.');
+});
+
+test('missing or malformed environment never receives the local development principal', async () => {
+  for (const environment of [undefined, '', 'LOCAL', 'production']) {
+    const result = await withDeployedEnvironment(environment, async () =>
+      authorizeRequest(
+        requestWithAuthorization(undefined),
+        context(),
+        { ...baseConfig, enabled: false },
+        await verifierReturning({}),
+      ),
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(result.response.status, 401);
+    assert.equal(result.response.jsonBody.error.message, 'Authentication is not configured.');
+  }
 });
 
 test('disabled authentication retains the local development principal only in local', async () => {
@@ -253,7 +280,7 @@ test('allowed subject fallback works only when oid is absent', async () => {
   const result = await authorize('Bearer valid-token', {
     sub: 'allowed-sub',
     azp: 'allowed-delegated-client-id',
-    roles: ['catalogue.read'],
+    scp: 'catalogue.read',
   });
 
   assert.equal(result.ok, true);
@@ -263,8 +290,8 @@ test('allowed subject fallback works only when oid is absent', async () => {
     tenantId: undefined,
     clientId: 'allowed-delegated-client-id',
     tokenType: 'user',
-    scopes: [],
-    roles: ['catalogue.read'],
+    scopes: ['catalogue.read'],
+    roles: [],
   });
 });
 
@@ -337,6 +364,147 @@ test('service role aliases do not grant delegated user permissions', async () =>
   assert.equal(result.response.jsonBody.error.message, 'Required permission is missing: catalogue.read.');
 });
 
+test('explicit user token can never enter the service authorization path', async () => {
+  const result = await authorize('Bearer valid-token', {
+    sub: 'user-shaped-subject',
+    oid: 'allowed-app-oid',
+    idtyp: 'user',
+    azp: 'allowed-client-id',
+    azpacr: '2',
+    roles: ['catalogue.read'],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.message, 'User is not allowed.');
+});
+
+test('ambiguous or unknown idtyp values are rejected', async () => {
+  for (const idtyp of ['app+user', 'service']) {
+    const result = await authorize('Bearer valid-token', {
+      sub: 'user-shaped-subject',
+      oid: 'allowed-app-oid',
+      idtyp,
+      azp: 'allowed-client-id',
+      azpacr: '2',
+      roles: ['catalogue.read'],
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.response.status, 403);
+    assert.equal(result.response.jsonBody.error.message, 'Token claim shape is not supported.');
+  }
+});
+
+test('delegated user permissions come only from scp and never from app roles', async () => {
+  const result = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'user-subject',
+      oid: 'allowed-oid',
+      idtyp: 'user',
+      azp: 'allowed-delegated-client-id',
+      azpacr: '2',
+      scp: 'bring.read',
+      roles: ['bring.write'],
+    },
+    {},
+    {
+      permission: 'bring.write',
+      allowedTokenTypes: ['user'],
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.message, 'Required permission is missing: bring.write.');
+});
+
+test('contradictory app and delegated permission claims are rejected', async () => {
+  const result = await authorize('Bearer valid-token', {
+    sub: 'service-subject',
+    oid: 'allowed-app-oid',
+    idtyp: 'app',
+    azp: 'allowed-client-id',
+    scp: 'catalogue.read',
+    roles: ['catalogue.read'],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.message, 'Token claim shape is not supported.');
+});
+
+test('roles-only compatibility accepts only confidential-client markers for an allowlisted app object', async () => {
+  const invalidMarkers = [
+    { azpacr: '0' },
+    { azpacr: '' },
+    { azpacr: '3' },
+    { azpacr: 2 },
+    { azpacr: '1', appidacr: '2' },
+  ];
+
+  for (const markerClaims of invalidMarkers) {
+    const result = await authorize('Bearer valid-token', {
+      sub: 'service-subject',
+      oid: 'allowed-app-oid',
+      azp: 'service-client-id',
+      roles: ['catalogue.read'],
+      ...markerClaims,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.response.status, 403);
+  }
+
+  for (const markerClaims of [{ azpacr: '1' }, { azpacr: '2' }, { appidacr: '1' }, { appidacr: '2' }]) {
+    const result = await authorize('Bearer valid-token', {
+      sub: 'service-subject',
+      oid: 'allowed-app-oid',
+      appid: 'service-client-id',
+      roles: ['catalogue.read'],
+      ...markerClaims,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.user.tokenType, 'service');
+  }
+});
+
+test('conflicting client identifiers and malformed identity claims are rejected', async () => {
+  for (const payload of [
+    {
+      sub: 'allowed-sub',
+      oid: 'allowed-oid',
+      azp: 'allowed-delegated-client-id',
+      appid: 'different-client-id',
+      scp: 'catalogue.read',
+    },
+    {
+      sub: 'allowed-sub',
+      oid: '',
+      azp: 'allowed-delegated-client-id',
+      scp: 'catalogue.read',
+    },
+    {
+      sub: 'allowed-sub',
+      oid: 42,
+      azp: 'allowed-delegated-client-id',
+      scp: 'catalogue.read',
+    },
+    {
+      sub: 'allowed-sub',
+      oid: 'allowed-oid',
+      idtyp: 'unexpected',
+      azp: 'allowed-delegated-client-id',
+      scp: 'catalogue.read',
+    },
+  ]) {
+    const result = await authorize('Bearer valid-token', payload);
+    assert.equal(result.ok, false);
+    assert.equal(result.response.status, 403);
+    assert.equal(result.response.jsonBody.error.message, 'Token claim shape is not supported.');
+  }
+});
+
 test('app-only service token can be allowed by client ID', async () => {
   const result = await authorize(
     'Bearer valid-token',
@@ -379,12 +547,12 @@ test('roles-only service token without idtyp but with client-credential marker c
   });
 });
 
-test('roles-only service token without idtyp but with client-credential marker can be allowed by client ID', async () => {
+test('roles-only token without idtyp cannot use a service client ID alone to bypass the user allowlist', async () => {
   const result = await authorize(
     'Bearer valid-token',
     {
       sub: 'service-subject',
-      oid: 'unlisted-app-oid',
+      oid: 'blocked-user-oid',
       tid: 'tenant-id',
       azp: 'allowed-client-id',
       azpacr: '2',
@@ -393,9 +561,9 @@ test('roles-only service token without idtyp but with client-credential marker c
     { allowedAppObjectIds: [] },
   );
 
-  assert.equal(result.ok, true);
-  assert.equal(result.user.tokenType, 'service');
-  assert.equal(result.user.clientId, 'allowed-client-id');
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 403);
+  assert.equal(result.response.jsonBody.error.message, 'User is not allowed.');
 });
 
 test('delegated user token fails closed when delegated client allowlist is empty', async () => {
@@ -567,6 +735,61 @@ test('allowed tenants are enforced when configured', async () => {
   assert.equal(result.response.status, 403);
 });
 
+test('non-local authentication requires a non-empty tenant allowlist at the request boundary', async () => {
+  const result = await withDeployedEnvironment('test', async () =>
+    authorizeRequest(
+      requestWithAuthorization('Bearer valid-token'),
+      context(),
+      { ...baseConfig, allowedTenants: [] },
+      await verifierReturning({
+        sub: 'user-subject',
+        oid: 'allowed-oid',
+        tid: 'tenant-id',
+        azp: 'allowed-delegated-client-id',
+        scp: 'catalogue.read',
+      }),
+    ),
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.response.status, 401);
+  assert.equal(result.response.jsonBody.error.message, 'Authentication is not configured.');
+});
+
+test('non-local authentication requires an exact tenant claim', async () => {
+  await withDeployedEnvironment('test', async () => {
+    for (const tenantClaims of [{}, { tid: 'wrong-tenant' }]) {
+      const result = await authorize(
+        'Bearer valid-token',
+        {
+          sub: 'user-subject',
+          oid: 'allowed-oid',
+          azp: 'allowed-delegated-client-id',
+          scp: 'catalogue.read',
+          ...tenantClaims,
+        },
+        { allowedTenants: ['expected-tenant'] },
+      );
+      assert.equal(result.ok, false);
+      assert.equal(result.response.status, 403);
+      assert.equal(result.response.jsonBody.error.message, 'Tenant is not allowed.');
+    }
+
+    const allowed = await authorize(
+      'Bearer valid-token',
+      {
+        sub: 'user-subject',
+        oid: 'allowed-oid',
+        tid: 'expected-tenant',
+        azp: 'allowed-delegated-client-id',
+        scp: 'catalogue.read',
+      },
+      { allowedTenants: ['expected-tenant'] },
+    );
+    assert.equal(allowed.ok, true);
+  });
+});
+
 test('missing required OIDC config fails closed when auth is enabled', async () => {
   const result = await authorizeRequest(
     requestWithAuthorization('Bearer valid-token'),
@@ -609,7 +832,10 @@ test('failed OIDC discovery is evicted so a later request can recover', async ()
     if (requests === 1) {
       return new Response('temporarily unavailable', { status: 503 });
     }
-    return Response.json({ jwks_uri: 'https://recoverable-issuer.example.test/jwks' });
+    return Response.json({
+      issuer: 'https://recoverable-issuer.example.test',
+      jwks_uri: 'https://recoverable-issuer.example.test/jwks',
+    });
   };
 
   await assert.rejects(discoverJwksUri(issuer, fetchStub, { maxAttempts: 1, retryDelayMs: 0 }), /HTTP 503/);
@@ -627,15 +853,95 @@ test('OIDC discovery rejects non-local HTTP JWKS endpoints', async () => {
     discoverJwksUri(
       'https://issuer-with-insecure-jwks.example.test',
       async () =>
-        new Response(JSON.stringify({ jwks_uri: 'http://keys.example.test/jwks' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
+        new Response(
+          JSON.stringify({
+            issuer: 'https://issuer-with-insecure-jwks.example.test',
+            jwks_uri: 'http://keys.example.test/jwks',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
       { maxAttempts: 1 },
     ),
-    /unsupported jwks_uri/,
+    /jwks_uri URL is unsupported/,
   );
   clearOidcCachesForTesting();
+});
+
+test('OIDC discovery binds metadata issuer and JWKS origin and rejects malformed metadata URLs', async () => {
+  const issuer = 'https://issuer.example.test';
+  const rejectedMetadata = [
+    {
+      metadata: { issuer: 'https://other-issuer.example.test', jwks_uri: `${issuer}/jwks` },
+      message: /issuer does not match/,
+    },
+    {
+      metadata: { issuer, jwks_uri: 'https://keys.example.test/jwks' },
+      message: /cross-origin jwks_uri/,
+    },
+    {
+      metadata: { issuer, jwks_uri: 'https://user:password@issuer.example.test/jwks' },
+      message: /jwks_uri URL is unsupported/,
+    },
+    {
+      metadata: { issuer, jwks_uri: `${issuer}/jwks?tenant=other` },
+      message: /jwks_uri URL is unsupported/,
+    },
+    {
+      metadata: { issuer, userinfo_endpoint: `${issuer}/userinfo` },
+      message: /did not return jwks_uri/,
+    },
+  ];
+
+  for (const { metadata, message } of rejectedMetadata) {
+    clearOidcCachesForTesting();
+    await assert.rejects(
+      discoverJwksUri(issuer, async () => Response.json(metadata), { maxAttempts: 1 }),
+      message,
+    );
+  }
+  clearOidcCachesForTesting();
+});
+
+test('OIDC discovery rejects redirects and respects its bounded timeout', async () => {
+  let redirectedRequests = 0;
+  const server = createServer((request, response) => {
+    if (request.url === '/redirect/.well-known/openid-configuration') {
+      response.writeHead(302, { location: '/redirected-metadata' });
+      response.end();
+      return;
+    }
+    if (request.url === '/redirected-metadata') {
+      redirectedRequests += 1;
+      response.end('{}');
+      return;
+    }
+    if (request.url === '/timeout/.well-known/openid-configuration') {
+      return;
+    }
+    response.statusCode = 404;
+    response.end();
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    clearOidcCachesForTesting();
+    await assert.rejects(discoverJwksUri(`${baseUrl}/redirect`, fetch, { maxAttempts: 1 }));
+    assert.equal(redirectedRequests, 0);
+
+    clearOidcCachesForTesting();
+    await assert.rejects(
+      discoverJwksUri(`${baseUrl}/timeout`, fetch, { maxAttempts: 1, timeoutMs: 10 }),
+      /timeout|aborted/i,
+    );
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    clearOidcCachesForTesting();
+  }
 });
 
 test('verifyJwtWithJose discovers JWKS for the matching configured issuer', async () => {
@@ -650,12 +956,12 @@ test('verifyJwtWithJose discovers JWKS for the matching configured issuer', asyn
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
     if (request.url === '/issuer-a/.well-known/openid-configuration') {
       response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({ jwks_uri: `${baseUrl}/issuer-a/jwks` }));
+      response.end(JSON.stringify({ issuer: `${baseUrl}/issuer-a`, jwks_uri: `${baseUrl}/issuer-a/jwks` }));
       return;
     }
     if (request.url === '/issuer-b/.well-known/openid-configuration') {
       response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({ jwks_uri: `${baseUrl}/issuer-b/jwks` }));
+      response.end(JSON.stringify({ issuer: `${baseUrl}/issuer-b`, jwks_uri: `${baseUrl}/issuer-b/jwks` }));
       return;
     }
     if (request.url === '/issuer-a/jwks') {
@@ -697,6 +1003,112 @@ test('verifyJwtWithJose discovers JWKS for the matching configured issuer', asyn
   }
 });
 
+test('explicit operator-configured JWKS preserves issuer, audience, and bounded token-time validation', async () => {
+  const { publicKey, privateKey } = await generateKeyPair('RS256');
+  const jwk = await exportJWK(publicKey);
+  jwk.kid = 'claim-matrix-key';
+  const issuer = 'https://configured-issuer.example.test';
+  const audience = 'api://catalogue-test';
+  const server = createServer((request, response) => {
+    if (request.url === '/jwks') {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ keys: [jwk] }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end();
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const config = {
+      ...baseConfig,
+      issuer,
+      issuers: [issuer],
+      audience,
+      jwksUri: `http://127.0.0.1:${server.address().port}/jwks`,
+    };
+    const sign = async ({ tokenIssuer = issuer, tokenAudience = audience, expiration = '5m', notBefore } = {}) => {
+      let builder = new SignJWT({ scp: 'catalogue.read' })
+        .setProtectedHeader({ alg: 'RS256', kid: 'claim-matrix-key' })
+        .setIssuer(tokenIssuer)
+        .setAudience(tokenAudience)
+        .setSubject('allowed-sub');
+      if (expiration !== null) builder = builder.setExpirationTime(expiration);
+      if (notBefore !== undefined) builder = builder.setNotBefore(notBefore);
+      return builder.sign(privateKey);
+    };
+
+    assert.equal((await verifyJwtWithJose(await sign(), config)).sub, 'allowed-sub');
+    for (const token of [
+      await sign({ tokenIssuer: 'https://wrong-issuer.example.test' }),
+      await sign({ tokenAudience: 'api://wrong-audience' }),
+      await sign({ expiration: Math.floor(Date.now() / 1000) - 1 }),
+      await sign({ notBefore: '5m' }),
+      await sign({ expiration: null }),
+    ]) {
+      await assert.rejects(verifyJwtWithJose(token, config));
+    }
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    clearOidcCachesForTesting();
+  }
+});
+
+test('remote JWKS cache refreshes an unknown key after provider key rotation', async () => {
+  const oldKeys = await generateKeyPair('RS256');
+  const newKeys = await generateKeyPair('RS256');
+  const oldJwk = await exportJWK(oldKeys.publicKey);
+  const newJwk = await exportJWK(newKeys.publicKey);
+  oldJwk.kid = 'old-key';
+  newJwk.kid = 'new-key';
+  let activeJwk = oldJwk;
+  let jwksRequests = 0;
+
+  const server = createServer((request, response) => {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    if (request.url === '/issuer/.well-known/openid-configuration') {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ issuer: `${baseUrl}/issuer`, jwks_uri: `${baseUrl}/issuer/jwks` }));
+      return;
+    }
+    if (request.url === '/issuer/jwks') {
+      jwksRequests += 1;
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ keys: [activeJwk] }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end();
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const realDateNow = Date.now;
+  try {
+    clearOidcCachesForTesting();
+    const issuer = `http://127.0.0.1:${server.address().port}/issuer`;
+    const config = { ...baseConfig, issuer, issuers: [issuer], audience: 'api://catalogue-test' };
+    const sign = (privateKey, kid) =>
+      new SignJWT({ scp: 'catalogue.read' })
+        .setProtectedHeader({ alg: 'RS256', kid })
+        .setIssuer(issuer)
+        .setAudience('api://catalogue-test')
+        .setSubject('allowed-sub')
+        .setExpirationTime('5m')
+        .sign(privateKey);
+
+    assert.equal((await verifyJwtWithJose(await sign(oldKeys.privateKey, 'old-key'), config)).sub, 'allowed-sub');
+    activeJwk = newJwk;
+    Date.now = () => realDateNow() + 31_000;
+    assert.equal((await verifyJwtWithJose(await sign(newKeys.privateKey, 'new-key'), config)).sub, 'allowed-sub');
+    assert.ok(jwksRequests >= 2);
+  } finally {
+    Date.now = realDateNow;
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    clearOidcCachesForTesting();
+  }
+});
+
 test('tenant-specific Microsoft Entra v2 issuer also accepts v1 access token issuer', async () => {
   const entraTenantId = '11111111-2222-3333-4444-555555555555';
   const issuerKeys = await generateKeyPair('RS256');
@@ -707,17 +1119,24 @@ test('tenant-specific Microsoft Entra v2 issuer also accepts v1 access token iss
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
     if (request.url === `/${entraTenantId}/v2.0/.well-known/openid-configuration`) {
       response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({ jwks_uri: `${baseUrl}/${entraTenantId}/v2.0/jwks` }));
+      response.end(
+        JSON.stringify({
+          issuer: `${baseUrl}/${entraTenantId}/v2.0`,
+          jwks_uri: `${baseUrl}/${entraTenantId}/v2.0/jwks`,
+        }),
+      );
       return;
     }
     if (request.url === `/${entraTenantId}/.well-known/openid-configuration`) {
       response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({ jwks_uri: `${baseUrl}/${entraTenantId}/jwks` }));
+      response.end(
+        JSON.stringify({ issuer: `${baseUrl}/${entraTenantId}/`, jwks_uri: `${baseUrl}/${entraTenantId}/jwks` }),
+      );
       return;
     }
     if (request.url === `/${entraTenantId}/v2.0/jwks`) {
       response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({ keys: [] }));
+      response.end(JSON.stringify({ keys: [issuerJwk] }));
       return;
     }
     if (request.url === `/${entraTenantId}/jwks`) {

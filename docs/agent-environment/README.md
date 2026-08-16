@@ -11,4 +11,4 @@ npm run agent:env:reset
 npm run agent:env:stop
 ```
 
-Azure Functions Core Tools (`func`) and installed Node dependencies are prerequisites. Startup never deploys or contacts Azure. Provider fixtures listen only on loopback and reject unknown requests. The environment starts no Codex process and does not read Codex authentication.
+Azure Functions Core Tools (`func`) and installed Node dependencies are prerequisites. The launcher passes the explicit `DEPLOYED_ENVIRONMENT_NAME=local` trust marker only to the local Functions process. Startup never deploys or contacts Azure. Provider fixtures listen only on loopback and reject unknown requests. The environment starts no Codex process and does not read Codex authentication.
