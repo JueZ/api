@@ -11,7 +11,9 @@ MCP_RESOURCE_ORIGIN=https://<function-host>
 MCP_ALLOWED_ORIGINS=https://<exact trusted client origin>[,...]
 ```
 
-`MCP_RESOURCE_ORIGIN` must be one canonical HTTPS origin with no path, query, fragment, wildcard, localhost, or IP literal in test/production. The gateway verifies `Host`, forwarded host/scheme, and browser `Origin` against canonical configuration before processing JSON-RPC.
+`MCP_RESOURCE_ORIGIN` must be one non-localhost, non-IP HTTPS origin with no path, query, fragment, or wildcard in test/production. The gateway requires the request URL authority and `Host` to match it; any supplied forwarded host/scheme must also match. `Host`, `X-Forwarded-Host`, `X-Forwarded-Proto`, and browser `Origin` must each be a single unambiguous value. The only HTTP exception is an explicit loopback request in local development, and forwarded headers cannot change its advertised resource origin.
+
+The supported deployed topology is host-preserving: Azure Functions must present the configured public authority in both `HttpRequest.url` and `Host`. Canonical Azure `X-Forwarded-Host`/`X-Forwarded-Proto` values are accepted but cannot override a different request authority. A proxy that rewrites the worker-facing authority needs an explicit trusted-proxy policy before it is supported.
 
 Each protected tool advertises the fully qualified permission derived from `OIDC_AUDIENCE`, for example `api://<api-app-id>/reddit.read`. Challenges advertise only the missing operation scope. Backend tokens contain the short `scp`/role value.
 

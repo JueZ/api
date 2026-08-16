@@ -5,6 +5,8 @@ export class BodyTooLargeError extends Error {
   }
 }
 
+export const AUTHENTICATED_PROVIDER_JSON_BODY_MAX_BYTES = 64 * 1024;
+
 export async function readResponseTextWithLimit(response: Response, maxBytes: number): Promise<string> {
   assertDeclaredLength(response.headers, maxBytes);
   return readStreamTextWithLimit(response.body, maxBytes);
@@ -13,6 +15,10 @@ export async function readResponseTextWithLimit(response: Response, maxBytes: nu
 export async function readRequestTextWithLimit(request: RequestLike, maxBytes: number): Promise<string> {
   assertDeclaredLength(request.headers, maxBytes);
   return readStreamTextWithLimit(request.body, maxBytes);
+}
+
+export async function readRequestJsonWithLimit<T>(request: RequestLike, maxBytes: number): Promise<T> {
+  return JSON.parse(await readRequestTextWithLimit(request, maxBytes)) as T;
 }
 
 interface RequestLike {

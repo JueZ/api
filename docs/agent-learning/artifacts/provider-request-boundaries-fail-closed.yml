@@ -1,0 +1,20 @@
+version: 2
+id: provider-request-boundaries-fail-closed
+fingerprint: runtime.provider-request-boundary-confidentiality
+severity: high
+invariant: Authenticated provider bodies are byte-bounded before parsing or provider work, untrusted provider data never becomes public or logged detail, and deployed MCP authority is accepted only from single canonical values.
+scope:
+  - apps/api/src/functions/reddit*.ts
+  - apps/api/src/functions/wlhSearch.ts
+  - apps/api/src/shared/reddit/**
+  - apps/api/src/mcp/auth.ts
+prevention:
+  - kind: regression-test
+    path: apps/api/test/provider-request-boundaries.test.mjs
+  - kind: regression-test
+    path: apps/api/test/reddit.test.mjs
+  - kind: regression-test
+    path: apps/api/test/mcp-auth.test.mjs
+broken: 78a92ca7a428377d60cb83c1c30f1940e354d169
+recurrenceCount: 1
+status: active

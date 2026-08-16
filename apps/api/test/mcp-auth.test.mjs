@@ -5,6 +5,7 @@ import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { authorizeBearerToken } from '../dist/shared/security/auth.js';
 import { oauthProtectedResourceHandler } from '../dist/functions/oauthProtectedResource.js';
 import { handleMcpHttpRequest, MCP_REQUEST_BODY_MAX_BYTES } from '../dist/mcp/server.js';
+import { getMcpResourceOrigin, validateMcpRequestOrigin } from '../dist/mcp/auth.js';
 
 const baseEnv = {
   AUTH_ENABLED: 'true',
@@ -102,6 +103,76 @@ test('deployed MCP rejects spoofed hosts, forwarded schemes, and browser origins
   });
 });
 
+test('deployed MCP authority matrix rejects ambiguous proxy headers and binds the URL authority', async () => {
+  await withEnv({ ...baseEnv, OIDC_ISSUER: 'https://login.example.test/tenant/v2.0' }, async () => {
+    const canonical = request('POST', 'https://mcp.example.test/mcp', {});
+    canonical.headers.set('x-forwarded-host', 'mcp.example.test');
+    canonical.headers.set('x-forwarded-proto', 'https');
+    canonical.headers.set('origin', 'https://chatgpt.com');
+    assert.deepEqual(validateMcpRequestOrigin(canonical), { ok: true });
+
+    const acceptedSingleForwardedHost = request('POST', 'https://mcp.example.test/mcp', {});
+    acceptedSingleForwardedHost.headers.set('x-forwarded-host', 'mcp.example.test');
+    assert.deepEqual(validateMcpRequestOrigin(acceptedSingleForwardedHost), { ok: true });
+
+    const acceptedSingleForwardedProto = request('POST', 'https://mcp.example.test/mcp', {});
+    acceptedSingleForwardedProto.headers.set('x-forwarded-proto', 'https');
+    assert.deepEqual(validateMcpRequestOrigin(acceptedSingleForwardedProto), { ok: true });
+
+    for (const [name, value, message] of [
+      ['host', 'mcp.example.test, attacker.example', 'MCP Host header is malformed.'],
+      ['x-forwarded-host', 'mcp.example.test, attacker.example', 'MCP forwarded host header is malformed.'],
+      ['x-forwarded-proto', 'https, http', 'MCP forwarded scheme header is malformed.'],
+      ['origin', 'https://chatgpt.com, https://attacker.example', 'MCP Origin header is malformed.'],
+    ]) {
+      const ambiguous = request('POST', 'https://mcp.example.test/mcp', {});
+      ambiguous.headers.set(name, value);
+      assert.deepEqual(validateMcpRequestOrigin(ambiguous), { ok: false, status: 400, message });
+    }
+
+    const mismatchedAuthority = request('POST', 'https://attacker.example/mcp', {});
+    mismatchedAuthority.headers.set('host', 'mcp.example.test');
+    mismatchedAuthority.headers.set('x-forwarded-host', 'mcp.example.test');
+    mismatchedAuthority.headers.set('x-forwarded-proto', 'https');
+    assert.deepEqual(validateMcpRequestOrigin(mismatchedAuthority), {
+      ok: false,
+      status: 403,
+      message: 'MCP request authority is not allowed.',
+    });
+  });
+});
+
+test('local MCP keeps only the explicit loopback exception and does not trust forwarded authority', async () => {
+  await withEnv(
+    { DEPLOYED_ENVIRONMENT_NAME: 'local', AUTH_ENABLED: 'false', MCP_RESOURCE_ORIGIN: undefined },
+    async () => {
+      for (const url of ['http://localhost:7071/mcp', 'http://127.0.0.1:7071/mcp', 'http://[::1]:7071/mcp']) {
+        const local = request('POST', url, {});
+        local.headers.set('origin', 'https://browser.example');
+        assert.deepEqual(validateMcpRequestOrigin(local), { ok: true });
+        assert.equal(getMcpResourceOrigin(local), new URL(url).origin);
+      }
+
+      const forwardedAttacker = request('POST', 'http://localhost:7071/mcp', {});
+      forwardedAttacker.headers.set('x-forwarded-host', 'attacker.example');
+      assert.deepEqual(validateMcpRequestOrigin(forwardedAttacker), {
+        ok: false,
+        status: 403,
+        message: 'Local MCP requests must target localhost.',
+      });
+      assert.equal(getMcpResourceOrigin(forwardedAttacker), 'http://localhost:7071');
+
+      const remote = request('POST', 'https://attacker.example/mcp', {});
+      remote.headers.set('host', 'localhost:7071');
+      assert.deepEqual(validateMcpRequestOrigin(remote), {
+        ok: false,
+        status: 403,
+        message: 'Local MCP requests must target localhost.',
+      });
+    },
+  );
+});
+
 test('unauthenticated MCP POST fails before reading or forwarding its body', async () => {
   await withEnv({ ...baseEnv, OIDC_ISSUER: 'https://login.example.test/tenant/v2.0' }, async () => {
     const unreadRequest = request('POST', 'https://mcp.example.test/mcp', { jsonrpc: '2.0' });
@@ -115,6 +186,32 @@ test('unauthenticated MCP POST fails before reading or forwarding its body', asy
     assert.equal(response.jsonBody.classification, 'authorization_context_mismatch');
     assert.match(response.headers['WWW-Authenticate'], /error_description="Missing bearer token\."/);
   });
+});
+
+test('local authenticated MCP keeps a configured HTTPS resource origin for missing-bearer challenges', async () => {
+  await withEnv(
+    {
+      ...baseEnv,
+      DEPLOYED_ENVIRONMENT_NAME: 'local',
+      AUTH_ENABLED: 'true',
+      MCP_RESOURCE_ORIGIN: 'https://mcp.example.test',
+      OIDC_ISSUER: 'https://login.example.test/tenant/v2.0',
+    },
+    async () => {
+      const unreadRequest = request('POST', 'http://localhost:7071/mcp', { jsonrpc: '2.0' });
+      Object.defineProperty(unreadRequest, 'body', {
+        get() {
+          throw new Error('missing-bearer body must not be read');
+        },
+      });
+      const response = await handleMcpHttpRequest(unreadRequest, contextStub(), stubServices());
+      assert.equal(response.status, 401);
+      assert.match(
+        response.headers['WWW-Authenticate'],
+        /resource_metadata="https:\/\/mcp\.example\.test\/\.well-known\/oauth-protected-resource"/,
+      );
+    },
+  );
 });
 
 test('MCP rejects declared and chunked oversized POST bodies before JSON parsing', async () => {

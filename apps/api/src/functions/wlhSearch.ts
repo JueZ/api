@@ -10,6 +10,11 @@ import {
   wlhProblemResponse,
 } from '../shared/wlh/problem.js';
 import { WlhService } from '../shared/wlh/service.js';
+import {
+  AUTHENTICATED_PROVIDER_JSON_BODY_MAX_BYTES,
+  BodyTooLargeError,
+  readRequestJsonWithLimit,
+} from '../shared/http/boundedBody.js';
 
 let service: WlhService | null = null;
 export function setWlhSearchServiceForTesting(s: WlhService | null) {
@@ -28,10 +33,14 @@ export async function wlhSearchHandler(request: HttpRequest, context: Invocation
   const traceId = getTraceIdFromRequestOrContext(request, context);
   let body;
   try {
-    body = await request.json();
-  } catch {
+    body = await readRequestJsonWithLimit<unknown>(request, AUTHENTICATED_PROVIDER_JSON_BODY_MAX_BYTES);
+  } catch (error) {
     return wlhProblemResponse(
-      buildWlhProblem({ operationId: WLH_OPERATION_IDS.postWlhSearch, failureKind: 'invalid_json', traceId }),
+      buildWlhProblem({
+        operationId: WLH_OPERATION_IDS.postWlhSearch,
+        failureKind: error instanceof BodyTooLargeError ? 'body_too_large' : 'invalid_json',
+        traceId,
+      }),
       corsHeaders(request),
     );
   }

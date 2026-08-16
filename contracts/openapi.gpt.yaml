@@ -266,6 +266,12 @@ paths:
                       or canonical URL.
                     safe_debug_summary: Sanitized Reddit 404 diagnosis.
                     analysis_mode: deterministic
+        "413":
+          description: Request body exceeds the 65536-byte limit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
         "429":
           description: Reddit rate limit or upstream throttling.
           content:
@@ -580,6 +586,12 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/RepairableProblem"
+        "413":
+          description: Request body exceeds the 65536-byte limit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
         "429":
           description: Rate limited
           content:
@@ -763,6 +775,12 @@ paths:
                 $ref: "#/components/schemas/RedditCommentTreeResponse"
         "400":
           description: Invalid request payload.
+        "413":
+          description: Request body exceeds the 65536-byte limit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
         "401":
           description: Unauthorized.
         "403":
@@ -797,6 +815,12 @@ paths:
                 $ref: "#/components/schemas/RedditThreadOverviewResponse"
         "400":
           description: Invalid request payload.
+        "413":
+          description: Request body exceeds the 65536-byte limit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
         "401":
           description: Unauthorized.
         "403":
@@ -829,6 +853,12 @@ paths:
                 $ref: "#/components/schemas/RedditCommentQueryResponse"
         "400":
           description: Invalid request payload.
+        "413":
+          description: Request body exceeds the 65536-byte limit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
         "401":
           description: Unauthorized.
         "403":
@@ -861,6 +891,12 @@ paths:
                 $ref: "#/components/schemas/RedditCommentsBatchResponse"
         "400":
           description: Invalid request payload.
+        "413":
+          description: Request body exceeds the 65536-byte limit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
         "401":
           description: Unauthorized.
         "403":

@@ -19,6 +19,11 @@ import type { RedditThreadRequest } from '../shared/reddit/types.js';
 import { authorizeRequestForOperation } from '../shared/security/auth.js';
 import { OPERATION_IDS } from '../application/operations/registry.js';
 import { createCorsHeaders, withCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
+import {
+  AUTHENTICATED_PROVIDER_JSON_BODY_MAX_BYTES,
+  BodyTooLargeError,
+  readRequestJsonWithLimit,
+} from '../shared/http/boundedBody.js';
 
 const OPERATION_ID = 'postRedditThread';
 const ENDPOINT = '/api/reddit/thread';
@@ -56,16 +61,22 @@ export async function redditThreadHandler(request: HttpRequest, context: Invocat
   const traceId = getTraceIdFromRequestOrContext(request, context);
   let body: RedditThreadRequest;
   try {
-    body = (await request.json()) as RedditThreadRequest;
-  } catch {
+    body = await readRequestJsonWithLimit<RedditThreadRequest>(request, AUTHENTICATED_PROVIDER_JSON_BODY_MAX_BYTES);
+  } catch (error) {
+    const bodyTooLarge = error instanceof BodyTooLargeError;
     const problem = await problemForRedditError({
       request,
       context,
       traceId,
       diagnosticId: createDiagnosticId(),
-      status: 400,
-      failureStage: 'json_parse',
-      safeError: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' },
+      status: bodyTooLarge ? 413 : 400,
+      failureStage: bodyTooLarge ? 'request_shape' : 'json_parse',
+      safeError: bodyTooLarge
+        ? {
+            code: 'REQUEST_BODY_TOO_LARGE',
+            message: `The request body exceeds the ${AUTHENTICATED_PROVIDER_JSON_BODY_MAX_BYTES}-byte limit.`,
+          }
+        : { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' },
     });
     return problemResponse(problem, request);
   }

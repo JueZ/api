@@ -1,5 +1,6 @@
 import type { HttpRequest, InvocationContext } from '@azure/functions';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { isIP } from 'node:net';
 import { PERMISSIONS, type AuthenticatedPrincipal, type Permission } from '../application/authorization/types.js';
 import { getOperationDefinition } from '../application/operations/registry.js';
 import { getDeployedEnvironmentName } from '../shared/config/runtime.js';
@@ -24,21 +25,22 @@ export interface McpProtectedResourceMetadata {
 }
 
 export function getMcpResourceOrigin(request?: HttpRequest, env: NodeJS.ProcessEnv = process.env): string {
+  const environment = getDeployedEnvironmentName(env);
   const configured = normalizeOrigin(env['MCP_RESOURCE_ORIGIN']);
-  if (configured) return configured;
+  if (configured) {
+    if (environment === 'local') {
+      if (isLoopbackOrigin(configured) || isDeployableMcpOrigin(configured)) return configured;
+    } else if (isDeployableMcpOrigin(configured)) {
+      return configured;
+    }
+    throw new Error('MCP_RESOURCE_ORIGIN is not safe for the active environment.');
+  }
 
-  if (getDeployedEnvironmentName(env) !== 'local') {
+  if (environment !== 'local') {
     throw new Error('MCP_RESOURCE_ORIGIN is required outside local development.');
   }
 
   if (request && isLocalRequestUrl(request.url)) {
-    const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
-    const host = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim() ?? request.headers.get('host')?.trim();
-    if (host && isLocalHost(host)) {
-      const proto =
-        forwardedProto && forwardedProto.length > 0 ? forwardedProto : new URL(request.url).protocol.replace(':', '');
-      return `${proto}://${host}`.replace(/\/$/, '');
-    }
     return new URL(request.url).origin;
   }
 
@@ -138,38 +140,62 @@ export function validateMcpRequestOrigin(
   env: NodeJS.ProcessEnv = process.env,
 ): McpOriginValidation {
   const environment = getDeployedEnvironmentName(env);
+  const requestUrl = parseRequestUrl(request.url);
+  if (!requestUrl) return { ok: false, status: 400, message: 'MCP request URL is malformed.' };
+
+  const hostHeader = singleHeaderValue(request.headers, 'host');
+  if (!hostHeader.ok) return { ok: false, status: 400, message: 'MCP Host header is malformed.' };
+  const forwardedHost = singleHeaderValue(request.headers, 'x-forwarded-host');
+  if (!forwardedHost.ok) return { ok: false, status: 400, message: 'MCP forwarded host header is malformed.' };
+  const forwardedProto = singleHeaderValue(request.headers, 'x-forwarded-proto');
+  if (!forwardedProto.ok) return { ok: false, status: 400, message: 'MCP forwarded scheme header is malformed.' };
+  const originHeader = singleHeaderValue(request.headers, 'origin');
+  if (!originHeader.ok) return { ok: false, status: 400, message: 'MCP Origin header is malformed.' };
+
   if (environment === 'local') {
-    const requestUrl = new URL(request.url);
-    if (!isLocalHost(requestUrl.host)) {
+    if (!isLoopbackUrl(requestUrl)) {
       return { ok: false, status: 403, message: 'Local MCP requests must target localhost.' };
     }
+    const requestAuthority = requestUrl.host.toLowerCase();
+    if (hostHeader.value) {
+      const host = normalizeAuthority(hostHeader.value, requestUrl.protocol);
+      if (!host || host !== requestAuthority)
+        return { ok: false, status: 403, message: 'Local MCP requests must target localhost.' };
+    }
+    if (forwardedHost.value) {
+      const host = normalizeAuthority(forwardedHost.value, requestUrl.protocol);
+      if (!host || host !== requestAuthority)
+        return { ok: false, status: 403, message: 'Local MCP requests must target localhost.' };
+    }
+    if (forwardedProto.value && `${forwardedProto.value.toLowerCase()}:` !== requestUrl.protocol)
+      return { ok: false, status: 403, message: 'Local MCP request scheme is not allowed.' };
     return { ok: true };
   }
 
   const canonicalOrigin = normalizeOrigin(env['MCP_RESOURCE_ORIGIN']);
-  if (!canonicalOrigin) {
+  if (!canonicalOrigin || !isDeployableMcpOrigin(canonicalOrigin)) {
     return { ok: false, status: 400, message: 'MCP_RESOURCE_ORIGIN is not configured.' };
   }
   const canonical = new URL(canonicalOrigin);
-  const forwardedHost = firstHeaderValue(request.headers.get('x-forwarded-host'));
-  const host = firstHeaderValue(request.headers.get('host')) ?? new URL(request.url).host;
-  const forwardedProto = firstHeaderValue(request.headers.get('x-forwarded-proto'));
-  if (host.toLowerCase() !== canonical.host.toLowerCase()) {
+  if (requestUrl.origin !== canonical.origin) {
+    return { ok: false, status: 403, message: 'MCP request authority is not allowed.' };
+  }
+  const host = normalizeAuthority(hostHeader.value ?? requestUrl.host, canonical.protocol);
+  if (!host || host !== canonical.host.toLowerCase()) {
     return { ok: false, status: 403, message: 'MCP host is not allowed.' };
   }
-  if (forwardedHost && forwardedHost.toLowerCase() !== canonical.host.toLowerCase()) {
+  const normalizedForwardedHost = forwardedHost.value
+    ? normalizeAuthority(forwardedHost.value, canonical.protocol)
+    : undefined;
+  if (forwardedHost.value && (!normalizedForwardedHost || normalizedForwardedHost !== canonical.host.toLowerCase())) {
     return { ok: false, status: 403, message: 'MCP forwarded host is not allowed.' };
   }
-  if (new URL(request.url).protocol !== canonical.protocol) {
-    return { ok: false, status: 403, message: 'MCP request scheme is not allowed.' };
-  }
-  if (forwardedProto && `${forwardedProto.toLowerCase()}:` !== canonical.protocol) {
+  if (forwardedProto.value && `${forwardedProto.value.toLowerCase()}:` !== canonical.protocol) {
     return { ok: false, status: 403, message: 'MCP forwarded scheme is not allowed.' };
   }
 
-  const originHeader = request.headers.get('origin');
-  if (originHeader) {
-    const normalized = normalizeOrigin(originHeader);
+  if (originHeader.value) {
+    const normalized = normalizeOrigin(originHeader.value);
     const allowedOrigins = new Set(parseCsv(env['MCP_ALLOWED_ORIGINS']).map(normalizeOrigin).filter(Boolean));
     if (!normalized || !allowedOrigins.has(normalized)) {
       return { ok: false, status: 403, message: 'MCP browser origin is not allowed.' };
@@ -208,21 +234,77 @@ function qualifyOAuthScope(audience: string | undefined, scope: string): string 
   return `${audience.replace(/\/$/, '')}/${scope.replace(/^\//, '')}`;
 }
 
-function firstHeaderValue(value: string | null): string | undefined {
-  return value?.split(',')[0]?.trim() || undefined;
-}
-
 function isLocalRequestUrl(value: string): boolean {
   try {
-    return isLocalHost(new URL(value).host);
+    return isLoopbackUrl(new URL(value));
   } catch {
     return false;
   }
 }
 
-function isLocalHost(value: string): boolean {
-  const hostname = value.replace(/:\d+$/, '').toLowerCase();
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+function parseRequestUrl(value: string): URL | undefined {
+  try {
+    const url = new URL(value);
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) return undefined;
+    return url;
+  } catch {
+    return undefined;
+  }
+}
+
+function singleHeaderValue(headers: Pick<Headers, 'get'>, name: string): { ok: true; value?: string } | { ok: false } {
+  const raw = headers.get(name);
+  if (raw === null) return { ok: true };
+  const value = raw.trim();
+  if (!value || value.includes(',')) return { ok: false };
+  return { ok: true, value };
+}
+
+function normalizeAuthority(value: string, protocol: string): string | undefined {
+  try {
+    const url = new URL(`${protocol}//${value}`);
+    if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) return undefined;
+    return url.host.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+function isDeployableMcpOrigin(value: string): boolean {
+  const url = new URL(value);
+  const hostname = url.hostname.toLowerCase();
+  return (
+    url.protocol === 'https:' &&
+    !isLoopbackHostname(hostname) &&
+    !hostname.endsWith('.localhost') &&
+    !isIpHostname(hostname)
+  );
+}
+
+function isLoopbackOrigin(value: string): boolean {
+  try {
+    return isLoopbackUrl(new URL(value));
+  } catch {
+    return false;
+  }
+}
+
+function isLoopbackUrl(url: URL): boolean {
+  return (
+    (url.protocol === 'http:' || url.protocol === 'https:') &&
+    !url.username &&
+    !url.password &&
+    isLoopbackHostname(url.hostname)
+  );
+}
+
+function isLoopbackHostname(value: string): boolean {
+  const hostname = value.replace(/^\[|\]$/g, '').toLowerCase();
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+function isIpHostname(value: string): boolean {
+  return isIP(value.replace(/^\[|\]$/g, '')) !== 0;
 }
 
 function parseCsv(value: string | undefined): string[] {

@@ -78,6 +78,25 @@ test('deployed runtime safety rejects incomplete auth and non-canonical origins'
   assert.ok(problems.some((problem) => problem.startsWith('MCP_ALLOWED_ORIGINS')));
 });
 
+test('deployed runtime safety rejects local and IP MCP resource origins', () => {
+  for (const origin of [
+    'https://localhost',
+    'https://api.localhost',
+    'https://127.0.0.1',
+    'https://[::1]',
+    'https://192.0.2.10',
+    'https://[2001:db8::10]',
+  ]) {
+    const problems = validateRuntimeSafety({ ...validTestEnvironment, MCP_RESOURCE_ORIGIN: origin });
+    assert.ok(
+      problems.some(
+        (problem) => problem === 'MCP_RESOURCE_ORIGIN must be a non-localhost, non-IP HTTPS origin in test',
+      ),
+      origin,
+    );
+  }
+});
+
 test('deployed runtime safety enforces explicit Bring flags, production-only writes, and list containment', () => {
   const unspecified = { ...validTestEnvironment };
   delete unspecified.BRING_ENABLED;

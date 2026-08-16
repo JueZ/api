@@ -4,6 +4,7 @@ import {
   RedditOAuthClient,
   RedditRequestDeadlineError,
   RedditUpstreamError,
+  sanitizeRedditTelemetryUrl,
   type FetchLike,
 } from './client.js';
 import {
@@ -85,7 +86,6 @@ export class RedditThreadService {
       normalizedPostId: input.articleId,
     });
     logRedditFetch({
-      originalInput,
       normalizedPostId: input.articleId,
       normalizedCommentId: normalizedPost.comment_id,
       requestUrl: initial.requestUrl,
@@ -237,7 +237,6 @@ export class RedditThreadService {
       { input: originalInput, normalizedPostId: input.articleId },
     );
     logRedditFetch({
-      originalInput,
       normalizedPostId: input.articleId,
       normalizedCommentId: commentId ?? normalizedPost.comment_id,
       requestUrl: postTree.requestUrl,
@@ -378,7 +377,6 @@ export class RedditThreadService {
       normalizedPostId: input.articleId,
     });
     logRedditFetch({
-      originalInput,
       normalizedPostId: input.articleId,
       normalizedCommentId: normalizedPost.comment_id,
       requestUrl: initial.requestUrl,
@@ -398,7 +396,6 @@ export class RedditThreadService {
           normalizedPostId: input.articleId,
         });
         logRedditFetch({
-          originalInput,
           normalizedPostId: input.articleId,
           normalizedCommentId: normalizedPost.comment_id,
           requestUrl: initial.requestUrl,
@@ -690,7 +687,7 @@ export function mapRedditError(error: unknown): {
     };
   }
   if (error instanceof RedditUpstreamError) {
-    return { status: error.status, message: error.message, kind: 'upstream' };
+    return { status: error.status, message: safeRedditUpstreamMessage(error), kind: 'upstream' };
   }
   return {
     status: 502,
@@ -704,6 +701,13 @@ function safeRedditFetchMessage(error: RedditFetchError): string {
   if (error.status === 429) return 'Reddit rate-limited the request.';
   if (error.status && error.status >= 500) return 'Reddit upstream request failed with a retryable status.';
   return 'Reddit fetch failed before a valid JSON response was available.';
+}
+
+function safeRedditUpstreamMessage(error: RedditUpstreamError): string {
+  if (error.status === 429 || error.upstreamStatus === 429) return 'Reddit rate-limited the request.';
+  if (error.upstreamStatus && error.upstreamStatus >= 500)
+    return 'Reddit upstream request failed with a retryable status.';
+  return 'Reddit upstream request failed.';
 }
 
 function assertRedditStatus(status: number, context = 'thread'): void {
@@ -1052,7 +1056,6 @@ function normalizeOptionalParentId(input: unknown): string {
 }
 
 function logRedditFetch(args: {
-  originalInput: string;
   normalizedPostId: string;
   normalizedCommentId?: string;
   requestUrl: string;
@@ -1066,13 +1069,12 @@ function logRedditFetch(args: {
 }): void {
   console.info('reddit_thread_fetch', {
     request_id: undefined,
-    original_input: args.originalInput,
     normalized_post_id: args.normalizedPostId,
     normalized_comment_id: args.normalizedCommentId,
-    request_url: args.requestUrl,
-    final_url: args.finalUrl,
+    request_url: stripLogUrl(args.requestUrl),
+    final_url: stripLogUrl(args.finalUrl),
     status: args.status,
-    content_type: args.contentType,
+    content_type: safeLogContentType(args.contentType),
     redirect_count: args.redirectCount,
     elapsed_ms: Date.now() - args.startedAt,
     retry_count: args.retryCount,
@@ -1089,30 +1091,30 @@ function logShareResolution(resolution: RedditShareResolution): void {
     original_host: originalHost,
     final_host: hostFromUrl(resolution.finalUrl),
     http_status: resolution.httpStatus,
-    content_type: resolution.contentType,
+    content_type: safeLogContentType(resolution.contentType),
     redirect_count: Math.max(0, resolution.redirectChain.length - 1),
     final_url: finalUrl,
     extracted_post_id: resolution.status === 'resolved' ? resolution.postId : undefined,
-    redirect_chain: resolution.redirectChain.map((url) => stripLogUrl(url) ?? url),
+    redirect_chain: resolution.redirectChain
+      .map((url) => stripLogUrl(url))
+      .filter((url): url is string => Boolean(url)),
   });
 }
 
 function stripLogUrl(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  try {
-    const url = new URL(value);
-    url.search = '';
-    url.hash = '';
-    return url.toString();
-  } catch {
-    return value.split('?')[0]?.split('#')[0] ?? value;
-  }
+  return sanitizeRedditTelemetryUrl(value);
+}
+
+function safeLogContentType(value: string | null | undefined): string | undefined {
+  const mediaType = value?.split(';', 1)[0]?.trim().toLowerCase();
+  return mediaType && /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(mediaType) ? mediaType : undefined;
 }
 
 function hostFromUrl(value: string | undefined): string | undefined {
   if (!value) return undefined;
   try {
-    return new URL(value).hostname.toLowerCase();
+    const sanitized = sanitizeRedditTelemetryUrl(value);
+    return sanitized ? new URL(sanitized).hostname.toLowerCase() : undefined;
   } catch {
     return undefined;
   }

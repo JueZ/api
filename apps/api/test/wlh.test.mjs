@@ -485,25 +485,38 @@ async function wlhOfferHandlerRequest(method, url, params, context = {}) {
 }
 
 function requestWithJson(body, authorization = undefined) {
+  return requestWithText(JSON.stringify(body), authorization);
+}
+
+function requestWithText(text, authorization = undefined) {
+  const headers = new Headers({
+    'content-type': 'application/json',
+    'content-length': String(Buffer.byteLength(text)),
+  });
+  if (authorization !== undefined && authorization !== null) headers.set('authorization', authorization);
   return {
     method: 'POST',
     url: 'https://api.test/api/wlh/search',
     params: {},
-    headers: new Headers(authorization === undefined ? {} : authorization === null ? {} : { authorization }),
-    json: async () => body,
+    headers,
+    body: bodyStream([new TextEncoder().encode(text)]),
+    json: async () => {
+      throw new Error('WLH handler must use the bounded body reader.');
+    },
   };
 }
 
 function requestThatThrowsJson(authorization = undefined) {
-  return {
-    method: 'POST',
-    url: 'https://api.test/api/wlh/search',
-    params: {},
-    headers: new Headers(authorization === undefined ? {} : authorization === null ? {} : { authorization }),
-    json: async () => {
-      throw new Error('invalid json');
+  return requestWithText('{', authorization);
+}
+
+function bodyStream(chunks) {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
     },
-  };
+  });
 }
 
 function contextStub(overrides = {}) {

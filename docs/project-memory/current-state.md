@@ -14,6 +14,7 @@
 
 - Test and production use Azure OIDC, managed identity/Key Vault boundaries, exact release SHA/digests, public and authenticated smoke, telemetry correlation, provenance, and compact release ledgers.
 - Authentication requires an explicit `local`, `test`, or `prod` runtime identity. Non-local tenant allowlists are enforced again at the request boundary; delegated `scp` and app-role service permissions are classified separately; and discovered JWKS metadata is issuer-bound, redirect-free, and same-origin while an explicit JWKS URI remains an operator-managed pin.
+- Authenticated Reddit/WLH JSON bodies are streamed through a shared 64 KiB boundary after authorization; declared and streamed overages fail with 413 before provider work. Reddit provider payloads cannot become public error details, telemetry omits raw caller input and uses route-normalized allowlisted URLs, and deployed MCP binds single-value proxy headers plus request authority to a non-localhost, non-IP canonical HTTPS origin.
 - Authentication, authorization, operation permissions, audit, idempotency, destructive confirmation, allowlists, and provider-data minimization remain fail closed.
 - Optional OpenAI use is restricted to bounded sanitized runtime repairable-error analysis. Pull-request governance, repair callbacks, and required checks use no provider key.
 
