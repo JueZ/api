@@ -28,6 +28,7 @@
 ## Completion
 
 The task is done when:
+
 - the requested behavior is implemented,
 - the relevant acceptance criteria are satisfied,
 - relevant validation passes, and
