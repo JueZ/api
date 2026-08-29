@@ -152,6 +152,22 @@ test('Azure Functions loads the fail-closed composition root before registering 
   assert.doesNotMatch(infrastructure, /siteConfig:\s*\{[\s\S]*?appSettings:\s*\[/);
 });
 
+test('staged deployment Bicep preserves its required output contract', () => {
+  const infrastructure = readFileSync(new URL('../../infra/main.bicep', import.meta.url), 'utf8');
+  for (const output of [
+    'functionAppResourceName',
+    'hostStorageAccountResourceName',
+    'releaseStorageAccountResourceName',
+    'staticWebStorageAccountResourceName',
+    'privateStorageAccountResourceName',
+    'applicationInsightsResourceName',
+    'keyVaultResourceName',
+    'monthlyBudgetEur',
+  ]) {
+    assert.match(infrastructure, new RegExp(`^output ${output} `, 'm'));
+  }
+});
+
 test('repository agent skills have valid frontmatter and unique names', () => {
   assert.deepEqual(validateAgentSkills(), []);
 });

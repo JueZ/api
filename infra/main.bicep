@@ -851,3 +851,12 @@ resource budget 'Microsoft.Consumption/budgets@2024-08-01' = {
     }
   }
 }
+
+output functionAppResourceName string = functionApp.name
+output hostStorageAccountResourceName string = hostStorage.name
+output releaseStorageAccountResourceName string = releaseStorage.name
+output staticWebStorageAccountResourceName string = staticStorage.name
+output privateStorageAccountResourceName string = privateStorage.name
+output applicationInsightsResourceName string = appInsights.name
+output keyVaultResourceName string = keyVault.name
+output monthlyBudgetEur int = validatedBudgetAmount
