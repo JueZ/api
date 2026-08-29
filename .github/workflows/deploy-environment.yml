@@ -627,6 +627,37 @@ jobs:
           else
             echo "No infra/main.bicep found; skipping infrastructure deployment."
           fi
+      - name: Remove retired scheduled-query alerts
+        if: ${{ !inputs.allowRollback }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          alert_names=(
+            "alert-api-catalogue-${ENVIRONMENT_NAME}-function-5xx"
+            "alert-api-catalogue-${ENVIRONMENT_NAME}-auth-spike"
+            "alert-api-catalogue-${ENVIRONMENT_NAME}-bring-protocol"
+          )
+          for alert_name in "${alert_names[@]}"; do
+            alert_id="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Insights/scheduledQueryRules/${alert_name}"
+            if az resource show --ids "$alert_id" --only-show-errors -o none 2>/dev/null; then
+              az resource update \
+                --ids "$alert_id" \
+                --set properties.enabled=false \
+                --only-show-errors \
+                -o none
+              az resource delete --ids "$alert_id" --only-show-errors
+            fi
+          done
+
+          remaining_alerts=$(az resource list \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --resource-type Microsoft.Insights/scheduledQueryRules \
+            --query 'length(@)' \
+            -o tsv)
+          if [ "$remaining_alerts" != "0" ]; then
+            echo "Expected no scheduled-query alerts in $AZURE_RESOURCE_GROUP after cleanup; found $remaining_alerts." >&2
+            exit 1
+          fi
       - name: Resolve runtime settings
         id: resolve
         shell: bash

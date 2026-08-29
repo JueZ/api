@@ -7,7 +7,7 @@ Added/expanded cost-bearing capabilities:
 - Standard Key Vault for secret references;
 - four low-volume StorageV2 accounts per environment to isolate trust boundaries;
 - Application Insights/Log Analytics already used for runtime telemetry;
-- Azure Monitor action group, scheduled-query alerts, and budget notifications;
+- Azure Monitor action group and budget notifications; the six five-minute scheduled-query alerts were retired because their recurring evaluation cost dominated the low-volume workload;
 - optional bounded OpenAI API calls only for REC analysis of `diagnostic_uncertain` runtime failures.
 
 All storage remains standard LRS with lifecycle deletion (mutation 35 days, audit 365 days, releases 180 days). There is no SQL, Cosmos DB, API Management, Front Door, Search, Kubernetes, Cognitive Services, or always-on compute.
@@ -19,3 +19,5 @@ Pull-request governance makes no OpenAI request. Privileged paths receive determ
 Configure an OpenAI project hard spend limit and earlier alerts in the Platform as the account-level backstop for the optional runtime analyzer. Proportional path-aware PR jobs and one protected-main build reduce Actions work without weakening runtime gates.
 
 Cheaper alternatives considered were one shared storage account, Function settings containing secrets, and no scheduled telemetry alerts. They were rejected because they collapse public/private, deploy/runtime, or detection trust boundaries. Disable the Bring canary or runtime LLM analysis independently if their variable/API costs are not justified. Do not bypass deterministic protected governance or disable authentication, audit retention, deterministic REC, or deployment smoke gates to save cost.
+
+The Function 5xx, OAuth spike, and Bring protocol scheduled-query alerts are intentionally absent in test and production. Delivery disables and deletes their retired resource names after the incremental Bicep deployment so they cannot survive as unmanaged resources. Application Insights ingestion, deployment telemetry checks, smoke tests, budget notifications, and the action group remain enabled.
