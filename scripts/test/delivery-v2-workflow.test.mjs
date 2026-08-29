@@ -90,6 +90,21 @@ test('direct environment mode preserves OIDC, exact artifact, smoke, telemetry, 
   assert.match(environmentSource, /expectedFunctionDigest/);
 });
 
+test('normal environment deployment disables and deletes every retired scheduled-query alert', () => {
+  const cleanup = environmentWorkflow.jobs.deploy.steps.find(
+    (step) => step.name === 'Remove retired scheduled-query alerts',
+  );
+
+  assert.equal(cleanup.if, '${{ !inputs.allowRollback }}');
+  for (const suffix of ['function-5xx', 'auth-spike', 'bring-protocol']) {
+    assert.match(cleanup.run, new RegExp(`alert-api-catalogue-\\$\\{ENVIRONMENT_NAME\\}-${suffix}`));
+  }
+  assert.match(cleanup.run, /--set properties\.enabled=false/);
+  assert.match(cleanup.run, /az resource delete --ids/);
+  assert.match(cleanup.run, /Microsoft\.Insights\/scheduledQueryRules/);
+  assert.match(cleanup.run, /Expected no scheduled-query alerts/);
+});
+
 test('delivery summary reports classification, duration, skips, identity, environments, and recovery', () => {
   const summary = workflow.jobs.summary.steps.find((step) => step.name === 'Write concise delivery summary').run;
   for (const field of [
