@@ -1,0 +1,14 @@
+version: 2
+id: bicep-output-contract-preservation
+fingerprint: delivery.bicep-resource-removal-truncated-required-outputs
+severity: high
+invariant: Infrastructure resource removal must preserve every Bicep output consumed by staged deployment; deleting a trailing resource block cannot truncate the deployment output contract.
+scope:
+  - infra/main.bicep
+  - .github/workflows/deploy-environment.yml
+prevention:
+  - kind: regression-test
+    path: scripts/test/architecture-and-governance.test.mjs
+broken: fca275c1b7091e91b50508dda2731c5c9d878765
+recurrenceCount: 1
+status: active
