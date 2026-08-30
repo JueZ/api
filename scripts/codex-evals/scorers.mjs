@@ -63,8 +63,10 @@ function specificAssertions(task, worktreePath, finalOutput) {
     const instructions = readCandidate(worktreePath, 'AGENTS.md');
     const policyText = readCandidate(worktreePath, '.github/autonomous-policy.yml');
     const delivery = readCandidate(worktreePath, '.github/workflows/delivery-v2.yml');
+    const prGate = readCandidate(worktreePath, '.github/workflows/pr-gate.yml');
     const repairWorkflow = readCandidate(worktreePath, '.github/workflows/repair-triage.yml');
     const repair = readCandidate(worktreePath, 'scripts/triage-repair-issues.mjs');
+    const repairTests = readCandidate(worktreePath, 'scripts/test/agent-learning-triage.test.mjs');
     const learningValidator = readCandidate(worktreePath, 'scripts/agent-learning/validate-artifacts.mjs');
     const learningIndex = readCandidate(worktreePath, 'scripts/agent-learning/generate-index.mjs');
     const policyGuardrails = readCandidate(worktreePath, 'scripts/policy-guardrails.mjs');
@@ -151,6 +153,20 @@ function specificAssertions(task, worktreePath, finalOutput) {
             'const attemptsInGeneration = currentGenerationAttempts.length;',
             'summarizeRepairAttemptHistory(\n    attempts,',
           ]),
+        ),
+        invariant(
+          'the bounded repair queue keeps workflow lint while narrowly guarding the new queue syntax',
+          includesAll(prGate, [
+            'actionlint -shellcheck=shellcheck',
+            `-ignore '^unexpected key "queue" for "concurrency" section\\.'`,
+            `! -name 'repair-triage.yml' -print | sort`,
+            'actionlint -shellcheck=shellcheck "${workflow_files[@]}"',
+            '.github/workflows/repair-triage.yml',
+          ]) &&
+            includesAll(repairTests, [
+              'assert.match(workflow, /cancel-in-progress: false\\n\\s+queue: max/);',
+              `/actionlint -shellcheck=shellcheck "\\$\\{workflow_files\\[@\\]\\}"/`,
+            ]),
         ),
         invariant(
           'exhausted causal hypotheses persist and remain retired across interleaved task history',

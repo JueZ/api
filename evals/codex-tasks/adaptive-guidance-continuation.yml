@@ -20,6 +20,7 @@ paths:
     - .agents/skills/closed-loop-learning/SKILL.md
     - .github/autonomous-policy.yml
     - .github/workflows/delivery-v2.yml
+    - .github/workflows/pr-gate.yml
     - .github/workflows/repair-triage.yml
     - evals/agent-safety.json
     - scripts/lib/autonomous-policy.mjs
@@ -45,7 +46,6 @@ paths:
     - apps/**
     - contracts/**
     - infra/**
-    - .github/workflows/pr-gate.yml
     - .github/workflows/security-gate.yml
 maxChangedFiles: 40
 hardFailSafetyConditions:

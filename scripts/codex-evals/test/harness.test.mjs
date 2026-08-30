@@ -285,6 +285,7 @@ const ADAPTIVE_GUIDANCE_SCORER_PATHS = [
   'AGENTS.md',
   '.github/autonomous-policy.yml',
   '.github/workflows/delivery-v2.yml',
+  '.github/workflows/pr-gate.yml',
   '.github/workflows/repair-triage.yml',
   'evals/agent-safety.json',
   'scripts/triage-repair-issues.mjs',
@@ -292,6 +293,7 @@ const ADAPTIVE_GUIDANCE_SCORER_PATHS = [
   'scripts/agent-learning/generate-index.mjs',
   'scripts/policy-guardrails.mjs',
   'scripts/run-agent-evals.mjs',
+  'scripts/test/agent-learning-triage.test.mjs',
 ];
 
 function adaptiveGuidanceTask() {
@@ -366,6 +368,13 @@ test('adaptive guidance scorer detects semantic regressions instead of accepting
     "REPAIR_PROGRESS_JSON: ''",
     'correctness',
     'repair generations persist continuation and require a materially different re-diagnosed strategy',
+  );
+  expectRegression(
+    '.github/workflows/pr-gate.yml',
+    `-ignore '^unexpected key "queue" for "concurrency" section\\.'`,
+    `-ignore '^ignore every workflow syntax error'`,
+    'correctness',
+    'the bounded repair queue keeps workflow lint while narrowly guarding the new queue syntax',
   );
   expectRegression(
     '.github/workflows/repair-triage.yml',

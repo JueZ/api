@@ -2108,6 +2108,7 @@ test('batched next-generation progress cannot exceed the task-wide two-attempt s
 
 test('workflow callback is bounded, trusted-main checked out, and cannot self-trigger', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/repair-triage.yml', import.meta.url), 'utf8');
+  const prGate = readFileSync(new URL('../../.github/workflows/pr-gate.yml', import.meta.url), 'utf8');
   const deliveryDoc = readFileSync(new URL('../../docs/autonomous-delivery.md', import.meta.url), 'utf8');
   assert.match(workflow, /^name: Repair and Learning Queue/m);
   assert.match(workflow, /ref: main/);
@@ -2118,6 +2119,12 @@ test('workflow callback is bounded, trusted-main checked out, and cannot self-tr
   assert.equal(workflow.match(/inputs\.repair_progress_json/g)?.length, 1);
   assert.match(workflow, /group: repair-learning-\$\{\{ github\.repository \}\}/);
   assert.match(workflow, /cancel-in-progress: false\n\s+queue: max/);
+  assert.match(prGate, /! -name 'repair-triage\.yml' -print \| sort/);
+  assert.match(prGate, /actionlint -shellcheck=shellcheck "\$\{workflow_files\[@\]\}"/);
+  assert.match(
+    prGate,
+    /actionlint -shellcheck=shellcheck \\\n\s+-ignore '\^unexpected key "queue" for "concurrency" section\\\.' \\\n\s+\.github\/workflows\/repair-triage\.yml/,
+  );
   assert.match(deliveryDoc, /retains at most 100 pending runs/);
   assert.match(
     deliveryDoc,
