@@ -2110,11 +2110,19 @@ test('workflow callback is bounded, trusted-main checked out, and cannot self-tr
   const workflow = readFileSync(new URL('../../.github/workflows/repair-triage.yml', import.meta.url), 'utf8');
   const prGate = readFileSync(new URL('../../.github/workflows/pr-gate.yml', import.meta.url), 'utf8');
   const deliveryDoc = readFileSync(new URL('../../docs/autonomous-delivery.md', import.meta.url), 'utf8');
+  const workflowLines = workflow.split('\n');
+  const repairProgressInputIndex = workflowLines.indexOf('      repair_progress_json:');
   assert.match(workflow, /^name: Repair and Learning Queue/m);
   assert.match(workflow, /ref: main/);
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /retention-days: 30/);
-  assert.match(workflow, /repair_progress_json:\n(?:\s+.*\n)*?\s+required: false\n\s+type: string/);
+  assert.notEqual(repairProgressInputIndex, -1);
+  assert.deepEqual(workflowLines.slice(repairProgressInputIndex, repairProgressInputIndex + 4), [
+    '      repair_progress_json:',
+    '        description: Optional public-safe advisory repair progress bound to the exact source run.',
+    '        required: false',
+    '        type: string',
+  ]);
   assert.match(workflow, /REPAIR_PROGRESS_JSON: \$\{\{ inputs\.repair_progress_json \}\}/);
   assert.equal(workflow.match(/inputs\.repair_progress_json/g)?.length, 1);
   assert.match(workflow, /group: repair-learning-\$\{\{ github\.repository \}\}/);
