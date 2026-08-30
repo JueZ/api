@@ -34,8 +34,9 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: repair-learning-${{ github.event.workflow_run.id || inputs.source_run_id }}
+  group: repair-learning-${{ github.repository }}
   cancel-in-progress: false
+  queue: max
 
 jobs:
   queue:

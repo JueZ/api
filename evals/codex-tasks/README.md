@@ -1,6 +1,6 @@
 # Historical Codex tasks
 
-Eight data-only tasks reconstruct real repository requests at each source pull request's exact base commit. Definitions can select only registered setup profiles, deterministic scorers, bounded paths, timeouts, and hard gates. They are advisory local evaluations, never required CI or delivery agents.
+Nine data-only tasks reconstruct real repository requests at each source pull request's exact base commit. Definitions can select only registered setup profiles, deterministic scorers, bounded paths, timeouts, and hard gates. They are advisory local evaluations, never required CI or delivery agents.
 
 Validate and test without account use:
 

@@ -61,6 +61,7 @@ const MAX_REPAIR_PROGRESS_BYTES = 48 * 1024;
 const MAX_PUBLIC_STATE_BLOCKS_PER_SOURCE = 8;
 const MAX_REPAIR_ATTEMPTS = 100;
 const MAX_STRATEGY_FINGERPRINTS = 100;
+const MAX_DUPLICATE_REPAIR_ISSUES = 20;
 const REPAIR_ATTEMPT_OUTCOMES = new Set(['effective', 'ineffective', 'in-progress']);
 const REDIAGNOSIS_FIELDS = Object.freeze([
   'version',
@@ -168,6 +169,13 @@ export function classifyFailure(workflowPath, jobName, deliverySummary = undefin
     if (deliverySummary?.terminalOutcome === 'superseded') {
       return failure('superseded-delivery-generation', 'medium', 'delivery.superseded');
     }
+    if (
+      deliverySummary?.terminalOutcome === 'incomplete' &&
+      deliverySummary.deploymentRequired === true &&
+      ['full', 'shadow'].includes(deliverySummary.mode)
+    ) {
+      return failure('delivery-configuration-blocker', 'high', 'delivery.configuration');
+    }
     if (/rollback|recover|known-good/.test(job)) {
       return failure('production-recovery-failure', 'critical', 'delivery.production-recovery', [
         'production-recovery-failure',
@@ -222,21 +230,36 @@ export function buildStrategyFingerprint({
 
 export function decideRepairAttempt({
   attempts = [],
+  currentGenerationAttemptCount = attempts.length,
   exhaustedStrategyFingerprints: priorExhaustedStrategyFingerprints = [],
+  exhaustedRootCauseHypothesisKeys: priorExhaustedRootCauseHypothesisKeys = [],
   proposedStrategy,
   rediagnosis = {},
   priorRediagnosisVersion = 0,
   priorRediagnosisStrategyFingerprint = null,
   priorRootCauseHypothesisKey = null,
 }) {
+  if (
+    !Number.isSafeInteger(currentGenerationAttemptCount) ||
+    currentGenerationAttemptCount < 0 ||
+    currentGenerationAttemptCount > attempts.length
+  ) {
+    throw new Error('Current-generation attempt count must be a bounded subset of repair history.');
+  }
   const strategyFingerprint = buildStrategyFingerprint(proposedStrategy);
-  const { exhaustedStrategyFingerprints } = summarizeRepairAttemptHistory(attempts, priorExhaustedStrategyFingerprints);
+  const proposedRootCauseHypothesisKey = strategyKey(proposedStrategy.rootCauseHypothesis, 'rootCauseHypothesis');
+  const { exhaustedStrategyFingerprints, exhaustedRootCauseHypothesisKeys } = summarizeRepairAttemptHistory(
+    attempts,
+    priorExhaustedStrategyFingerprints,
+    priorExhaustedRootCauseHypothesisKeys,
+  );
   const reusesCurrentDiagnosis = priorRediagnosisStrategyFingerprint === strategyFingerprint;
   const requiredRediagnosisVersion = safeInteger(priorRediagnosisVersion) + (reusesCurrentDiagnosis ? 0 : 1);
   const base = {
     taskStatus: 'active',
     strategyFingerprint,
     exhaustedStrategyFingerprints,
+    exhaustedRootCauseHypothesisKeys,
     requiredRediagnosis: [...REDIAGNOSIS_FIELDS],
     requiredRediagnosisVersion,
   };
@@ -249,7 +272,7 @@ export function decideRepairAttempt({
     requireMateriallyDifferentHypothesis: exhaustedStrategyFingerprints.length > 0 && !reusesCurrentDiagnosis,
   });
 
-  if (attempts.length >= REPAIR_BOUNDS.maxAttemptsPerRepairGeneration) {
+  if (currentGenerationAttemptCount >= REPAIR_BOUNDS.maxAttemptsPerRepairGeneration) {
     return {
       ...base,
       allowed: false,
@@ -265,6 +288,16 @@ export function decideRepairAttempt({
       ...base,
       allowed: false,
       action: 'strategy-exhausted',
+      generationStatus: 'active',
+      continuationRequired: true,
+      missingRediagnosis,
+    };
+  }
+  if (exhaustedRootCauseHypothesisKeys.includes(proposedRootCauseHypothesisKey)) {
+    return {
+      ...base,
+      allowed: false,
+      action: 'causal-hypothesis-exhausted',
       generationStatus: 'active',
       continuationRequired: true,
       missingRediagnosis,
@@ -303,7 +336,18 @@ export function validateSourceRun({ run, pullRequest, deliverySummary, repositor
     deliverySummary?.schemaVersion === 2 &&
     deliverySummary.terminalOutcome === 'superseded' &&
     isAcceptedDeliverySummary(deliverySummary, run.head_sha);
-  if (!acceptedFailure && !acceptedSupersession) return ignored('workflow-did-not-fail-or-supersede');
+  const acceptedIncompleteDeliveryBlocker =
+    workflow.key === 'delivery-v2' &&
+    run.conclusion === 'success' &&
+    run.event === 'push' &&
+    deliverySummary?.schemaVersion === 2 &&
+    deliverySummary.terminalOutcome === 'incomplete' &&
+    deliverySummary.deploymentRequired === true &&
+    ['full', 'shadow'].includes(deliverySummary.mode) &&
+    isAcceptedDeliverySummary(deliverySummary, run.head_sha);
+  if (!acceptedFailure && !acceptedSupersession && !acceptedIncompleteDeliveryBlocker) {
+    return ignored('workflow-did-not-fail-or-supersede');
+  }
 
   if (run.event === 'pull_request') {
     if (!isRecord(pullRequest)) return ignored('pull-request-metadata-missing');
@@ -341,22 +385,68 @@ export function extractIncidentMarkers(value) {
   return markers;
 }
 
-function latestSanitizedAdvisoryRepairSnapshot(issue, comments, fingerprint) {
-  let latest;
+function latestRepairSnapshot(snapshots) {
+  return snapshots.reduce((latest, candidate) => {
+    if (!latest) return candidate;
+    if (candidate.trigger.workflowRunId !== latest.trigger.workflowRunId) {
+      return candidate.trigger.workflowRunId > latest.trigger.workflowRunId ? candidate : latest;
+    }
+    if (candidate.repair.generation !== latest.repair.generation) {
+      return candidate.repair.generation > latest.repair.generation ? candidate : latest;
+    }
+    if (candidate.repair.attempts.length !== latest.repair.attempts.length) {
+      return candidate.repair.attempts.length > latest.repair.attempts.length ? candidate : latest;
+    }
+    if (candidate.diagnosis.version !== latest.diagnosis.version) {
+      return candidate.diagnosis.version > latest.diagnosis.version ? candidate : latest;
+    }
+    const sameAttemptIdentities = candidate.repair.attempts.every((attempt, index) =>
+      sameRepairAttemptIdentity(attempt, latest.repair.attempts[index]),
+    );
+    if (sameAttemptIdentities) {
+      const conflictingTerminalOutcome = candidate.repair.attempts.some((attempt, index) => {
+        const previous = latest.repair.attempts[index];
+        return (
+          attempt.outcome !== 'in-progress' &&
+          previous.outcome !== 'in-progress' &&
+          attempt.outcome !== previous.outcome
+        );
+      });
+      if (conflictingTerminalOutcome) {
+        throw new Error('Advisory repair snapshots contain conflicting terminal outcomes for one attempt identity.');
+      }
+      const candidateTerminalAttempts = candidate.repair.attempts.filter(
+        (attempt) => attempt.outcome !== 'in-progress',
+      ).length;
+      const latestTerminalAttempts = latest.repair.attempts.filter(
+        (attempt) => attempt.outcome !== 'in-progress',
+      ).length;
+      if (candidateTerminalAttempts !== latestTerminalAttempts) {
+        return candidateTerminalAttempts > latestTerminalAttempts ? candidate : latest;
+      }
+    }
+    return candidate;
+  }, undefined);
+}
+
+function sanitizedAdvisoryRepairSnapshots(issue, comments, fingerprint) {
+  const snapshots = [];
   const sources = [{ value: issue, comment: false }, ...comments.map((comment) => ({ value: comment, comment: true }))];
   for (const source of sources) {
     if (!reusableBotSnapshotSource(source.value, source.comment)) continue;
     const allowsExpectedCandidate = immutableProgressSnapshotSource(source.value, source.comment, fingerprint);
     for (const candidate of extractMarkedPublicRepairStates(source.value.body, fingerprint)) {
-      latest = allowsExpectedCandidate
-        ? candidate
-        : {
-            ...candidate,
-            continuation: { ...candidate.continuation, expectedCandidateSha: null },
-          };
+      snapshots.push(
+        allowsExpectedCandidate
+          ? candidate
+          : {
+              ...candidate,
+              continuation: { ...candidate.continuation, expectedCandidateSha: null },
+            },
+      );
     }
   }
-  return latest;
+  return snapshots;
 }
 
 function extractMarkedPublicRepairStates(value, fingerprint) {
@@ -473,6 +563,17 @@ function carriedRepairContinuation(incident, previousState) {
   };
 }
 
+function repairSnapshotContainsHandoff(snapshot, handoff, incidentHeadSha) {
+  if (snapshot.task.candidateSha !== incidentHeadSha) return false;
+  if (snapshot.task.targetRequirementRef !== handoff.task.targetRequirementRef) return false;
+  if (snapshot.repair.generation < handoff.repair.generation) return false;
+  if (snapshot.diagnosis.version < handoff.diagnosis.version) return false;
+  return handoff.repair.attempts.every((attempt, index) => {
+    const recorded = snapshot.repair.attempts[index];
+    return recorded && sameRepairAttemptIdentity(recorded, attempt) && recorded.outcome === attempt.outcome;
+  });
+}
+
 export function learningDecision({ classification, severity, recurrenceCount, learningTriggers = [] }) {
   const triggers = new Set(learningTriggers.filter((value) => typeof value === 'string' && value.length <= 80));
   const significant =
@@ -490,9 +591,19 @@ export function learningDecision({ classification, severity, recurrenceCount, le
   };
 }
 
+function matchingBotRepairIssues(issues, fingerprint) {
+  const marker = repairFingerprintMarker(fingerprint);
+  const matches = (Array.isArray(issues) ? issues : [])
+    .filter((issue) => issueNumber(issue) && isBotAuthor(issue.author) && String(issue.body || '').includes(marker))
+    .sort((left, right) => issueNumber(left) - issueNumber(right));
+  if (matches.length > MAX_DUPLICATE_REPAIR_ISSUES) {
+    throw new Error('Duplicate repair issue enumeration reached its fail-closed bound.');
+  }
+  return matches;
+}
+
 export function planRepairIssue({ incident, issues = [], comments = [] }) {
-  const marker = repairFingerprintMarker(incident.fingerprint);
-  const matches = issues.filter((issue) => String(issue.body || '').includes(marker));
+  const matches = matchingBotRepairIssues(issues, incident.fingerprint);
   if (matches.length > 1) {
     return { action: 'blocked', reason: 'duplicate-repair-issues', incident, issueNumbers: matches.map(issueNumber) };
   }
@@ -509,7 +620,48 @@ export function planRepairIssue({ incident, issues = [], comments = [] }) {
   }
 
   const incidentMarker = repairIncidentMarker(incident.headSha, incident.fingerprint);
+  const snapshots = sanitizedAdvisoryRepairSnapshots(issue, boundedComments, incident.fingerprint);
   if (recordedMarkers.has(incidentMarker)) {
+    const handoff = latestRepairSnapshot(
+      snapshots.filter((snapshot) => snapshot.continuation.expectedCandidateSha === incident.headSha),
+    );
+    const reconciled =
+      handoff && snapshots.some((snapshot) => repairSnapshotContainsHandoff(snapshot, handoff, incident.headSha));
+    if (handoff && !reconciled) {
+      const recurrenceCount = recordedMarkers.size;
+      const learning = learningDecision({
+        classification: incident.classification,
+        severity: incident.severity,
+        recurrenceCount,
+        learningTriggers: incident.learningTriggers,
+      });
+      const stateInput = {
+        ...incident,
+        ...carriedRepairContinuation(incident, handoff),
+        recurrenceCount,
+        learning,
+        callback: CODEX_CALLBACK,
+        repairBounds: REPAIR_BOUNDS,
+      };
+      const normalized = buildPublicRepairState(stateInput);
+      const state = {
+        ...stateInput,
+        task: normalized.task,
+        diagnosis: normalized.diagnosis,
+        repair: normalized.repair,
+        continuation: normalized.continuation,
+        recovery: normalized.recovery,
+      };
+      return {
+        action: 'reconcile',
+        reason: 'late-exact-candidate-handoff',
+        issueNumber: issueNumber(issue),
+        reopen: issue.state === 'CLOSED',
+        comment: buildRepairReconciliationComment(state),
+        labels: desiredLabels(state),
+        state,
+      };
+    }
     return {
       action: 'deduplicated',
       reason: 'exact-head-and-fingerprint-already-recorded',
@@ -526,7 +678,7 @@ export function planRepairIssue({ incident, issues = [], comments = [] }) {
     recurrenceCount,
     learningTriggers: incident.learningTriggers,
   });
-  const previousState = latestSanitizedAdvisoryRepairSnapshot(issue, boundedComments, incident.fingerprint);
+  const previousState = latestRepairSnapshot(snapshots);
   const stateInput = {
     ...incident,
     ...carriedRepairContinuation(incident, previousState),
@@ -605,6 +757,7 @@ function sameRepairAttemptIdentity(left, right) {
     left.number === right.number &&
     left.generation === right.generation &&
     left.strategyFingerprint === right.strategyFingerprint &&
+    (left.rootCauseHypothesisKey || null) === (right.rootCauseHypothesisKey || null) &&
     left.candidateSha === right.candidateSha
   );
 }
@@ -645,20 +798,29 @@ function validateRepairProgressTransition(previousState, progress, candidateStat
       throw new Error('Repair progress may not erase an exhausted strategy fingerprint.');
     }
   }
-  const expectedExhaustedStrategyFingerprints = summarizeRepairAttemptHistory(
+  for (const key of previousState.repair.exhaustedRootCauseHypothesisKeys) {
+    if (!candidateState.repair.exhaustedRootCauseHypothesisKeys.includes(key)) {
+      throw new Error('Repair progress may not erase an exhausted causal hypothesis key.');
+    }
+  }
+  const expectedExhaustion = summarizeRepairAttemptHistory(
     candidateAttempts,
     previousState.repair.exhaustedStrategyFingerprints,
-  ).exhaustedStrategyFingerprints;
+    previousState.repair.exhaustedRootCauseHypothesisKeys,
+  );
   if (
     JSON.stringify(candidateState.repair.exhaustedStrategyFingerprints) !==
-    JSON.stringify(expectedExhaustedStrategyFingerprints)
+      JSON.stringify(expectedExhaustion.exhaustedStrategyFingerprints) ||
+    JSON.stringify(candidateState.repair.exhaustedRootCauseHypothesisKeys) !==
+      JSON.stringify(expectedExhaustion.exhaustedRootCauseHypothesisKeys)
   ) {
-    throw new Error('Repair progress may not manufacture an exhausted strategy fingerprint.');
+    throw new Error('Repair progress may not manufacture exhausted strategy or causal hypothesis history.');
   }
 
   const rawAttempts = Array.isArray(progress.repair.attempts) ? progress.repair.attempts : [];
   const stagedAttempts = [...candidateAttempts.slice(0, previousAttempts.length)];
   const historicalExhausted = [...previousState.repair.exhaustedStrategyFingerprints];
+  const historicalExhaustedHypotheses = [...previousState.repair.exhaustedRootCauseHypothesisKeys];
   for (let index = previousAttempts.length; index < candidateAttempts.length; index += 1) {
     const attempt = candidateAttempts[index];
     const rawAttempt = rawAttempts[index];
@@ -668,6 +830,11 @@ function validateRepairProgressTransition(previousState, progress, candidateStat
     const computedFingerprint = buildStrategyFingerprint(rawAttempt.strategy);
     if (computedFingerprint !== attempt.strategyFingerprint) {
       throw new Error('Repair attempt strategy inputs do not match its strategy fingerprint.');
+    }
+    if (
+      attempt.rootCauseHypothesisKey !== strategyKey(rawAttempt.strategy.rootCauseHypothesis, 'rootCauseHypothesis')
+    ) {
+      throw new Error('Repair attempt causal hypothesis does not match its stable strategy inputs.');
     }
     if (safeInteger(rawAttempt.number) !== index + 1 || attempt.number !== index + 1) {
       throw new Error('New repair attempts must use unique sequential attempt numbers.');
@@ -681,9 +848,14 @@ function validateRepairProgressTransition(previousState, progress, candidateStat
     if (attempt.generation !== candidateGeneration) {
       throw new Error('A new repair attempt must belong to the active repair generation.');
     }
+    if (stagedAttempts.some((entry) => entry.outcome === 'in-progress')) {
+      throw new Error('A new repair attempt cannot start while a prior repair attempt is still in-progress.');
+    }
     const decision = decideRepairAttempt({
-      attempts: stagedAttempts.filter((entry) => entry.generation === candidateGeneration),
+      attempts: stagedAttempts,
+      currentGenerationAttemptCount: stagedAttempts.filter((entry) => entry.generation === candidateGeneration).length,
       exhaustedStrategyFingerprints: historicalExhausted,
+      exhaustedRootCauseHypothesisKeys: historicalExhaustedHypotheses,
       proposedStrategy: rawAttempt.strategy,
       rediagnosis: candidateState.diagnosis,
       priorRediagnosisVersion: previousState.diagnosis.version,
@@ -695,6 +867,11 @@ function validateRepairProgressTransition(previousState, progress, candidateStat
     }
     stagedAttempts.push(attempt);
     historicalExhausted.splice(0, historicalExhausted.length, ...decision.exhaustedStrategyFingerprints);
+    historicalExhaustedHypotheses.splice(
+      0,
+      historicalExhaustedHypotheses.length,
+      ...decision.exhaustedRootCauseHypothesisKeys,
+    );
   }
 }
 
@@ -707,18 +884,28 @@ function planRepairProgressSnapshot({ incident, issues = [], comments = [], prog
   ) {
     throw new Error('Repair progress identity does not match the trusted source run.');
   }
-  const marker = repairFingerprintMarker(incident.fingerprint);
-  const matches = issues.filter((issue) => String(issue.body || '').includes(marker));
+  const matches = matchingBotRepairIssues(issues, incident.fingerprint);
   if (matches.length !== 1) {
-    throw new Error('Repair progress requires exactly one existing repair issue for the trusted fingerprint.');
+    const numbers = matches.map(issueNumber);
+    throw new Error(
+      `Repair progress requires exactly one existing bot-owned repair issue for the trusted fingerprint; found: ${
+        numbers.length > 0 ? numbers.join(', ') : 'none'
+      }.`,
+    );
   }
   const issue = matches[0];
-  if (issueNumber(issue) !== progress.issueNumber || !isBotAuthor(issue.author)) {
+  const boundIssueNumber = issueNumber(issue);
+  if (boundIssueNumber !== progress.issueNumber) {
     throw new Error('Repair progress issue binding is invalid.');
   }
   const boundedComments = Array.isArray(comments) ? comments.slice(-MAX_REPAIR_COMMENTS) : [];
-  const previousState = latestSanitizedAdvisoryRepairSnapshot(issue, boundedComments, incident.fingerprint);
-  if (!previousState || previousState.task.candidateSha !== incident.headSha) {
+  const previousState = latestRepairSnapshot(
+    sanitizedAdvisoryRepairSnapshots(issue, boundedComments, incident.fingerprint).filter(
+      (snapshot) =>
+        snapshot.task.candidateSha === incident.headSha && snapshot.trigger.workflowRunId === progress.sourceRunId,
+    ),
+  );
+  if (!previousState) {
     throw new Error('Repair progress requires a current sanitized advisory snapshot for the exact candidate.');
   }
   const recurrenceCount = Math.max(1, safeInteger(previousState.recurrenceCount));
@@ -764,7 +951,7 @@ function planRepairProgressSnapshot({ incident, issues = [], comments = [], prog
   return {
     action: 'record-progress',
     reason: 'sanitized-advisory-progress-snapshot',
-    issueNumber: issueNumber(issue),
+    issueNumber: boundIssueNumber,
     reopen: issue.state === 'CLOSED',
     comment: buildRepairProgressComment(state),
     labels: desiredLabels(state),
@@ -793,15 +980,24 @@ export async function runRepairQueue({ env = process.env, api = defaultApi(), lo
   }
 
   const jobs = await api.getJobs(repository, sourceRunId);
-  const failedJob =
-    run.conclusion === 'success' && deliverySummary?.terminalOutcome === 'superseded'
-      ? {
-          id: 0,
-          name: `main supersession ${run.head_sha}`,
-          conclusion: 'success',
-          workflowPath: run.path,
-        }
-      : selectFailedJob(jobs, run.path);
+  let failedJob;
+  if (run.conclusion === 'success' && deliverySummary?.terminalOutcome === 'superseded') {
+    failedJob = {
+      id: 0,
+      name: `main supersession ${run.head_sha}`,
+      conclusion: 'success',
+      workflowPath: run.path,
+    };
+  } else if (run.conclusion === 'success' && deliverySummary?.terminalOutcome === 'incomplete') {
+    failedJob = {
+      id: 0,
+      name: `delivery ${deliverySummary.mode} configuration blocker`,
+      conclusion: 'success',
+      workflowPath: run.path,
+    };
+  } else {
+    failedJob = selectFailedJob(jobs, run.path);
+  }
   const failureClass = classifyFailure(run.path, failedJob.name, deliverySummary);
   const fingerprint = buildFailureFingerprint(run.path, failureClass.classification, failedJob.name);
   const incident = buildIncident({
@@ -814,7 +1010,7 @@ export async function runRepairQueue({ env = process.env, api = defaultApi(), lo
   });
 
   const issues = await api.listRepairIssues(repository, MAX_ISSUES);
-  const match = issues.find((issue) => String(issue.body || '').includes(repairFingerprintMarker(fingerprint)));
+  const match = matchingBotRepairIssues(issues, fingerprint)[0];
   const comments = match ? await api.listIssueComments(repository, issueNumber(match)) : [];
   const plan = repairProgress
     ? planRepairProgressSnapshot({ incident, issues, comments, progress: repairProgress })
@@ -824,7 +1020,7 @@ export async function runRepairQueue({ env = process.env, api = defaultApi(), lo
   if (!dryRun && plan.action === 'create') {
     await api.ensureLabels(repository, plan.labels, LABELS);
     resultingIssueNumber = await api.createIssue(repository, plan.title, plan.body, plan.labels);
-  } else if (!dryRun && ['append', 'record-progress'].includes(plan.action)) {
+  } else if (!dryRun && ['append', 'record-progress', 'reconcile'].includes(plan.action)) {
     await api.ensureLabels(repository, plan.labels, LABELS);
     if (plan.reopen) await api.reopenIssue(repository, plan.issueNumber);
     await api.addLabels(repository, plan.issueNumber, plan.labels);
@@ -833,7 +1029,9 @@ export async function runRepairQueue({ env = process.env, api = defaultApi(), lo
 
   const summary = summaryResult({
     action:
-      dryRun && ['create', 'append', 'record-progress'].includes(plan.action) ? `planned-${plan.action}` : plan.action,
+      dryRun && ['create', 'append', 'record-progress', 'reconcile'].includes(plan.action)
+        ? `planned-${plan.action}`
+        : plan.action,
     reason: plan.reason,
     run,
     sourceRunId,
@@ -841,6 +1039,7 @@ export async function runRepairQueue({ env = process.env, api = defaultApi(), lo
     failedJob,
     fingerprint,
     issueNumber: resultingIssueNumber,
+    issueNumbers: plan.issueNumbers,
     recurrenceCount: plan.state?.recurrenceCount || plan.recurrenceCount || 0,
     learning: plan.state?.learning,
   });
@@ -853,9 +1052,11 @@ function buildIncident({ run, failedJob, failureClass, fingerprint, pullRequestN
   const conclusion =
     run.conclusion === 'success' && deliverySummary?.terminalOutcome === 'superseded'
       ? 'superseded'
-      : FAILURE_CONCLUSIONS.has(String(run.conclusion))
-        ? String(run.conclusion)
-        : 'failure';
+      : run.conclusion === 'success' && deliverySummary?.terminalOutcome === 'incomplete'
+        ? 'incomplete'
+        : FAILURE_CONCLUSIONS.has(String(run.conclusion))
+          ? String(run.conclusion)
+          : 'failure';
   const jobName = sanitizeJobName(failedJob.name);
   const observableFailure = `${workflow.displayName} concluded ${conclusion} at ${jobName}.`;
   if (containsSensitiveText(observableFailure)) throw new Error('Generated observable failure was not public-safe.');
@@ -1020,6 +1221,15 @@ ${JSON.stringify(buildPublicRepairState(state), null, 2)}
 \`\`\``;
 }
 
+function buildRepairReconciliationComment(state) {
+  return `${repairIncidentMarker(state.headSha, state.fingerprint)}
+Sanitized advisory handoff reconciliation for \`${state.fingerprint}\`. A later exact-run snapshot is deterministically combined with an earlier one-hop candidate declaration; neither snapshot authorizes repair or completion.
+
+\`\`\`json
+${JSON.stringify(buildPublicRepairState(state), null, 2)}
+\`\`\``;
+}
+
 export function buildPublicRepairState(state) {
   assertSha(state.headSha);
   assertFingerprint(state.fingerprint);
@@ -1083,6 +1293,7 @@ export function buildPublicRepairState(state) {
       attempts: recordedRepair.attempts,
       strategyFingerprints: recordedRepair.strategyFingerprints,
       exhaustedStrategyFingerprints: recordedRepair.exhaustedStrategyFingerprints,
+      exhaustedRootCauseHypothesisKeys: recordedRepair.exhaustedRootCauseHypothesisKeys,
       policyDecision: recordedRepair.policyDecision,
       repairedPr: null,
       repairedSha: null,
@@ -1160,6 +1371,7 @@ function publishSummary(summary, env, logger) {
         `- Exact SHA: ${summary.headSha || 'not-applicable'}`,
         `- Fingerprint: ${summary.fingerprint || 'not-applicable'}`,
         `- Failed job: ${summary.failedJob || 'not-applicable'}`,
+        `- Duplicate repair issues: ${summary.issueNumbers.length > 0 ? summary.issueNumbers.join(', ') : 'none'}`,
         `- Recurrence: ${summary.recurrenceCount || 0}`,
         `- Learning: ${summary.learningStatus || 'not-required-yet'}`,
         `- Callback: unsupported; no request emitted`,
@@ -1179,9 +1391,14 @@ function summaryResult({
   failedJob,
   fingerprint,
   issueNumber = 0,
+  issueNumbers = [],
   recurrenceCount = 0,
   learning,
 }) {
+  const boundedIssueNumbers = [...new Set((Array.isArray(issueNumbers) ? issueNumbers : []).map(safeInteger))]
+    .filter(Boolean)
+    .sort((left, right) => left - right)
+    .slice(0, MAX_DUPLICATE_REPAIR_ISSUES);
   return {
     schemaVersion: 1,
     action,
@@ -1193,6 +1410,7 @@ function summaryResult({
     fingerprint: fingerprint || '',
     failedJob: failedJob ? sanitizeJobName(failedJob.name) : '',
     issueNumber: safeInteger(issueNumber),
+    issueNumbers: boundedIssueNumbers,
     recurrenceCount,
     learningStatus: learning?.status || 'not-required-yet',
     callbackSupported: false,
@@ -1359,13 +1577,17 @@ function reusableBotSnapshotSource(source, comment) {
   return !createdAt || !updatedAt || createdAt === updatedAt;
 }
 
-function immutableProgressSnapshotSource(source, comment, fingerprint) {
-  if (!comment || !source) return false;
+function immutableBotComment(source) {
+  if (!source || !isBotAuthor(source.user || source.author)) return false;
   const createdAt = source.created_at || source.createdAt;
   const updatedAt = source.updated_at || source.updatedAt;
+  return Boolean(createdAt) && createdAt === updatedAt;
+}
+
+function immutableProgressSnapshotSource(source, comment, fingerprint) {
+  if (!comment || !source) return false;
   return (
-    Boolean(createdAt) &&
-    createdAt === updatedAt &&
+    immutableBotComment(source) &&
     String(source.body || '').includes(`Sanitized advisory repair-progress snapshot for \`${fingerprint}\`.`)
   );
 }
@@ -1436,6 +1658,13 @@ function validateRepairAttempts(attempts) {
     if (!REPAIR_ATTEMPT_OUTCOMES.has(attempt.outcome)) {
       throw new Error('Repair attempt outcome must be effective, ineffective, or in-progress.');
     }
+    if (
+      attempt.rootCauseHypothesisKey !== undefined &&
+      attempt.rootCauseHypothesisKey !== null &&
+      !publicKeyOrNull(attempt.rootCauseHypothesisKey)
+    ) {
+      throw new Error('Repair attempt causal hypothesis key is invalid.');
+    }
   }
 }
 
@@ -1451,25 +1680,58 @@ function validateExhaustedStrategyFingerprints(value) {
   }
 }
 
-function summarizeRepairAttemptHistory(attempts, priorExhaustedStrategyFingerprints = []) {
+function validateExhaustedRootCauseHypothesisKeys(value) {
+  if (!Array.isArray(value)) throw new Error('Exhausted causal hypothesis history must be an array.');
+  if (value.length > MAX_STRATEGY_FINGERPRINTS) {
+    throw new Error('Exhausted causal hypothesis history exceeds its bound.');
+  }
+  for (const key of value) {
+    if (!publicKeyOrNull(key)) throw new Error('Exhausted causal hypothesis history contains an invalid key.');
+  }
+}
+
+function summarizeRepairAttemptHistory(
+  attempts,
+  priorExhaustedStrategyFingerprints = [],
+  priorExhaustedRootCauseHypothesisKeys = [],
+) {
   validateRepairAttempts(attempts);
   validateExhaustedStrategyFingerprints(priorExhaustedStrategyFingerprints);
+  validateExhaustedRootCauseHypothesisKeys(priorExhaustedRootCauseHypothesisKeys);
   const ineffectiveByStrategy = new Map();
+  const ineffectiveByRootCauseHypothesis = new Map();
   for (const attempt of attempts) {
     if (attempt.outcome !== 'ineffective') continue;
     ineffectiveByStrategy.set(
       attempt.strategyFingerprint,
       (ineffectiveByStrategy.get(attempt.strategyFingerprint) || 0) + 1,
     );
+    const rootCauseHypothesisKey = publicKeyOrNull(attempt.rootCauseHypothesisKey);
+    if (rootCauseHypothesisKey) {
+      ineffectiveByRootCauseHypothesis.set(
+        rootCauseHypothesisKey,
+        (ineffectiveByRootCauseHypothesis.get(rootCauseHypothesisKey) || 0) + 1,
+      );
+    }
   }
   const exhaustedStrategyFingerprints = new Set(priorExhaustedStrategyFingerprints);
+  const exhaustedRootCauseHypothesisKeys = new Set(priorExhaustedRootCauseHypothesisKeys);
   for (const [fingerprint, count] of ineffectiveByStrategy) {
     if (count >= REPAIR_BOUNDS.maxAttemptsPerStrategy) exhaustedStrategyFingerprints.add(fingerprint);
+  }
+  for (const [key, count] of ineffectiveByRootCauseHypothesis) {
+    if (count >= REPAIR_BOUNDS.maxAttemptsPerStrategy) exhaustedRootCauseHypothesisKeys.add(key);
   }
   if (exhaustedStrategyFingerprints.size > MAX_STRATEGY_FINGERPRINTS) {
     throw new Error('Exhausted strategy history exceeds its bound.');
   }
-  return { exhaustedStrategyFingerprints: [...exhaustedStrategyFingerprints].sort() };
+  if (exhaustedRootCauseHypothesisKeys.size > MAX_STRATEGY_FINGERPRINTS) {
+    throw new Error('Exhausted causal hypothesis history exceeds its bound.');
+  }
+  return {
+    exhaustedStrategyFingerprints: [...exhaustedStrategyFingerprints].sort(),
+    exhaustedRootCauseHypothesisKeys: [...exhaustedRootCauseHypothesisKeys].sort(),
+  };
 }
 
 function nonEmptyPublicText(value) {
@@ -1491,11 +1753,15 @@ function publicRepairAttempts(value, defaultGeneration) {
     ) {
       return [];
     }
+    const rootCauseHypothesisKey = publicKeyOrNull(
+      attempt.rootCauseHypothesisKey || attempt.strategy?.rootCauseHypothesis,
+    );
     return [
       {
         number: safeInteger(attempt.number) || index + 1,
         generation: safeInteger(attempt.generation) || defaultGeneration,
         strategyFingerprint: attempt.strategyFingerprint,
+        ...(rootCauseHypothesisKey ? { rootCauseHypothesisKey } : {}),
         outcome: attempt.outcome,
         candidateSha: SHA_RE.test(String(attempt.candidateSha || '')) ? attempt.candidateSha : null,
       },
@@ -1511,14 +1777,22 @@ function publicStrategyFingerprints(value, fallback = []) {
   );
 }
 
+function publicCausalHypothesisKeys(value) {
+  return [...new Set((Array.isArray(value) ? value : []).map(publicKeyOrNull).filter(Boolean))]
+    .sort()
+    .slice(0, MAX_STRATEGY_FINGERPRINTS);
+}
+
 function recordedRepairPolicyState(repair, continuation, diagnosis) {
   const generation = safeInteger(repair?.generation) || 1;
   const attempts = publicRepairAttempts(repair?.attempts, generation);
   const currentGenerationAttempts = attempts.filter((attempt) => attempt.generation === generation);
   const priorExhaustedStrategyFingerprints = publicStrategyFingerprints(repair?.exhaustedStrategyFingerprints);
-  const { exhaustedStrategyFingerprints } = summarizeRepairAttemptHistory(
-    currentGenerationAttempts,
+  const priorExhaustedRootCauseHypothesisKeys = publicCausalHypothesisKeys(repair?.exhaustedRootCauseHypothesisKeys);
+  const { exhaustedStrategyFingerprints, exhaustedRootCauseHypothesisKeys } = summarizeRepairAttemptHistory(
+    attempts,
     priorExhaustedStrategyFingerprints,
+    priorExhaustedRootCauseHypothesisKeys,
   );
   const strategyFingerprints = publicStrategyFingerprints(repair?.strategyFingerprints, [
     ...attempts.map((attempt) => attempt.strategyFingerprint),
@@ -1566,6 +1840,7 @@ function recordedRepairPolicyState(repair, continuation, diagnosis) {
     attempts,
     strategyFingerprints,
     exhaustedStrategyFingerprints,
+    exhaustedRootCauseHypothesisKeys,
     continuationStatus,
     nextGeneration: {
       pending: generationExhausted,
