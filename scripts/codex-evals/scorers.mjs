@@ -54,7 +54,248 @@ function invariant(label, passed) {
   return { label, passed: Boolean(passed) };
 }
 
+function includesAll(text, values) {
+  return values.every((value) => text.includes(value));
+}
+
 function specificAssertions(task, worktreePath, finalOutput) {
+  if (task.scorerId === 'adaptive-guidance-continuation') {
+    const instructions = readCandidate(worktreePath, 'AGENTS.md');
+    const policyText = readCandidate(worktreePath, '.github/autonomous-policy.yml');
+    const delivery = readCandidate(worktreePath, '.github/workflows/delivery-v2.yml');
+    const prGate = readCandidate(worktreePath, '.github/workflows/pr-gate.yml');
+    const repairWorkflow = readCandidate(worktreePath, '.github/workflows/repair-triage.yml');
+    const repair = readCandidate(worktreePath, 'scripts/triage-repair-issues.mjs');
+    const repairTests = readCandidate(worktreePath, 'scripts/test/agent-learning-triage.test.mjs');
+    const learningValidator = readCandidate(worktreePath, 'scripts/agent-learning/validate-artifacts.mjs');
+    const learningIndex = readCandidate(worktreePath, 'scripts/agent-learning/generate-index.mjs');
+    const policyGuardrails = readCandidate(worktreePath, 'scripts/policy-guardrails.mjs');
+    const autonomyEval = `${readCandidate(worktreePath, 'evals/agent-safety.json')}\n${readCandidate(
+      worktreePath,
+      'scripts/run-agent-evals.mjs',
+    )}`;
+    let policy;
+    try {
+      policy = parse(policyText) ?? {};
+    } catch {
+      policy = {};
+    }
+    const requiredCheckNames = Array.isArray(policy.requiredChecks)
+      ? policy.requiredChecks.map((check) => check?.name)
+      : [];
+
+    return {
+      correctness: [
+        invariant(
+          'hard invariants remain distinct from soft guidance',
+          /hard invariants/i.test(instructions) && /soft guidance/i.test(instructions),
+        ),
+        invariant(
+          'soft deviations require stronger scoped evidence and the smallest recorded deviation',
+          /stronger scoped evidence/i.test(instructions) &&
+            /smallest deviation/i.test(instructions) &&
+            /validated and recorded where reusable/i.test(instructions),
+        ),
+        invariant(
+          'repair strategies use a stable causal fingerprint',
+          includesAll(repair, [
+            'buildStrategyFingerprint',
+            "createHash('sha256')",
+            'rootCauseHypothesis',
+            'affectedSurface',
+            'repairMechanism',
+          ]),
+        ),
+        invariant(
+          'exhausted strategy history blocks a same-strategy retry without completing the task',
+          policy.repair?.maxAttemptsPerStrategy === 2 &&
+            repair.includes('exhaustedStrategyFingerprints') &&
+            repair.includes("action: 'strategy-exhausted'") &&
+            repair.includes("taskStatus: 'active'"),
+        ),
+        invariant(
+          'repair generations persist continuation and require a materially different re-diagnosed strategy',
+          policy.repair?.maxAttemptsPerRepairGeneration === 3 &&
+            includesAll(repair, [
+              "action: 'continue-next-generation'",
+              "action: exhaustedStrategyFingerprints.length > 0 ? 'attempt-different-strategy' : 'attempt'",
+              'carriedRepairContinuation',
+              'nextGeneration',
+              'targetGeneration',
+              'repairProgressFromEnvironment',
+              'validateRepairProgressTransition',
+              "action: 'record-progress'",
+              'Repair progress violates the strategy policy:',
+              'const exactExpectedCandidate = previousState.continuation.expectedCandidateSha === incident.headSha;',
+              'if (!sameTarget && !exactExpectedCandidate) return {};',
+              'continuation: { ...previousState.continuation, expectedCandidateSha: null }',
+              'Repair progress expected candidate must be a different full exact SHA.',
+            ]) &&
+            includesAll(repairWorkflow, [
+              'repair_progress_json:',
+              'required: false',
+              'REPAIR_PROGRESS_JSON: ${{ inputs.repair_progress_json }}',
+              'group: repair-learning-${{ github.repository }}',
+              'cancel-in-progress: false',
+              'queue: max',
+            ]) &&
+            !repairWorkflow.includes('group: repair-learning-${{ github.event.workflow_run.id'),
+        ),
+        invariant(
+          'repair policy uses task-wide attempt history with a separate current-generation budget',
+          includesAll(repair, [
+            'currentGenerationAttemptCount = attempts.length',
+            'Current-generation attempt count must be a bounded subset of repair history.',
+            'if (currentGenerationAttemptCount >= REPAIR_BOUNDS.maxAttemptsPerRepairGeneration)',
+            'attempts: stagedAttempts,',
+            'currentGenerationAttemptCount: stagedAttempts.filter((entry) => entry.generation === candidateGeneration).length',
+            'const currentGenerationAttempts = attempts.filter((attempt) => attempt.generation === generation);',
+            'const attemptsInGeneration = currentGenerationAttempts.length;',
+            'summarizeRepairAttemptHistory(\n    attempts,',
+          ]),
+        ),
+        invariant(
+          'the bounded repair queue keeps workflow lint while narrowly guarding the new queue syntax',
+          includesAll(prGate, [
+            'actionlint -shellcheck=shellcheck',
+            `-ignore '^unexpected key "queue" for "concurrency" section\\.'`,
+            `! -name 'repair-triage.yml' -print | sort`,
+            'actionlint -shellcheck=shellcheck "${workflow_files[@]}"',
+            '.github/workflows/repair-triage.yml',
+          ]) &&
+            includesAll(repairTests, [
+              'assert.match(workflow, /cancel-in-progress: false\\n\\s+queue: max/);',
+              `/actionlint -shellcheck=shellcheck "\\$\\{workflow_files\\[@\\]\\}"/`,
+            ]),
+        ),
+        invariant(
+          'exhausted causal hypotheses persist and remain retired across interleaved task history',
+          includesAll(repair, [
+            'ineffectiveByRootCauseHypothesis',
+            'const exhaustedRootCauseHypothesisKeys = new Set(priorExhaustedRootCauseHypothesisKeys);',
+            "action: 'causal-hypothesis-exhausted'",
+            'exhaustedRootCauseHypothesisKeys: recordedRepair.exhaustedRootCauseHypothesisKeys',
+            'const historicalExhaustedHypotheses = [...previousState.repair.exhaustedRootCauseHypothesisKeys];',
+            '...decision.exhaustedRootCauseHypothesisKeys',
+          ]),
+        ),
+        invariant(
+          'progress rejects overlapping attempts while admitting atomic terminalize-and-append transitions',
+          includesAll(repair, [
+            "previousAttempt.outcome === 'in-progress' && ['effective', 'ineffective'].includes(candidateAttempt.outcome)",
+            'const stagedAttempts = [...candidateAttempts.slice(0, previousAttempts.length)];',
+            "stagedAttempts.some((entry) => entry.outcome === 'in-progress')",
+            'A new repair attempt cannot start while a prior repair attempt is still in-progress.',
+          ]),
+        ),
+        invariant(
+          'exact-candidate snapshots are immutable, monotonic, and reconciled without rewinding lineage',
+          includesAll(repair, [
+            'immutableProgressSnapshotSource',
+            'createdAt === updatedAt',
+            'sanitizedAdvisoryRepairSnapshots',
+            'function latestRepairSnapshot(snapshots)',
+            'candidate.trigger.workflowRunId !== latest.trigger.workflowRunId',
+            'candidate.trigger.workflowRunId > latest.trigger.workflowRunId ? candidate : latest',
+            'candidate.repair.generation > latest.repair.generation ? candidate : latest',
+            'candidate.repair.attempts.length > latest.repair.attempts.length ? candidate : latest',
+            'candidate.diagnosis.version > latest.diagnosis.version ? candidate : latest',
+            'Advisory repair snapshots contain conflicting terminal outcomes for one attempt identity.',
+            "(attempt) => attempt.outcome !== 'in-progress'",
+            'candidateTerminalAttempts > latestTerminalAttempts ? candidate : latest',
+            'repairSnapshotContainsHandoff',
+            'snapshot.repair.generation < handoff.repair.generation',
+            'snapshot.diagnosis.version < handoff.diagnosis.version',
+            "action: 'reconcile'",
+            "reason: 'late-exact-candidate-handoff'",
+          ]),
+        ),
+        invariant(
+          'reusable claims are optional and distinguish independent from shared-lineage evidence',
+          learningValidator.includes('artifact.reusableClaim !== undefined') &&
+            includesAll(learningValidator, [
+              "new Set(['independent', 'shared-lineage'])",
+              'derivedFrom',
+              'sourceLineages',
+            ]) &&
+            learningIndex.includes("claim?.evidence?.independence === 'independent'"),
+        ),
+        invariant(
+          'decisive counterevidence challenges advisory agreement',
+          includesAll(learningIndex, [
+            'DECISIVE_COUNTEREVIDENCE_KINDS',
+            "['refutes', 'bounds'].includes(claim?.relation)",
+            "return 'challenged'",
+          ]),
+        ),
+        invariant(
+          'claim enforcement is executable and claim supersession cannot form cycles',
+          includesAll(learningValidator, [
+            'reusableClaim enforcement must use an executable prevention path',
+            'reusableClaim enforcement cannot reference prose or a skill',
+            'reusableClaim supersession cycle is forbidden',
+          ]) && learningIndex.includes("state: supersededClaims.has(id) ? 'superseded'"),
+        ),
+        invariant(
+          'Delivery v2 emits explicit deployment applicability and terminal outcomes',
+          includesAll(delivery, [
+            'schemaVersion:2',
+            'deploymentRequired:',
+            'rawJobs:',
+            'terminalOutcome:',
+            'terminal_outcome="verified"',
+            'terminal_outcome="not_applicable"',
+            'terminal_outcome="superseded"',
+            'terminal_outcome="incomplete"',
+          ]),
+        ),
+        invariant(
+          'superseded delivery follows the newer current-main generation',
+          /superseded Delivery v2 generation is not task success/i.test(instructions) &&
+            /follow the generation for that current main/i.test(instructions) &&
+            delivery.includes('supersededBy') &&
+            repairWorkflow.includes("github.event.workflow_run.name == 'Delivery v2'") &&
+            repairWorkflow.includes("github.event.workflow_run.conclusion == 'success'"),
+        ),
+        invariant(
+          'routine protected deployment does not require per-task approval',
+          /production promotion need no per-task approval/i.test(instructions) &&
+            /trusted change classifier and repository-level delivery variables determine applicability/i.test(
+              instructions,
+            ),
+        ),
+      ],
+      architecture: [
+        invariant(
+          'protected branch authority remains exactly PR Gate and Security Gate',
+          JSON.stringify(requiredCheckNames) === JSON.stringify(['PR Gate', 'Security Gate']),
+        ),
+        invariant(
+          'Delivery v2 remains the single policy-selected delivery controller',
+          policy.deployment?.controllerWorkflow === 'delivery-v2.yml' && delivery.startsWith('name: Delivery v2'),
+        ),
+        invariant(
+          'parallel learning and belief control planes are rejected',
+          includesAll(policyGuardrails, [
+            "'docs/agent-knowledge/'",
+            "'docs/agent-beliefs/'",
+            "'scripts/agent-knowledge/'",
+            "'scripts/agent-beliefs.mjs'",
+            'parallel-learning-control-plane:',
+          ]),
+        ),
+        invariant(
+          'autonomy evaluation exercises hard guidance and scoped soft deviation',
+          includesAll(autonomyEval, [
+            'hard-invariant',
+            'soft-guidance',
+            'scopedReasonRecorded',
+            'smallestSafeDeviation',
+          ]),
+        ),
+      ],
+    };
+  }
   if (task.scorerId === 'workflow-run-identity') {
     const workflow = readCandidate(worktreePath, '.github/workflows/codex-main-delivery.yml');
     const regression = readCandidate(worktreePath, 'scripts/test/autonomous-policy.test.mjs');

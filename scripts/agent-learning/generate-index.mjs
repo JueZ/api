@@ -6,6 +6,73 @@ import { loadLearningArtifacts } from './validate-artifacts.mjs';
 
 const REPOSITORY_ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const INDEX_PATH = resolve(REPOSITORY_ROOT, 'docs/agent-learning/index.md');
+const CORROBORATING_EVIDENCE_KINDS = new Set([
+  'deterministic-reproduction',
+  'protected-check',
+  'runtime-observation',
+  'authoritative-requirement',
+  'specialist-review',
+  'repeated-application',
+]);
+const DECISIVE_COUNTEREVIDENCE_KINDS = new Set([
+  'deterministic-reproduction',
+  'protected-check',
+  'runtime-observation',
+]);
+
+export function deriveReusableClaimState(entries) {
+  if (entries.some(({ artifact }) => artifact.reusableClaim?.retired)) return 'retired';
+  if (entries.every(({ artifact }) => artifact.status === 'superseded')) return 'superseded';
+  if (
+    entries.some(({ artifact }) => artifact.reusableClaim?.challenge?.state === 'open') ||
+    entries.some(({ artifact }) => {
+      const claim = artifact.reusableClaim;
+      return (
+        ['refutes', 'bounds'].includes(claim?.relation) &&
+        DECISIVE_COUNTEREVIDENCE_KINDS.has(claim?.evidence?.kind) &&
+        !['resolved', 'accepted-exception'].includes(claim?.challenge?.state)
+      );
+    })
+  ) {
+    return 'challenged';
+  }
+  if (entries.some(({ artifact }) => artifact.reusableClaim?.enforcement?.kind !== 'none')) return 'enforced';
+  const supportingLineages = new Set(
+    entries
+      .filter(({ artifact }) => {
+        const claim = artifact.reusableClaim;
+        return (
+          claim?.relation === 'supports' &&
+          claim?.evidence?.independence === 'independent' &&
+          CORROBORATING_EVIDENCE_KINDS.has(claim?.evidence?.kind)
+        );
+      })
+      .map(({ artifact }) => artifact.reusableClaim.lineageId),
+  );
+  return supportingLineages.size >= 2 ? 'corroborated' : 'candidate';
+}
+
+export function summarizeReusableClaims(records) {
+  const grouped = new Map();
+  const supersededClaims = new Set();
+  for (const record of records) {
+    const claim = record.artifact.reusableClaim;
+    if (!claim) continue;
+    const entries = grouped.get(claim.id) ?? [];
+    entries.push(record);
+    grouped.set(claim.id, entries);
+    if (claim.relation === 'supersedes') {
+      for (const id of claim.supersedes) supersededClaims.add(id);
+    }
+  }
+  return [...grouped.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([id, entries]) => ({
+      id,
+      entries,
+      state: supersededClaims.has(id) ? 'superseded' : deriveReusableClaimState(entries),
+    }));
+}
 
 export function generateArtifactIndex(records) {
   const sorted = [...records].sort((left, right) => left.artifact.id.localeCompare(right.artifact.id));
@@ -18,6 +85,28 @@ export function generateArtifactIndex(records) {
     String(artifact.recurrenceCount),
     artifact.prevention.map((item) => `\`${item.path}\` (${item.kind})`).join('<br>'),
   ]);
+  const claimRows = summarizeReusableClaims(sorted).map(({ id, entries, state }) => {
+    const claim = entries[0].artifact.reusableClaim;
+    const carriers = entries
+      .map(({ artifact }) => `[${artifact.id}](artifacts/${artifact.id}.yml)`)
+      .sort()
+      .join('<br>');
+    const lineages = [...new Set(entries.map(({ artifact }) => artifact.reusableClaim.lineageId))]
+      .sort()
+      .map((lineage) => `\`${lineage}\``)
+      .join('<br>');
+    const enforcement = [
+      ...new Set(
+        entries
+          .map(({ artifact }) => artifact.reusableClaim.enforcement)
+          .filter(({ kind }) => kind !== 'none')
+          .map(({ kind, reference }) => `\`${reference}\` (${kind})`),
+      ),
+    ]
+      .sort()
+      .join('<br>');
+    return [markdownCell(id), markdownCell(claim.claim), state, carriers, lineages, enforcement || 'advisory'];
+  });
   const lines = [
     '# Learning invariants',
     '',
@@ -27,7 +116,21 @@ export function generateArtifactIndex(records) {
     '',
     ...renderTable(['Invariant', 'Severity', 'Status', 'Recurrence', 'Prevention'], rows, new Set([3])),
   ];
+  if (claimRows.length > 0) {
+    lines.push(
+      '',
+      '## Reusable claims',
+      '',
+      'States are derived qualitative navigation aids, never merge or deployment gates.',
+      '',
+      ...renderTable(['Claim ID', 'Claim', 'State', 'Artifacts', 'Lineage', 'Enforcement'], claimRows, new Set()),
+    );
+  }
   return `${lines.join('\n')}\n`;
+}
+
+function markdownCell(value) {
+  return String(value).replaceAll('|', '&#124;').replaceAll('\n', '<br>');
 }
 
 function renderTable(headers, rows, rightAligned) {

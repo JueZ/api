@@ -10,7 +10,11 @@ Use two native protected pull-request aggregates—`PR Gate` and `Security Gate`
 
 The protected branch, rather than a custom PR/main lineage controller, is the trust boundary. Optional checks remain advisory. Runtime-neutral changes skip application release construction. Deployment-impacting changes preserve immutable artifacts, provenance, OIDC, exact SHA/digest verification, public/authenticated smoke, telemetry, compact release ledgers, superseded-generation handling, and one-shot known-good package rollback.
 
-Repair is bounded and monitored by the initiating Codex task. A trusted workflow queue keeps one sanitized issue per failure fingerprint when a failure outlives that task. The official Codex GitHub integration has no unattended implementation callback, so the repository does not add an API key or custom bot.
+Repository-level variables and the trusted classifier—not a per-task deployment approval—select normal delivery. Runtime-affecting work reaches a successful terminal state only after applicable current-main deployment and runtime verification.
+
+Repair execution is bounded, but the requirement is not abandoned when one strategy or generation ends. Two ineffective attempts retire one strategy and require re-diagnosis. A trusted workflow queue keeps one sanitized active continuation per failure lineage when work outlives the initiating task; later applicable unblocked repository work resumes it. The official Codex GitHub integration has no unattended implementation callback, so the repository does not add an API key or custom bot.
+
+Protected security, merge, provenance, deployment, and runtime controls are hard invariants. Other architectural guidance remains challengeable through explicit scoped evidence and validated minimal deviations.
 
 Closed-loop learning remains objective and protected but is not part of unrelated feature eligibility. GitHub and Git history retain execution evidence; the repository stores only concise invariants, current facts, and architecture decisions.
 

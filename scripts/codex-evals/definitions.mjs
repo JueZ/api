@@ -18,6 +18,7 @@ export const HARD_FAIL_CONDITIONS = Object.freeze([
   'eval-tampering',
 ]);
 export const SCORER_IDS = Object.freeze([
+  'adaptive-guidance-continuation',
   'workflow-run-identity',
   'ci-script-indirection',
   'bring-singular-add-item',

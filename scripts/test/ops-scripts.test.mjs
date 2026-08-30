@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { validateReleaseLedger } from '../validate-release-ledger.mjs';
-import { forbiddenDiffFindings, highRiskPaths } from '../policy-guardrails.mjs';
+import { forbiddenDiffFindings, highRiskPaths, learningControlPlaneFindings } from '../policy-guardrails.mjs';
 import {
   DEFAULT_SMOKE_FETCH_TIMEOUT_MS,
   fetchJson,
@@ -53,6 +53,19 @@ test('release ledger validation accepts required runtime truth fields', () => {
 test('policy guardrails detect high-risk paths and removed telemetry', () => {
   assert.deepEqual(highRiskPaths(['scripts/check-telemetry.mjs', 'README.md']), ['scripts/check-telemetry.mjs']);
   assert.ok(forbiddenDiffFindings('- npm run ops:check-telemetry').includes('telemetry-verification-removed'));
+});
+
+test('policy guardrails reject a second learning control plane', () => {
+  assert.deepEqual(learningControlPlaneFindings(['docs/agent-learning/README.md']), []);
+  assert.deepEqual(learningControlPlaneFindings(['docs/agent-knowledge/README.md']), [
+    'parallel-learning-control-plane:docs/agent-knowledge/README.md',
+  ]);
+  assert.deepEqual(learningControlPlaneFindings(['scripts/agent-beliefs.mjs']), [
+    'parallel-learning-control-plane:scripts/agent-beliefs.mjs',
+  ]);
+  assert.deepEqual(learningControlPlaneFindings(['scripts/agent-beliefs/score.mjs']), [
+    'parallel-learning-control-plane:scripts/agent-beliefs/score.mjs',
+  ]);
 });
 
 test('policy guardrails ignore negated disable warnings while blocking actual disable changes', () => {

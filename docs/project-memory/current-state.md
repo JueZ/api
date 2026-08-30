@@ -1,4 +1,4 @@
-<!-- project-memory-asOf: 2026-08-16 -->
+<!-- project-memory-asOf: 2026-08-30 -->
 # Current state
 
 ## Repository delivery
@@ -7,9 +7,9 @@
 - Repository-native exact-head squash auto-merge is enabled. No custom merge controller, check-run writer, arbitrary status rollup, or required model review exists.
 - `PR Gate` and `Security Gate` use one fail-closed path classifier. Pull requests run proportional validation and never build release artifacts.
 - The root/build and standalone `apps/api` Function manifests are independent dependency projects. Both receive pair-local lock policy, audit, Dependabot, CodeQL, and Trivy coverage; the release CycloneDX SBOM describes the exact installed production Function stage.
-- `Delivery v2` is the sole normal controller. A push to protected `main` classifies runtime impact, builds one immutable release when applicable, verifies test, promotes the same application digests to production, and verifies production.
+- `Delivery v2` is the sole normal controller. A push to protected `main` classifies runtime impact, builds one immutable release when applicable, verifies test, promotes the same application digests to production, and verifies production without per-task deployment approval. Runtime-affecting work remains incomplete until its applicable runtime evidence passes.
 - `DELIVERY_V2_ENABLED=true` and `DEPLOY_PRODUCTION_ENABLED=true`. Production and one-shot package rollback share `production-deployment` concurrency.
-- The repair queue creates or updates one sanitized issue per exact run/fingerprint. It cannot invoke Codex or rewrite repository files.
+- The repair queue creates or updates one sanitized issue per exact run/failure fingerprint. It cannot invoke Codex or rewrite repository files. Two ineffective attempts retire one repair strategy rather than the task; a bounded generation that ends first leaves an active continuation for later applicable unblocked repository work. A protected workflow-dispatch path records schema-sanitized advisory progress against an exact source run, and an exact expected candidate SHA links protected-main repair generations without carrying state into unrelated candidates.
 
 ## Runtime and security
 
@@ -23,6 +23,6 @@
 
 ## Learning and memory
 
-- Significant and recurring failures use executable prevention plus concise schema-v2 learning artifacts. Learning validation runs only when learning files or their validator change.
-- Completed phase ledgers, historical acceptance evidence, model-backed task harnesses, workflow hashes, and chronological project-memory logs have been removed. GitHub and Git history are the execution record.
+- Significant and recurring failures use executable prevention plus concise schema-v2 learning artifacts. Hard invariants remain mechanically protected; reusable architectural guidance is advisory and may be bounded by scoped counterevidence. Learning validation runs only when learning files or their validator change.
+- Completed phase ledgers, historical acceptance evidence, required model-review gates, workflow hashes, and chronological project-memory logs have been removed. The lean local historical Codex task harness remains advisory and outside merge or delivery eligibility. GitHub and Git history are the execution record.
 - Query live GitHub/Azure/runtime state for the current deployed SHA and workflow outcome; do not copy routine run narration into this file.

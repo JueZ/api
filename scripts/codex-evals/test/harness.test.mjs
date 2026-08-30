@@ -92,10 +92,19 @@ function writeHistoricalFiles(directory, commit, paths) {
   }
 }
 
+function writeCurrentFiles(directory, paths) {
+  for (const path of paths) {
+    const destination = join(directory, path);
+    mkdirSync(dirname(destination), { recursive: true });
+    writeFileSync(destination, readFileSync(join(REPOSITORY_ROOT, path)), 'utf8');
+  }
+}
+
 test('all committed historical tasks validate against exact available commits', () => {
   const result = validateTaskRepository();
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.tasks.map(({ id }) => id).sort(), [
+    'adaptive-guidance-continuation',
     'bring-singular-add-item',
     'ci-script-indirection',
     'delivery-evidence-truthfulness',
@@ -270,6 +279,215 @@ test('trusted scorers accept fixed historical invariants without requiring exact
     assert.equal(scoring.scores.correctness, 50, entry.taskId);
     assert.equal(scoring.scores.architecturalFit, 10, entry.taskId);
   }
+});
+
+const ADAPTIVE_GUIDANCE_SCORER_PATHS = [
+  'AGENTS.md',
+  '.github/autonomous-policy.yml',
+  '.github/workflows/delivery-v2.yml',
+  '.github/workflows/pr-gate.yml',
+  '.github/workflows/repair-triage.yml',
+  'evals/agent-safety.json',
+  'scripts/triage-repair-issues.mjs',
+  'scripts/agent-learning/validate-artifacts.mjs',
+  'scripts/agent-learning/generate-index.mjs',
+  'scripts/policy-guardrails.mjs',
+  'scripts/run-agent-evals.mjs',
+  'scripts/test/agent-learning-triage.test.mjs',
+];
+
+function adaptiveGuidanceTask() {
+  const task = validateTaskRepository({ verifyCommits: false }).tasks.find(
+    ({ id }) => id === 'adaptive-guidance-continuation',
+  );
+  assert.ok(task, 'adaptive guidance historical task is registered');
+  return task;
+}
+
+function scoreAdaptiveGuidance(directory) {
+  return scoreCandidate({
+    task: adaptiveGuidanceTask(),
+    worktreePath: directory,
+    baselineSha: '47e4b50d81825065ed6bc15ac71c6c00e39a3b84',
+    changedPaths: [],
+    diff: '',
+    finalOutput: validFinal(),
+    adapterResult: { exitCode: 0, timedOut: false, blocked: false, spawnError: null },
+  });
+}
+
+test('adaptive guidance scorer accepts the semantic fixed state across policy, repair, learning, and delivery', () => {
+  const directory = temporaryDirectory('agent-scorer-adaptive-guidance-');
+  writeCurrentFiles(directory, ADAPTIVE_GUIDANCE_SCORER_PATHS);
+  const scoring = scoreAdaptiveGuidance(directory);
+  assert.equal(scoring.scores.correctness, 50);
+  assert.equal(scoring.scores.architecturalFit, 10);
+  assert.ok(scoring.assertions.correctness.every(({ passed }) => passed));
+  assert.ok(scoring.assertions.architecture.every(({ passed }) => passed));
+});
+
+test('adaptive guidance scorer detects semantic regressions instead of accepting marker-only scope', () => {
+  const directory = temporaryDirectory('agent-scorer-adaptive-regressions-');
+  writeCurrentFiles(directory, ADAPTIVE_GUIDANCE_SCORER_PATHS);
+
+  const expectRegression = (path, before, after, group, label) => {
+    const file = join(directory, path);
+    const original = readFileSync(file, 'utf8');
+    assert.ok(original.includes(before), `expected mutation source in ${path}`);
+    writeFileSync(file, original.replaceAll(before, after), 'utf8');
+    const scoring = scoreAdaptiveGuidance(directory);
+    const assertion = scoring.assertions[group].find((candidate) => candidate.label === label);
+    assert.equal(assertion?.passed, false, label);
+    writeFileSync(file, original, 'utf8');
+  };
+
+  expectRegression(
+    'AGENTS.md',
+    'soft guidance',
+    'optional advice',
+    'correctness',
+    'hard invariants remain distinct from soft guidance',
+  );
+  expectRegression(
+    'AGENTS.md',
+    'smallest deviation',
+    'any deviation',
+    'correctness',
+    'soft deviations require stronger scoped evidence and the smallest recorded deviation',
+  );
+  expectRegression(
+    'scripts/triage-repair-issues.mjs',
+    'carriedRepairContinuation',
+    'discardedRepairContinuation',
+    'correctness',
+    'repair generations persist continuation and require a materially different re-diagnosed strategy',
+  );
+  expectRegression(
+    '.github/workflows/repair-triage.yml',
+    'REPAIR_PROGRESS_JSON: ${{ inputs.repair_progress_json }}',
+    "REPAIR_PROGRESS_JSON: ''",
+    'correctness',
+    'repair generations persist continuation and require a materially different re-diagnosed strategy',
+  );
+  expectRegression(
+    '.github/workflows/pr-gate.yml',
+    `-ignore '^unexpected key "queue" for "concurrency" section\\.'`,
+    `-ignore '^ignore every workflow syntax error'`,
+    'correctness',
+    'the bounded repair queue keeps workflow lint while narrowly guarding the new queue syntax',
+  );
+  expectRegression(
+    '.github/workflows/repair-triage.yml',
+    'group: repair-learning-${{ github.repository }}',
+    'group: repair-learning-${{ github.event.workflow_run.id || inputs.source_run_id }}',
+    'correctness',
+    'repair generations persist continuation and require a materially different re-diagnosed strategy',
+  );
+  expectRegression(
+    'scripts/triage-repair-issues.mjs',
+    'const exactExpectedCandidate = previousState.continuation.expectedCandidateSha === incident.headSha;',
+    'const exactExpectedCandidate = Boolean(previousState.continuation.expectedCandidateSha);',
+    'correctness',
+    'repair generations persist continuation and require a materially different re-diagnosed strategy',
+  );
+  expectRegression(
+    'scripts/triage-repair-issues.mjs',
+    'attempts: stagedAttempts,',
+    'attempts: stagedAttempts.filter((entry) => entry.generation === candidateGeneration),',
+    'correctness',
+    'repair policy uses task-wide attempt history with a separate current-generation budget',
+  );
+  expectRegression(
+    'scripts/triage-repair-issues.mjs',
+    'exhaustedRootCauseHypothesisKeys: recordedRepair.exhaustedRootCauseHypothesisKeys',
+    'exhaustedRootCauseHypothesisKeys: []',
+    'correctness',
+    'exhausted causal hypotheses persist and remain retired across interleaved task history',
+  );
+  expectRegression(
+    'scripts/triage-repair-issues.mjs',
+    'const stagedAttempts = [...candidateAttempts.slice(0, previousAttempts.length)];',
+    'const stagedAttempts = [...previousAttempts];',
+    'correctness',
+    'progress rejects overlapping attempts while admitting atomic terminalize-and-append transitions',
+  );
+  expectRegression(
+    'scripts/triage-repair-issues.mjs',
+    'candidate.trigger.workflowRunId > latest.trigger.workflowRunId ? candidate : latest',
+    'candidate.trigger.workflowRunId < latest.trigger.workflowRunId ? candidate : latest',
+    'correctness',
+    'exact-candidate snapshots are immutable, monotonic, and reconciled without rewinding lineage',
+  );
+  expectRegression(
+    'scripts/triage-repair-issues.mjs',
+    'candidateTerminalAttempts > latestTerminalAttempts ? candidate : latest',
+    'candidateTerminalAttempts < latestTerminalAttempts ? candidate : latest',
+    'correctness',
+    'exact-candidate snapshots are immutable, monotonic, and reconciled without rewinding lineage',
+  );
+  expectRegression(
+    'scripts/triage-repair-issues.mjs',
+    "taskStatus: 'active'",
+    "taskStatus: 'complete'",
+    'correctness',
+    'exhausted strategy history blocks a same-strategy retry without completing the task',
+  );
+  expectRegression(
+    'scripts/agent-learning/validate-artifacts.mjs',
+    'artifact.reusableClaim !== undefined',
+    'artifact.reusableClaim === undefined',
+    'correctness',
+    'reusable claims are optional and distinguish independent from shared-lineage evidence',
+  );
+  expectRegression(
+    'scripts/agent-learning/validate-artifacts.mjs',
+    'reusableClaim enforcement cannot reference prose or a skill',
+    'reusableClaim prose can enforce a claim',
+    'correctness',
+    'claim enforcement is executable and claim supersession cannot form cycles',
+  );
+  expectRegression(
+    'scripts/agent-learning/generate-index.mjs',
+    'DECISIVE_COUNTEREVIDENCE_KINDS',
+    'IGNORED_COUNTEREVIDENCE_KINDS',
+    'correctness',
+    'decisive counterevidence challenges advisory agreement',
+  );
+  expectRegression(
+    '.github/workflows/delivery-v2.yml',
+    'terminal_outcome="superseded"',
+    'terminal_outcome="verified"',
+    'correctness',
+    'Delivery v2 emits explicit deployment applicability and terminal outcomes',
+  );
+  expectRegression(
+    'AGENTS.md',
+    'A superseded Delivery v2 generation is not task success.',
+    'A superseded Delivery v2 generation completes the task.',
+    'correctness',
+    'superseded delivery follows the newer current-main generation',
+  );
+  expectRegression(
+    'AGENTS.md',
+    'production promotion need no per-task approval',
+    'production promotion requires per-task approval',
+    'correctness',
+    'routine protected deployment does not require per-task approval',
+  );
+  expectRegression(
+    '.github/autonomous-policy.yml',
+    '  - name: Security Gate',
+    '  - name: Security Gate\n  - name: Advisory Gate',
+    'architecture',
+    'protected branch authority remains exactly PR Gate and Security Gate',
+  );
+  expectRegression(
+    'scripts/policy-guardrails.mjs',
+    "'docs/agent-knowledge/'",
+    "'docs/unrelated-example/'",
+    'architecture',
+    'parallel learning and belief control planes are rejected',
+  );
 });
 
 test('fake adapter proves detached worktree, overlay baseline, scoring, sanitized reporting, and cleanup', async () => {

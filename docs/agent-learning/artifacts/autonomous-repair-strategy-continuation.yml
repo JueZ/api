@@ -1,0 +1,51 @@
+version: 2
+id: autonomous-repair-strategy-continuation
+fingerprint: agent-repair.same-strategy-exhaustion-vs-task-continuation
+severity: high
+invariant: Two ineffective attempts with one repair strategy require re-diagnosis and a materially different strategy; exhausting that strategy does not complete or abandon the autonomous task.
+scope:
+  - .agents/skills/closed-loop-learning/SKILL.md
+  - docs/agent-learning/**
+  - scripts/test/agent-learning-artifacts.test.mjs
+  - scripts/test/agent-learning-triage.test.mjs
+prevention:
+  - kind: architecture
+    path: docs/agent-learning/README.md
+  - kind: regression-test
+    path: scripts/test/agent-learning-artifacts.test.mjs
+  - kind: regression-test
+    path: scripts/test/agent-learning-triage.test.mjs
+broken: 47e4b50d81825065ed6bc15ac71c6c00e39a3b84
+fixed: 51ea0668cd2bd46506efae88d8e497947bc41b84
+repairPr: 443
+recurrenceCount: 1
+status: verified
+reusableClaim:
+  id: repair-strategy-exhaustion-requires-rediagnosis
+  claim: Two ineffective attempts with one unchanged repair strategy trigger causal re-diagnosis and do not end the autonomous task.
+  scope:
+    paths:
+      - .agents/skills/closed-loop-learning/SKILL.md
+      - docs/agent-learning/**
+      - scripts/test/agent-learning-triage.test.mjs
+    components:
+      - autonomous repair
+      - durable learning
+    conditions:
+      - one causal strategy has failed twice without material progress
+  relation: supports
+  evidence:
+    kind: authoritative-requirement
+    source: owner-requirement:adaptive-guidance-autonomous-continuation
+    independence: independent
+  lineageId: agent-repair.same-strategy-rediagnosis
+  independenceBasis: This artifact records one owner requirement as one evidence lineage; agent restatements of that requirement are not independent corroboration.
+  applicability: Repository repair remains safe to continue after an unchanged causal strategy is exhausted and a materially different diagnosis is available.
+  exceptions: []
+  challenge:
+    state: none
+    severity: low
+  enforcement:
+    kind: test
+    reference: scripts/test/agent-learning-triage.test.mjs
+  supersedes: []

@@ -1,0 +1,17 @@
+version: 2
+id: workflow-test-regex-linear-assertion
+fingerprint: security.codeql.workflow-test-nested-quantifier-backtracking
+severity: high
+invariant: Workflow structure tests use linear parsing or exact line-block assertions instead of nested quantified regular expressions over multiline workflow text.
+scope:
+  - scripts/test/agent-learning-triage.test.mjs
+prevention:
+  - kind: deterministic-guard
+    path: .github/workflows/security-gate.yml
+  - kind: regression-test
+    path: scripts/test/agent-learning-triage.test.mjs
+broken: 21e304143dbf9d120af0d80cdef525e02fa36f12
+fixed: 227dbe30a2f5fca5354a9008abd28f210e9962e3
+repairPr: 443
+recurrenceCount: 1
+status: verified

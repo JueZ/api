@@ -281,7 +281,17 @@ jobs:
         run: |
           set -euo pipefail
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-          actionlint -shellcheck=shellcheck
+          mapfile -t workflow_files < <(
+            find .github/workflows -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) \
+              ! -name 'repair-triage.yml' -print | sort
+          )
+          actionlint -shellcheck=shellcheck "${workflow_files[@]}"
+          # actionlint v1.7.7 does not yet recognize GitHub's concurrency.queue key
+          # (https://github.com/rhysd/actionlint/issues/680). Scope the compatibility
+          # ignore to the one workflow whose exact max/false declaration is regression-tested.
+          actionlint -shellcheck=shellcheck \
+            -ignore '^unexpected key "queue" for "concurrency" section\.' \
+            .github/workflows/repair-triage.yml
           mapfile -d '' shell_files < <(find scripts -type f -name '*.sh' -print0)
           if [ "${#shell_files[@]}" -gt 0 ]; then
             shellcheck "${shell_files[@]}"
