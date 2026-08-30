@@ -29,10 +29,10 @@ test('native exact-head squash auto-merge replaces polling policy', () => {
   assert.match(agents, /--match-head-commit <exact-head-sha>/);
 });
 
-test('bounded repair policy stops repeated non-progress', () => {
+test('bounded repair policy ends ineffective strategies and generations without ending the task', () => {
   assert.deepEqual(policy.repair, {
-    maxCommitsPerPullRequest: 3,
-    repeatedFingerprintStop: 2,
-    externalReruns: 1,
+    maxAttemptsPerStrategy: 2,
+    maxAttemptsPerRepairGeneration: 3,
+    externalRerunsPerFailure: 1,
   });
 });

@@ -1,5 +1,7 @@
 # Autonomous delivery guardrails
 
+The controls in this document are hard invariants and may block unsafe work. Other architecture and implementation preferences are soft guidance: they may be challenged by stronger scoped evidence when the smallest deviation is explicit and its consequences are validated. Advisory agreement never overrides a failing objective protection.
+
 ## Protected merge
 
 - `main` requires an up-to-date pull request and exactly `PR Gate` plus `Security Gate`, published by GitHub Actions.
@@ -38,4 +40,4 @@ Authentication, JWT/JWKS validation, user/service-token separation, operation pe
 
 Bring destructive confirmations use a versioned canonical tenant-aware identity, action/list/payload-bound tokens, record-bound encryption, ETag transitions, and exact consumed-token result replay. Legacy or structurally inconsistent mutation records are retained only as non-replayable evidence and must never trigger a provider call.
 
-The repair queue treats workflow output and GitHub text as untrusted evidence. It stores only sanitized identity and fingerprint metadata. A candidate cannot rewrite code, tests, policy, instructions, skills, or production configuration; every repair and learning promotion uses the normal protected PR path.
+The repair queue treats workflow output and GitHub text as untrusted evidence. It stores only sanitized identity, fingerprint, and continuation metadata. A candidate cannot rewrite code, tests, policy, instructions, skills, or production configuration; every repair and learning promotion uses the normal protected PR path. Exhausting one repair generation leaves the requirement active and cannot turn a failed, skipped, or unavailable gate into success.

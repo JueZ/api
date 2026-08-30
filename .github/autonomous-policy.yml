@@ -58,9 +58,9 @@ merge:
   allowAdminBypass: false
 
 repair:
-  maxCommitsPerPullRequest: 3
-  repeatedFingerprintStop: 2
-  externalReruns: 1
+  maxAttemptsPerStrategy: 2
+  maxAttemptsPerRepairGeneration: 3
+  externalRerunsPerFailure: 1
 
 deployment:
   controllerWorkflow: delivery-v2.yml

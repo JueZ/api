@@ -13,6 +13,19 @@ export function highRiskPaths(paths, policy = loadAutonomousPolicy()) {
   return pathsMatchingPatterns(paths, policy.profiles.privileged);
 }
 
+export function learningControlPlaneFindings(paths) {
+  const forbiddenRoots = [
+    'docs/agent-knowledge/',
+    'docs/agent-beliefs/',
+    'scripts/agent-knowledge/',
+    'scripts/agent-beliefs/',
+    'scripts/agent-beliefs.mjs',
+  ];
+  return paths
+    .filter((path) => forbiddenRoots.some((root) => path === root || path.startsWith(root)))
+    .map((path) => `parallel-learning-control-plane:${path}`);
+}
+
 export function forbiddenDiffFindings(diff, repositorySource = '') {
   const scanDiff = diff
     .split('\n')
@@ -158,7 +171,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     )
     .join('\n');
   const diff = `${trackedDiff}\n${untrackedDiff}`;
-  const findings = [...forbiddenDiffFindings(diff, trackedRepositorySource()), ...(await workflowPolicyFindings())];
+  const findings = [
+    ...learningControlPlaneFindings(changed),
+    ...forbiddenDiffFindings(diff, trackedRepositorySource()),
+    ...(await workflowPolicyFindings()),
+  ];
   if (findings.length > 0) {
     console.error(`Forbidden guardrail changes detected: ${findings.join(', ')}`);
     process.exit(1);

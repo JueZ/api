@@ -22,6 +22,9 @@ test('delivery v2 is a protected-main push DAG with a guarded manual cutover sur
   assert.ok(workflow.on.workflow_dispatch.inputs.mode.options.includes('test-only'));
   assert.ok(workflow.on.workflow_dispatch.inputs.mode.options.includes('full'));
   assert.match(source, /DELIVERY_V2_ENABLED: \$\{\{ vars\.DELIVERY_V2_ENABLED \}\}/);
+  assert.match(environmentSource, /DEPLOY_PRODUCTION_ENABLED/);
+  assert.doesNotMatch(source, /deployRequested|deploymentRequested|explicitApproval|productionApproval/i);
+  assert.doesNotMatch(environmentSource, /deployRequested|deploymentRequested|explicitApproval|productionApproval/i);
   assert.doesNotMatch(source, /workflow_run|repository_dispatch|gh run list|sleep [0-9]/);
   assert.equal(loadAutonomousPolicy().deployment.controllerWorkflow, 'delivery-v2.yml');
 });
@@ -115,11 +118,24 @@ test('delivery summary reports classification, duration, skips, identity, enviro
     'Test deployment, smoke, authenticated smoke, telemetry, SHA and digest:',
     'Production deployment, smoke, authenticated smoke, telemetry, SHA and digest:',
     'Superseded before production:',
+    'Superseded by:',
+    'Terminal outcome:',
     'Recovery state:',
     'Rollback verification:',
     'Repair attempts:',
   ]) {
     assert.match(summary, new RegExp(field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
+  assert.match(summary, /test_verification="not_applicable"/);
+  assert.match(summary, /test_verification="passed"/);
+  assert.match(summary, /production_verification="not_applicable"/);
+  assert.match(summary, /terminal_outcome="superseded"/);
+  assert.match(summary, /terminal_outcome="incomplete"/);
+  assert.match(summary, /Deployment applicability output is missing or invalid/);
+  assert.match(summary, /Runtime-neutral delivery unexpectedly reached production/);
+  assert.match(summary, /schemaVersion:2/);
+  assert.match(summary, /deploymentRequired:/);
+  assert.match(summary, /supersededBy/);
+  assert.match(summary, /rawJobs:/);
   assert.equal(workflow.jobs.summary.steps[1].with['retention-days'], 30);
 });

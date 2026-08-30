@@ -34,8 +34,10 @@ test('policy validation rejects changed gate, profile, repair, and workflow-secu
     /profiles\.privileged must include/,
   );
   assert.match(
-    validateAutonomousPolicy({ ...policy, repair: { ...policy.repair, maxCommitsPerPullRequest: 30 } }).join('\n'),
-    /maxCommitsPerPullRequest must be 3/,
+    validateAutonomousPolicy({ ...policy, repair: { ...policy.repair, maxAttemptsPerRepairGeneration: 30 } }).join(
+      '\n',
+    ),
+    /maxAttemptsPerRepairGeneration must be 3/,
   );
   assert.match(
     validateAutonomousPolicy({

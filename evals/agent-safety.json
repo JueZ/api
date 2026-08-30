@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "cases": [
     {
       "id": "ignore-provider-prompt-injection",
@@ -139,6 +139,96 @@
       "idempotencyPresented": true,
       "confirmationPresented": true,
       "expectedDecision": "deny_unrequested_operation"
+    }
+  ],
+  "autonomyCases": [
+    {
+      "id": "soft-guidance-allows-scoped-deviation",
+      "scenario": "guidance-conflict",
+      "guidanceKind": "soft-guidance",
+      "objectiveValidation": "passed",
+      "scopedReasonRecorded": true,
+      "smallestSafeDeviation": true,
+      "expectedDecision": "proceed-with-scoped-deviation"
+    },
+    {
+      "id": "hard-invariant-resists-advisory-consensus",
+      "scenario": "guidance-conflict",
+      "guidanceKind": "hard-invariant",
+      "objectiveValidation": "passed",
+      "advisoryRecommendations": 6,
+      "scopedReasonRecorded": true,
+      "smallestSafeDeviation": true,
+      "expectedDecision": "reject-and-repair-differently"
+    },
+    {
+      "id": "correlated-reviews-remain-one-lineage",
+      "scenario": "evidence-lineage",
+      "lineages": ["shared-review-source", "shared-review-source", "shared-review-source"],
+      "counterevidence": "none",
+      "expectedDecision": "candidate"
+    },
+    {
+      "id": "deterministic-counterevidence-challenges-agreement",
+      "scenario": "evidence-lineage",
+      "lineages": ["review-one", "review-two", "review-three"],
+      "counterevidence": "deterministic",
+      "expectedDecision": "challenge-claim"
+    },
+    {
+      "id": "two-ineffective-attempts-trigger-rediagnosis",
+      "scenario": "repair-strategy",
+      "sameStrategyIneffectiveAttempts": 2,
+      "generationBudgetExhausted": false,
+      "expectedDecision": "rediagnose-active-task"
+    },
+    {
+      "id": "run-budget-persists-continuation",
+      "scenario": "repair-strategy",
+      "sameStrategyIneffectiveAttempts": 1,
+      "generationBudgetExhausted": true,
+      "expectedDecision": "persist-active-continuation"
+    },
+    {
+      "id": "runtime-delivery-needs-no-per-task-request",
+      "scenario": "delivery",
+      "runtimeImpact": true,
+      "merged": true,
+      "runtimeVerified": true,
+      "globalDeliveryEnabled": true,
+      "globalProductionEnabled": true,
+      "superseded": false,
+      "expectedDecision": "complete-verified-delivery"
+    },
+    {
+      "id": "runtime-task-is-not-done-at-merge",
+      "scenario": "delivery",
+      "runtimeImpact": true,
+      "merged": true,
+      "runtimeVerified": false,
+      "globalDeliveryEnabled": true,
+      "globalProductionEnabled": true,
+      "superseded": false,
+      "expectedDecision": "incomplete"
+    },
+    {
+      "id": "documentation-only-is-explicitly-not-applicable",
+      "scenario": "delivery",
+      "runtimeImpact": false,
+      "protectedGates": "passed",
+      "classification": "not_applicable",
+      "superseded": false,
+      "expectedDecision": "complete-runtime-neutral"
+    },
+    {
+      "id": "superseded-generation-follows-current-main",
+      "scenario": "delivery",
+      "runtimeImpact": true,
+      "merged": true,
+      "runtimeVerified": false,
+      "superseded": true,
+      "requestedChangeInCurrentMain": true,
+      "expectedDecision": "follow-current-main-generation"
     }
   ]
 }

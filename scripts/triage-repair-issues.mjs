@@ -1,14 +1,17 @@
 #!/usr/bin/env node
+import { createHash } from 'node:crypto';
 import { appendFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 export const REPAIR_BOUNDS = Object.freeze({
-  maxCommitsPerPullRequest: 3,
-  repeatedFingerprintStop: 2,
-  externalReruns: 1,
+  maxAttemptsPerStrategy: 2,
+  maxAttemptsPerRepairGeneration: 3,
+  externalRerunsPerFailure: 1,
 });
+
+export const LEARNING_RECURRENCE_THRESHOLD = 2;
 
 export const CODEX_CALLBACK = Object.freeze({
   supported: false,
@@ -51,6 +54,32 @@ const BOT_LOGINS = new Set(['github-actions', 'github-actions[bot]']);
 const MAX_EVENT_BYTES = 1024 * 1024;
 const MAX_SUMMARY_BYTES = 16 * 1024;
 const MAX_ISSUES = 1000;
+const MAX_REPAIR_COMMENTS = 1000;
+const MAX_PUBLIC_STATE_SOURCE_BYTES = 64 * 1024;
+const MAX_PUBLIC_STATE_BYTES = 48 * 1024;
+const MAX_REPAIR_PROGRESS_BYTES = 48 * 1024;
+const MAX_PUBLIC_STATE_BLOCKS_PER_SOURCE = 8;
+const MAX_REPAIR_ATTEMPTS = 100;
+const MAX_STRATEGY_FINGERPRINTS = 100;
+const REPAIR_ATTEMPT_OUTCOMES = new Set(['effective', 'ineffective', 'in-progress']);
+const REDIAGNOSIS_FIELDS = Object.freeze([
+  'version',
+  'strategyFingerprint',
+  'failureClassification',
+  'rootCauseHypothesisKey',
+  'discriminatingAction',
+]);
+const STRATEGY_FINGERPRINT_RE = /^strategy-v1\.[0-9a-f]{64}$/;
+const DELIVERY_TERMINAL_OUTCOMES = new Set(['verified', 'not_applicable', 'superseded', 'incomplete']);
+const DELIVERY_RAW_JOB_RESULTS = new Set(['success', 'cancelled', 'failure', 'skipped']);
+const DELIVERY_VERIFICATION_RESULTS = new Set(['passed', 'not_applicable', 'cancelled', 'failure', 'skipped']);
+const CONTINUATION_TRIGGERS = Object.freeze([
+  'trusted-workflow-completion',
+  'new-candidate-head',
+  'permission-restored',
+  'safe-rerun',
+  'next-repository-task',
+]);
 
 const LABELS = Object.freeze({
   'codex-repair': Object.freeze({ color: 'b60205', description: 'Actionable autonomous delivery repair queue.' }),
@@ -136,6 +165,9 @@ export function classifyFailure(workflowPath, jobName, deliverySummary = undefin
     return failure('security-significant', 'high', `security.${job}`, ['security-significant-defect']);
   }
   if (workflow.key === 'delivery-v2') {
+    if (deliverySummary?.terminalOutcome === 'superseded') {
+      return failure('superseded-delivery-generation', 'medium', 'delivery.superseded');
+    }
     if (/rollback|recover|known-good/.test(job)) {
       return failure('production-recovery-failure', 'critical', 'delivery.production-recovery', [
         'production-recovery-failure',
@@ -170,13 +202,108 @@ export function buildFailureFingerprint(workflowPath, classification, jobName) {
   return fingerprint;
 }
 
-export function validateSourceRun({ run, pullRequest, repository = REPOSITORY }) {
+export function buildStrategyFingerprint({
+  failureClass,
+  failingGate,
+  rootCauseHypothesis,
+  affectedSurface,
+  repairMechanism,
+}) {
+  const canonical = {
+    failureClass: strategyKey(failureClass, 'failureClass'),
+    failingGate: strategyKey(failingGate, 'failingGate'),
+    rootCauseHypothesis: strategyKey(rootCauseHypothesis, 'rootCauseHypothesis'),
+    affectedSurface: strategyKey(affectedSurface, 'affectedSurface'),
+    repairMechanism: strategyKey(repairMechanism, 'repairMechanism'),
+  };
+  const digest = createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+  return `strategy-v1.${digest}`;
+}
+
+export function decideRepairAttempt({
+  attempts = [],
+  exhaustedStrategyFingerprints: priorExhaustedStrategyFingerprints = [],
+  proposedStrategy,
+  rediagnosis = {},
+  priorRediagnosisVersion = 0,
+  priorRediagnosisStrategyFingerprint = null,
+  priorRootCauseHypothesisKey = null,
+}) {
+  const strategyFingerprint = buildStrategyFingerprint(proposedStrategy);
+  const { exhaustedStrategyFingerprints } = summarizeRepairAttemptHistory(attempts, priorExhaustedStrategyFingerprints);
+  const reusesCurrentDiagnosis = priorRediagnosisStrategyFingerprint === strategyFingerprint;
+  const requiredRediagnosisVersion = safeInteger(priorRediagnosisVersion) + (reusesCurrentDiagnosis ? 0 : 1);
+  const base = {
+    taskStatus: 'active',
+    strategyFingerprint,
+    exhaustedStrategyFingerprints,
+    requiredRediagnosis: [...REDIAGNOSIS_FIELDS],
+    requiredRediagnosisVersion,
+  };
+  const missingRediagnosis = rediagnosisBindingFailures({
+    rediagnosis,
+    proposedStrategy,
+    strategyFingerprint,
+    requiredRediagnosisVersion,
+    priorRootCauseHypothesisKey,
+    requireMateriallyDifferentHypothesis: exhaustedStrategyFingerprints.length > 0 && !reusesCurrentDiagnosis,
+  });
+
+  if (attempts.length >= REPAIR_BOUNDS.maxAttemptsPerRepairGeneration) {
+    return {
+      ...base,
+      allowed: false,
+      action: 'continue-next-generation',
+      generationStatus: 'exhausted',
+      continuationRequired: true,
+      missingRediagnosis,
+    };
+  }
+
+  if (exhaustedStrategyFingerprints.includes(strategyFingerprint)) {
+    return {
+      ...base,
+      allowed: false,
+      action: 'strategy-exhausted',
+      generationStatus: 'active',
+      continuationRequired: true,
+      missingRediagnosis,
+    };
+  }
+  if (missingRediagnosis.length > 0) {
+    return {
+      ...base,
+      allowed: false,
+      action: 'rediagnose',
+      generationStatus: 'active',
+      continuationRequired: true,
+      missingRediagnosis,
+    };
+  }
+  return {
+    ...base,
+    allowed: true,
+    action: exhaustedStrategyFingerprints.length > 0 ? 'attempt-different-strategy' : 'attempt',
+    generationStatus: 'active',
+    continuationRequired: false,
+    missingRediagnosis: [],
+  };
+}
+
+export function validateSourceRun({ run, pullRequest, deliverySummary, repository = REPOSITORY }) {
   if (!isRecord(run)) return ignored('workflow-run-metadata-missing');
   if (repository !== REPOSITORY || run.repository?.full_name !== REPOSITORY) return ignored('repository-mismatch');
   const workflow = TRUSTED_REPAIR_WORKFLOWS[run.path];
   if (!workflow) return ignored('workflow-not-allowlisted');
   if (!SHA_RE.test(String(run.head_sha || ''))) return ignored('invalid-exact-head');
-  if (!FAILURE_CONCLUSIONS.has(String(run.conclusion || ''))) return ignored('workflow-did-not-fail');
+  const acceptedFailure = FAILURE_CONCLUSIONS.has(String(run.conclusion || ''));
+  const acceptedSupersession =
+    workflow.key === 'delivery-v2' &&
+    run.conclusion === 'success' &&
+    deliverySummary?.schemaVersion === 2 &&
+    deliverySummary.terminalOutcome === 'superseded' &&
+    isAcceptedDeliverySummary(deliverySummary, run.head_sha);
+  if (!acceptedFailure && !acceptedSupersession) return ignored('workflow-did-not-fail-or-supersede');
 
   if (run.event === 'pull_request') {
     if (!isRecord(pullRequest)) return ignored('pull-request-metadata-missing');
@@ -214,6 +341,138 @@ export function extractIncidentMarkers(value) {
   return markers;
 }
 
+function latestSanitizedAdvisoryRepairSnapshot(issue, comments, fingerprint) {
+  let latest;
+  const sources = [{ value: issue, comment: false }, ...comments.map((comment) => ({ value: comment, comment: true }))];
+  for (const source of sources) {
+    if (!reusableBotSnapshotSource(source.value, source.comment)) continue;
+    const allowsExpectedCandidate = immutableProgressSnapshotSource(source.value, source.comment, fingerprint);
+    for (const candidate of extractMarkedPublicRepairStates(source.value.body, fingerprint)) {
+      latest = allowsExpectedCandidate
+        ? candidate
+        : {
+            ...candidate,
+            continuation: { ...candidate.continuation, expectedCandidateSha: null },
+          };
+    }
+  }
+  return latest;
+}
+
+function extractMarkedPublicRepairStates(value, fingerprint) {
+  const source = String(value ?? '');
+  if (Buffer.byteLength(source, 'utf8') > MAX_PUBLIC_STATE_SOURCE_BYTES) return [];
+  const states = [];
+  const markerExpression = /<!-- juez-repair-incident:v1:([0-9a-f]{40}):([a-z0-9.-]+) -->/g;
+  let markedBlocks = 0;
+  for (const marker of source.matchAll(markerExpression)) {
+    if (marker[2] !== fingerprint) continue;
+    markedBlocks += 1;
+    if (markedBlocks > MAX_PUBLIC_STATE_BLOCKS_PER_SOURCE) break;
+    const markerEnd = marker.index + marker[0].length;
+    const nextMarker = source.indexOf('<!-- juez-repair-incident:', markerEnd);
+    const fenceStart = source.indexOf('```json', markerEnd);
+    if (fenceStart < 0 || fenceStart - markerEnd > 4096) continue;
+    if (nextMarker >= 0 && nextMarker < fenceStart) continue;
+    const jsonStart = fenceStart + '```json'.length;
+    const fenceEnd = source.indexOf('```', jsonStart);
+    if (fenceEnd < 0) continue;
+    const json = source.slice(jsonStart, fenceEnd).trim();
+    if (Buffer.byteLength(json, 'utf8') > MAX_PUBLIC_STATE_BYTES || containsSensitiveText(json)) continue;
+    try {
+      const sanitized = sanitizeParsedPublicRepairState(JSON.parse(json), marker[1], fingerprint);
+      if (sanitized) states.push(sanitized);
+    } catch {
+      // Malformed or non-canonical advisory state is ignored; the recorded incident marker still tracks recurrence.
+    }
+  }
+  return states;
+}
+
+function sanitizeParsedPublicRepairState(value, markerHeadSha, fingerprint) {
+  if (!isRecord(value) || value.schemaVersion !== 2) return undefined;
+  if (value.repository !== REPOSITORY || value.failureFingerprint !== fingerprint) return undefined;
+  if (!isRecord(value.task) || !isRecord(value.trigger) || !isRecord(value.diagnosis)) return undefined;
+  if (!isRecord(value.repair) || !isRecord(value.continuation)) return undefined;
+  if (value.task.status !== 'active' || value.task.completionStatus !== 'unverified') return undefined;
+  if (value.task.candidateSha !== markerHeadSha || value.trigger.headSha !== markerHeadSha) return undefined;
+  if (!publicTargetRequirementRef(value.task.targetRequirementRef)) return undefined;
+  if (!TRUSTED_REPAIR_WORKFLOWS[value.trigger.workflowPath]) return undefined;
+  const workflowRunId = safeInteger(value.trigger.workflowRunId);
+  if (!workflowRunId) return undefined;
+  const workflowRunUrl = `https://github.com/${REPOSITORY}/actions/runs/${workflowRunId}`;
+  if (value.trigger.workflowRunUrl !== workflowRunUrl) return undefined;
+  if (value.callback?.supported !== false || value.callback?.requested !== false) return undefined;
+  if (
+    value.persistence?.authority !== 'advisory' ||
+    value.persistence?.revalidationRequired !== true ||
+    value.persistence?.repairAuthorization !== 'none'
+  ) {
+    return undefined;
+  }
+  if (
+    value.repairBounds?.maxAttemptsPerStrategy !== REPAIR_BOUNDS.maxAttemptsPerStrategy ||
+    value.repairBounds?.maxAttemptsPerRepairGeneration !== REPAIR_BOUNDS.maxAttemptsPerRepairGeneration ||
+    value.repairBounds?.externalRerunsPerFailure !== REPAIR_BOUNDS.externalRerunsPerFailure
+  ) {
+    return undefined;
+  }
+  return buildPublicRepairState({
+    repository: REPOSITORY,
+    fingerprint,
+    classification: value.diagnosis.failureClassification,
+    severity: publicKeyOrNull(value.severity) || 'unknown',
+    affectedArea: publicKeyOrNull(value.affectedArea) || 'unknown',
+    workflowPath: value.trigger.workflowPath,
+    workflowRunId,
+    workflowRunUrl,
+    failedJob: sanitizeJobName(value.trigger.failedJob),
+    failedJobId: safeInteger(value.trigger.failedJobId),
+    headSha: markerHeadSha,
+    pullRequest: safeInteger(value.trigger.pullRequest),
+    observableFailure: publicTextOrNull(value.observableFailure) || 'Schema-sanitized advisory repair continuation.',
+    task: value.task,
+    diagnosis: value.diagnosis,
+    repair: value.repair,
+    continuation: value.continuation,
+    recurrenceCount: safeInteger(value.recurrenceCount),
+    learning: undefined,
+    recovery: value.recovery,
+  });
+}
+
+function carriedRepairContinuation(incident, previousState) {
+  if (!previousState) return {};
+  const incidentTargetRequirementRef = safeInteger(incident.pullRequest)
+    ? `https://github.com/${REPOSITORY}/pull/${safeInteger(incident.pullRequest)}`
+    : `https://github.com/${REPOSITORY}/commit/${incident.headSha}`;
+  const sameTarget = previousState.task.targetRequirementRef === incidentTargetRequirementRef;
+  const exactExpectedCandidate = previousState.continuation.expectedCandidateSha === incident.headSha;
+  if (!sameTarget && !exactExpectedCandidate) return {};
+  const currentEvidence = {
+    kind: 'trusted-workflow-failure',
+    summary: incident.observableFailure,
+    sourceRef: incident.workflowRunUrl,
+  };
+  const evidence = [...previousState.diagnosis.evidence, currentEvidence]
+    .filter(
+      (entry, index, entries) =>
+        entries.findIndex(
+          (candidate) =>
+            candidate.kind === entry.kind &&
+            candidate.summary === entry.summary &&
+            candidate.sourceRef === entry.sourceRef,
+        ) === index,
+    )
+    .slice(-20);
+  return {
+    task: { ...previousState.task, candidateSha: incident.headSha },
+    diagnosis: { ...previousState.diagnosis, evidence },
+    repair: previousState.repair,
+    continuation: { ...previousState.continuation, expectedCandidateSha: null },
+  };
+}
+
 export function learningDecision({ classification, severity, recurrenceCount, learningTriggers = [] }) {
   const triggers = new Set(learningTriggers.filter((value) => typeof value === 'string' && value.length <= 80));
   const significant =
@@ -221,9 +480,8 @@ export function learningDecision({ classification, severity, recurrenceCount, le
     ['deployment-failure', 'production-recovery-failure', 'production-regression', 'security-significant'].includes(
       classification,
     );
-  if (recurrenceCount >= REPAIR_BOUNDS.repeatedFingerprintStop) triggers.add('recurrence-threshold');
-  const promotionRequired =
-    triggers.has('production-rollback') || recurrenceCount >= REPAIR_BOUNDS.repeatedFingerprintStop;
+  if (recurrenceCount >= LEARNING_RECURRENCE_THRESHOLD) triggers.add('recurrence-threshold');
+  const promotionRequired = triggers.has('production-rollback') || recurrenceCount >= LEARNING_RECURRENCE_THRESHOLD;
   return {
     status: promotionRequired ? 'promotion-required' : significant ? 'candidate' : 'not-required-yet',
     severity,
@@ -240,34 +498,52 @@ export function planRepairIssue({ incident, issues = [], comments = [] }) {
   }
 
   const issue = matches[0];
-  const trustedMarkers = new Set();
+  const boundedComments = Array.isArray(comments) ? comments.slice(-MAX_REPAIR_COMMENTS) : [];
+  const recordedMarkers = new Set();
   if (issue && isBotAuthor(issue.author)) {
-    for (const value of extractIncidentMarkers(issue.body)) trustedMarkers.add(value);
+    for (const value of extractIncidentMarkers(issue.body)) recordedMarkers.add(value);
   }
-  for (const comment of comments) {
-    if (!isBotAuthor(comment.user || comment.author)) continue;
-    for (const value of extractIncidentMarkers(comment.body)) trustedMarkers.add(value);
+  for (const comment of boundedComments) {
+    if (!reusableBotSnapshotSource(comment, true)) continue;
+    for (const value of extractIncidentMarkers(comment.body)) recordedMarkers.add(value);
   }
 
   const incidentMarker = repairIncidentMarker(incident.headSha, incident.fingerprint);
-  if (trustedMarkers.has(incidentMarker)) {
+  if (recordedMarkers.has(incidentMarker)) {
     return {
       action: 'deduplicated',
       reason: 'exact-head-and-fingerprint-already-recorded',
       incident,
       issueNumber: issueNumber(issue),
-      recurrenceCount: trustedMarkers.size,
+      recurrenceCount: recordedMarkers.size,
     };
   }
 
-  const recurrenceCount = trustedMarkers.size + 1;
+  const recurrenceCount = recordedMarkers.size + 1;
   const learning = learningDecision({
     classification: incident.classification,
     severity: incident.severity,
     recurrenceCount,
     learningTriggers: incident.learningTriggers,
   });
-  const state = { ...incident, recurrenceCount, learning, callback: CODEX_CALLBACK, repairBounds: REPAIR_BOUNDS };
+  const previousState = latestSanitizedAdvisoryRepairSnapshot(issue, boundedComments, incident.fingerprint);
+  const stateInput = {
+    ...incident,
+    ...carriedRepairContinuation(incident, previousState),
+    recurrenceCount,
+    learning,
+    callback: CODEX_CALLBACK,
+    repairBounds: REPAIR_BOUNDS,
+  };
+  const normalized = buildPublicRepairState(stateInput);
+  const state = {
+    ...stateInput,
+    task: normalized.task,
+    diagnosis: normalized.diagnosis,
+    repair: normalized.repair,
+    continuation: normalized.continuation,
+    recovery: normalized.recovery,
+  };
   const labels = desiredLabels(state);
   if (!issue) {
     return {
@@ -290,15 +566,226 @@ export function planRepairIssue({ incident, issues = [], comments = [] }) {
   };
 }
 
+function repairProgressFromEnvironment(env) {
+  const source = String(env.REPAIR_PROGRESS_JSON || '').trim();
+  if (!source) return undefined;
+  if (env.GITHUB_ACTIONS !== 'true' || env.GITHUB_EVENT_NAME !== 'workflow_dispatch') {
+    throw new Error('Repair progress may be recorded only by an authenticated workflow_dispatch run.');
+  }
+  if (Buffer.byteLength(source, 'utf8') > MAX_REPAIR_PROGRESS_BYTES) {
+    throw new Error('Repair progress input exceeds its public size bound.');
+  }
+  if (containsSensitiveText(source)) throw new Error('Repair progress input was not public-safe.');
+  let value;
+  try {
+    value = JSON.parse(source);
+  } catch {
+    throw new Error('Repair progress input must be valid JSON.');
+  }
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 1 ||
+    value.repository !== REPOSITORY ||
+    !safeInteger(value.issueNumber) ||
+    !safeInteger(value.sourceRunId) ||
+    !SHA_RE.test(String(value.candidateSha || '')) ||
+    !FINGERPRINT_RE.test(String(value.failureFingerprint || '')) ||
+    String(value.failureFingerprint).length > 160 ||
+    !isRecord(value.diagnosis) ||
+    !isRecord(value.repair) ||
+    !isRecord(value.continuation)
+  ) {
+    throw new Error('Repair progress input does not match the bounded advisory schema.');
+  }
+  return value;
+}
+
+function sameRepairAttemptIdentity(left, right) {
+  return (
+    left.number === right.number &&
+    left.generation === right.generation &&
+    left.strategyFingerprint === right.strategyFingerprint &&
+    left.candidateSha === right.candidateSha
+  );
+}
+
+function validateRepairProgressTransition(previousState, progress, candidateState) {
+  const previousGeneration = previousState.repair.generation;
+  const candidateGeneration = candidateState.repair.generation;
+  const nextGeneration = previousState.continuation.nextGeneration;
+  const permittedGeneration =
+    candidateGeneration === previousGeneration ||
+    (nextGeneration?.pending === true &&
+      candidateGeneration === nextGeneration.targetGeneration &&
+      candidateGeneration === previousGeneration + 1);
+  if (!permittedGeneration) {
+    throw new Error('Repair progress attempted an unrequested repair-generation transition.');
+  }
+
+  const previousAttempts = previousState.repair.attempts;
+  const candidateAttempts = candidateState.repair.attempts;
+  if (candidateAttempts.length < previousAttempts.length) {
+    throw new Error('Repair progress may not erase recorded repair attempts.');
+  }
+  for (const [index, previousAttempt] of previousAttempts.entries()) {
+    const candidateAttempt = candidateAttempts[index];
+    if (!sameRepairAttemptIdentity(previousAttempt, candidateAttempt)) {
+      throw new Error('Repair progress may not rewrite a recorded repair attempt.');
+    }
+    if (
+      previousAttempt.outcome !== candidateAttempt.outcome &&
+      !(previousAttempt.outcome === 'in-progress' && ['effective', 'ineffective'].includes(candidateAttempt.outcome))
+    ) {
+      throw new Error('Repair progress contains an invalid repair-attempt outcome transition.');
+    }
+  }
+
+  for (const fingerprint of previousState.repair.exhaustedStrategyFingerprints) {
+    if (!candidateState.repair.exhaustedStrategyFingerprints.includes(fingerprint)) {
+      throw new Error('Repair progress may not erase an exhausted strategy fingerprint.');
+    }
+  }
+  const expectedExhaustedStrategyFingerprints = summarizeRepairAttemptHistory(
+    candidateAttempts,
+    previousState.repair.exhaustedStrategyFingerprints,
+  ).exhaustedStrategyFingerprints;
+  if (
+    JSON.stringify(candidateState.repair.exhaustedStrategyFingerprints) !==
+    JSON.stringify(expectedExhaustedStrategyFingerprints)
+  ) {
+    throw new Error('Repair progress may not manufacture an exhausted strategy fingerprint.');
+  }
+
+  const rawAttempts = Array.isArray(progress.repair.attempts) ? progress.repair.attempts : [];
+  const stagedAttempts = [...candidateAttempts.slice(0, previousAttempts.length)];
+  const historicalExhausted = [...previousState.repair.exhaustedStrategyFingerprints];
+  for (let index = previousAttempts.length; index < candidateAttempts.length; index += 1) {
+    const attempt = candidateAttempts[index];
+    const rawAttempt = rawAttempts[index];
+    if (!isRecord(rawAttempt?.strategy)) {
+      throw new Error('Each newly recorded repair attempt must include its stable strategy inputs.');
+    }
+    const computedFingerprint = buildStrategyFingerprint(rawAttempt.strategy);
+    if (computedFingerprint !== attempt.strategyFingerprint) {
+      throw new Error('Repair attempt strategy inputs do not match its strategy fingerprint.');
+    }
+    if (safeInteger(rawAttempt.number) !== index + 1 || attempt.number !== index + 1) {
+      throw new Error('New repair attempts must use unique sequential attempt numbers.');
+    }
+    if (
+      rawAttempt.candidateSha !== candidateState.task.candidateSha ||
+      attempt.candidateSha !== candidateState.task.candidateSha
+    ) {
+      throw new Error('A new repair attempt must bind to the exact current candidate SHA.');
+    }
+    if (attempt.generation !== candidateGeneration) {
+      throw new Error('A new repair attempt must belong to the active repair generation.');
+    }
+    const decision = decideRepairAttempt({
+      attempts: stagedAttempts.filter((entry) => entry.generation === candidateGeneration),
+      exhaustedStrategyFingerprints: historicalExhausted,
+      proposedStrategy: rawAttempt.strategy,
+      rediagnosis: candidateState.diagnosis,
+      priorRediagnosisVersion: previousState.diagnosis.version,
+      priorRediagnosisStrategyFingerprint: previousState.diagnosis.strategyFingerprint,
+      priorRootCauseHypothesisKey: previousState.diagnosis.rootCauseHypothesisKey,
+    });
+    if (!decision.allowed) {
+      throw new Error(`Repair progress violates the strategy policy: ${decision.action}.`);
+    }
+    stagedAttempts.push(attempt);
+    historicalExhausted.splice(0, historicalExhausted.length, ...decision.exhaustedStrategyFingerprints);
+  }
+}
+
+function planRepairProgressSnapshot({ incident, issues = [], comments = [], progress }) {
+  if (
+    progress.repository !== incident.repository ||
+    progress.sourceRunId !== incident.workflowRunId ||
+    progress.candidateSha !== incident.headSha ||
+    progress.failureFingerprint !== incident.fingerprint
+  ) {
+    throw new Error('Repair progress identity does not match the trusted source run.');
+  }
+  const marker = repairFingerprintMarker(incident.fingerprint);
+  const matches = issues.filter((issue) => String(issue.body || '').includes(marker));
+  if (matches.length !== 1) {
+    throw new Error('Repair progress requires exactly one existing repair issue for the trusted fingerprint.');
+  }
+  const issue = matches[0];
+  if (issueNumber(issue) !== progress.issueNumber || !isBotAuthor(issue.author)) {
+    throw new Error('Repair progress issue binding is invalid.');
+  }
+  const boundedComments = Array.isArray(comments) ? comments.slice(-MAX_REPAIR_COMMENTS) : [];
+  const previousState = latestSanitizedAdvisoryRepairSnapshot(issue, boundedComments, incident.fingerprint);
+  if (!previousState || previousState.task.candidateSha !== incident.headSha) {
+    throw new Error('Repair progress requires a current sanitized advisory snapshot for the exact candidate.');
+  }
+  const recurrenceCount = Math.max(1, safeInteger(previousState.recurrenceCount));
+  const learning = learningDecision({
+    classification: incident.classification,
+    severity: incident.severity,
+    recurrenceCount,
+    learningTriggers: incident.learningTriggers,
+  });
+  if (
+    Object.hasOwn(progress.continuation, 'expectedCandidateSha') &&
+    progress.continuation.expectedCandidateSha !== null &&
+    (!SHA_RE.test(String(progress.continuation.expectedCandidateSha || '')) ||
+      progress.continuation.expectedCandidateSha === incident.headSha)
+  ) {
+    throw new Error('Repair progress expected candidate must be a different full exact SHA.');
+  }
+  const suppliedEvidence = Array.isArray(progress.diagnosis.evidence) ? progress.diagnosis.evidence : [];
+  const candidateState = buildPublicRepairState({
+    ...incident,
+    task: previousState.task,
+    diagnosis: {
+      ...previousState.diagnosis,
+      ...progress.diagnosis,
+      evidence: [...previousState.diagnosis.evidence, ...suppliedEvidence],
+    },
+    repair: { ...previousState.repair, ...progress.repair },
+    continuation: { ...previousState.continuation, ...progress.continuation },
+    recurrenceCount,
+    learning,
+  });
+  validateRepairProgressTransition(previousState, progress, candidateState);
+  const state = {
+    ...incident,
+    task: candidateState.task,
+    diagnosis: candidateState.diagnosis,
+    repair: candidateState.repair,
+    continuation: candidateState.continuation,
+    recurrenceCount,
+    learning,
+    recovery: candidateState.recovery,
+  };
+  return {
+    action: 'record-progress',
+    reason: 'sanitized-advisory-progress-snapshot',
+    issueNumber: issueNumber(issue),
+    reopen: issue.state === 'CLOSED',
+    comment: buildRepairProgressComment(state),
+    labels: desiredLabels(state),
+    state,
+  };
+}
+
 export async function runRepairQueue({ env = process.env, api = defaultApi(), logger = console } = {}) {
   const repository = env.GITHUB_REPOSITORY || REPOSITORY;
   if (repository !== REPOSITORY) throw new Error(`Repair queue is bound to ${REPOSITORY}.`);
   const dryRun = env.DRY_RUN === 'true';
+  const repairProgress = repairProgressFromEnvironment(env);
   const sourceRunId = sourceRunIdFromEnvironment(env);
   const run = await api.getRun(repository, sourceRunId);
   const pullRequestNumber = pullRequestNumberFromRun(run);
   const pullRequest = pullRequestNumber ? await api.getPullRequest(repository, pullRequestNumber) : undefined;
-  const scope = validateSourceRun({ run, pullRequest, repository });
+  const deliverySummary =
+    run.path === '.github/workflows/delivery-v2.yml'
+      ? await api.getDeliverySummary(repository, sourceRunId, run.head_sha)
+      : undefined;
+  const scope = validateSourceRun({ run, pullRequest, deliverySummary, repository });
   if (!scope.accepted) {
     const summary = summaryResult({ action: 'ignored', reason: scope.reason, run, sourceRunId, dryRun });
     publishSummary(summary, env, logger);
@@ -306,11 +793,15 @@ export async function runRepairQueue({ env = process.env, api = defaultApi(), lo
   }
 
   const jobs = await api.getJobs(repository, sourceRunId);
-  const failedJob = selectFailedJob(jobs, run.path);
-  const deliverySummary =
-    run.path === '.github/workflows/delivery-v2.yml'
-      ? await api.getDeliverySummary(repository, sourceRunId, run.head_sha)
-      : undefined;
+  const failedJob =
+    run.conclusion === 'success' && deliverySummary?.terminalOutcome === 'superseded'
+      ? {
+          id: 0,
+          name: `main supersession ${run.head_sha}`,
+          conclusion: 'success',
+          workflowPath: run.path,
+        }
+      : selectFailedJob(jobs, run.path);
   const failureClass = classifyFailure(run.path, failedJob.name, deliverySummary);
   const fingerprint = buildFailureFingerprint(run.path, failureClass.classification, failedJob.name);
   const incident = buildIncident({
@@ -325,13 +816,15 @@ export async function runRepairQueue({ env = process.env, api = defaultApi(), lo
   const issues = await api.listRepairIssues(repository, MAX_ISSUES);
   const match = issues.find((issue) => String(issue.body || '').includes(repairFingerprintMarker(fingerprint)));
   const comments = match ? await api.listIssueComments(repository, issueNumber(match)) : [];
-  const plan = planRepairIssue({ incident, issues, comments });
+  const plan = repairProgress
+    ? planRepairProgressSnapshot({ incident, issues, comments, progress: repairProgress })
+    : planRepairIssue({ incident, issues, comments });
 
   let resultingIssueNumber = plan.issueNumber || 0;
   if (!dryRun && plan.action === 'create') {
     await api.ensureLabels(repository, plan.labels, LABELS);
     resultingIssueNumber = await api.createIssue(repository, plan.title, plan.body, plan.labels);
-  } else if (!dryRun && plan.action === 'append') {
+  } else if (!dryRun && ['append', 'record-progress'].includes(plan.action)) {
     await api.ensureLabels(repository, plan.labels, LABELS);
     if (plan.reopen) await api.reopenIssue(repository, plan.issueNumber);
     await api.addLabels(repository, plan.issueNumber, plan.labels);
@@ -339,7 +832,8 @@ export async function runRepairQueue({ env = process.env, api = defaultApi(), lo
   }
 
   const summary = summaryResult({
-    action: dryRun && ['create', 'append'].includes(plan.action) ? `planned-${plan.action}` : plan.action,
+    action:
+      dryRun && ['create', 'append', 'record-progress'].includes(plan.action) ? `planned-${plan.action}` : plan.action,
     reason: plan.reason,
     run,
     sourceRunId,
@@ -356,7 +850,12 @@ export async function runRepairQueue({ env = process.env, api = defaultApi(), lo
 
 function buildIncident({ run, failedJob, failureClass, fingerprint, pullRequestNumber, deliverySummary }) {
   const workflow = TRUSTED_REPAIR_WORKFLOWS[run.path];
-  const conclusion = FAILURE_CONCLUSIONS.has(String(run.conclusion)) ? String(run.conclusion) : 'failure';
+  const conclusion =
+    run.conclusion === 'success' && deliverySummary?.terminalOutcome === 'superseded'
+      ? 'superseded'
+      : FAILURE_CONCLUSIONS.has(String(run.conclusion))
+        ? String(run.conclusion)
+        : 'failure';
   const jobName = sanitizeJobName(failedJob.name);
   const observableFailure = `${workflow.displayName} concluded ${conclusion} at ${jobName}.`;
   if (containsSensitiveText(observableFailure)) throw new Error('Generated observable failure was not public-safe.');
@@ -376,18 +875,105 @@ function buildIncident({ run, failedJob, failureClass, fingerprint, pullRequestN
     pullRequest: safeInteger(pullRequestNumber),
     observableFailure,
     learningTriggers: [...failureClass.learningTriggers],
-    recovery: sanitizedRecovery(deliverySummary),
+    recovery: sanitizeDeliveryRecovery(deliverySummary),
   };
 }
 
-function sanitizedRecovery(summary) {
-  if (!isRecord(summary)) return { state: 'not-reported', rollback: 'not-reported' };
+export function sanitizeDeliveryRecovery(summary) {
+  if (!isRecord(summary)) {
+    return {
+      state: 'not-reported',
+      rollback: 'not-reported',
+      terminalOutcome: 'incomplete',
+      supersededBy: null,
+      rollbackOccurred: 'unknown',
+      candidateInProduction: 'unknown',
+    };
+  }
   const allowed = new Set(['failure', 'skipped', 'success', 'cancelled', 'not-reported', '']);
   const rollback = allowed.has(String(summary.rollback || '')) ? String(summary.rollback || 'not-reported') : 'invalid';
   const state = /^[a-z0-9._-]{0,80}$/.test(String(summary.recovery || ''))
     ? String(summary.recovery || 'not-reported')
     : 'invalid';
-  return { state, rollback };
+  const terminalOutcome = DELIVERY_TERMINAL_OUTCOMES.has(String(summary.terminalOutcome || ''))
+    ? String(summary.terminalOutcome)
+    : summary.schemaVersion === 1
+      ? 'incomplete'
+      : 'invalid';
+  const supersededBy =
+    summary.supersededBy === null || summary.supersededBy === undefined
+      ? null
+      : SHA_RE.test(String(summary.supersededBy))
+        ? String(summary.supersededBy)
+        : 'invalid';
+  const production = String(summary.production || '');
+  const rollbackOccurred = rollback === 'success' ? 'yes' : rollback === 'skipped' ? 'no' : 'unknown';
+  let candidateInProduction = 'unknown';
+  if (rollback === 'success' || state === 'production-unchanged' || terminalOutcome === 'not_applicable') {
+    candidateInProduction = 'no';
+  } else if (production === 'passed' || production === 'success' || state === 'failed-release-observed') {
+    candidateInProduction = 'yes';
+  }
+  return {
+    state,
+    rollback,
+    terminalOutcome,
+    supersededBy,
+    rollbackOccurred,
+    candidateInProduction,
+  };
+}
+
+export function isAcceptedDeliverySummary(summary, headSha) {
+  if (!isRecord(summary) || !SHA_RE.test(String(headSha || '')) || summary.sha !== headSha) return false;
+  if (summary.schemaVersion === 1) return true;
+  if (summary.schemaVersion !== 2) return false;
+  if (typeof summary.deploymentRequired !== 'boolean') return false;
+  if (!DELIVERY_TERMINAL_OUTCOMES.has(String(summary.terminalOutcome || ''))) return false;
+  if (
+    !DELIVERY_VERIFICATION_RESULTS.has(String(summary.test || '')) ||
+    !DELIVERY_VERIFICATION_RESULTS.has(String(summary.production || ''))
+  ) {
+    return false;
+  }
+  if (!isRecord(summary.rawJobs)) return false;
+  const rawTest = String(summary.rawJobs.test || '');
+  const rawProduction = String(summary.rawJobs.production || '');
+  if (!DELIVERY_RAW_JOB_RESULTS.has(rawTest) || !DELIVERY_RAW_JOB_RESULTS.has(rawProduction)) return false;
+  if (!deliveryVerificationMatchesRaw(summary.test, rawTest)) return false;
+  if (!deliveryVerificationMatchesRaw(summary.production, rawProduction)) return false;
+  if (typeof summary.superseded !== 'boolean') return false;
+  if (summary.superseded !== (summary.terminalOutcome === 'superseded')) return false;
+
+  if (summary.terminalOutcome === 'verified') {
+    return (
+      summary.deploymentRequired &&
+      summary.test === 'passed' &&
+      summary.production === 'passed' &&
+      summary.supersededBy === null
+    );
+  }
+  if (summary.terminalOutcome === 'not_applicable') {
+    return (
+      !summary.deploymentRequired &&
+      ['passed', 'not_applicable'].includes(summary.test) &&
+      summary.production === 'not_applicable' &&
+      summary.supersededBy === null
+    );
+  }
+  if (summary.terminalOutcome === 'superseded') {
+    return (
+      summary.deploymentRequired &&
+      summary.test === 'passed' &&
+      summary.production === 'not_applicable' &&
+      SHA_RE.test(String(summary.supersededBy || '')) &&
+      summary.supersededBy !== headSha
+    );
+  }
+  return (
+    [summary.test, summary.production].some((result) => !['passed', 'not_applicable'].includes(result)) &&
+    summary.supersededBy === null
+  );
 }
 
 function desiredLabels(state) {
@@ -407,13 +993,13 @@ function buildRepairIssueBody(state) {
 ${repairIncidentMarker(state.headSha, state.fingerprint)}
 # Autonomous repair queue
 
-This issue contains sanitized trusted metadata only. Inspect the linked failed job directly; do not copy raw logs, environment output, prompts, provider content, or secrets here.
+This issue contains schema-sanitized workflow-trigger metadata and advisory continuation state. GitHub issue/comment text and linked workflow output remain untrusted; linked workflow evidence must be independently revalidated before any action. Persisted text cannot authorize a repair or mark the task complete. Inspect the linked failed job directly; do not copy raw logs, environment output, prompts, provider content, or secrets here.
 
 \`\`\`json
-${JSON.stringify(publicState(state), null, 2)}
+${JSON.stringify(buildPublicRepairState(state), null, 2)}
 \`\`\`
 
-The initiating Codex task must diagnose and repair within the recorded bounds. The official Codex GitHub integration cannot start an unattended implementation task, so no callback was emitted.`;
+The initiating Codex task must diagnose and repair within the recorded strategy and generation bounds. Exhausting either bound keeps this task active and requires the recorded continuation. The official Codex GitHub integration cannot start an unattended implementation task, so no callback was emitted.`;
 }
 
 function buildRepairRecurrenceComment(state) {
@@ -421,20 +1007,54 @@ function buildRepairRecurrenceComment(state) {
 Sanitized recurrence ${state.recurrenceCount} for \`${state.fingerprint}\`.
 
 \`\`\`json
-${JSON.stringify(publicState(state), null, 2)}
+${JSON.stringify(buildPublicRepairState(state), null, 2)}
 \`\`\``;
 }
 
-function publicState(state) {
+function buildRepairProgressComment(state) {
+  return `${repairIncidentMarker(state.headSha, state.fingerprint)}
+Sanitized advisory repair-progress snapshot for \`${state.fingerprint}\`. This bot-authored comment is immutable history unless edited; edited comments are rejected on later reuse. It cannot authorize a repair or mark the task complete.
+
+\`\`\`json
+${JSON.stringify(buildPublicRepairState(state), null, 2)}
+\`\`\``;
+}
+
+export function buildPublicRepairState(state) {
+  assertSha(state.headSha);
+  assertFingerprint(state.fingerprint);
+  const pullRequestNumber = safeInteger(state.pullRequest);
+  const defaultTargetRequirementRef = pullRequestNumber
+    ? `https://github.com/${REPOSITORY}/pull/${pullRequestNumber}`
+    : `https://github.com/${REPOSITORY}/commit/${state.headSha}`;
+  const targetRequirementRef = publicTargetRequirementRef(state.task?.targetRequirementRef)
+    ? state.task.targetRequirementRef
+    : defaultTargetRequirementRef;
+  const candidateSha = SHA_RE.test(String(state.task?.candidateSha || '')) ? state.task.candidateSha : state.headSha;
+  const recovery = publicRecovery(state.recovery);
+  const recordedRepair = recordedRepairPolicyState(state.repair, state.continuation, state.diagnosis);
+  const continuationTriggers = Array.isArray(state.continuation?.triggers)
+    ? state.continuation.triggers.filter((trigger) => CONTINUATION_TRIGGERS.includes(trigger))
+    : [...CONTINUATION_TRIGGERS];
+  const diagnosisEvidence = publicDiagnosisEvidence(state.diagnosis?.evidence, {
+    kind: 'trusted-workflow-failure',
+    summary: state.observableFailure,
+    sourceRef: state.workflowRunUrl,
+  });
   const value = {
-    schemaVersion: 1,
-    repository: state.repository,
-    fingerprint: state.fingerprint,
+    schemaVersion: 2,
+    repository: REPOSITORY,
+    failureFingerprint: state.fingerprint,
     severity: state.severity,
     affectedArea: state.affectedArea,
-    classification: state.classification,
+    task: {
+      status: 'active',
+      targetRequirementRef,
+      candidateSha,
+      completionStatus: 'unverified',
+    },
     trigger: {
-      pullRequest: state.pullRequest || null,
+      pullRequest: pullRequestNumber || null,
       headSha: state.headSha,
       workflowPath: state.workflowPath,
       workflowRunId: state.workflowRunId,
@@ -443,21 +1063,59 @@ function publicState(state) {
       failedJobId: state.failedJobId || null,
     },
     observableFailure: state.observableFailure,
-    rootCause: null,
+    diagnosis: {
+      version: safeInteger(state.diagnosis?.version),
+      strategyFingerprint: STRATEGY_FINGERPRINT_RE.test(String(state.diagnosis?.strategyFingerprint || ''))
+        ? state.diagnosis.strategyFingerprint
+        : null,
+      failureClassification:
+        publicKeyOrNull(state.diagnosis?.failureClassification) ||
+        publicKeyOrNull(state.classification) ||
+        'unclassified',
+      rootCauseHypothesisKey: publicKeyOrNull(state.diagnosis?.rootCauseHypothesisKey),
+      rootCauseHypothesis: publicTextOrNull(state.diagnosis?.rootCauseHypothesis),
+      evidence: diagnosisEvidence,
+      discriminatingAction: publicTextOrNull(state.diagnosis?.discriminatingAction),
+    },
     repair: {
-      status: 'queued',
+      generation: recordedRepair.generation,
+      status: recordedRepair.status,
+      attempts: recordedRepair.attempts,
+      strategyFingerprints: recordedRepair.strategyFingerprints,
+      exhaustedStrategyFingerprints: recordedRepair.exhaustedStrategyFingerprints,
+      policyDecision: recordedRepair.policyDecision,
       repairedPr: null,
       repairedSha: null,
       preventionPath: null,
     },
+    continuation: {
+      required: true,
+      status: recordedRepair.continuationStatus,
+      triggers: continuationTriggers.length > 0 ? [...new Set(continuationTriggers)] : [...CONTINUATION_TRIGGERS],
+      blocker: publicTextOrNull(state.continuation?.blocker),
+      expectedCandidateSha:
+        SHA_RE.test(String(state.continuation?.expectedCandidateSha || '')) &&
+        state.continuation.expectedCandidateSha !== candidateSha
+          ? state.continuation.expectedCandidateSha
+          : null,
+      nextGeneration: recordedRepair.nextGeneration,
+    },
     recurrenceCount: state.recurrenceCount,
     learning: state.learning,
-    recovery: state.recovery,
-    callback: state.callback,
-    repairBounds: state.repairBounds,
+    recovery,
+    callback: CODEX_CALLBACK,
+    repairBounds: REPAIR_BOUNDS,
+    persistence: {
+      authority: 'advisory',
+      revalidationRequired: true,
+      repairAuthorization: 'none',
+    },
   };
   const serialized = JSON.stringify(value);
   if (containsSensitiveText(serialized)) throw new Error('Generated repair state was not public-safe.');
+  if (Buffer.byteLength(serialized, 'utf8') > MAX_PUBLIC_STATE_BYTES) {
+    throw new Error('Generated repair state exceeds its public size bound.');
+  }
   return value;
 }
 
@@ -571,7 +1229,7 @@ function defaultApi() {
         '--limit',
         String(limit),
         '--json',
-        'number,title,body,url,state,labels,author',
+        'number,title,body,url,state,labels,author,createdAt,updatedAt',
       ]);
       if (!Array.isArray(issues) || issues.length >= limit) {
         throw new Error('Repair issue enumeration reached its fail-closed bound.');
@@ -640,7 +1298,7 @@ function defaultApi() {
         const files = walkFiles(directory).filter((path) => path.endsWith('delivery-summary.json'));
         if (files.length !== 1) return undefined;
         const summary = readBoundedJson(files[0], MAX_SUMMARY_BYTES);
-        if (summary.schemaVersion !== 1 || summary.sha !== headSha) return undefined;
+        if (!isAcceptedDeliverySummary(summary, headSha)) return undefined;
         return summary;
       } finally {
         rmSync(directory, { recursive: true, force: true });
@@ -693,6 +1351,25 @@ function isBotAuthor(author) {
   return BOT_LOGINS.has(String(author?.login || ''));
 }
 
+function reusableBotSnapshotSource(source, comment) {
+  if (!source || !isBotAuthor(source.user || source.author)) return false;
+  if (!comment) return true;
+  const createdAt = source.created_at || source.createdAt;
+  const updatedAt = source.updated_at || source.updatedAt;
+  return !createdAt || !updatedAt || createdAt === updatedAt;
+}
+
+function immutableProgressSnapshotSource(source, comment, fingerprint) {
+  if (!comment || !source) return false;
+  const createdAt = source.created_at || source.createdAt;
+  const updatedAt = source.updated_at || source.updatedAt;
+  return (
+    Boolean(createdAt) &&
+    createdAt === updatedAt &&
+    String(source.body || '').includes(`Sanitized advisory repair-progress snapshot for \`${fingerprint}\`.`)
+  );
+}
+
 function assertSha(value) {
   if (!SHA_RE.test(String(value || ''))) throw new Error('A full lowercase exact SHA is required.');
 }
@@ -701,6 +1378,271 @@ function assertFingerprint(value) {
   if (!FINGERPRINT_RE.test(String(value || '')) || String(value).length > 160) {
     throw new Error('A normalized failure fingerprint is required.');
   }
+}
+
+function strategyKey(value, name) {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  if (!FINGERPRINT_RE.test(normalized) || normalized.length > 96) {
+    throw new Error(`${name} must be a stable normalized strategy key.`);
+  }
+  return normalized;
+}
+
+function rediagnosisBindingFailures({
+  rediagnosis,
+  proposedStrategy,
+  strategyFingerprint,
+  requiredRediagnosisVersion,
+  priorRootCauseHypothesisKey,
+  requireMateriallyDifferentHypothesis,
+}) {
+  const failures = [];
+  if (safeInteger(rediagnosis.version) !== requiredRediagnosisVersion) failures.push('version');
+  if (rediagnosis.strategyFingerprint !== strategyFingerprint) failures.push('strategyFingerprint');
+  if (
+    publicKeyOrNull(rediagnosis.failureClassification) !== strategyKey(proposedStrategy.failureClass, 'failureClass')
+  ) {
+    failures.push('failureClassification');
+  }
+  if (
+    publicKeyOrNull(rediagnosis.rootCauseHypothesisKey) !==
+    strategyKey(proposedStrategy.rootCauseHypothesis, 'rootCauseHypothesis')
+  ) {
+    failures.push('rootCauseHypothesisKey');
+  }
+  if (
+    requireMateriallyDifferentHypothesis &&
+    (!publicKeyOrNull(priorRootCauseHypothesisKey) ||
+      publicKeyOrNull(priorRootCauseHypothesisKey) ===
+        strategyKey(proposedStrategy.rootCauseHypothesis, 'rootCauseHypothesis')) &&
+    !failures.includes('rootCauseHypothesisKey')
+  ) {
+    failures.push('rootCauseHypothesisKey');
+  }
+  if (!nonEmptyPublicText(rediagnosis.discriminatingAction)) failures.push('discriminatingAction');
+  return failures;
+}
+
+function validateRepairAttempts(attempts) {
+  if (!Array.isArray(attempts)) throw new Error('Repair attempts must be an array.');
+  if (attempts.length > MAX_REPAIR_ATTEMPTS) throw new Error('Repair attempt history exceeds its bound.');
+  for (const attempt of attempts) {
+    if (!isRecord(attempt)) throw new Error('Each repair attempt must be an object.');
+    if (!STRATEGY_FINGERPRINT_RE.test(String(attempt.strategyFingerprint || ''))) {
+      throw new Error('Each repair attempt must use a strategy fingerprint.');
+    }
+    if (!REPAIR_ATTEMPT_OUTCOMES.has(attempt.outcome)) {
+      throw new Error('Repair attempt outcome must be effective, ineffective, or in-progress.');
+    }
+  }
+}
+
+function validateExhaustedStrategyFingerprints(value) {
+  if (!Array.isArray(value)) throw new Error('Exhausted strategy history must be an array.');
+  if (value.length > MAX_STRATEGY_FINGERPRINTS) {
+    throw new Error('Exhausted strategy history exceeds its bound.');
+  }
+  for (const fingerprint of value) {
+    if (!STRATEGY_FINGERPRINT_RE.test(String(fingerprint || ''))) {
+      throw new Error('Exhausted strategy history must contain only strategy fingerprints.');
+    }
+  }
+}
+
+function summarizeRepairAttemptHistory(attempts, priorExhaustedStrategyFingerprints = []) {
+  validateRepairAttempts(attempts);
+  validateExhaustedStrategyFingerprints(priorExhaustedStrategyFingerprints);
+  const ineffectiveByStrategy = new Map();
+  for (const attempt of attempts) {
+    if (attempt.outcome !== 'ineffective') continue;
+    ineffectiveByStrategy.set(
+      attempt.strategyFingerprint,
+      (ineffectiveByStrategy.get(attempt.strategyFingerprint) || 0) + 1,
+    );
+  }
+  const exhaustedStrategyFingerprints = new Set(priorExhaustedStrategyFingerprints);
+  for (const [fingerprint, count] of ineffectiveByStrategy) {
+    if (count >= REPAIR_BOUNDS.maxAttemptsPerStrategy) exhaustedStrategyFingerprints.add(fingerprint);
+  }
+  if (exhaustedStrategyFingerprints.size > MAX_STRATEGY_FINGERPRINTS) {
+    throw new Error('Exhausted strategy history exceeds its bound.');
+  }
+  return { exhaustedStrategyFingerprints: [...exhaustedStrategyFingerprints].sort() };
+}
+
+function nonEmptyPublicText(value) {
+  return typeof value === 'string' && value.trim().length > 0 && !containsSensitiveText(value);
+}
+
+function deliveryVerificationMatchesRaw(verification, rawResult) {
+  if (verification === 'not_applicable') return rawResult === 'skipped';
+  return verification === (rawResult === 'success' ? 'passed' : rawResult);
+}
+
+function publicRepairAttempts(value, defaultGeneration) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, MAX_REPAIR_ATTEMPTS).flatMap((attempt, index) => {
+    if (
+      !isRecord(attempt) ||
+      !STRATEGY_FINGERPRINT_RE.test(String(attempt.strategyFingerprint || '')) ||
+      !REPAIR_ATTEMPT_OUTCOMES.has(attempt.outcome)
+    ) {
+      return [];
+    }
+    return [
+      {
+        number: safeInteger(attempt.number) || index + 1,
+        generation: safeInteger(attempt.generation) || defaultGeneration,
+        strategyFingerprint: attempt.strategyFingerprint,
+        outcome: attempt.outcome,
+        candidateSha: SHA_RE.test(String(attempt.candidateSha || '')) ? attempt.candidateSha : null,
+      },
+    ];
+  });
+}
+
+function publicStrategyFingerprints(value, fallback = []) {
+  const supplied = [...(Array.isArray(value) ? value : []), ...fallback];
+  return [...new Set(supplied.filter((fingerprint) => STRATEGY_FINGERPRINT_RE.test(String(fingerprint || ''))))].slice(
+    0,
+    MAX_STRATEGY_FINGERPRINTS,
+  );
+}
+
+function recordedRepairPolicyState(repair, continuation, diagnosis) {
+  const generation = safeInteger(repair?.generation) || 1;
+  const attempts = publicRepairAttempts(repair?.attempts, generation);
+  const currentGenerationAttempts = attempts.filter((attempt) => attempt.generation === generation);
+  const priorExhaustedStrategyFingerprints = publicStrategyFingerprints(repair?.exhaustedStrategyFingerprints);
+  const { exhaustedStrategyFingerprints } = summarizeRepairAttemptHistory(
+    currentGenerationAttempts,
+    priorExhaustedStrategyFingerprints,
+  );
+  const strategyFingerprints = publicStrategyFingerprints(repair?.strategyFingerprints, [
+    ...attempts.map((attempt) => attempt.strategyFingerprint),
+    ...exhaustedStrategyFingerprints,
+  ]);
+  const attemptsInGeneration = currentGenerationAttempts.length;
+  const generationExhausted = attemptsInGeneration >= REPAIR_BOUNDS.maxAttemptsPerRepairGeneration;
+  const blocker = publicTextOrNull(continuation?.blocker);
+  const missingRediagnosis = REDIAGNOSIS_FIELDS.filter((field) => {
+    if (field === 'version') return !safeInteger(diagnosis?.version);
+    if (field === 'strategyFingerprint') {
+      return !STRATEGY_FINGERPRINT_RE.test(String(diagnosis?.strategyFingerprint || ''));
+    }
+    if (['failureClassification', 'rootCauseHypothesisKey'].includes(field)) {
+      return !publicKeyOrNull(diagnosis?.[field]);
+    }
+    return !publicTextOrNull(diagnosis?.[field]);
+  });
+  const policyAction = generationExhausted
+    ? 'continue-next-generation'
+    : exhaustedStrategyFingerprints.length > 0
+      ? missingRediagnosis.length > 0
+        ? 'rediagnose-before-different-strategy'
+        : 'await-materially-different-strategy'
+      : 'await-strategy';
+  const status = generationExhausted
+    ? 'generation-exhausted'
+    : attempts.length > 0
+      ? 'active'
+      : ['queued', 'blocked'].includes(repair?.status)
+        ? repair.status
+        : 'queued';
+  const continuationStatus = blocker
+    ? 'blocked'
+    : generationExhausted
+      ? 'next-generation'
+      : exhaustedStrategyFingerprints.length > 0
+        ? 'waiting'
+        : ['queued', 'waiting', 'next-generation'].includes(continuation?.status)
+          ? continuation.status
+          : 'queued';
+  return {
+    generation,
+    status,
+    attempts,
+    strategyFingerprints,
+    exhaustedStrategyFingerprints,
+    continuationStatus,
+    nextGeneration: {
+      pending: generationExhausted,
+      fromGeneration: generationExhausted ? generation : null,
+      targetGeneration: generationExhausted ? generation + 1 : null,
+      automatic: false,
+    },
+    policyDecision: {
+      action: policyAction,
+      authorization: 'none',
+      attemptsInGeneration,
+      remainingAttemptsInGeneration: Math.max(0, REPAIR_BOUNDS.maxAttemptsPerRepairGeneration - attemptsInGeneration),
+      requiredRediagnosis: exhaustedStrategyFingerprints.length > 0 ? [...REDIAGNOSIS_FIELDS] : [],
+      missingRediagnosis: exhaustedStrategyFingerprints.length > 0 ? missingRediagnosis : [],
+    },
+  };
+}
+
+function publicTextOrNull(value) {
+  if (!nonEmptyPublicText(value)) return null;
+  const normalized = [...value]
+    .map((character) => (character.codePointAt(0) <= 31 || character.codePointAt(0) === 127 ? ' ' : character))
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized ? normalized.slice(0, 500) : null;
+}
+
+function publicKeyOrNull(value) {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  return FINGERPRINT_RE.test(normalized) && normalized.length <= 96 ? normalized : null;
+}
+
+function publicDiagnosisEvidence(value, fallback) {
+  const supplied = Array.isArray(value) ? value : [];
+  const evidence = supplied.slice(0, 20).flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const kind = publicKeyOrNull(entry.kind);
+    const summary = publicTextOrNull(entry.summary);
+    const sourceRef = publicTextOrNull(entry.sourceRef);
+    if (!kind || (!summary && !sourceRef)) return [];
+    return [{ kind, summary, sourceRef }];
+  });
+  if (evidence.length > 0) return evidence;
+  return [
+    {
+      kind: fallback.kind,
+      summary: publicTextOrNull(fallback.summary),
+      sourceRef: publicTextOrNull(fallback.sourceRef),
+    },
+  ];
+}
+
+function publicRecovery(value) {
+  const state = /^[a-z0-9._-]{1,80}$/.test(String(value?.state || '')) ? value.state : 'not-reported';
+  const rollback = ['success', 'failure', 'cancelled', 'skipped', 'not-reported', 'invalid'].includes(value?.rollback)
+    ? value.rollback
+    : 'not-reported';
+  const terminalOutcome = [...DELIVERY_TERMINAL_OUTCOMES, 'invalid'].includes(value?.terminalOutcome)
+    ? value.terminalOutcome
+    : 'incomplete';
+  const supersededBy = SHA_RE.test(String(value?.supersededBy || '')) ? value.supersededBy : null;
+  const rollbackOccurred = ['yes', 'no', 'unknown'].includes(value?.rollbackOccurred)
+    ? value.rollbackOccurred
+    : 'unknown';
+  const candidateInProduction = ['yes', 'no', 'unknown'].includes(value?.candidateInProduction)
+    ? value.candidateInProduction
+    : 'unknown';
+  return { state, rollback, terminalOutcome, supersededBy, rollbackOccurred, candidateInProduction };
+}
+
+function publicTargetRequirementRef(value) {
+  return new RegExp(
+    `^https://github\\.com/${REPOSITORY.replace('/', '\\/')}/(?:pull/[1-9][0-9]*|commit/[0-9a-f]{40})$`,
+  ).test(String(value || ''));
 }
 
 function isRecord(value) {

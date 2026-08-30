@@ -103,9 +103,13 @@ export function validateAutonomousPolicy(policy) {
   if (policy.merge?.allowAdminBypass !== false) errors.push('merge.allowAdminBypass must be false');
   if (policy.merge?.allowForks !== false) errors.push('merge.allowForks must be false');
 
-  if (policy.repair?.maxCommitsPerPullRequest !== 3) errors.push('repair.maxCommitsPerPullRequest must be 3');
-  if (policy.repair?.repeatedFingerprintStop !== 2) errors.push('repair.repeatedFingerprintStop must be 2');
-  if (policy.repair?.externalReruns !== 1) errors.push('repair.externalReruns must be 1');
+  if (policy.repair?.maxAttemptsPerStrategy !== 2) errors.push('repair.maxAttemptsPerStrategy must be 2');
+  if (policy.repair?.maxAttemptsPerRepairGeneration !== 3) {
+    errors.push('repair.maxAttemptsPerRepairGeneration must be 3');
+  }
+  if (policy.repair?.externalRerunsPerFailure !== 1) {
+    errors.push('repair.externalRerunsPerFailure must be 1');
+  }
 
   if (policy.deployment?.controllerWorkflow !== 'delivery-v2.yml') {
     errors.push('deployment.controllerWorkflow must be delivery-v2.yml');

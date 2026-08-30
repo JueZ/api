@@ -468,6 +468,7 @@ jobs:
           RUN_MODE: ${{ needs.classify.outputs.run_mode }}
           STARTED_AT_EPOCH: ${{ needs.classify.outputs.started_at_epoch }}
           SUPERSEDED: ${{ needs.current-main.outputs.superseded }}
+          SUPERSEDED_BY: ${{ needs.current-main.outputs.confirmed_sha }}
           TEST_FUNCTION_DIGEST: ${{ needs.deploy-test.outputs.functionArtifactSha256 }}
           TEST_RENDERED_FRONTEND_DIGEST: ${{ needs.deploy-test.outputs.frontendArtifactSha256 }}
           TEST_SBOM_DIGEST: ${{ needs.deploy-test.outputs.sbomSha256 }}
@@ -476,8 +477,40 @@ jobs:
         run: |
           set -euo pipefail
           duration="$(( $(date +%s) - STARTED_AT_EPOCH ))"
-          if [ "$TEST_RESULT" = "success" ]; then test_verification="passed"; else test_verification="$TEST_RESULT"; fi
-          if [ "$PRODUCTION_RESULT" = "success" ]; then production_verification="passed"; else production_verification="$PRODUCTION_RESULT"; fi
+          case "$DEPLOYMENT_REQUIRED" in
+            true|false) ;;
+            *) echo "Deployment applicability output is missing or invalid." >&2; exit 1 ;;
+          esac
+          if [ "$DEPLOYMENT_REQUIRED" = "false" ]; then
+            if [ "$PRODUCTION_RESULT" != "skipped" ]; then
+              echo "Runtime-neutral delivery unexpectedly reached production." >&2
+              exit 1
+            fi
+            if [ "$TEST_RESULT" = "success" ]; then
+              test_verification="passed"
+            elif [ "$TEST_RESULT" = "skipped" ]; then
+              test_verification="not_applicable"
+            else
+              test_verification="$TEST_RESULT"
+            fi
+            production_verification="not_applicable"
+            if [ "$TEST_RESULT" = "success" ] || [ "$TEST_RESULT" = "skipped" ]; then
+              terminal_outcome="not_applicable"
+            else
+              terminal_outcome="incomplete"
+            fi
+          else
+            if [ "$TEST_RESULT" = "success" ]; then test_verification="passed"; else test_verification="$TEST_RESULT"; fi
+            if [ "$PRODUCTION_RESULT" = "success" ]; then production_verification="passed"; else production_verification="$PRODUCTION_RESULT"; fi
+            if [ "$SUPERSEDED" = "true" ]; then
+              production_verification="not_applicable"
+              terminal_outcome="superseded"
+            elif [ "$TEST_RESULT" = "success" ] && [ "$PRODUCTION_RESULT" = "success" ]; then
+              terminal_outcome="verified"
+            else
+              terminal_outcome="incomplete"
+            fi
+          fi
           if [ "$TEST_RESULT" = "success" ] && [ "$PRODUCTION_RESULT" = "success" ]; then
             if [ "$TEST_FUNCTION_DIGEST" != "$PROD_FUNCTION_DIGEST" ] ||
                [ "$TEST_SOURCE_FRONTEND_DIGEST" != "$PROD_SOURCE_FRONTEND_DIGEST" ] ||
@@ -502,6 +535,8 @@ jobs:
             echo "- Production deployment, smoke, authenticated smoke, telemetry, SHA and digest: $production_verification"
             echo "- Previous production SHA: ${PREVIOUS_PRODUCTION_SHA:-not-read}"
             echo "- Superseded before production: ${SUPERSEDED:-false}"
+            echo "- Superseded by: ${SUPERSEDED_BY:-not-applicable}"
+            echo "- Terminal outcome: $terminal_outcome"
             echo "- Recovery state: ${RECOVERY_STATE:-not-required}"
             echo "- Rollback verification: $ROLLBACK_RESULT"
             echo "- Repair attempts: 0"
@@ -519,10 +554,15 @@ jobs:
             --arg testResult "$TEST_RESULT" \
             --arg productionResult "$PRODUCTION_RESULT" \
             --arg superseded "$SUPERSEDED" \
+            --arg supersededBy "$SUPERSEDED_BY" \
+            --arg terminalOutcome "$terminal_outcome" \
+            --arg testVerification "$test_verification" \
+            --arg productionVerification "$production_verification" \
+            --arg deploymentRequired "$DEPLOYMENT_REQUIRED" \
             --arg recoveryState "$RECOVERY_STATE" \
             --arg rollbackResult "$ROLLBACK_RESULT" \
             --argjson durationSeconds "$duration" \
-            '{schemaVersion:1,sha:$sha,mode:$mode,classification:$reason,artifactDigest:$artifactDigest,applicationDigests:{function:$functionDigest,sourceFrontend:$sourceFrontendDigest,sbom:$sbomDigest},renderedFrontendDigests:{test:$testRenderedFrontendDigest,production:$productionRenderedFrontendDigest},test:$testResult,production:$productionResult,superseded:($superseded=="true"),recovery:$recoveryState,rollback:$rollbackResult,durationSeconds:$durationSeconds,repairAttempts:0}' \
+            '{schemaVersion:2,sha:$sha,mode:$mode,classification:$reason,deploymentRequired:($deploymentRequired=="true"),artifactDigest:$artifactDigest,applicationDigests:{function:$functionDigest,sourceFrontend:$sourceFrontendDigest,sbom:$sbomDigest},renderedFrontendDigests:{test:$testRenderedFrontendDigest,production:$productionRenderedFrontendDigest},rawJobs:{test:$testResult,production:$productionResult},test:$testVerification,production:$productionVerification,terminalOutcome:$terminalOutcome,superseded:($superseded=="true"),supersededBy:(if $superseded=="true" then $supersededBy else null end),recovery:$recoveryState,rollback:$rollbackResult,durationSeconds:$durationSeconds,repairAttempts:0}' \
             > "$RUNNER_TEMP/delivery-summary.json"
       - name: Upload bounded delivery summary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1

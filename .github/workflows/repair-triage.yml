@@ -22,6 +22,10 @@ on:
         required: true
         default: true
         type: boolean
+      repair_progress_json:
+        description: Optional public-safe advisory repair progress bound to the exact source run.
+        required: false
+        type: string
 
 permissions:
   actions: read
@@ -38,6 +42,8 @@ jobs:
     name: queue bounded repair and learning
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.name == 'Delivery v2' &&
+       github.event.workflow_run.conclusion == 'success') ||
       (github.event.workflow_run.conclusion != 'success' &&
        github.event.workflow_run.conclusion != 'skipped' &&
        github.event.workflow_run.conclusion != 'neutral')
@@ -58,6 +64,7 @@ jobs:
         env:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
           GH_TOKEN: ${{ github.token }}
+          REPAIR_PROGRESS_JSON: ${{ inputs.repair_progress_json }}
           REPAIR_SUMMARY_PATH: ${{ runner.temp }}/repair-learning-summary.json
           SOURCE_RUN_ID: ${{ github.event.workflow_run.id || inputs.source_run_id }}
         run: node scripts/triage-repair-issues.mjs

@@ -43,6 +43,43 @@ export function evaluateAgentSafetyCase(testCase) {
   return 'allow';
 }
 
+export function evaluateAutonomyCase(testCase) {
+  switch (testCase.scenario) {
+    case 'guidance-conflict':
+      if (testCase.guidanceKind === 'hard-invariant') return 'reject-and-repair-differently';
+      return testCase.objectiveValidation === 'passed' &&
+        testCase.scopedReasonRecorded === true &&
+        testCase.smallestSafeDeviation === true
+        ? 'proceed-with-scoped-deviation'
+        : 'repair-before-delivery';
+    case 'evidence-lineage':
+      if (testCase.counterevidence === 'deterministic' || testCase.counterevidence === 'runtime') {
+        return 'challenge-claim';
+      }
+      return new Set(testCase.lineages ?? []).size >= 2 ? 'corroborated' : 'candidate';
+    case 'repair-strategy':
+      if (testCase.generationBudgetExhausted === true) return 'persist-active-continuation';
+      return testCase.sameStrategyIneffectiveAttempts >= 2 ? 'rediagnose-active-task' : 'continue-bounded-strategy';
+    case 'delivery':
+      if (testCase.superseded === true) {
+        return testCase.requestedChangeInCurrentMain === true
+          ? 'follow-current-main-generation'
+          : 'restore-requested-change';
+      }
+      if (testCase.runtimeImpact === false) {
+        return testCase.protectedGates === 'passed' && testCase.classification === 'not_applicable'
+          ? 'complete-runtime-neutral'
+          : 'incomplete';
+      }
+      if (testCase.merged !== true || testCase.runtimeVerified !== true) return 'incomplete';
+      return testCase.globalDeliveryEnabled === true && testCase.globalProductionEnabled === true
+        ? 'complete-verified-delivery'
+        : 'blocked-by-global-configuration';
+    default:
+      throw new Error(`Unknown autonomy scenario: ${testCase.scenario}`);
+  }
+}
+
 export function operationGovernanceFindings(operations = listOperationDefinitions()) {
   const findings = [];
   for (const operation of operations) {
@@ -90,7 +127,13 @@ export function evaluateOperationGovernanceMutations(operations = listOperationD
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const suite = JSON.parse(await readFile(new URL('../evals/agent-safety.json', import.meta.url), 'utf8'));
-  if (suite.schemaVersion !== 1 || !Array.isArray(suite.cases) || suite.cases.length < 5) {
+  if (
+    suite.schemaVersion !== 2 ||
+    !Array.isArray(suite.cases) ||
+    suite.cases.length < 5 ||
+    !Array.isArray(suite.autonomyCases) ||
+    suite.autonomyCases.length < 10
+  ) {
     console.error('Agent safety eval suite metadata is invalid.');
     process.exit(1);
   }
@@ -101,13 +144,20 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       actual: evaluateAgentSafetyCase(testCase),
     }))
     .filter((result) => result.actual !== result.expected);
+  const autonomyFailures = suite.autonomyCases
+    .map((testCase) => ({
+      id: testCase.id,
+      expected: testCase.expectedDecision,
+      actual: evaluateAutonomyCase(testCase),
+    }))
+    .filter((result) => result.actual !== result.expected);
   const governanceFindings = operationGovernanceFindings();
   const mutationEvaluation = evaluateOperationGovernanceMutations();
-  if (failures.length || governanceFindings.length || mutationEvaluation.survivors.length) {
-    console.error(JSON.stringify({ failures, governanceFindings, mutationEvaluation }, null, 2));
+  if (failures.length || autonomyFailures.length || governanceFindings.length || mutationEvaluation.survivors.length) {
+    console.error(JSON.stringify({ failures, autonomyFailures, governanceFindings, mutationEvaluation }, null, 2));
     process.exit(1);
   }
   console.log(
-    `Agent safety evals passed: ${suite.cases.length}/${suite.cases.length}; ${listOperationDefinitions().length} operation governance contracts valid; ${mutationEvaluation.total} unsafe policy mutants killed.`,
+    `Agent safety evals passed: ${suite.cases.length}/${suite.cases.length} operation cases and ${suite.autonomyCases.length}/${suite.autonomyCases.length} autonomy cases; ${listOperationDefinitions().length} operation governance contracts valid; ${mutationEvaluation.total} unsafe policy mutants killed.`,
   );
 }
