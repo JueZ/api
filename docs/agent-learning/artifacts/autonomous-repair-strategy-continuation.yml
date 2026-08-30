@@ -16,8 +16,10 @@ prevention:
   - kind: regression-test
     path: scripts/test/agent-learning-triage.test.mjs
 broken: 47e4b50d81825065ed6bc15ac71c6c00e39a3b84
+fixed: 51ea0668cd2bd46506efae88d8e497947bc41b84
+repairPr: 443
 recurrenceCount: 1
-status: active
+status: verified
 reusableClaim:
   id: repair-strategy-exhaustion-requires-rediagnosis
   claim: Two ineffective attempts with one unchanged repair strategy trigger causal re-diagnosis and do not end the autonomous task.

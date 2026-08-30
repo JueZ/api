@@ -541,12 +541,14 @@ test('generated index is deterministic, sorted, and contains no execution ledger
   );
 });
 
-test('task continuation artifact keeps its reusable claim executable and active', () => {
+test('task continuation artifact keeps its reusable claim executable and verified by the repair commit', () => {
   const result = loadLearningArtifacts();
   assert.deepEqual(result.errors, []);
   const record = result.records.find(({ artifact }) => artifact.id === 'autonomous-repair-strategy-continuation');
   assert.ok(record);
-  assert.equal(record.artifact.status, 'active');
+  assert.equal(record.artifact.status, 'verified');
+  assert.equal(record.artifact.fixed, '51ea0668cd2bd46506efae88d8e497947bc41b84');
+  assert.equal(record.artifact.repairPr, 443);
   assert.match(record.artifact.reusableClaim.claim, /do(?:es)? not end the autonomous task/i);
   assert.equal(record.artifact.reusableClaim.enforcement.reference, 'scripts/test/agent-learning-triage.test.mjs');
   assert.equal(deriveReusableClaimState([record]), 'enforced');
