@@ -114,14 +114,20 @@ export interface RedditCommentTreeResponse {
 
 export interface RedditCoverageDto {
   reportedTotal: number;
+  retrievedUnique: number;
   uniqueReturned: number;
   deleted: number;
   unavailable: number;
+  unavailableBranches: number;
   knownRemaining: number;
   cursorsRemaining: boolean;
   continuationsRemaining: number;
+  frontierRemaining: number;
   sortsSampled: RedditSort[];
+  complete: boolean;
   snapshotComplete: boolean;
+  stoppedReason?: 'rate_limit' | 'execution_budget' | 'snapshot_resource_limit' | 'upstream_retryable';
+  retryAfterSeconds?: number;
 }
 
 export interface RedditCommentQueryRequest {
@@ -150,6 +156,7 @@ export interface RedditCommentSkeletonDto {
   id: string;
   fullname: string;
   parentId: string;
+  author: string;
   depth: number;
   score: number;
   replyCount: number | null;
@@ -165,6 +172,17 @@ export interface RedditCommentQueryPageInfo {
   hasMore: boolean;
   returned: number;
   truncatedBy: 'limit' | 'maxBytes' | 'cursor' | null;
+}
+
+export interface RedditThreadSnapshotMetadataDto {
+  version: number;
+  id: string;
+  postId: string;
+  sort: RedditSort;
+  startedAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  sourceExhausted: boolean;
 }
 
 export interface RedditThreadOverviewRequest {
@@ -202,8 +220,10 @@ export interface RedditCommentQueryResponse {
   input: string;
   post: RedditPostDto;
   comments: RedditCommentSkeletonDto[];
+  snapshot: RedditThreadSnapshotMetadataDto;
   page: RedditCommentQueryPageInfo;
   coverage: RedditCoverageDto;
+  warnings: string[];
   redditRateLimit: RedditRateLimit;
 }
 

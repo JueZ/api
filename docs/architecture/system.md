@@ -12,6 +12,8 @@ All Reddit, Willhaben, Bring, health, and authentication tools are bundled into 
 
 Provider clients for Reddit, willhaben, and Bring live behind normalized application-facing services. Provider responses are untrusted. Adapters expose bounded DTOs and repairable error shapes, never raw headers, credentials, tokens, or unrestricted upstream bodies.
 
+Reddit's ordinary overview/thread operations remain lightweight snapshots. The explicit exhaustive comments operation uses the same Reddit service and normalizers but persists an append-only normalized comment snapshot plus a typed traversal frontier in the existing private Azure Blob account. Versioned HMAC-protected cursors contain only snapshot ID and page offset; Function managed identity has contributor access scoped to the dedicated private container, and ETags prevent concurrent writers from silently overwriting one another.
+
 Every service-generated failure crosses one deterministic-first Repairable Error Contract boundary. Predefined mappings handle known failures without model cost. Only `diagnostic_uncertain` failures can send a sanitized shape-only capsule to the OpenAI Responses API, and the returned object must pass the schema and operation/field policy gate. REST uses `application/problem+json`; the single bundled MCP server exposes the same contract at `structuredContent.repairable_problem` while retaining stable MCP error codes.
 
 Azure infrastructure separates Function host storage, immutable release packages, public static content, and private integration state. The Function system identity reads runtime data; the GitHub deployment identity writes artifacts through resource/container-scoped RBAC. Secrets are Key Vault references.

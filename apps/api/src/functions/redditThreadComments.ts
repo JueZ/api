@@ -13,7 +13,8 @@ import {
   type RepairableProblem,
   type RepairableProblemExpected,
 } from '../shared/errors/repairableProblem.js';
-import { mapRedditError, RedditThreadService } from '../shared/reddit/service.js';
+import { mapRedditError, type RedditThreadService } from '../shared/reddit/service.js';
+import { createRedditThreadService } from '../infrastructure/composition/reddit.js';
 import { withRedditPrincipalConcurrency } from '../shared/reddit/concurrency.js';
 import type { RedditCommentQueryRequest } from '../shared/reddit/types.js';
 import { authorizeRequestForOperation } from '../shared/security/auth.js';
@@ -50,7 +51,7 @@ const ALLOWED_REQUEST_FIELDS = [
 ];
 const ALLOWED_OPERATION_IDS = [OPERATION_ID];
 
-let redditThreadService = new RedditThreadService();
+let redditThreadService = createRedditThreadService();
 let repairableErrorAnalyzer = analyzeRepairableErrorWithLlm;
 
 export async function redditThreadCommentsHandler(
@@ -125,7 +126,7 @@ export async function redditThreadCommentsHandler(
 }
 
 export function setRedditThreadCommentsServiceForTesting(service: RedditThreadService | null): void {
-  redditThreadService = service ?? new RedditThreadService();
+  redditThreadService = service ?? createRedditThreadService();
 }
 
 export function setRepairableErrorAnalyzerForTesting(analyzer: typeof analyzeRepairableErrorWithLlm | null): void {

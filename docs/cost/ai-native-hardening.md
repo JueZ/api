@@ -6,11 +6,12 @@ Added/expanded cost-bearing capabilities:
 
 - Standard Key Vault for secret references;
 - four low-volume StorageV2 accounts per environment to isolate trust boundaries;
+- one private Reddit snapshot container inside the existing private-integration account; snapshots expire after two days at the storage lifecycle boundary and add only low-volume LRS Blob capacity/transactions;
 - Application Insights/Log Analytics already used for runtime telemetry;
 - Azure Monitor action group and budget notifications; the six five-minute scheduled-query alerts were retired because their recurring evaluation cost dominated the low-volume workload;
 - optional bounded OpenAI API calls only for REC analysis of `diagnostic_uncertain` runtime failures.
 
-All storage remains standard LRS with lifecycle deletion (mutation 35 days, audit 365 days, releases 180 days). There is no SQL, Cosmos DB, API Management, Front Door, Search, Kubernetes, Cognitive Services, or always-on compute.
+All storage remains standard LRS with lifecycle deletion (Reddit snapshots 2 days, mutation 35 days, audit 365 days, releases 180 days). There is no SQL, Cosmos DB, API Management, Front Door, Search, Kubernetes, Cognitive Services, or always-on compute.
 
 Known runtime failures use predefined deterministic REC messages and therefore add no model cost or latency. The runtime analyzer permits only `gpt-5.6-luna` with high reasoning, has a 24,000-byte capsule cap, 700 output-token cap, no SDK retries, bounded timeout, optional sampling, schema/policy gate, and deterministic fallback. An unapproved configured model, oversized capsule, unavailable model, incomplete output, or invalid response returns the deterministic REC fallback. `REPAIRABLE_ERRORS_LLM_ENABLED=false` or a lower `REPAIRABLE_ERRORS_LLM_SAMPLE_RATE` disables or reduces this variable cost without weakening the public REC envelope.
 

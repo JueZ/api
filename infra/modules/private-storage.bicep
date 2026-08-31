@@ -22,6 +22,9 @@ param deploymentPrincipalObjectId string
 @description('Private WLH reference-data container.')
 param wlhCategoryBlobContainer string
 
+@description('Private Reddit resumable thread-snapshot container.')
+param redditSnapshotContainer string
+
 @description('Private Bring session container.')
 param bringSessionCacheContainer string
 
@@ -92,6 +95,14 @@ resource wlhReferenceContainer 'Microsoft.Storage/storageAccounts/blobServices/c
   }
 }
 
+resource redditThreadSnapshotContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: privateBlobService
+  name: redditSnapshotContainer
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
 resource bringSessionContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
   parent: privateBlobService
   name: bringSessionCacheContainer
@@ -122,6 +133,33 @@ resource privateLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@
   properties: {
     policy: {
       rules: [
+        {
+          name: 'expire-reddit-thread-snapshots'
+          enabled: true
+          type: 'Lifecycle'
+          definition: {
+            actions: {
+              baseBlob: {
+                delete: {
+                  daysAfterModificationGreaterThan: 2
+                }
+              }
+              version: {
+                delete: {
+                  daysAfterCreationGreaterThan: 2
+                }
+              }
+            }
+            filters: {
+              blobTypes: [
+                'blockBlob'
+              ]
+              prefixMatch: [
+                '${redditSnapshotContainer}/snapshots/'
+              ]
+            }
+          }
+        }
         {
           name: 'expire-bring-replay-records'
           enabled: true
@@ -208,3 +246,4 @@ resource deploymentWlhWriterRole 'Microsoft.Authorization/roleAssignments@2022-0
 output storageAccountName string = privateStorage.name
 output storageAccountId string = privateStorage.id
 output wlhReferenceContainerId string = wlhReferenceContainer.id
+output redditThreadSnapshotContainerId string = redditThreadSnapshotContainer.id

@@ -86,6 +86,18 @@ param redditOAuthSecret string
 @description('Reddit API User-Agent.')
 param redditUserAgent string
 
+@description('Private container for resumable Reddit thread snapshots.')
+param redditSnapshotContainer string = 'reddit-snapshots'
+
+@description('Reddit snapshot cursor lifetime in seconds.')
+param redditSnapshotTtlSeconds int = 86400
+
+@description('High resource-safety cap per Reddit snapshot; this is not a normal pagination limit.')
+param redditSnapshotMaxComments int = 100000
+
+@description('High serialized-byte safety cap per Reddit snapshot; leaves headroom below the application Blob read limit.')
+param redditSnapshotMaxBytes int = 100663296
+
 @secure()
 @description('WLH upstream base URL; stored in Key Vault because the existing integration treats it as sensitive.')
 param wlhBaseUrl string
@@ -287,6 +299,7 @@ module privateStorageDeployment './modules/private-storage.bicep' = {
     storageAccountName: privateStorageName
     deploymentPrincipalObjectId: deploymentPrincipalObjectId
     wlhCategoryBlobContainer: wlhCategoryBlobContainer
+    redditSnapshotContainer: redditSnapshotContainer
     bringSessionCacheContainer: bringSessionCacheContainer
     bringMutationContainer: bringMutationContainer
     bringAuditContainer: bringAuditContainer
@@ -360,6 +373,11 @@ resource releaseContainer 'Microsoft.Storage/storageAccounts/blobServices/contai
 resource wlhReferenceContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
   parent: privateBlobService
   name: wlhCategoryBlobContainer
+}
+
+resource redditThreadSnapshotContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
+  parent: privateBlobService
+  name: redditSnapshotContainer
 }
 
 resource bringSessionContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
@@ -634,6 +652,11 @@ module functionAppSettings './modules/function-app-settings.bicep' = {
       REDDIT_CLIENT_ID: redditClientId
       REDDIT_CLIENT_SECRET: '@Microsoft.KeyVault(SecretUri=${redditSecret.properties.secretUriWithVersion})'
       REDDIT_USER_AGENT: redditUserAgent
+      REDDIT_STORAGE_ACCOUNT_NAME: privateStorage.name
+      REDDIT_SNAPSHOT_CONTAINER: redditSnapshotContainer
+      REDDIT_SNAPSHOT_TTL_SECONDS: string(redditSnapshotTtlSeconds)
+      REDDIT_SNAPSHOT_MAX_COMMENTS: string(redditSnapshotMaxComments)
+      REDDIT_SNAPSHOT_MAX_BYTES: string(redditSnapshotMaxBytes)
       WLH_BASE_URL: '@Microsoft.KeyVault(SecretUri=${wlhBaseUrlSecret.properties.secretUriWithVersion})'
       WLH_STORAGE_ACCOUNT_NAME: privateStorage.name
       WLH_CATEGORY_BLOB_CONTAINER: wlhCategoryBlobContainer
@@ -718,6 +741,19 @@ resource functionWlhReaderRole 'Microsoft.Authorization/roleAssignments@2022-04-
   scope: wlhReferenceContainer
   properties: {
     roleDefinitionId: storageBlobDataReaderRole
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+  dependsOn: [
+    privateStorageDeployment
+  ]
+}
+
+resource functionRedditSnapshotRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(redditThreadSnapshotContainer.id, functionApp.id, 'reddit-snapshot-contributor')
+  scope: redditThreadSnapshotContainer
+  properties: {
+    roleDefinitionId: storageBlobDataContributorRole
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
   }

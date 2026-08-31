@@ -10,6 +10,13 @@ import {
 } from '../dist/shared/reddit/input.js';
 import { attachMoreChildren, normalizeInitialThread } from '../dist/shared/reddit/normalize.js';
 import { RedditThreadService } from '../dist/shared/reddit/service.js';
+import {
+  InMemoryRedditThreadSnapshotStore,
+  RedditCursorError,
+  RedditSnapshotConflictError,
+  RedditSnapshotExpiredError,
+  RedditSnapshotNotFoundError,
+} from '../dist/shared/reddit/snapshot.js';
 import { RedditPrincipalConcurrencyError, withRedditPrincipalConcurrency } from '../dist/shared/reddit/concurrency.js';
 import {
   redditThreadHandler,
@@ -48,6 +55,11 @@ const config = {
   clientId: 'client-id',
   secret: 'client-secret',
   userAgent: 'script:test:v0.1.0 (by u/example)',
+  storageAccountName: '',
+  snapshotContainer: 'reddit-snapshots',
+  snapshotTtlMs: 86_400_000,
+  snapshotMaxComments: 100_000,
+  snapshotMaxBytes: 96 * 1024 * 1024,
 };
 
 function headerValue(init, name) {
@@ -211,7 +223,7 @@ test('normalizeInitialThread preserves nested replies and more placeholders', ()
   assert.equal(tree.comments.length, 1);
   assert.equal(tree.comments[0].replies.length, 1);
   assert.equal(tree.comments[0].replies[0].depth, 1);
-  assert.deepEqual(tree.more, [{ parentId: 't1_c1', depth: 1, children: ['c3'] }]);
+  assert.deepEqual(tree.more, [{ parentId: 't1_c1', depth: 1, children: ['c3'], count: 0, id: '' }]);
 });
 
 test('attachMoreChildren appends expanded comments to the matching parent', () => {
@@ -1010,11 +1022,15 @@ test('RedditThreadService pages comment skeletons with filters and byte controls
   process.env.REDDIT_CLIENT_ID = config.clientId;
   process.env.REDDIT_CLIENT_SECRET = config.secret;
   process.env.REDDIT_USER_AGENT = config.userAgent;
+  let initialListingCalls = 0;
   const service = new RedditThreadService({
     fetchImpl: async (input) => {
       if (String(input).includes('/api/v1/access_token'))
         return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
-      if (String(input).includes('/comments/abc123')) return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      if (String(input).includes('/comments/abc123')) {
+        initialListingCalls += 1;
+        return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      }
       throw new Error(`unexpected URL ${String(input)}`);
     },
   });
@@ -1025,6 +1041,7 @@ test('RedditThreadService pages comment skeletons with filters and byte controls
     includeBody: false,
     bodyPreviewChars: 4,
     maxComments: 10,
+    maxMoreChildrenRequests: 0,
   });
 
   assert.equal(firstPage.comments.length, 1);
@@ -1035,15 +1052,406 @@ test('RedditThreadService pages comment skeletons with filters and byte controls
   assert.ok(firstPage.page.nextCursor);
 
   const secondPage = await service.fetchThreadComments({
-    post: 'abc123',
     cursor: firstPage.page.nextCursor,
     limit: 1,
     includeBody: true,
-    maxComments: 10,
+    maxMoreChildrenRequests: 0,
   });
 
   assert.equal(secondPage.comments[0].id, 'c2');
   assert.equal(secondPage.comments[0].body, 'reply comment');
+  assert.equal(secondPage.snapshot.id, firstPage.snapshot.id);
+  assert.equal(initialListingCalls, 1);
+});
+
+test('RedditThreadService exhaustively resumes a 2500-comment tree without refetching or duplicates', async () => {
+  let initialListingCalls = 0;
+  let activeMoreRequests = 0;
+  let maximumConcurrentMoreRequests = 0;
+  const snapshotStore = new InMemoryRedditThreadSnapshotStore();
+  const service = new RedditThreadService({
+    config,
+    snapshotStore,
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('/api/v1/access_token')) {
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      }
+      if (url.pathname === '/comments/abc123' && !url.searchParams.has('comment')) {
+        initialListingCalls += 1;
+        return jsonResponse(exhaustiveThreadFixture(), 200, rateHeaders(1));
+      }
+      if (url.pathname === '/api/morechildren') {
+        activeMoreRequests += 1;
+        maximumConcurrentMoreRequests = Math.max(maximumConcurrentMoreRequests, activeMoreRequests);
+        await Promise.resolve();
+        const children = (url.searchParams.get('children') ?? '').split(',').filter(Boolean);
+        activeMoreRequests -= 1;
+        return jsonResponse(exhaustiveMoreChildrenFixture(children), 200, rateHeaders(2));
+      }
+      if (url.pathname === '/comments/abc123' && url.searchParams.get('comment') === 'seed1') {
+        return jsonResponse(exhaustiveContinueFixture('seed1'), 200, rateHeaders(3));
+      }
+      if (url.pathname === '/comments/abc123' && url.searchParams.get('comment') === 'ct1') {
+        return jsonResponse(exhaustiveContinueFixture('ct1'), 200, rateHeaders(4));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const seen = new Map();
+  const parentIds = new Map();
+  let response = await service.fetchThreadComments({
+    post: 'abc123',
+    sort: 'old',
+    limit: 137,
+    includeBody: true,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 2,
+  });
+  const snapshotId = response.snapshot.id;
+  let calls = 1;
+  while (true) {
+    for (const comment of response.comments) {
+      seen.set(comment.id, (seen.get(comment.id) ?? 0) + 1);
+      parentIds.set(comment.id, comment.parentId);
+    }
+    if (response.coverage.complete && response.page.nextCursor === null) break;
+    assert.ok(response.page.nextCursor, 'incomplete crawl must remain resumable');
+    response = await service.fetchThreadComments({
+      cursor: response.page.nextCursor,
+      limit: 137,
+      includeBody: true,
+      includeDeleted: true,
+      maxMoreChildrenRequests: 2,
+    });
+    assert.equal(response.snapshot.id, snapshotId);
+    calls += 1;
+    assert.ok(calls < 100, 'crawl should make bounded forward progress');
+  }
+
+  const expectedIds = ['seed0', 'seed1', 'ct1', 'ct2', 'ct3'];
+  for (let index = 1; index <= 2500; index += 1) expectedIds.push(exhaustiveCommentId(index));
+  assert.equal(seen.size, expectedIds.length);
+  assert.deepEqual(
+    [...seen.values()].filter((count) => count !== 1),
+    [],
+  );
+  assert.deepEqual([...expectedIds].sort(), [...seen.keys()].sort());
+  assert.equal(parentIds.get('seed1'), 't1_seed0');
+  assert.equal(parentIds.get('ct1'), 't1_seed1');
+  assert.equal(parentIds.get('ct2'), 't1_ct1');
+  assert.equal(parentIds.get('ct3'), 't1_ct2');
+  assert.equal(response.coverage.retrievedUnique, expectedIds.length);
+  const completedSnapshot = await snapshotStore.load(snapshotId);
+  assert.deepEqual(completedSnapshot?.snapshot.unavailableCommentIds, []);
+  assert.equal(response.coverage.unavailable, 0);
+  assert.equal(response.coverage.frontierRemaining, 0);
+  assert.equal(response.coverage.complete, true);
+  assert.equal(response.coverage.knownRemaining, response.coverage.reportedTotal - expectedIds.length);
+  assert.equal(initialListingCalls, 1);
+  assert.equal(maximumConcurrentMoreRequests, 1);
+  assert.ok(calls > 10, 'small per-call expansion budget should require multiple resumptions');
+});
+
+test('RedditThreadService checkpoints an execution-budget stop and resumes it', async () => {
+  let nowMs = 1_000_000;
+  let initialListingCalls = 0;
+  let firstExpansion = true;
+  const service = new RedditThreadService({
+    config,
+    now: () => nowMs,
+    expansionTimeoutBudgetMs: 25,
+    snapshotStore: new InMemoryRedditThreadSnapshotStore(),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('/api/v1/access_token'))
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (url.pathname === '/comments/abc123') {
+        initialListingCalls += 1;
+        return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      }
+      if (url.pathname === '/api/morechildren') {
+        const child = url.searchParams.get('children');
+        if (firstExpansion) {
+          firstExpansion = false;
+          nowMs += 25;
+          return jsonResponse(moreWithNextFixture(child, 'c4'), 200, rateHeaders(2));
+        }
+        return jsonResponse(moreWithNextFixture(child), 200, rateHeaders(3));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const first = await service.fetchThreadComments({
+    post: 'abc123',
+    limit: 10,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 10,
+  });
+  assert.equal(first.coverage.complete, false);
+  assert.equal(first.coverage.stoppedReason, 'execution_budget');
+  assert.ok(first.page.nextCursor);
+
+  const resumed = await service.fetchThreadComments({
+    cursor: first.page.nextCursor,
+    limit: 10,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 10,
+  });
+  assert.equal(resumed.coverage.complete, true);
+  assert.equal(resumed.coverage.frontierRemaining, 0);
+  assert.equal(initialListingCalls, 1);
+});
+
+test('RedditThreadService snapshot lease prevents concurrent expansion across service instances', async () => {
+  const store = new InMemoryRedditThreadSnapshotStore();
+  let releaseExpansion;
+  let expansionStarted;
+  const entered = new Promise((resolve) => {
+    expansionStarted = resolve;
+  });
+  const blocked = new Promise((resolve) => {
+    releaseExpansion = resolve;
+  });
+  const fetchImpl = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.includes('/api/v1/access_token'))
+      return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+    if (url.pathname === '/comments/abc123') return jsonResponse(threadFixture(), 200, rateHeaders(1));
+    if (url.pathname === '/api/morechildren') {
+      expansionStarted();
+      await blocked;
+      return jsonResponse(moreChildrenFixture(), 200, rateHeaders(2));
+    }
+    throw new Error(`unexpected URL ${String(input)}`);
+  };
+  const firstService = new RedditThreadService({ config, snapshotStore: store, fetchImpl });
+  const secondService = new RedditThreadService({ config, snapshotStore: store, fetchImpl });
+  const initial = await firstService.fetchThreadComments({
+    post: 'abc123',
+    limit: 10,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 0,
+  });
+
+  const firstContinuation = firstService.fetchThreadComments({
+    cursor: initial.page.nextCursor,
+    limit: 10,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 1,
+  });
+  await entered;
+  await assert.rejects(
+    () =>
+      secondService.fetchThreadComments({
+        cursor: initial.page.nextCursor,
+        limit: 10,
+        includeDeleted: true,
+        maxMoreChildrenRequests: 1,
+      }),
+    RedditSnapshotConflictError,
+  );
+  releaseExpansion();
+  const completed = await firstContinuation;
+  assert.equal(completed.coverage.complete, true);
+});
+
+test('RedditThreadService retains progress and retry guidance after Reddit 429', async () => {
+  let allowExpansion = false;
+  let initialListingCalls = 0;
+  const service = new RedditThreadService({
+    config,
+    snapshotStore: new InMemoryRedditThreadSnapshotStore(),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('/api/v1/access_token'))
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (url.pathname === '/comments/abc123') {
+        initialListingCalls += 1;
+        return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      }
+      if (url.pathname === '/api/morechildren' && !allowExpansion) {
+        return jsonResponse({ message: 'rate limited' }, 429, {
+          'x-ratelimit-used': '900',
+          'x-ratelimit-remaining': '100',
+          'x-ratelimit-reset': '7',
+        });
+      }
+      if (url.pathname === '/api/morechildren') return jsonResponse(moreChildrenFixture(), 200, rateHeaders(2));
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const limited = await service.fetchThreadComments({
+    post: 'abc123',
+    limit: 10,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 1,
+  });
+  assert.equal(limited.coverage.complete, false);
+  assert.equal(limited.coverage.stoppedReason, 'rate_limit');
+  assert.equal(limited.coverage.retryAfterSeconds, 7);
+  assert.ok(limited.page.nextCursor);
+
+  allowExpansion = true;
+  const resumed = await service.fetchThreadComments({
+    cursor: limited.page.nextCursor,
+    limit: 10,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 1,
+  });
+  assert.equal(resumed.coverage.complete, true);
+  assert.equal(resumed.comments.at(-1).id, 'c3');
+  assert.equal(initialListingCalls, 1);
+});
+
+test('RedditThreadService marks a vanished MoreChildren branch unavailable without looping', async () => {
+  const service = new RedditThreadService({
+    config,
+    snapshotStore: new InMemoryRedditThreadSnapshotStore(),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('/api/v1/access_token'))
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (url.pathname === '/comments/abc123') return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      if (url.pathname === '/api/morechildren') return jsonResponse({ message: 'gone' }, 404, rateHeaders(2));
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThreadComments({
+    post: 'abc123',
+    limit: 10,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 10,
+  });
+  assert.equal(response.coverage.unavailable, 1);
+  assert.equal(response.coverage.frontierRemaining, 0);
+  assert.equal(response.coverage.complete, true);
+  assert.equal(response.page.nextCursor, null);
+});
+
+test('RedditThreadService reports a snapshot resource cap as incomplete', async () => {
+  let moreCalls = 0;
+  const service = new RedditThreadService({
+    config: { ...config, snapshotMaxComments: 2 },
+    snapshotStore: new InMemoryRedditThreadSnapshotStore(),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('/api/v1/access_token'))
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (url.pathname === '/comments/abc123') return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      if (url.pathname === '/api/morechildren') {
+        moreCalls += 1;
+        return jsonResponse(moreChildrenFixture(), 200, rateHeaders(2));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThreadComments({
+    post: 'abc123',
+    limit: 10,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 10,
+  });
+  assert.equal(response.coverage.complete, false);
+  assert.equal(response.coverage.stoppedReason, 'snapshot_resource_limit');
+  assert.ok(response.page.nextCursor);
+  assert.match(response.warnings.join(' '), /resource limit of 2 comments/i);
+  assert.equal(moreCalls, 0);
+});
+
+test('RedditThreadService validates malformed, unknown, expired, incompatible, and repeated cursors', async () => {
+  let nowMs = 1_000_000;
+  let initialListingCalls = 0;
+  const service = new RedditThreadService({
+    config: { ...config, snapshotTtlMs: 1_000 },
+    now: () => nowMs,
+    snapshotStore: new InMemoryRedditThreadSnapshotStore(),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('/api/v1/access_token'))
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (url.pathname === '/comments/abc123') {
+        initialListingCalls += 1;
+        return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      }
+      if (url.pathname === '/api/morechildren') return jsonResponse(moreChildrenFixture(), 200, rateHeaders(2));
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  await assert.rejects(() => service.fetchThreadComments({ cursor: 'not-a-cursor' }), RedditCursorError);
+  await assert.rejects(
+    () => service.fetchThreadComments({ post: 'abc123', url: 'https://redd.it/abc123' }),
+    /exactly one Reddit post or URL selector/i,
+  );
+  const unknownCursor = Buffer.from(
+    JSON.stringify({
+      version: 1,
+      snapshotId: '11111111-1111-4111-8111-111111111111',
+      offset: 0,
+      signature: 'a'.repeat(43),
+    }),
+  ).toString('base64url');
+  await assert.rejects(() => service.fetchThreadComments({ cursor: unknownCursor }), RedditSnapshotNotFoundError);
+  const wrongVersion = Buffer.from(
+    JSON.stringify({
+      version: 99,
+      snapshotId: '11111111-1111-4111-8111-111111111111',
+      offset: 0,
+      signature: 'a'.repeat(43),
+    }),
+  ).toString('base64url');
+  await assert.rejects(
+    () => service.fetchThreadComments({ cursor: wrongVersion }),
+    (error) => error instanceof RedditCursorError && error.code === 'REDDIT_CURSOR_VERSION_MISMATCH',
+  );
+
+  const first = await service.fetchThreadComments({
+    post: 'abc123',
+    limit: 1,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 0,
+  });
+  const tamperedPayload = JSON.parse(Buffer.from(first.page.nextCursor, 'base64url').toString('utf8'));
+  tamperedPayload.offset += 1;
+  const tamperedCursor = Buffer.from(JSON.stringify(tamperedPayload)).toString('base64url');
+  await assert.rejects(
+    () => service.fetchThreadComments({ cursor: tamperedCursor, includeDeleted: true }),
+    RedditCursorError,
+  );
+  await assert.rejects(
+    () => service.fetchThreadComments({ post: 'abc123', cursor: first.page.nextCursor }),
+    RedditCursorError,
+  );
+  const once = await service.fetchThreadComments({
+    cursor: first.page.nextCursor,
+    limit: 1,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 0,
+  });
+  const repeated = await service.fetchThreadComments({
+    cursor: first.page.nextCursor,
+    limit: 1,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 0,
+  });
+  assert.deepEqual(
+    repeated.comments.map((comment) => comment.id),
+    once.comments.map((comment) => comment.id),
+  );
+  assert.equal(repeated.snapshot.id, first.snapshot.id);
+  assert.equal(initialListingCalls, 1);
+
+  nowMs += 1_001;
+  await assert.rejects(
+    () => service.fetchThreadComments({ cursor: once.page.nextCursor, includeDeleted: true }),
+    RedditSnapshotExpiredError,
+  );
 });
 
 test('RedditThreadService fetches full comments by ID with field projection', async () => {
@@ -2052,6 +2460,116 @@ function threadFixtureWithoutMore(postId = 'abc123') {
   fixture[1].data.children[0].data.replies.data.children =
     fixture[1].data.children[0].data.replies.data.children.filter((child) => child.kind !== 'more');
   return fixture;
+}
+
+function exhaustiveThreadFixture() {
+  const fixture = threadFixtureWithoutMore();
+  fixture[0].data.children[0].data.num_comments = 2600;
+  fixture[1].data.children = [
+    exhaustiveCommentThing('seed0', 't3_abc123', 0, {
+      children: [
+        exhaustiveCommentThing('seed1', 't1_seed0', 1, {
+          children: [exhaustiveMoreThing('t1_seed1', [], 2, 3)],
+        }),
+        exhaustiveMoreThing(
+          't1_seed0',
+          Array.from({ length: 100 }, (_, index) => exhaustiveCommentId(index + 1)),
+          1,
+          100,
+        ),
+      ],
+    }),
+    exhaustiveMoreThing(
+      't3_abc123',
+      Array.from({ length: 100 }, (_, index) => exhaustiveCommentId(index + 101)),
+      0,
+      100,
+    ),
+  ];
+  return fixture;
+}
+
+function exhaustiveMoreChildrenFixture(children) {
+  const deferredChild = children[0] === exhaustiveCommentId(101) ? children.at(-1) : undefined;
+  const things = children.filter((id) => id !== deferredChild).map((id) => exhaustiveCommentThing(id, 't1_seed0', 1));
+  if (children[0]) {
+    things.push(exhaustiveCommentThing(children[0], 't1_seed0', 1));
+    things.push(exhaustiveCommentThing('seed0', 't3_abc123', 0));
+  }
+  const firstNumber = Number(children[0]?.slice(1));
+  const nextStart = firstNumber + 200;
+  if (Number.isSafeInteger(nextStart) && nextStart <= 2500) {
+    const nextChildren = Array.from({ length: Math.min(100, 2501 - nextStart) }, (_, index) =>
+      exhaustiveCommentId(nextStart + index),
+    );
+    things.push(exhaustiveMoreThing('t1_seed0', nextChildren, 1, nextChildren.length));
+  }
+  if (deferredChild) {
+    things.push(exhaustiveMoreThing('t1_seed0', [deferredChild], 1, 1));
+  }
+  return { json: { data: { things } } };
+}
+
+function exhaustiveContinueFixture(target) {
+  const fixture = threadFixtureWithoutMore();
+  fixture[0].data.children[0].data.num_comments = 2600;
+  fixture[1].data.children =
+    target === 'seed1'
+      ? [
+          exhaustiveCommentThing('seed1', 't1_seed0', 1, {
+            children: [exhaustiveCommentThing('ct1', 't1_seed1', 2), exhaustiveMoreThing('t1_ct1', [], 3, 2)],
+          }),
+        ]
+      : [
+          exhaustiveCommentThing('ct1', 't1_seed1', 2, {
+            children: [
+              exhaustiveCommentThing('ct2', 't1_ct1', 3, {
+                children: [exhaustiveCommentThing('ct3', 't1_ct2', 4)],
+              }),
+            ],
+          }),
+        ];
+  return fixture;
+}
+
+function exhaustiveCommentThing(id, parentId, depth, replies) {
+  return {
+    kind: 't1',
+    data: {
+      id,
+      name: `t1_${id}`,
+      parent_id: parentId,
+      author: `user_${id}`,
+      body: `complete body for ${id}`,
+      score: depth + 1,
+      created_utc: 1000 + depth,
+      depth,
+      replies: replies ? { kind: 'Listing', data: replies } : '',
+    },
+  };
+}
+
+function exhaustiveMoreThing(parentId, children, depth, count = children.length) {
+  return {
+    kind: 'more',
+    data: {
+      id: `more_${parentId.replace(/^t[13]_/, '')}_${depth}`,
+      parent_id: parentId,
+      children,
+      depth,
+      count,
+    },
+  };
+}
+
+function exhaustiveCommentId(index) {
+  return `x${String(index).padStart(4, '0')}`;
+}
+
+function moreWithNextFixture(child, nextChild) {
+  const things = [exhaustiveCommentThing(child, 't1_c1', 1)];
+  if (nextChild) things.push(exhaustiveMoreThing('t1_c1', [nextChild], 1, 1));
+  return { json: { data: { things } } };
 }
 
 function chainedMoreChildrenFixture(index, total) {
