@@ -1,8 +1,9 @@
-<!-- project-memory-asOf: 2026-08-30 -->
+<!-- project-memory-asOf: 2026-08-31 -->
 # Current state
 
 ## Repository delivery
 
+- Codex environment setup and maintenance remove inherited `apt.llvm.org` entries before APT refreshes because the repository does not require LLVM or Clang; Ubuntu plus the explicitly configured Microsoft and GitHub repositories remain signature-verified.
 - Protected `main` requires exactly `PR Gate` and `Security Gate` from GitHub Actions, with strict/up-to-date PRs, admin enforcement, linear history, conversation resolution, force-push denial, and deletion denial.
 - Repository-native exact-head squash auto-merge is enabled. No custom merge controller, check-run writer, arbitrary status rollup, or required model review exists.
 - `PR Gate` and `Security Gate` use one fail-closed path classifier. Pull requests run proportional validation and never build release artifacts.
