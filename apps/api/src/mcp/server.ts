@@ -5,9 +5,14 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import * as z from 'zod/v4';
 import { createHealthResponse, createHelloResponse } from '../shared/responses.js';
 import { createCorsHeaders, type CorsOptions } from '../shared/http/cors.js';
-import { RedditThreadService } from '../shared/reddit/service.js';
+import type { RedditThreadService } from '../shared/reddit/service.js';
+import { createRedditThreadService } from '../infrastructure/composition/reddit.js';
 import { withRedditPrincipalConcurrency } from '../shared/reddit/concurrency.js';
-import type { RedditThreadOverviewRequest, RedditThreadRequest } from '../shared/reddit/types.js';
+import type {
+  RedditCommentQueryRequest,
+  RedditThreadOverviewRequest,
+  RedditThreadRequest,
+} from '../shared/reddit/types.js';
 import { WlhService } from '../shared/wlh/service.js';
 import { BringUpstreamError } from '../shared/bring/client.js';
 import {
@@ -45,7 +50,7 @@ import {
 import type { RepairableErrorClassification, RepairableProblem } from '../shared/errors/repairableProblem.js';
 
 export interface McpGatewayServices {
-  reddit: Pick<RedditThreadService, 'fetchThread' | 'fetchThreadOverview'>;
+  reddit: Pick<RedditThreadService, 'fetchThread' | 'fetchThreadOverview' | 'fetchThreadComments'>;
   wlh: Pick<WlhService, 'search' | 'offer' | 'topCategories' | 'children'>;
   bring: BringApplicationPort;
 }
@@ -62,12 +67,15 @@ const jsonRpcContentType = 'application/json';
 export const MCP_REQUEST_BODY_MAX_BYTES = 256 * 1024;
 const maxMcpComments = 50;
 const maxCommentBodyChars = 800;
+const maxMcpThreadPageComments = 50;
+const maxMcpThreadPageBytes = 128 * 1024;
 const maxCategoryMatches = 10;
 const maxCategoryScan = 200;
 
 const serverInstructions = [
   'This private API catalogue MCP server exposes Reddit and Willhaben reads plus controlled Bring reads and item additions for the authenticated operator.',
-  'For Reddit analysis, call reddit_get_thread_overview first; call reddit_get_thread only when comment bodies or a fuller snapshot are needed.',
+  'For ordinary Reddit analysis, call reddit_get_thread_overview first; call reddit_get_thread only when a bounded set of comment bodies is needed.',
+  'When the user explicitly asks for all or exhaustive Reddit comments, or a bounded result reports remaining comments that matter, call reddit_get_thread_page. Provide postId or url only on the first call, then repeatedly provide only its returned cursor until coverage.complete is true and nextCursor is absent.',
   'For a specific Willhaben URL or ad ID, call wlh_get_offer directly. For broad Willhaben searches, call wlh_find_category if the category is unclear, then wlh_search, then wlh_get_offer for selected listings.',
   'Bring item additions require bring.write, an explicit writable list UUID, and a caller-generated operation UUID. Complete and remove mutations remain unavailable over MCP.',
   'When a tool fails, read structuredContent.repairable_problem before retrying. Follow caller_instruction and retry_policy.same_request exactly; do not invent arguments after dependency or internal failures.',
@@ -204,6 +212,62 @@ const redditOverviewOutputSchema = z.object({
     })
     .optional(),
   availableSorts: z.array(redditSortSchema).optional(),
+});
+const redditThreadPageCommentSchema = z.object({
+  id: z.string(),
+  fullname: z.string(),
+  parentId: z.string(),
+  author: z.string(),
+  body: z.string(),
+  score: z.number(),
+  depth: z.number(),
+  createdUtc: z.number(),
+  replyCount: z.number().nullable(),
+  bodyLength: z.number(),
+  isDeleted: z.boolean(),
+});
+const redditThreadPageOutputSchema = z.object({
+  source: z.literal('reddit'),
+  fetchedAt: z.string(),
+  input: z.string(),
+  post: redditPostSummarySchema,
+  comments: z.array(redditThreadPageCommentSchema).max(maxMcpThreadPageComments),
+  snapshot: z.object({
+    version: z.number(),
+    id: z.string(),
+    postId: z.string(),
+    sort: redditSortSchema,
+    startedAt: z.string(),
+    updatedAt: z.string(),
+    expiresAt: z.string(),
+    sourceExhausted: z.boolean(),
+  }),
+  page: z.object({
+    nextCursor: z.string().nullable(),
+    hasMore: z.boolean(),
+    returned: z.number(),
+    truncatedBy: z.enum(['limit', 'maxBytes', 'cursor']).nullable(),
+  }),
+  coverage: z.object({
+    reportedTotal: z.number(),
+    retrievedUnique: z.number(),
+    uniqueReturned: z.number(),
+    deleted: z.number(),
+    unavailable: z.number(),
+    unavailableBranches: z.number(),
+    knownRemaining: z.number(),
+    cursorsRemaining: z.boolean(),
+    continuationsRemaining: z.number(),
+    frontierRemaining: z.number(),
+    sortsSampled: z.array(redditSortSchema),
+    complete: z.boolean(),
+    snapshotComplete: z.boolean(),
+    stoppedReason: z
+      .enum(['execution_budget', 'rate_limit', 'snapshot_resource_limit', 'upstream_retryable'])
+      .optional(),
+    retryAfterSeconds: z.number().optional(),
+  }),
+  warnings: z.array(z.string()),
 });
 const wlhListingSchema = z.object({
   id: z.string(),
@@ -421,7 +485,7 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     {
       title: 'Reddit thread snapshot',
       description:
-        'Use this when the user asks for Reddit comment bodies, full thread analysis, source extraction, sentiment, named entities, or representative comments. Prefer reddit_get_thread_overview first unless comments are needed.',
+        'Use this for an ordinary bounded sample when the user asks for Reddit comment bodies, source extraction, sentiment, named entities, or representative comments. Prefer reddit_get_thread_overview first. For all or exhaustive comments, use reddit_get_thread_page instead.',
       inputSchema: {
         postId: redditPostIdSchema.optional(),
         url: redditUrlSchema.optional(),
@@ -462,6 +526,60 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
         const response = await withRedditPrincipalConcurrency(principal, () => services.reddit.fetchThread(request));
         const structuredContent = toMcpRedditThread(response);
         return textResult(structuredContent, summarizeRedditThread(structuredContent));
+      });
+    },
+  );
+
+  server.registerTool(
+    'reddit_get_thread_page',
+    {
+      title: 'Reddit exhaustive thread page',
+      description:
+        'Use this when the user explicitly asks for all or exhaustive Reddit comments, or when a bounded Reddit result reports remaining comments that matter. On the first call provide exactly one of postId or url and optionally sort. On every subsequent call provide only the returned cursor (plus pageSize or maxMoreChildrenRequests if desired). Continue until coverage.complete is true and nextCursor is null. The server owns traversal, MoreChildren expansion, deduplication, retry, and durable resume state.',
+      inputSchema: {
+        postId: redditPostIdSchema.optional(),
+        url: redditUrlSchema.optional(),
+        cursor: nonEmptyText(
+          1024,
+          'Opaque continuation cursor returned by the previous reddit_get_thread_page call. Provide this without postId, url, or sort.',
+        ).optional(),
+        sort: redditSortSchema.describe('Reddit comment sort for the initial snapshot only.').optional(),
+        pageSize: z
+          .number()
+          .int()
+          .positive()
+          .max(maxMcpThreadPageComments)
+          .describe('Maximum complete comment bodies returned in this MCP page; defaults to 25 and is capped at 50.')
+          .optional(),
+        maxMoreChildrenRequests: z
+          .number()
+          .int()
+          .min(0)
+          .max(10)
+          .describe(
+            'Maximum serial Reddit expansion requests in this invocation; defaults to 5. This is a per-call safety bound, not a total-thread limit.',
+          )
+          .optional(),
+      },
+      outputSchema: redditThreadPageOutputSchema,
+      annotations: externalReadOnlyAnnotations,
+      ...withToolStatus(
+        createProtectedToolSecurity(OPERATION_IDS.redditThreadComments),
+        'Crawling Reddit…',
+        'Reddit page ready',
+      ),
+    },
+    async (args) => {
+      const principal = await requirePrincipal(OPERATION_IDS.redditThreadComments);
+      if (isToolErrorResult(principal)) return principal;
+      const request = toRedditThreadPageRequest(args);
+      if (isToolErrorResult(request)) return request;
+      return await withToolErrorBoundary('reddit', OPERATION_IDS.redditThreadComments, async () => {
+        const response = await withRedditPrincipalConcurrency(principal, () =>
+          services.reddit.fetchThreadComments(request),
+        );
+        const structuredContent = toMcpRedditThreadPage(response);
+        return textResult(structuredContent, summarizeRedditThreadPage(structuredContent));
       });
     },
   );
@@ -982,15 +1100,27 @@ function classifyToolError(error: unknown): SafeToolErrorCode {
   const status = numberValue(record['status']) ?? numberValue(record['statusCode']);
   const name = stringValue(record['name']) ?? '';
   const message = typeof record['message'] === 'string' ? record['message'].toLowerCase() : '';
+  if (status === 400 || name.includes('Input') || name.includes('Cursor')) return 'invalid_arguments';
   if (status === 429 || message.includes('rate-limit') || message.includes('rate limit'))
     return 'upstream_rate_limited';
-  if (status === 404 || name.includes('NotFound') || message.includes('not found')) return 'not_found';
+  if (
+    status === 404 ||
+    status === 410 ||
+    name.includes('NotFound') ||
+    name.includes('Expired') ||
+    message.includes('not found') ||
+    message.includes('expired')
+  )
+    return 'not_found';
   return 'upstream_unavailable';
 }
 
 function safeToolErrorMessage(error: unknown, source: ToolSource): string {
   const code = classifyToolError(error);
-  if (code === 'invalid_arguments') return 'The tool arguments violate the Bring mutation contract.';
+  if (code === 'invalid_arguments')
+    return source === 'bring'
+      ? 'The tool arguments violate the Bring mutation contract.'
+      : `The ${source.toUpperCase()} tool arguments are invalid.`;
   if (code === 'policy_denied') return 'The requested Bring operation is disabled or the list is not allowlisted.';
   if (code === 'idempotency_conflict') {
     return 'The operation ID or expected list version conflicts with durable mutation state.';
@@ -1215,7 +1345,7 @@ function safeAuthErrorDescription(auth: Extract<Awaited<ReturnType<typeof author
 
 function defaultServices(context: InvocationContext): McpGatewayServices {
   return {
-    reddit: new RedditThreadService(),
+    reddit: createRedditThreadService(),
     wlh: new WlhService(),
     bring: createBringApplication({
       warn: (message, details) => context.warn(message, details),
@@ -1265,6 +1395,47 @@ function toRedditOverviewRequest(args: {
     sort: args.sort as RedditThreadOverviewRequest['sort'] | undefined,
     maxComments: args.maxComments,
   }) as RedditThreadOverviewRequest;
+}
+
+function toRedditThreadPageRequest(args: {
+  postId?: string;
+  url?: string;
+  cursor?: string;
+  sort?: string;
+  pageSize?: number;
+  maxMoreChildrenRequests?: number;
+}): RedditCommentQueryRequest | CallToolResult {
+  const cursor = args.cursor?.trim();
+  if (cursor) {
+    if (args.postId?.trim() || args.url?.trim() || args.sort) {
+      return invalidArgument(
+        OPERATION_IDS.redditThreadComments,
+        'Provide cursor without postId, url, or sort when continuing reddit_get_thread_page.',
+      );
+    }
+    return {
+      cursor,
+      limit: args.pageSize ?? 25,
+      includeBody: true,
+      bodyPreviewChars: 0,
+      includeDeleted: true,
+      maxBytes: maxMcpThreadPageBytes,
+      maxMoreChildrenRequests: args.maxMoreChildrenRequests ?? 5,
+    };
+  }
+
+  const source = validateExactlyOneRedditSource(args, OPERATION_IDS.redditThreadComments);
+  if (isToolErrorResult(source)) return source;
+  return compactRecord({
+    ...source,
+    sort: args.sort as RedditCommentQueryRequest['sort'] | undefined,
+    limit: args.pageSize ?? 25,
+    includeBody: true,
+    bodyPreviewChars: 0,
+    includeDeleted: true,
+    maxBytes: maxMcpThreadPageBytes,
+    maxMoreChildrenRequests: args.maxMoreChildrenRequests ?? 5,
+  }) as RedditCommentQueryRequest;
 }
 
 function validateExactlyOneRedditSource(
@@ -1321,6 +1492,56 @@ function toMcpRedditThread(response: unknown): Record<string, unknown> {
       ),
     }),
   });
+}
+
+function toMcpRedditThreadPage(response: unknown): Record<string, unknown> {
+  const record = asRecord(response);
+  const snapshot = asRecord(record['snapshot']);
+  const page = asRecord(record['page']);
+  const coverage = asRecord(record['coverage']);
+  const comments = arrayValue(record['comments'])
+    .slice(0, maxMcpThreadPageComments)
+    .map((value) => {
+      const comment = asRecord(value);
+      return {
+        id: stringValue(comment['id']) ?? '',
+        fullname: stringValue(comment['fullname']) ?? '',
+        parentId: stringValue(comment['parentId']) ?? '',
+        author: stringValue(comment['author']) ?? '',
+        body: stringValue(comment['body']) ?? '',
+        score: numberValue(comment['score']) ?? 0,
+        depth: numberValue(comment['depth']) ?? 0,
+        createdUtc: numberValue(comment['createdUtc']) ?? 0,
+        replyCount: numberValue(comment['replyCount']) ?? null,
+        bodyLength: numberValue(comment['bodyLength']) ?? 0,
+        isDeleted: booleanValue(comment['isDeleted']) ?? false,
+      };
+    });
+  return {
+    source: 'reddit',
+    fetchedAt: stringValue(record['fetchedAt']) ?? '',
+    input: stringValue(record['input']) ?? '',
+    post: toMcpRedditPost(record['post']),
+    comments,
+    snapshot: {
+      version: numberValue(snapshot['version']) ?? 0,
+      id: stringValue(snapshot['id']) ?? '',
+      postId: stringValue(snapshot['postId']) ?? '',
+      sort: stringValue(snapshot['sort']) ?? 'confidence',
+      startedAt: stringValue(snapshot['startedAt']) ?? '',
+      updatedAt: stringValue(snapshot['updatedAt']) ?? '',
+      expiresAt: stringValue(snapshot['expiresAt']) ?? '',
+      sourceExhausted: booleanValue(snapshot['sourceExhausted']) ?? false,
+    },
+    page: {
+      nextCursor: stringValue(page['nextCursor']) ?? null,
+      hasMore: booleanValue(page['hasMore']) ?? false,
+      returned: numberValue(page['returned']) ?? comments.length,
+      truncatedBy: stringValue(page['truncatedBy']) ?? null,
+    },
+    coverage: compactRecord(coverage),
+    warnings: arrayValue(record['warnings']).filter((warning): warning is string => typeof warning === 'string'),
+  };
 }
 
 function toMcpRedditOverview(response: unknown): Record<string, unknown> {
@@ -1795,6 +2016,16 @@ function summarizeRedditThread(response: Record<string, unknown>): string {
   const modelCommentsReturned = numberValue(stats['modelCommentsReturned']) ?? arrayValue(response['comments']).length;
   const truncated = booleanValue(stats['modelTruncated']) ?? false;
   return `Fetched Reddit thread ${postId} with ${modelCommentsReturned} model-readable comments${truncated ? ' (truncated for model safety).' : '.'}`;
+}
+
+function summarizeRedditThreadPage(response: Record<string, unknown>): string {
+  const postId = String(asRecord(response['post'])['id'] ?? '');
+  const page = asRecord(response['page']);
+  const coverage = asRecord(response['coverage']);
+  const returned = numberValue(page['returned']) ?? arrayValue(response['comments']).length;
+  const retrieved = numberValue(coverage['retrievedUnique']) ?? returned;
+  const complete = booleanValue(coverage['complete']) ?? false;
+  return `Fetched Reddit exhaustive page for ${postId}: ${returned} comments in this page, ${retrieved} unique collected${complete ? '; traversal complete.' : '; continue with nextCursor.'}`;
 }
 
 function summarizeWlhSearch(response: Record<string, unknown>): string {

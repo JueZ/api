@@ -8,7 +8,7 @@
 | local.hello | local | read | catalogue.read | user, service | local, test, prod | not-applicable | not-applicable | GET /api/hello | hello_authenticated |
 | reddit.thread | reddit | read | reddit.read | user, service | local, test, prod | not-applicable | not-applicable | POST /api/reddit/thread | reddit_get_thread |
 | reddit.thread-overview | reddit | read | reddit.read | user, service | local, test, prod | not-applicable | not-applicable | POST /api/reddit/thread/overview | reddit_get_thread_overview |
-| reddit.thread-comments | reddit | read | reddit.read | user, service | local, test, prod | not-applicable | not-applicable | POST /api/reddit/thread/comments | — |
+| reddit.thread-comments | reddit | read | reddit.read | user, service | local, test, prod | not-applicable | not-applicable | POST /api/reddit/thread/comments | reddit_get_thread_page |
 | reddit.comment-tree | reddit | read | reddit.read | user, service | local, test, prod | not-applicable | not-applicable | POST /api/reddit/comment-tree | — |
 | reddit.comments-batch | reddit | read | reddit.read | user, service | local, test, prod | not-applicable | not-applicable | POST /api/reddit/comments/batch | — |
 | wlh.categories | wlh | read | wlh.read | user, service | local, test, prod | not-applicable | not-applicable | GET /api/wlh/categories/top | wlh_categories_top |

@@ -1,4 +1,5 @@
-import { RedditConfigError, readRedditConfig } from './config.js';
+import { RedditConfigError, readRedditConfig, type RedditConfig } from './config.js';
+import { randomUUID } from 'node:crypto';
 import {
   RedditFetchError,
   RedditOAuthClient,
@@ -51,6 +52,23 @@ import type {
   RedditThreadResponse,
 } from './types.js';
 import { RedditPrincipalConcurrencyError } from './concurrency.js';
+import {
+  createRedditThreadSnapshot,
+  decodeRedditSnapshotCursor,
+  encodeRedditSnapshotCursor,
+  InMemoryRedditThreadSnapshotStore,
+  RedditCursorError,
+  RedditSnapshotConflictError,
+  RedditSnapshotExpiredError,
+  RedditSnapshotNotFoundError,
+  REDDIT_THREAD_SNAPSHOT_VERSION,
+  verifyRedditSnapshotCursor,
+  type RedditSnapshotQuery,
+  type RedditThreadSnapshot,
+  type RedditThreadSnapshotStore,
+  type RedditTraversalWork,
+  type StoredRedditThreadSnapshot,
+} from './snapshot.js';
 
 export const REDDIT_EXPANSION_TIMEOUT_BUDGET_MS = 20_000;
 export const REDDIT_RATE_LIMIT_RESERVE = 10;
@@ -60,17 +78,28 @@ export interface RedditThreadServiceOptions {
   fetchImpl?: FetchLike;
   now?: () => number;
   expansionTimeoutBudgetMs?: number;
+  config?: RedditConfig;
+  snapshotStore?: RedditThreadSnapshotStore;
 }
 
 export class RedditThreadService {
   private readonly client: RedditOAuthClient;
   private readonly now: () => number;
   private readonly expansionTimeoutBudgetMs: number;
+  private readonly snapshotStore: RedditThreadSnapshotStore;
+  private readonly snapshotTtlMs: number;
+  private readonly snapshotMaxComments: number;
+  private readonly snapshotMaxBytes: number;
 
   constructor(options: RedditThreadServiceOptions = {}) {
+    const config = options.config ?? readRedditConfig();
     this.now = options.now ?? (() => Date.now());
     this.expansionTimeoutBudgetMs = options.expansionTimeoutBudgetMs ?? REDDIT_EXPANSION_TIMEOUT_BUDGET_MS;
-    this.client = new RedditOAuthClient(readRedditConfig(), options.fetchImpl, this.now);
+    this.snapshotStore = options.snapshotStore ?? new InMemoryRedditThreadSnapshotStore();
+    this.snapshotTtlMs = config.snapshotTtlMs;
+    this.snapshotMaxComments = config.snapshotMaxComments;
+    this.snapshotMaxBytes = config.snapshotMaxBytes;
+    this.client = new RedditOAuthClient(config, options.fetchImpl, this.now);
   }
 
   async fetchThreadOverview(request: RedditThreadOverviewRequest): Promise<RedditThreadOverviewResponse> {
@@ -127,45 +156,99 @@ export class RedditThreadService {
   }
 
   async fetchThreadComments(request: RedditCommentQueryRequest): Promise<RedditCommentQueryResponse> {
-    const originalInput = normalizeRequestPostInput(request);
-    const sort = normalizeRedditSort(request.sort);
     const limit = normalizeQueryLimit(request.limit);
-    const offset = decodeCursor(request.cursor);
     const includeBody = request.includeBody === true;
     const bodyPreviewChars = normalizeBodyPreviewChars(request.bodyPreviewChars);
     const maxBytes = normalizeMaxBytes(request.maxBytes);
-    const maxComments = normalizeQuerySnapshotMaxComments(request.maxComments);
-    const maxMoreChildrenRequests = normalizeMaxMoreChildrenRequests(request.maxMoreChildrenRequests ?? 0);
-    const thread = await this.fetchThread({ post: originalInput, sort, maxComments, maxMoreChildrenRequests });
-    let rows = flattenComments(thread.comments, { includeBody, bodyPreviewChars });
-    rows = applyCommentFilters(rows, request);
+    const maxMoreChildrenRequests = normalizeMaxMoreChildrenRequests(request.maxMoreChildrenRequests ?? 5);
+    const startedAt = this.now();
+    const expansionDeadlineMs = startedAt + this.expansionTimeoutBudgetMs;
+    const cursorInput =
+      typeof request.cursor === 'string' && request.cursor.trim().length > 0 ? request.cursor : undefined;
+
+    let stored: StoredRedditThreadSnapshot;
+    let offset = 0;
+    if (cursorInput) {
+      assertCursorOnlyRequest(request);
+      const cursor = decodeRedditSnapshotCursor(cursorInput);
+      const loaded = await this.snapshotStore.load(cursor.snapshotId);
+      if (!loaded) throw new RedditSnapshotNotFoundError();
+      assertSnapshotAvailable(loaded.snapshot, this.now);
+      verifyRedditSnapshotCursor(cursor, loaded.snapshot);
+      assertCompatibleSnapshotQuery(request, loaded.snapshot.query);
+      stored = loaded;
+      offset = cursor.offset;
+    } else {
+      stored = await this.createInitialSnapshot(request, startedAt);
+    }
+
+    let leaseId: string | undefined;
+    if (cursorInput && maxMoreChildrenRequests > 0 && stored.snapshot.frontier.length > 0) {
+      const activeLease = stored.snapshot.crawlLease;
+      if (activeLease && Date.parse(activeLease.expiresAt) > this.now()) throw new RedditSnapshotConflictError();
+      leaseId = randomUUID();
+      stored.snapshot.crawlLease = {
+        id: leaseId,
+        expiresAt: new Date(expansionDeadlineMs + 5_000).toISOString(),
+      };
+      stored.snapshot.updatedAt = new Date(this.now()).toISOString();
+      stored = await this.snapshotStore.replace(stored.snapshot, stored.etag);
+    }
+
+    let crawl: Awaited<ReturnType<RedditThreadService['advanceThreadSnapshot']>>;
+    let crawlError: unknown;
+    try {
+      crawl = await this.advanceThreadSnapshot(stored.snapshot, maxMoreChildrenRequests, expansionDeadlineMs);
+    } catch (error) {
+      crawlError = error;
+      crawl = { changed: true, requests: 0, stoppedReason: 'upstream_retryable' };
+    }
+    if (leaseId && stored.snapshot.crawlLease?.id === leaseId) {
+      delete stored.snapshot.crawlLease;
+      crawl.changed = true;
+    }
+    if (crawl.changed) {
+      stored.snapshot.updatedAt = new Date(this.now()).toISOString();
+      stored = await this.snapshotStore.replace(stored.snapshot, stored.etag);
+    }
+    if (crawlError) throw crawlError;
+
+    let rows = snapshotCommentRows(stored.snapshot.comments, { includeBody, bodyPreviewChars });
+    rows = applySnapshotFilters(rows, stored.snapshot.query);
+    if (offset > rows.length)
+      throw new RedditCursorError('cursor offset is outside the persisted snapshot page range.');
     const page = pageRows(rows, offset, limit, maxBytes);
     const comments = page.rows;
+    const sourceComplete = stored.snapshot.sourceExhausted && !stored.snapshot.resourceLimitReached;
+    const hasMore = page.nextOffset < rows.length || !sourceComplete;
+    const nextCursor = hasMore ? encodeRedditSnapshotCursor(stored.snapshot, page.nextOffset) : null;
+    const coverage = coverageForSnapshot(stored.snapshot, Boolean(nextCursor), crawl.stoppedReason);
+    logRedditSnapshotProgress(stored.snapshot, crawl.requests, coverage.complete, startedAt, crawl.stoppedReason);
     return {
       source: 'reddit',
       fetchedAt: new Date().toISOString(),
-      input: originalInput,
-      post: thread.post,
+      input: stored.snapshot.input,
+      post: stored.snapshot.post,
       comments,
+      snapshot: {
+        version: stored.snapshot.version,
+        id: stored.snapshot.snapshotId,
+        postId: stored.snapshot.postId,
+        sort: stored.snapshot.sort,
+        startedAt: stored.snapshot.startedAt,
+        updatedAt: stored.snapshot.updatedAt,
+        expiresAt: stored.snapshot.expiresAt,
+        sourceExhausted: stored.snapshot.sourceExhausted,
+      },
       page: {
-        nextCursor: page.nextOffset < rows.length ? encodeCursor(page.nextOffset) : null,
-        hasMore: page.nextOffset < rows.length,
+        nextCursor,
+        hasMore,
         returned: comments.length,
         truncatedBy: page.truncatedBy,
       },
-      coverage: coverageFor(
-        thread.post.numComments,
-        flattenComments(thread.comments, { includeBody: false, bodyPreviewChars: 0 }),
-        thread.commentContinuations.map((continuation) => ({
-          parentId: continuation.parentId,
-          depth: continuation.depth,
-          children: continuation.children,
-        })),
-        sort,
-        comments.length,
-        page.nextOffset >= rows.length,
-      ),
-      redditRateLimit: thread.redditRateLimit,
+      coverage,
+      warnings: stored.snapshot.warnings,
+      redditRateLimit: stored.snapshot.redditRateLimit,
     };
   }
 
@@ -324,7 +407,7 @@ export class RedditThreadService {
         input.fullname,
         batch,
         sort,
-        { parentId, depth, children: batch },
+        { parentId, depth, children: batch, count: batch.length, id: batch[0] ?? '' },
         expansionDeadlineMs,
       );
       if (!response) {
@@ -440,6 +523,12 @@ export class RedditThreadService {
       if (!more) {
         break;
       }
+      if (more.children.length === 0) {
+        tree.more.unshift(more);
+        tree.truncated = true;
+        warnings.push('continue-thread traversal is available through the resumable thread-comments page endpoint.');
+        break;
+      }
       const childBatches = chunk(more.children, MORE_CHILDREN_BATCH_SIZE);
       for (let batchIndex = 0; batchIndex < childBatches.length; batchIndex += 1) {
         const children = childBatches[batchIndex] ?? [];
@@ -484,6 +573,273 @@ export class RedditThreadService {
     );
   }
 
+  private async createInitialSnapshot(
+    request: RedditCommentQueryRequest,
+    startedAt: number,
+  ): Promise<StoredRedditThreadSnapshot> {
+    const originalInput = normalizeInitialSnapshotPostInput(request);
+    const normalizedPost = await this.normalizePostInput(originalInput);
+    let input = parseRedditPostInput(normalizedPost.post_id);
+    const sort = normalizeRedditSort(request.sort);
+    const initialListingLimit = normalizeQuerySnapshotMaxComments(request.maxComments);
+    let initial = await this.client.getJson<unknown>(
+      commentsPath(input.articleId),
+      commentsQuery(sort, initialListingLimit),
+      { input: originalInput, normalizedPostId: input.articleId },
+    );
+    logRedditFetch({
+      normalizedPostId: input.articleId,
+      normalizedCommentId: normalizedPost.comment_id,
+      requestUrl: initial.requestUrl,
+      finalUrl: initial.finalUrl,
+      status: initial.status,
+      contentType: initial.contentType,
+      redirectCount: 0,
+      retryCount: initial.retryCount,
+      startedAt,
+    });
+    if (initial.status === 404) {
+      const fallbackArticleId = await this.resolveRawCommentIdToArticleId(input.articleId);
+      if (fallbackArticleId) {
+        input = parseRedditPostInput(fallbackArticleId);
+        initial = await this.client.getJson<unknown>(
+          commentsPath(input.articleId),
+          commentsQuery(sort, initialListingLimit),
+          { input: originalInput, normalizedPostId: input.articleId },
+        );
+        logRedditFetch({
+          normalizedPostId: input.articleId,
+          normalizedCommentId: normalizedPost.comment_id,
+          requestUrl: initial.requestUrl,
+          finalUrl: initial.finalUrl,
+          status: initial.status,
+          contentType: initial.contentType,
+          redirectCount: 0,
+          retryCount: initial.retryCount,
+          startedAt,
+        });
+      }
+    }
+    assertRedditStatus(initial.status);
+    const tree = normalizeInitialThread(originalInput, initial.body, { maxComments: this.snapshotMaxComments });
+    const comments = dedupeNormalizedComments(flattenNormalizedComments(tree.comments));
+    const frontier = traversalWorkFromMore(tree.more, {
+      postId: input.articleId,
+      seenCommentIds: new Set(comments.map((comment) => comment.id.toLowerCase())),
+    });
+    const snapshot = createRedditThreadSnapshot({
+      input: originalInput,
+      postId: input.articleId,
+      sort,
+      post: tree.post,
+      comments,
+      frontier,
+      query: normalizeSnapshotQuery(request),
+      rateLimit: initial.rateLimit,
+      nowMs: startedAt,
+      ttlMs: this.snapshotTtlMs,
+    });
+    snapshot.warnings = [...new Set(tree.warnings)];
+    if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > this.snapshotMaxBytes) {
+      snapshot.resourceLimitReached = true;
+      snapshot.sourceExhausted = false;
+      addSnapshotWarning(
+        snapshot,
+        `Snapshot byte resource limit of ${this.snapshotMaxBytes} reached; traversal is incomplete.`,
+      );
+    }
+    if (tree.truncated || comments.length >= this.snapshotMaxComments) {
+      snapshot.resourceLimitReached = true;
+      snapshot.sourceExhausted = false;
+      addSnapshotWarning(
+        snapshot,
+        `Snapshot resource limit of ${this.snapshotMaxComments} comments reached; traversal is incomplete.`,
+      );
+    }
+    return this.snapshotStore.create(snapshot);
+  }
+
+  private async advanceThreadSnapshot(
+    snapshot: RedditThreadSnapshot,
+    maxRequests: number,
+    deadlineMs: number,
+  ): Promise<{
+    changed: boolean;
+    requests: number;
+    stoppedReason?: NonNullable<RedditCoverageDto['stoppedReason']>;
+  }> {
+    let changed = false;
+    let requests = 0;
+    let stoppedReason: NonNullable<RedditCoverageDto['stoppedReason']> | undefined;
+
+    if (snapshot.resourceLimitReached) {
+      return { changed, requests, stoppedReason: 'snapshot_resource_limit' };
+    }
+
+    while (snapshot.frontier.length > 0) {
+      if (snapshot.resourceLimitReached || snapshot.comments.length >= this.snapshotMaxComments) {
+        snapshot.resourceLimitReached = true;
+        snapshot.sourceExhausted = false;
+        changed =
+          addSnapshotWarning(
+            snapshot,
+            `Snapshot resource limit of ${this.snapshotMaxComments} comments reached; traversal is incomplete.`,
+          ) || changed;
+        stoppedReason = 'snapshot_resource_limit';
+        break;
+      }
+      if (requests >= maxRequests) {
+        changed =
+          addSnapshotWarning(snapshot, 'Per-call Reddit expansion request budget reached; resume with nextCursor.') ||
+          changed;
+        stoppedReason = 'execution_budget';
+        break;
+      }
+      if (isProviderExpansionBudgetExhausted(snapshot.redditRateLimit)) {
+        snapshot.retryAfterSeconds = rateLimitResetSeconds(snapshot.redditRateLimit);
+        changed =
+          addSnapshotWarning(snapshot, 'Reddit provider rate-limit reserve reached; progress was checkpointed.') ||
+          changed;
+        stoppedReason = 'rate_limit';
+        break;
+      }
+      if (this.now() >= deadlineMs) {
+        changed =
+          addSnapshotWarning(snapshot, 'Server execution budget reached; progress was checkpointed.') || changed;
+        stoppedReason = 'execution_budget';
+        break;
+      }
+
+      const work = snapshot.frontier[0];
+      if (!work) break;
+      if (work.kind === 'continue_thread' && !/^t1_[a-z0-9_]+$/i.test(work.parentId)) {
+        finishTraversalWork(snapshot, work);
+        snapshot.unavailableBranches += 1;
+        changed = true;
+        changed =
+          addSnapshotWarning(snapshot, 'A Reddit continue-thread branch had no usable comment parent ID.') || changed;
+        continue;
+      }
+
+      let response;
+      try {
+        response =
+          work.kind === 'more_children'
+            ? await this.client.getJson<unknown>(
+                '/api/morechildren',
+                {
+                  api_type: 'json',
+                  link_id: `t3_${snapshot.postId}`,
+                  children: work.children.join(','),
+                  limit_children: 1,
+                  raw_json: 1,
+                  sort: snapshot.sort,
+                },
+                { deadlineMs },
+              )
+            : await this.client.getJson<unknown>(
+                commentsPath(snapshot.postId),
+                focusedCommentsQuery(snapshot.sort, work.parentId.replace(/^t1_/i, ''), 10, 500),
+                { deadlineMs, normalizedPostId: snapshot.postId },
+              );
+      } catch (error) {
+        if (error instanceof RedditRequestDeadlineError) {
+          changed =
+            addSnapshotWarning(snapshot, 'Server execution budget reached; progress was checkpointed.') || changed;
+          stoppedReason = 'execution_budget';
+          break;
+        }
+        if (error instanceof RedditFetchError || error instanceof RedditUpstreamError) {
+          changed =
+            addSnapshotWarning(snapshot, 'Reddit expansion failed transiently; progress was checkpointed for retry.') ||
+            changed;
+          stoppedReason = 'upstream_retryable';
+          break;
+        }
+        throw error;
+      }
+
+      requests += 1;
+      snapshot.redditRateLimit = response.rateLimit;
+      snapshot.retryAfterSeconds = undefined;
+      changed = true;
+      if (response.status === 429) {
+        snapshot.retryAfterSeconds = rateLimitResetSeconds(response.rateLimit);
+        addSnapshotWarning(snapshot, 'Reddit rate-limited expansion; progress was checkpointed for retry.');
+        stoppedReason = 'rate_limit';
+        break;
+      }
+      if (response.status === 400 || response.status === 403 || response.status === 404) {
+        markTraversalUnavailable(snapshot, work);
+        finishTraversalWork(snapshot, work);
+        addSnapshotWarning(
+          snapshot,
+          'Reddit no longer returned one requested comment branch; it was marked unavailable.',
+        );
+        continue;
+      }
+      if (response.status < 200 || response.status >= 300) {
+        addSnapshotWarning(snapshot, 'Reddit expansion failed transiently; progress was checkpointed for retry.');
+        stoppedReason = 'upstream_retryable';
+        break;
+      }
+
+      const beforeComments = snapshot.comments.length;
+      const beforeFrontier = snapshot.frontier.length;
+      if (work.kind === 'more_children') {
+        const block = normalizeCommentBlockFromThings(response.body, work.parentId, work.depth, {
+          maxComments: this.snapshotMaxComments,
+        });
+        const returned = flattenNormalizedComments(block.comments);
+        const returnedIds = new Set(returned.map((comment) => comment.id.toLowerCase()));
+        const deferredIds = new Set(
+          block.more.flatMap((placeholder) => placeholder.children.map((child) => child.toLowerCase())),
+        );
+        ingestSnapshotComments(snapshot, returned, this.snapshotMaxComments, this.snapshotMaxBytes);
+        for (const childId of work.children) {
+          const normalizedChildId = childId.toLowerCase();
+          if (!returnedIds.has(normalizedChildId) && !deferredIds.has(normalizedChildId)) {
+            addUnavailableComment(snapshot, childId);
+          }
+        }
+        finishTraversalWork(snapshot, work, deferredIds);
+        enqueueTraversalWork(snapshot, block.more);
+        const pendingChildren = new Set(
+          snapshot.frontier.flatMap((pending) => (pending.kind === 'more_children' ? pending.children : [])),
+        );
+        const seenCommentIds = new Set(snapshot.seenCommentIds);
+        for (const deferredId of deferredIds) {
+          if (!returnedIds.has(deferredId) && !pendingChildren.has(deferredId) && !seenCommentIds.has(deferredId)) {
+            addUnavailableComment(snapshot, deferredId);
+          }
+        }
+        if (block.truncated) snapshot.resourceLimitReached = true;
+      } else {
+        const tree = normalizeInitialThread(snapshot.input, response.body, { maxComments: this.snapshotMaxComments });
+        ingestSnapshotComments(
+          snapshot,
+          flattenNormalizedComments(tree.comments),
+          this.snapshotMaxComments,
+          this.snapshotMaxBytes,
+        );
+        finishTraversalWork(snapshot, work);
+        enqueueTraversalWork(snapshot, tree.more);
+        if (tree.truncated) snapshot.resourceLimitReached = true;
+        if (snapshot.comments.length === beforeComments && snapshot.frontier.length <= beforeFrontier - 1) {
+          snapshot.unavailableBranches += 1;
+          addSnapshotWarning(snapshot, 'A Reddit continue-thread branch returned no additional retrievable comments.');
+        }
+      }
+    }
+
+    const exhausted = snapshot.frontier.length === 0 && !snapshot.resourceLimitReached;
+    if (snapshot.sourceExhausted !== exhausted) {
+      snapshot.sourceExhausted = exhausted;
+      changed = true;
+    }
+    return { changed, requests, ...(stoppedReason ? { stoppedReason } : {}) };
+  }
+
   private async expandCommentBlock(
     linkId: string,
     block: NormalizedCommentBlock,
@@ -521,6 +877,12 @@ export class RedditThreadService {
 
       const more = block.more.shift();
       if (!more) break;
+      if (more.children.length === 0) {
+        block.more.unshift(more);
+        block.truncated = true;
+        warnings.push('continue-thread traversal requires the resumable thread-comments page endpoint.');
+        break;
+      }
       const childBatches = chunk(more.children, MORE_CHILDREN_BATCH_SIZE);
       for (let batchIndex = 0; batchIndex < childBatches.length; batchIndex += 1) {
         const children = childBatches[batchIndex] ?? [];
@@ -611,6 +973,343 @@ export class RedditThreadService {
   }
 }
 
+function normalizeSnapshotQuery(request: RedditCommentQueryRequest): RedditSnapshotQuery {
+  const maxDepth = normalizeOptionalInteger(request.maxDepth, 'maxDepth', 0, 50);
+  const minScore = normalizeOptionalInteger(request.minScore, 'minScore', -1000000, 1000000);
+  const minBodyLength = normalizeOptionalInteger(request.minBodyLength, 'minBodyLength', 0, 1000000);
+  const parentId =
+    typeof request.parentId === 'string' && request.parentId.trim() ? request.parentId.trim().toLowerCase() : undefined;
+  return {
+    ...(maxDepth !== undefined ? { maxDepth } : {}),
+    ...(parentId ? { parentId } : {}),
+    ...(minScore !== undefined ? { minScore } : {}),
+    ...(minBodyLength !== undefined ? { minBodyLength } : {}),
+    includeDeleted: request.includeDeleted === true,
+  };
+}
+
+function assertCompatibleSnapshotQuery(request: RedditCommentQueryRequest, query: RedditSnapshotQuery): void {
+  const supplied = normalizeSnapshotQuery(request);
+  for (const field of ['maxDepth', 'parentId', 'minScore', 'minBodyLength'] as const) {
+    if (request[field] !== undefined && supplied[field] !== query[field]) {
+      throw new RedditCursorError(`${field} is incompatible with the persisted snapshot cursor.`);
+    }
+  }
+  if (request.includeDeleted !== undefined && supplied.includeDeleted !== query.includeDeleted) {
+    throw new RedditCursorError('includeDeleted is incompatible with the persisted snapshot cursor.');
+  }
+}
+
+function assertCursorOnlyRequest(request: RedditCommentQueryRequest): void {
+  const incompatible = [
+    request.post,
+    request.url,
+    request.redditUrl,
+    request.reddit_url,
+    request.threadUrl,
+    request.thread_url,
+    request.sort,
+    request.maxComments,
+  ].some((value) => value !== undefined && value !== null && value !== '');
+  if (incompatible) {
+    throw new RedditCursorError('Provide cursor without post/url, sort, or maxComments when resuming a snapshot.');
+  }
+}
+
+function normalizeInitialSnapshotPostInput(request: RedditCommentQueryRequest): string {
+  const selectors = [
+    request.post,
+    request.url,
+    request.redditUrl,
+    request.reddit_url,
+    request.threadUrl,
+    request.thread_url,
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  if (selectors.length !== 1) {
+    throw new RedditInputError('Provide exactly one Reddit post or URL selector when starting a snapshot.');
+  }
+  return selectors[0].trim();
+}
+
+function assertSnapshotAvailable(snapshot: RedditThreadSnapshot, now: () => number): void {
+  if (snapshot.version !== REDDIT_THREAD_SNAPSHOT_VERSION) {
+    throw new RedditCursorError(
+      'snapshot version is not supported. Start a new exhaustive crawl.',
+      'REDDIT_CURSOR_VERSION_MISMATCH',
+    );
+  }
+  const expiresAt = Date.parse(snapshot.expiresAt);
+  if (!Number.isFinite(expiresAt) || expiresAt <= now()) throw new RedditSnapshotExpiredError();
+}
+
+function traversalWorkFromMore(
+  more: MorePlaceholder[],
+  options: {
+    postId: string;
+    seenCommentIds: Set<string>;
+    processedChildIds?: Set<string>;
+    processedFrontierKeys?: Set<string>;
+    pending?: RedditTraversalWork[];
+  },
+): RedditTraversalWork[] {
+  const processedChildIds = options.processedChildIds ?? new Set<string>();
+  const processedFrontierKeys = options.processedFrontierKeys ?? new Set<string>();
+  const pending = options.pending ?? [];
+  const pendingKeys = new Set(pending.map((work) => work.key));
+  const claimedChildren = new Set<string>([
+    ...options.seenCommentIds,
+    ...processedChildIds,
+    ...pending.flatMap((work) => (work.kind === 'more_children' ? work.children : [])),
+  ]);
+  const created: RedditTraversalWork[] = [];
+
+  for (const placeholder of more) {
+    const parentId = (placeholder.parentId || `t3_${options.postId}`).toLowerCase();
+    if (placeholder.children.length === 0) {
+      const key = `continue:${parentId}`;
+      if (!processedFrontierKeys.has(key) && !pendingKeys.has(key)) {
+        const work: RedditTraversalWork = {
+          kind: 'continue_thread',
+          key,
+          parentId,
+          depth: placeholder.depth,
+          count: Math.max(0, placeholder.count),
+        };
+        created.push(work);
+        pendingKeys.add(key);
+      }
+      continue;
+    }
+
+    const children = [...new Set(placeholder.children.map((child) => child.trim().toLowerCase()))].filter(
+      (child) => /^[a-z0-9][a-z0-9_]{1,12}$/i.test(child) && !claimedChildren.has(child),
+    );
+    for (const batch of chunk(children, MORE_CHILDREN_BATCH_SIZE)) {
+      const key = `more:${parentId}:${batch.join(',')}`;
+      if (batch.length === 0 || processedFrontierKeys.has(key) || pendingKeys.has(key)) continue;
+      const work: RedditTraversalWork = {
+        kind: 'more_children',
+        key,
+        parentId,
+        depth: placeholder.depth,
+        children: batch,
+        count: Math.max(batch.length, placeholder.count),
+      };
+      created.push(work);
+      pendingKeys.add(key);
+      for (const child of batch) claimedChildren.add(child);
+    }
+  }
+  return created;
+}
+
+function enqueueTraversalWork(snapshot: RedditThreadSnapshot, more: MorePlaceholder[]): void {
+  snapshot.frontier.push(
+    ...traversalWorkFromMore(more, {
+      postId: snapshot.postId,
+      seenCommentIds: new Set(snapshot.seenCommentIds),
+      processedChildIds: new Set(snapshot.processedChildIds),
+      processedFrontierKeys: new Set(snapshot.processedFrontierKeys),
+      pending: snapshot.frontier,
+    }),
+  );
+}
+
+function finishTraversalWork(
+  snapshot: RedditThreadSnapshot,
+  work: RedditTraversalWork,
+  deferredChildIds: ReadonlySet<string> = new Set(),
+): void {
+  if (snapshot.frontier[0]?.key === work.key) snapshot.frontier.shift();
+  if (!snapshot.processedFrontierKeys.includes(work.key)) snapshot.processedFrontierKeys.push(work.key);
+  if (work.kind === 'more_children') {
+    const processed = new Set(snapshot.processedChildIds);
+    for (const child of work.children) {
+      const normalized = child.toLowerCase();
+      if (!deferredChildIds.has(normalized)) processed.add(normalized);
+    }
+    snapshot.processedChildIds = [...processed];
+  }
+}
+
+function markTraversalUnavailable(snapshot: RedditThreadSnapshot, work: RedditTraversalWork): void {
+  if (work.kind === 'more_children') {
+    for (const child of work.children) addUnavailableComment(snapshot, child);
+  } else {
+    snapshot.unavailableBranches += Math.max(1, work.count);
+  }
+}
+
+function addUnavailableComment(snapshot: RedditThreadSnapshot, commentId: string): void {
+  const normalized = commentId.toLowerCase();
+  if (snapshot.seenCommentIds.includes(normalized)) return;
+  if (!snapshot.unavailableCommentIds.includes(normalized)) snapshot.unavailableCommentIds.push(normalized);
+  if (!snapshot.processedChildIds.includes(normalized)) snapshot.processedChildIds.push(normalized);
+}
+
+function ingestSnapshotComments(
+  snapshot: RedditThreadSnapshot,
+  comments: RedditCommentDto[],
+  maxComments: number,
+  maxBytes: number,
+): void {
+  const seen = new Set(snapshot.seenCommentIds);
+  let approximateBytes = Buffer.byteLength(JSON.stringify(snapshot), 'utf8');
+  const usableByteLimit = Math.max(1, maxBytes - 8 * 1024 * 1024);
+  for (const comment of comments) {
+    const id = comment.id.toLowerCase();
+    if (!id) continue;
+    snapshot.unavailableCommentIds = snapshot.unavailableCommentIds.filter((unavailableId) => unavailableId !== id);
+    if (seen.has(id)) continue;
+    if (snapshot.comments.length >= maxComments) {
+      snapshot.resourceLimitReached = true;
+      snapshot.sourceExhausted = false;
+      addSnapshotWarning(
+        snapshot,
+        `Snapshot resource limit of ${maxComments} comments reached; traversal is incomplete.`,
+      );
+      break;
+    }
+    const storedComment = { ...comment, id, replies: [] };
+    const incrementalBytes = Buffer.byteLength(JSON.stringify(storedComment), 'utf8') + Buffer.byteLength(id) + 64;
+    if (approximateBytes + incrementalBytes > usableByteLimit) {
+      snapshot.resourceLimitReached = true;
+      snapshot.sourceExhausted = false;
+      addSnapshotWarning(snapshot, `Snapshot byte resource limit of ${maxBytes} reached; traversal is incomplete.`);
+      break;
+    }
+    snapshot.comments.push(storedComment);
+    snapshot.seenCommentIds.push(id);
+    seen.add(id);
+    approximateBytes += incrementalBytes;
+  }
+}
+
+function flattenNormalizedComments(comments: RedditCommentDto[]): RedditCommentDto[] {
+  const flattened: RedditCommentDto[] = [];
+  const visit = (comment: RedditCommentDto): void => {
+    flattened.push({ ...comment, id: comment.id.toLowerCase(), replies: [] });
+    for (const reply of comment.replies) visit(reply);
+  };
+  for (const comment of comments) visit(comment);
+  return flattened;
+}
+
+function dedupeNormalizedComments(comments: RedditCommentDto[]): RedditCommentDto[] {
+  const seen = new Set<string>();
+  return comments.filter((comment) => {
+    const id = comment.id.toLowerCase();
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function snapshotCommentRows(
+  comments: RedditCommentDto[],
+  options: { includeBody: boolean; bodyPreviewChars: number },
+): RedditCommentSkeletonDto[] {
+  const replyCounts = new Map<string, number>();
+  for (const comment of comments) {
+    const parentId = comment.parentId.toLowerCase();
+    replyCounts.set(parentId, (replyCounts.get(parentId) ?? 0) + 1);
+  }
+  return comments.map((comment) => {
+    const isDeleted = comment.author === '[deleted]' || comment.body === '[deleted]' || comment.body === '[removed]';
+    return {
+      id: comment.id,
+      fullname: comment.fullname,
+      parentId: comment.parentId,
+      author: comment.author,
+      depth: comment.depth,
+      score: comment.score,
+      replyCount: replyCounts.get(comment.fullname.toLowerCase()) ?? 0,
+      bodyLength: comment.body.length,
+      bodyPreview: options.bodyPreviewChars > 0 ? comment.body.slice(0, options.bodyPreviewChars) : '',
+      createdUtc: comment.createdUtc,
+      isDeleted,
+      ...(options.includeBody ? { body: comment.body } : {}),
+    };
+  });
+}
+
+function applySnapshotFilters(
+  rows: RedditCommentSkeletonDto[],
+  query: RedditSnapshotQuery,
+): RedditCommentSkeletonDto[] {
+  return rows.filter((row) => {
+    if (query.maxDepth !== undefined && row.depth > query.maxDepth) return false;
+    if (query.minScore !== undefined && row.score < query.minScore) return false;
+    if (query.minBodyLength !== undefined && row.bodyLength < query.minBodyLength) return false;
+    if (query.parentId && row.parentId.toLowerCase() !== query.parentId) return false;
+    if (!query.includeDeleted && row.isDeleted) return false;
+    return true;
+  });
+}
+
+function coverageForSnapshot(
+  snapshot: RedditThreadSnapshot,
+  cursorsRemaining: boolean,
+  stoppedReason?: NonNullable<RedditCoverageDto['stoppedReason']>,
+): RedditCoverageDto {
+  const retrievedUnique = new Set(snapshot.seenCommentIds).size;
+  const deleted = snapshot.comments.filter(
+    (comment) => comment.author === '[deleted]' || comment.body === '[deleted]' || comment.body === '[removed]',
+  ).length;
+  const unavailable = snapshot.unavailableCommentIds.length + snapshot.unavailableBranches;
+  const complete = snapshot.sourceExhausted && !snapshot.resourceLimitReached;
+  return {
+    reportedTotal: snapshot.reportedTotal,
+    retrievedUnique,
+    uniqueReturned: retrievedUnique,
+    deleted,
+    unavailable,
+    unavailableBranches: snapshot.unavailableBranches,
+    knownRemaining: Math.max(0, snapshot.reportedTotal - retrievedUnique - unavailable),
+    cursorsRemaining,
+    continuationsRemaining: snapshot.frontier.length,
+    frontierRemaining: snapshot.frontier.length,
+    sortsSampled: [snapshot.sort],
+    complete,
+    snapshotComplete: complete,
+    ...(stoppedReason ? { stoppedReason } : {}),
+    ...(snapshot.retryAfterSeconds !== undefined ? { retryAfterSeconds: snapshot.retryAfterSeconds } : {}),
+  };
+}
+
+function rateLimitResetSeconds(rateLimit: RedditRateLimit): number | undefined {
+  if (rateLimit.resetSeconds === null || rateLimit.resetSeconds === undefined || rateLimit.resetSeconds === '') {
+    return undefined;
+  }
+  const value = Number(rateLimit.resetSeconds);
+  return Number.isFinite(value) && value >= 0 ? Math.ceil(value) : undefined;
+}
+
+function addSnapshotWarning(snapshot: RedditThreadSnapshot, warning: string): boolean {
+  if (snapshot.warnings.includes(warning)) return false;
+  snapshot.warnings.push(warning);
+  return true;
+}
+
+function logRedditSnapshotProgress(
+  snapshot: RedditThreadSnapshot,
+  upstreamRequests: number,
+  complete: boolean,
+  startedAt: number,
+  stoppedReason?: RedditCoverageDto['stoppedReason'],
+): void {
+  console.info('reddit_thread_snapshot_progress', {
+    snapshot_id: snapshot.snapshotId,
+    post_id: snapshot.postId,
+    retrieved_unique: snapshot.seenCommentIds.length,
+    frontier_size: snapshot.frontier.length,
+    upstream_requests: upstreamRequests,
+    complete,
+    stopped_reason: stoppedReason,
+    elapsed_ms: Date.now() - startedAt,
+  });
+}
+
 function isProviderExpansionBudgetExhausted(rateLimit: RedditRateLimit | undefined): boolean {
   const remaining = rateLimit?.remaining?.trim();
   if (!remaining) return false;
@@ -625,7 +1324,14 @@ function prependUnprocessedMore(
   batchIndex: number,
 ): void {
   const children = batches.slice(batchIndex).flat();
-  if (children.length > 0) target.unshift({ parentId: source.parentId, depth: source.depth, children });
+  if (children.length > 0)
+    target.unshift({
+      parentId: source.parentId,
+      depth: source.depth,
+      children,
+      count: children.length,
+      id: children[0] ?? '',
+    });
 }
 
 export class RedditShareResolutionError extends RedditInputError {
@@ -654,6 +1360,20 @@ export function mapRedditError(error: unknown): {
   redditFetchError?: ReturnType<RedditFetchError['toJSON']>;
   kind: MappedRedditErrorKind;
 } {
+  if (error instanceof RedditCursorError) {
+    return { status: error.status, message: error.message, code: error.code, kind: 'input' };
+  }
+  if (error instanceof RedditSnapshotNotFoundError || error instanceof RedditSnapshotExpiredError) {
+    return { status: error.status, message: error.message, code: error.code, kind: 'content' };
+  }
+  if (error instanceof RedditSnapshotConflictError) {
+    return {
+      status: 409,
+      message: 'The Reddit snapshot changed concurrently. Retry with the same cursor.',
+      code: 'REDDIT_SNAPSHOT_CONFLICT',
+      kind: 'input',
+    };
+  }
   if (error instanceof RedditPrincipalConcurrencyError) {
     return {
       status: 429,
@@ -763,6 +1483,7 @@ function flattenComments(
       id: comment.id,
       fullname: comment.fullname,
       parentId: comment.parentId,
+      author: comment.author,
       depth: comment.depth,
       score: comment.score,
       replyCount: comment.replies.length,
@@ -779,26 +1500,6 @@ function flattenComments(
   return rows;
 }
 
-function applyCommentFilters(
-  rows: RedditCommentSkeletonDto[],
-  request: RedditCommentQueryRequest,
-): RedditCommentSkeletonDto[] {
-  const maxDepth = normalizeOptionalInteger(request.maxDepth, 'maxDepth', 0, 50);
-  const minScore = normalizeOptionalInteger(request.minScore, 'minScore', -1000000, 1000000);
-  const minBodyLength = normalizeOptionalInteger(request.minBodyLength, 'minBodyLength', 0, 1000000);
-  const parentId =
-    typeof request.parentId === 'string' && request.parentId.trim() ? request.parentId.trim().toLowerCase() : undefined;
-  const includeDeleted = request.includeDeleted === true;
-  return rows.filter((row) => {
-    if (maxDepth !== undefined && row.depth > maxDepth) return false;
-    if (minScore !== undefined && row.score < minScore) return false;
-    if (minBodyLength !== undefined && row.bodyLength < minBodyLength) return false;
-    if (parentId && row.parentId.toLowerCase() !== parentId) return false;
-    if (!includeDeleted && row.isDeleted) return false;
-    return true;
-  });
-}
-
 function pageRows(
   rows: RedditCommentSkeletonDto[],
   offset: number,
@@ -810,7 +1511,7 @@ function pageRows(
   let truncatedBy: 'limit' | 'maxBytes' | 'cursor' | null = null;
   while (index < rows.length && page.length < limit) {
     const candidate = rows[index];
-    if (JSON.stringify([...page, candidate]).length > maxBytes) {
+    if (Buffer.byteLength(JSON.stringify([...page, candidate]), 'utf8') > maxBytes) {
       truncatedBy = 'maxBytes';
       if (page.length === 0) {
         page.push(candidate);
@@ -838,15 +1539,18 @@ function coverageFor(
   const knownRemaining = Math.max(0, reportedTotal - uniqueReturned);
   return {
     reportedTotal,
+    retrievedUnique: uniqueReturned,
     uniqueReturned,
     deleted,
     unavailable: 0,
+    unavailableBranches: 0,
     knownRemaining,
     cursorsRemaining: !complete,
     continuationsRemaining,
+    frontierRemaining: more.length,
     sortsSampled: [sort],
-    snapshotComplete:
-      complete && continuationsRemaining === 0 && uniqueReturned >= Math.min(reportedTotal, rows.length),
+    complete: complete && continuationsRemaining === 0,
+    snapshotComplete: complete && continuationsRemaining === 0,
   };
 }
 
@@ -868,6 +1572,7 @@ function commentRowsFromInfoListing(value: unknown): RedditCommentSkeletonDto[] 
       id: id.toLowerCase(),
       fullname: stringValue(data['name']) || `t1_${id.toLowerCase()}`,
       parentId: stringValue(data['parent_id']),
+      author,
       depth: 0,
       score: numberValue(data['score']),
       replyCount: null,
@@ -885,6 +1590,7 @@ const BATCH_FIELDS = new Set([
   'id',
   'fullname',
   'parentId',
+  'author',
   'depth',
   'score',
   'createdUtc',
@@ -966,24 +1672,6 @@ function normalizeOptionalInteger(input: unknown, field: string, min: number, ma
   if (typeof input !== 'number' || !Number.isInteger(input) || input < min)
     throw new RedditInputError(`${field} must be an integer greater than or equal to ${min}.`);
   return Math.min(input, max);
-}
-
-function encodeCursor(offset: number): string {
-  return Buffer.from(JSON.stringify({ offset }), 'utf8').toString('base64url');
-}
-
-function decodeCursor(input: unknown): number {
-  if (input === undefined || input === null || input === '') return 0;
-  if (typeof input !== 'string' || input.length > 200)
-    throw new RedditInputError('cursor must be an opaque cursor string.');
-  try {
-    const parsed = JSON.parse(Buffer.from(input, 'base64url').toString('utf8')) as { offset?: unknown };
-    if (typeof parsed.offset !== 'number' || !Number.isInteger(parsed.offset) || parsed.offset < 0)
-      throw new Error('bad cursor');
-    return parsed.offset;
-  } catch {
-    throw new RedditInputError('cursor is invalid or expired.');
-  }
 }
 
 function stringValue(value: unknown): string {

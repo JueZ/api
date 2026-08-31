@@ -834,9 +834,10 @@ paths:
   /api/reddit/thread/comments:
     post:
       operationId: postRedditThreadComments
-      summary: Page Reddit comment skeletons
-      description: Returns lightweight, paginated comment skeletons with optional bodies, previews, mechanical filters, cursor
-        pagination, maxBytes, and coverage metadata.
+      summary: Crawl and page all retrievable Reddit comments
+      description: Starts or resumes a durable Reddit comment-tree crawl. Provide a post selector on the first request and only
+        the opaque cursor on later requests. Each invocation has bounded expansion and response budgets; repeat until coverage.complete
+        is true and nextCursor is null. Pages are append-only within one snapshot and do not refetch the initial listing.
       security: *a1
       requestBody:
         required: true
@@ -864,7 +865,11 @@ paths:
         "403":
           description: Forbidden.
         "404":
-          description: Reddit content not found.
+          description: Reddit content or snapshot not found.
+        "409":
+          description: Snapshot was updated concurrently; retry the same cursor.
+        "410":
+          description: Snapshot cursor expired; start a new crawl.
         "429":
           description: Reddit rate limited the backend.
         "502":
@@ -1460,7 +1465,7 @@ components:
           type: integer
           minimum: 0
           maximum: 10
-          default: 0
+          default: 5
       required:
         - post
     RedditThreadResponse:
@@ -1538,7 +1543,8 @@ components:
           type: integer
           minimum: 0
           maximum: 10
-          default: 0
+          default: 5
+          description: Maximum serial Reddit frontier-expansion requests in this invocation. This is a per-call safety budget, not a total-thread limit.
       required:
         - post
     RedditCommentTreeResponse:
@@ -1772,9 +1778,13 @@ components:
           type: integer
         uniqueReturned:
           type: integer
+        retrievedUnique:
+          type: integer
         deleted:
           type: integer
         unavailable:
+          type: integer
+        unavailableBranches:
           type: integer
         knownRemaining:
           type: integer
@@ -1782,22 +1792,40 @@ components:
           type: boolean
         continuationsRemaining:
           type: integer
+        frontierRemaining:
+          type: integer
         sortsSampled:
           type: array
           items:
             type: string
         snapshotComplete:
           type: boolean
+        complete:
+          type: boolean
+          description: True only when the persisted Reddit traversal frontier is exhausted without a resource-limit stop.
+        stoppedReason:
+          type: string
+          enum:
+            - execution_budget
+            - rate_limit
+            - snapshot_resource_limit
+            - upstream_retryable
+        retryAfterSeconds:
+          type: integer
       required:
         - reportedTotal
         - uniqueReturned
+        - retrievedUnique
         - deleted
         - unavailable
+        - unavailableBranches
         - knownRemaining
         - cursorsRemaining
         - continuationsRemaining
+        - frontierRemaining
         - sortsSampled
         - snapshotComplete
+        - complete
     RedditThreadOverviewRequest:
       type: object
       additionalProperties: false
@@ -1887,10 +1915,11 @@ components:
     RedditCommentQueryRequest:
       type: object
       additionalProperties: false
+      description: Provide exactly one post/URL selector for an initial request, or provide cursor without a selector or sort for continuation.
       properties:
         post:
           type: string
-          description: Reddit URL, article ID, t3 fullname, or comment URL.
+          description: Reddit URL, article ID, t3 fullname, or comment URL. Supply only when starting a snapshot.
         url:
           type: string
           description: Alias for post.
@@ -1916,6 +1945,7 @@ components:
             - old
             - qa
           default: confidence
+          description: Reddit sort for the initial snapshot. Omit when continuing with cursor.
         limit:
           type: integer
           minimum: 1
@@ -1923,7 +1953,8 @@ components:
           default: 200
         cursor:
           type: string
-          description: Opaque cursor returned by the previous page.
+          maxLength: 1024
+          description: Versioned, tamper-resistant opaque cursor returned by the previous page. Supply without a post selector or sort.
         includeBody:
           type: boolean
           default: false
@@ -1957,6 +1988,7 @@ components:
           minimum: 1
           maximum: 10000
           default: 1000
+          description: Initial Reddit listing-size hint only; it is not a total-thread comment limit.
         maxMoreChildrenRequests:
           type: integer
           minimum: 0
@@ -1971,6 +2003,8 @@ components:
         fullname:
           type: string
         parentId:
+          type: string
+        author:
           type: string
         depth:
           type: integer
@@ -1995,6 +2029,7 @@ components:
         - id
         - fullname
         - parentId
+        - author
         - depth
         - score
         - replyCount
@@ -2020,6 +2055,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RedditCommentSkeleton"
+        snapshot:
+          $ref: "#/components/schemas/RedditThreadSnapshotMetadata"
         page:
           type: object
           additionalProperties: false
@@ -2048,6 +2085,10 @@ components:
             - truncatedBy
         coverage:
           $ref: "#/components/schemas/RedditCoverage"
+        warnings:
+          type: array
+          items:
+            type: string
         redditRateLimit:
           type: object
           additionalProperties: true
@@ -2057,9 +2098,51 @@ components:
         - input
         - post
         - comments
+        - snapshot
         - page
         - coverage
+        - warnings
         - redditRateLimit
+    RedditThreadSnapshotMetadata:
+      type: object
+      additionalProperties: false
+      properties:
+        version:
+          type: integer
+        id:
+          type: string
+          format: uuid
+        postId:
+          type: string
+        sort:
+          type: string
+          enum:
+            - confidence
+            - top
+            - new
+            - controversial
+            - old
+            - qa
+        startedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        sourceExhausted:
+          type: boolean
+      required:
+        - version
+        - id
+        - postId
+        - sort
+        - startedAt
+        - updatedAt
+        - expiresAt
+        - sourceExhausted
     RedditCommentsBatchRequest:
       type: object
       additionalProperties: false

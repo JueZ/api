@@ -26,6 +26,8 @@ export interface MorePlaceholder {
   parentId: string;
   depth: number;
   children: string[];
+  count: number;
+  id: string;
 }
 
 export interface NormalizedCommentTree {
@@ -312,6 +314,7 @@ function normalizeComment(
   }
 
   state.commentsReturned += 1;
+  const normalizedDepth = Number.isFinite(data['depth']) ? numberValue(data['depth']) : depth;
   const comment: RedditCommentDto = {
     id,
     fullname,
@@ -320,7 +323,7 @@ function normalizeComment(
     body: stringValue(data['body']),
     score: numberValue(data['score']),
     createdUtc: numberValue(data['created_utc']),
-    depth,
+    depth: normalizedDepth,
     replies: [],
   };
   state.commentByFullname.set(fullname, comment);
@@ -328,7 +331,7 @@ function normalizeComment(
   const replies = data['replies'];
   if (replies && typeof replies === 'object') {
     const listing = replies as RedditListing;
-    comment.replies = normalizeCommentChildren(listing.data?.children ?? [], depth + 1, state);
+    comment.replies = normalizeCommentChildren(listing.data?.children ?? [], normalizedDepth + 1, state);
   }
 
   return comment;
@@ -342,13 +345,16 @@ function collectMore(data: unknown, fallbackParentId: string, fallbackDepth: num
   const children = Array.isArray(more['children'])
     ? more['children'].filter((child): child is string => typeof child === 'string')
     : [];
-  if (children.length === 0) {
+  const parentId = stringValue(more['parent_id']) || fallbackParentId;
+  if (children.length === 0 && !parentId) {
     return;
   }
   state.more.push({
-    parentId: stringValue(more['parent_id']) || fallbackParentId,
+    parentId,
     depth: Number.isFinite(more['depth']) ? numberValue(more['depth']) : fallbackDepth,
     children,
+    count: numberValue(more['count']),
+    id: stringValue(more['id']),
   });
 }
 

@@ -20,10 +20,13 @@ Application authorization is not a substitute for bounded resource use. Anonymou
 
 ## Reddit expansion
 
-- `maxMoreChildrenRequests` defaults to zero and cannot exceed 10 for any REST or MCP call.
+- `maxMoreChildrenRequests` cannot exceed 10 for any REST or MCP call. Ordinary Reddit reads default to zero expansion work; the explicit exhaustive REST/MCP path defaults to five serial frontier expansions per invocation.
 - Expansion uses an abortable 20-second deadline that also bounds provider retries and body reads, and it stops before Reddit's reported remaining quota would fall below the 10-request reserve.
-- Only one Reddit expansion operation per authenticated principal may run concurrently in one Function worker. The key is hashed in memory and is always released in a `finally` boundary.
-- Truncated results retain continuation handles for work that the request, time, or provider-quota budget deferred. Callers continue in later bounded requests instead of keeping one invocation alive.
+- Only one Reddit expansion operation per authenticated principal may run concurrently in one Function worker. The key is hashed in memory and is always released in a `finally` boundary. Exhaustive cursor continuations additionally acquire a short optimistic-concurrency lease in the shared snapshot so separate Function instances cannot expand the same frontier concurrently.
+- Ordinary thread and overview calls remain bounded snapshots. Exhaustive retrieval is explicit through `POST /api/reddit/thread/comments` and MCP `reddit_get_thread_page`.
+- The exhaustive path checkpoints normalized comments, deduplication state, and its server-owned traversal frontier in a private Blob after each bounded invocation. Opaque signed cursors reference the snapshot and page offset; callers never carry Reddit child-ID queues.
+- Each exhaustive invocation still permits at most ten serial `/api/morechildren` or continue-thread requests, uses the same deadline and provider-quota reserve, and returns a resumable cursor rather than sleeping through a rate reset.
+- A high configurable snapshot resource cap protects Function memory and storage. Reaching it is reported as incomplete and never as exhausted traversal.
 
 The per-worker concurrency gate is defense in depth, not a distributed rate limiter. Azure scale-out can place the same principal on another worker, but the hard per-call request/time/provider budgets still apply on every instance. A shared distributed quota is future work only if monitoring shows the bounded calls can still exhaust provider or Function capacity.
 

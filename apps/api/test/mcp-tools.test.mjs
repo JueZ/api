@@ -37,6 +37,7 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
         'hello_authenticated',
         'reddit_get_thread',
         'reddit_get_thread_overview',
+        'reddit_get_thread_page',
         'wlh_categories_top',
         'wlh_category_children',
         'wlh_find_category',
@@ -44,6 +45,13 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
         'wlh_search',
       ].sort(),
     );
+
+    const exhaustive = tools.find((tool) => tool.name === 'reddit_get_thread_page');
+    assert.match(exhaustive.description, /all or exhaustive Reddit comments/i);
+    assert.match(exhaustive.description, /coverage\.complete is true and nextCursor is null/i);
+    assert.ok(exhaustive.inputSchema.properties.cursor);
+    assert.equal(exhaustive.inputSchema.properties.pageSize.maximum, 50);
+    assert.equal(exhaustive.inputSchema.properties.maxComments, undefined);
 
     for (const tool of tools) {
       assert.equal(tool.annotations.readOnlyHint, tool.name !== 'bring_add_item', `${tool.name} read-only hint`);
@@ -204,6 +212,143 @@ test('MCP tools call shared Reddit and WLH services with stable structured conte
     ['offer', '123456789'],
     ['topCategories'],
     ['children', '10'],
+  ]);
+});
+
+test('reddit_get_thread_page validates initial versus continuation input and preserves complete bodies', async () => {
+  const calls = [];
+  const services = stubServices(calls);
+  services.reddit.fetchThreadComments = async (args) => {
+    calls.push(['fetchThreadComments', args]);
+    const continuation = Boolean(args.cursor);
+    const body = continuation ? 'second complete body' : 'x'.repeat(1200);
+    return {
+      source: 'reddit',
+      fetchedAt: '2026-08-31T12:00:00.000Z',
+      input: 'abc',
+      post: { id: 'abc', title: 'Large thread', numComments: 2500 },
+      comments: [
+        {
+          id: continuation ? 'c2' : 'c1',
+          fullname: continuation ? 't1_c2' : 't1_c1',
+          parentId: 't3_abc',
+          author: 'author',
+          body,
+          score: 1,
+          depth: 0,
+          createdUtc: 1,
+          replyCount: 0,
+          bodyLength: body.length,
+          bodyPreview: '',
+          isDeleted: false,
+        },
+      ],
+      snapshot: {
+        version: 1,
+        id: '11111111-1111-4111-8111-111111111111',
+        postId: 'abc',
+        sort: 'confidence',
+        startedAt: '2026-08-31T12:00:00.000Z',
+        updatedAt: '2026-08-31T12:00:01.000Z',
+        expiresAt: '2026-09-01T12:00:00.000Z',
+        sourceExhausted: continuation,
+      },
+      page: {
+        nextCursor: continuation ? null : 'opaque-next-cursor',
+        hasMore: !continuation,
+        returned: 1,
+        truncatedBy: null,
+      },
+      coverage: {
+        reportedTotal: 2500,
+        retrievedUnique: continuation ? 2500 : 1200,
+        uniqueReturned: continuation ? 2500 : 1200,
+        deleted: 0,
+        unavailable: 0,
+        unavailableBranches: 0,
+        knownRemaining: continuation ? 0 : 1300,
+        cursorsRemaining: !continuation,
+        continuationsRemaining: continuation ? 0 : 4,
+        frontierRemaining: continuation ? 0 : 4,
+        sortsSampled: ['confidence'],
+        complete: continuation,
+        snapshotComplete: continuation,
+      },
+      warnings: [],
+      redditRateLimit: { used: '1', remaining: '999', resetSeconds: '60' },
+    };
+  };
+
+  await withEnv(authEnv, async () => {
+    await assertToolError(
+      await mcpCall('reddit_get_thread_page', {}, 'Bearer local-dev-token', services),
+      'invalid_arguments',
+    );
+    await assertToolError(
+      await mcpCall(
+        'reddit_get_thread_page',
+        { postId: 'abc', cursor: 'opaque-next-cursor' },
+        'Bearer local-dev-token',
+        services,
+      ),
+      'invalid_arguments',
+    );
+    await assertToolError(
+      await mcpCall(
+        'reddit_get_thread_page',
+        { cursor: 'opaque-next-cursor', sort: 'top' },
+        'Bearer local-dev-token',
+        services,
+      ),
+      'invalid_arguments',
+    );
+
+    const first = await mcpCall(
+      'reddit_get_thread_page',
+      { postId: 'abc', pageSize: 50, maxMoreChildrenRequests: 2 },
+      'Bearer local-dev-token',
+      services,
+    );
+    assert.equal(first.jsonBody.result.structuredContent.comments[0].body.length, 1200);
+    assert.equal(first.jsonBody.result.structuredContent.page.nextCursor, 'opaque-next-cursor');
+    assert.equal(first.jsonBody.result.structuredContent.coverage.complete, false);
+
+    const second = await mcpCall(
+      'reddit_get_thread_page',
+      { cursor: 'opaque-next-cursor', pageSize: 50 },
+      'Bearer local-dev-token',
+      services,
+    );
+    assert.equal(second.jsonBody.result.structuredContent.comments[0].id, 'c2');
+    assert.equal(second.jsonBody.result.structuredContent.page.nextCursor, null);
+    assert.equal(second.jsonBody.result.structuredContent.coverage.complete, true);
+  });
+
+  assert.deepEqual(calls, [
+    [
+      'fetchThreadComments',
+      {
+        post: 'abc',
+        limit: 50,
+        includeBody: true,
+        bodyPreviewChars: 0,
+        includeDeleted: true,
+        maxBytes: 131072,
+        maxMoreChildrenRequests: 2,
+      },
+    ],
+    [
+      'fetchThreadComments',
+      {
+        cursor: 'opaque-next-cursor',
+        limit: 50,
+        includeBody: true,
+        bodyPreviewChars: 0,
+        includeDeleted: true,
+        maxBytes: 131072,
+        maxMoreChildrenRequests: 5,
+      },
+    ],
   ]);
 });
 
@@ -538,6 +683,9 @@ function stubServices(calls = []) {
           coverage: {},
           redditRateLimit: { used: null, remaining: null, resetSeconds: null },
         };
+      },
+      fetchThreadComments: async () => {
+        throw new Error('fetchThreadComments test stub must be configured by the calling test.');
       },
     },
     wlh: {

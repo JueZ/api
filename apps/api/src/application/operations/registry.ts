@@ -62,6 +62,7 @@ const definitions = [
   }),
   defineRead(OPERATION_IDS.redditThreadComments, 'reddit', 'reddit.read', {
     rest: { method: 'POST', path: '/api/reddit/thread/comments' },
+    mcp: { toolName: 'reddit_get_thread_page' },
   }),
   defineRead(OPERATION_IDS.redditCommentTree, 'reddit', 'reddit.read', {
     rest: { method: 'POST', path: '/api/reddit/comment-tree' },
