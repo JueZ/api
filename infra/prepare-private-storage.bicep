@@ -21,6 +21,9 @@ param deploymentPrincipalObjectId string
 @description('Private WLH reference-data container.')
 param wlhCategoryBlobContainer string = 'wlh-reference'
 
+@description('Private Reddit resumable thread-snapshot container.')
+param redditSnapshotContainer string = 'reddit-snapshots'
+
 @description('Private Bring session container.')
 param bringSessionCacheContainer string = 'bring-private'
 
@@ -43,6 +46,7 @@ module privateStorage './modules/private-storage.bicep' = {
     storageAccountName: privateStorageName
     deploymentPrincipalObjectId: deploymentPrincipalObjectId
     wlhCategoryBlobContainer: wlhCategoryBlobContainer
+    redditSnapshotContainer: redditSnapshotContainer
     bringSessionCacheContainer: bringSessionCacheContainer
     bringMutationContainer: bringMutationContainer
     bringAuditContainer: bringAuditContainer
