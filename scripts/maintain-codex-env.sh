@@ -24,6 +24,42 @@ configure_git_remote() {
   git -C "${worktree}" remote add origin "${remote_url}"
 }
 
+remove_inherited_llvm_apt_source() {
+  local apt_directory="${1:-/etc/apt}"
+  local source
+  local temporary_source
+
+  if [[ -f "${apt_directory}/sources.list" ]]; then
+    sed -i '\|apt\.llvm\.org|d' "${apt_directory}/sources.list"
+  fi
+
+  if [[ ! -d "${apt_directory}/sources.list.d" ]]; then
+    return
+  fi
+
+  while IFS= read -r -d '' source; do
+    if ! grep -Fq 'apt.llvm.org' "${source}"; then
+      continue
+    fi
+
+    case "${source}" in
+      *.sources)
+        temporary_source="$(mktemp "${source}.XXXXXX")"
+        awk 'BEGIN { RS = ""; ORS = "\n\n" } index($0, "apt.llvm.org") == 0 { print }' \
+          "${source}" > "${temporary_source}"
+        chmod --reference="${source}" "${temporary_source}"
+        mv "${temporary_source}" "${source}"
+        ;;
+      *)
+        sed -i '\|apt\.llvm\.org|d' "${source}"
+        ;;
+    esac
+  done < <(
+    find "${apt_directory}/sources.list.d" -maxdepth 1 -type f \
+      \( -name '*.list' -o -name '*.sources' \) -print0
+  )
+}
+
 install_tools() {
   if [[ "${EUID}" -ne 0 ]]; then
     echo "This maintenance script must run as root so it can refresh apt packages." >&2
@@ -45,6 +81,9 @@ install_tools() {
 
   export DEBIAN_FRONTEND=noninteractive
 
+  # Some Codex base images inherit apt.llvm.org even though this repository does
+  # not require LLVM. Remove only that source before refreshing signed indexes.
+  remove_inherited_llvm_apt_source /etc/apt
   apt-get update
   apt-get install -y ca-certificates curl apt-transport-https lsb-release gnupg git
 

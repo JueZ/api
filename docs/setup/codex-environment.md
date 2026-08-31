@@ -4,6 +4,8 @@ Use `scripts/setup-codex-env.sh` once per fresh Codex host to install required C
 
 Both scripts are deployment-free. They install or verify tooling only and must not deploy infrastructure or application code.
 
+Codex base images can include an `apt.llvm.org` source that is unreachable through the environment's egress proxy. This repository does not require LLVM or Clang, so setup and maintenance remove only `apt.llvm.org` entries from inherited APT source files before updating package indexes. Ubuntu and the explicitly configured Microsoft and GitHub signed repositories remain enabled; APT signature verification is never disabled.
+
 ## Related Codex skills
 
 Use the repo-scoped `github-cli-devops` skill for GitHub CLI work, pull requests, workflow runs, CI logs, and repository automation. Use the repo-scoped `azure-cli-devops` skill for Azure CLI work, resource diagnostics, Bicep validation, RBAC checks, Azure Functions, Storage, and deployment debugging.
@@ -82,14 +84,15 @@ Do not repeat `az login` or `gh auth login` in the wrapper; `scripts/setup-codex
 
 The setup script:
 
-1. Installs or updates apt prerequisites.
-2. Configures Microsoft and GitHub CLI apt repositories.
-3. Installs `azure-cli` and `gh`.
-4. Logs into Azure using the explicit mode: Managed Identity by default, or the time-limited service principal when Codex Cloud selects `service-principal`. Managed Identity mode also bypasses host proxies for Azure IMDS.
-5. Selects `AZURE_SUBSCRIPTION_ID` with `az account set`.
-6. Unsets `GH_TOKEN` and `GITHUB_TOKEN`.
-7. Logs into GitHub CLI by piping `CODEX_GH_TOKEN` to `gh auth login --with-token` so the credential is cached.
-8. Adds a missing git `origin` remote for the repository so hosted PR URLs can be resolved after commits.
+1. Removes an inherited `apt.llvm.org` source that the repository does not use.
+2. Installs or updates apt prerequisites from the remaining signed repositories.
+3. Configures Microsoft and GitHub CLI apt repositories.
+4. Installs `azure-cli` and `gh`.
+5. Logs into Azure using the explicit mode: Managed Identity by default, or the time-limited service principal when Codex Cloud selects `service-principal`. Managed Identity mode also bypasses host proxies for Azure IMDS.
+6. Selects `AZURE_SUBSCRIPTION_ID` with `az account set`.
+7. Unsets `GH_TOKEN` and `GITHUB_TOKEN`.
+8. Logs into GitHub CLI by piping `CODEX_GH_TOKEN` to `gh auth login --with-token` so the credential is cached.
+9. Adds a missing git `origin` remote for the repository so hosted PR URLs can be resolved after commits.
 
 ## Maintenance
 
@@ -101,11 +104,12 @@ sudo scripts/maintain-codex-env.sh
 
 The maintenance script:
 
-1. Reinstalls `azure-cli` and `gh` from their apt repositories.
-2. Prints CLI versions.
-3. Verifies cached Azure CLI authentication with `az account show`.
-4. Unsets `GH_TOKEN` and `GITHUB_TOKEN`.
-5. Verifies cached GitHub CLI authentication with `gh auth status`.
-6. Adds a missing git `origin` remote for the repository so hosted PR URLs can be resolved after commits.
+1. Removes an inherited `apt.llvm.org` source that the repository does not use.
+2. Reinstalls `azure-cli` and `gh` from their signed apt repositories.
+3. Prints CLI versions.
+4. Verifies cached Azure CLI authentication with `az account show`.
+5. Unsets `GH_TOKEN` and `GITHUB_TOKEN`.
+6. Verifies cached GitHub CLI authentication with `gh auth status`.
+7. Adds a missing git `origin` remote for the repository so hosted PR URLs can be resolved after commits.
 
 Maintenance must fail if cached authentication has expired or is missing. Re-run setup using the host's documented authentication mode. Rotate the Codex Cloud service-principal credential before its configured expiry and update both the secret and `CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON` together.

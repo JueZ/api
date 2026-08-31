@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -121,6 +121,87 @@ test('Codex Azure setup bypasses proxies for IMDS without duplicating the endpoi
   assert.equal(completed.stdout, 'localhost,169.254.169.254\nlocalhost,169.254.169.254\n');
 });
 
+test('Codex environment setup removes only inherited apt.llvm.org sources before apt update', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codex-apt-sources-'));
+  const sourceParts = join(directory, 'sources.list.d');
+  try {
+    await mkdir(sourceParts);
+    await writeFile(
+      join(directory, 'sources.list'),
+      [
+        'deb http://archive.ubuntu.com/ubuntu noble main',
+        'deb https://apt.llvm.org/noble llvm-toolchain-noble-20 main',
+        '',
+      ].join('\n'),
+    );
+    await writeFile(
+      join(sourceParts, 'third-party.list'),
+      [
+        'deb https://cli.github.com/packages stable main',
+        'deb https://apt.llvm.org/noble llvm-toolchain-noble-20 main',
+        '',
+      ].join('\n'),
+    );
+    await writeFile(
+      join(sourceParts, 'third-party.sources'),
+      [
+        'Types: deb',
+        'URIs: https://packages.microsoft.com/repos/azure-cli/',
+        'Suites: noble',
+        'Components: main',
+        '',
+        'Types: deb',
+        'URIs: https://apt.llvm.org/noble/',
+        'Suites: llvm-toolchain-noble-20',
+        'Components: main',
+        '',
+      ].join('\n'),
+    );
+
+    const command = ['source "$SETUP_SCRIPT"', 'remove_inherited_llvm_apt_source "$APT_DIRECTORY"'].join('\n');
+    const completed = spawnSync('bash', ['-c', command], {
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        SETUP_SCRIPT: setupScript,
+        APT_DIRECTORY: directory,
+      },
+    });
+
+    assert.equal(completed.status, 0, completed.stderr);
+    for (const path of [
+      join(directory, 'sources.list'),
+      join(sourceParts, 'third-party.list'),
+      join(sourceParts, 'third-party.sources'),
+    ]) {
+      assert.doesNotMatch(await readFile(path, 'utf8'), /apt\.llvm\.org/);
+    }
+    assert.match(await readFile(join(directory, 'sources.list'), 'utf8'), /archive\.ubuntu\.com/);
+    assert.match(await readFile(join(sourceParts, 'third-party.list'), 'utf8'), /cli\.github\.com/);
+    assert.match(await readFile(join(sourceParts, 'third-party.sources'), 'utf8'), /packages\.microsoft\.com/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('Codex environment scripts sanitize inherited LLVM sources without weakening apt security', async () => {
+  const setupSource = await readFile(setupScript, 'utf8');
+  const maintainSource = await readFile(maintainScript, 'utf8');
+
+  assert.equal(
+    extractShellFunction(setupSource, 'remove_inherited_llvm_apt_source'),
+    extractShellFunction(maintainSource, 'remove_inherited_llvm_apt_source'),
+  );
+
+  for (const source of [setupSource, maintainSource]) {
+    assert.match(source, /install_tools\(\) \{[\s\S]*?remove_inherited_llvm_apt_source \/etc\/apt\n\s+apt-get update/);
+    assert.doesNotMatch(
+      source,
+      /trusted=yes|allow-unauthenticated|AllowInsecureRepositories|AllowDowngradeToInsecureRepositories/,
+    );
+  }
+});
+
 test('Codex environment scripts never print an existing Git remote URL', async () => {
   for (const path of [setupScript, maintainScript]) {
     const source = await readFile(path, 'utf8');
@@ -161,4 +242,10 @@ async function captureAzureLogin(directory, managedIdentityClientId) {
   });
   assert.equal(completed.status, 0, completed.stderr);
   return (await readFile(capturePath, 'utf8')).trim().split('\n');
+}
+
+function extractShellFunction(source, name) {
+  const match = source.match(new RegExp(`${name}\\(\\) \\{[\\s\\S]*?\\n\\}`));
+  assert.ok(match, `Expected ${name} function`);
+  return match[0];
 }
