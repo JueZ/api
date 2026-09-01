@@ -48,8 +48,8 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
 
     const exhaustive = tools.find((tool) => tool.name === 'reddit_get_thread_page');
     assert.match(exhaustive.description, /all or exhaustive Reddit comments/i);
-    assert.match(exhaustive.description, /Continue until nextCursor is null/i);
-    assert.match(exhaustive.description, /coverage\.complete truthfully/i);
+    assert.match(exhaustive.description, /while nextCursor is non-null/i);
+    assert.match(exhaustive.description, /exhausted_with_reported_gap/i);
     assert.ok(exhaustive.inputSchema.properties.cursor);
     assert.equal(exhaustive.inputSchema.properties.pageSize.maximum, 50);
     assert.equal(exhaustive.inputSchema.properties.maxComments, undefined);
@@ -268,10 +268,14 @@ test('reddit_get_thread_page validates initial versus continuation input and pre
         unavailable: 0,
         unavailableBranches: 0,
         knownRemaining: continuation ? 0 : 1300,
+        reportedGap: continuation ? 0 : 1300,
         cursorsRemaining: !continuation,
         continuationsRemaining: continuation ? 0 : 4,
         frontierRemaining: continuation ? 0 : 4,
         sortsSampled: ['confidence'],
+        traversalComplete: continuation,
+        coverageComplete: continuation,
+        coverageStatus: continuation ? 'complete' : 'in_progress',
         complete: continuation,
         snapshotComplete: continuation,
       },

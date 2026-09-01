@@ -2513,6 +2513,10 @@ components:
           type: integer
         knownRemaining:
           type: integer
+          description: Backward-compatible alias for reportedGap; Reddit does not guarantee this many comments are retrievable.
+        reportedGap:
+          type: integer
+          description: Provider-reported total minus unique retrieved and explicitly unavailable comments.
         cursorsRemaining:
           type: boolean
         continuationsRemaining:
@@ -2523,12 +2527,21 @@ components:
           type: array
           items:
             type: string
+        traversalComplete:
+          type: boolean
+          description: True when the active Reddit sort frontier is empty; other planned sorts may remain.
+        coverageComplete:
+          type: boolean
+          description: True only after all configured sorts are exhausted with no unexplained reported gap.
+        coverageStatus:
+          type: string
+          enum: [in_progress, complete, exhausted_with_reported_gap, resource_limited]
         snapshotComplete:
           type: boolean
-          description: True when the selected sort's persisted traversal frontier is exhausted without a resource-limit stop.
+          description: True when the durable crawl is terminal and no server-planned discovery work remains.
         complete:
           type: boolean
-          description: Whole-thread coverage claim. Currently false because a single selected sort cannot establish provider-wide completeness; use snapshotComplete for selected-sort traversal.
+          description: Backward-compatible alias for coverageComplete.
         stoppedReason:
           type: string
           enum:
@@ -2550,6 +2563,9 @@ components:
         - continuationsRemaining
         - frontierRemaining
         - sortsSampled
+        - traversalComplete
+        - coverageComplete
+        - coverageStatus
         - snapshotComplete
         - complete
     RedditThreadOverviewRequest:

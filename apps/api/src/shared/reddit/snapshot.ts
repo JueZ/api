@@ -1,8 +1,8 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { RedditCommentDto, RedditPostDto, RedditRateLimit, RedditSort } from './types.js';
 
-export const REDDIT_THREAD_SNAPSHOT_VERSION = 1;
-export const REDDIT_THREAD_CURSOR_VERSION = 1;
+export const REDDIT_THREAD_SNAPSHOT_VERSION = 2;
+export const REDDIT_THREAD_CURSOR_VERSION = 2;
 export const DEFAULT_REDDIT_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_REDDIT_SNAPSHOT_MAX_COMMENTS = 100_000;
 export const DEFAULT_REDDIT_SNAPSHOT_MAX_BYTES = 96 * 1024 * 1024;
@@ -41,6 +41,10 @@ export interface RedditThreadSnapshot {
   input: string;
   postId: string;
   sort: RedditSort;
+  activeSort: RedditSort;
+  sortPlan: RedditSort[];
+  sortIndex: number;
+  sortsSampled: RedditSort[];
   post: RedditPostDto;
   comments: RedditCommentDto[];
   seenCommentIds: string[];
@@ -158,6 +162,7 @@ export function createRedditThreadSnapshot(args: {
   ttlMs: number;
 }): RedditThreadSnapshot {
   const now = new Date(args.nowMs).toISOString();
+  const sortPlan = redditCoverageSortPlan(args.sort);
   return {
     version: REDDIT_THREAD_SNAPSHOT_VERSION,
     snapshotId: randomUUID(),
@@ -165,6 +170,10 @@ export function createRedditThreadSnapshot(args: {
     input: args.input,
     postId: args.postId,
     sort: args.sort,
+    activeSort: args.sort,
+    sortPlan,
+    sortIndex: 0,
+    sortsSampled: [args.sort],
     post: args.post,
     comments: args.comments,
     seenCommentIds: args.comments.map((comment) => comment.id.toLowerCase()),
@@ -178,11 +187,15 @@ export function createRedditThreadSnapshot(args: {
     startedAt: now,
     updatedAt: now,
     expiresAt: new Date(args.nowMs + args.ttlMs).toISOString(),
-    sourceExhausted: args.frontier.length === 0,
+    sourceExhausted: false,
     resourceLimitReached: false,
     warnings: [],
     redditRateLimit: args.rateLimit,
   };
+}
+
+export function redditCoverageSortPlan(requested: RedditSort): RedditSort[] {
+  return [...new Set<RedditSort>([requested, 'old', 'new', 'controversial', 'top', 'confidence'])];
 }
 
 interface RedditCursorPayload {
@@ -276,13 +289,20 @@ export function parseRedditThreadSnapshot(text: string): RedditThreadSnapshot {
     typeof value['cursorSecret'] !== 'string' ||
     typeof value['postId'] !== 'string' ||
     typeof value['sort'] !== 'string' ||
+    typeof value['activeSort'] !== 'string' ||
+    !Array.isArray(value['sortPlan']) ||
+    typeof value['sortIndex'] !== 'number' ||
+    !Array.isArray(value['sortsSampled']) ||
     !Array.isArray(value['comments']) ||
     !Array.isArray(value['frontier']) ||
     !Array.isArray(value['seenCommentIds']) ||
     !Array.isArray(value['processedFrontierKeys']) ||
     typeof value['expiresAt'] !== 'string'
   ) {
-    throw new Error('Stored Reddit thread snapshot has an unsupported shape.');
+    throw new RedditCursorError(
+      'Stored Reddit thread snapshot version is not supported. Start a new exhaustive crawl.',
+      'REDDIT_CURSOR_VERSION_MISMATCH',
+    );
   }
   return value as unknown as RedditThreadSnapshot;
 }

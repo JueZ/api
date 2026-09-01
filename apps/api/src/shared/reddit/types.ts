@@ -120,10 +120,14 @@ export interface RedditCoverageDto {
   unavailable: number;
   unavailableBranches: number;
   knownRemaining: number;
+  reportedGap: number;
   cursorsRemaining: boolean;
   continuationsRemaining: number;
   frontierRemaining: number;
   sortsSampled: RedditSort[];
+  traversalComplete: boolean;
+  coverageComplete: boolean;
+  coverageStatus: 'in_progress' | 'complete' | 'exhausted_with_reported_gap' | 'resource_limited';
   complete: boolean;
   snapshotComplete: boolean;
   stoppedReason?: 'rate_limit' | 'execution_budget' | 'snapshot_resource_limit' | 'upstream_retryable';
