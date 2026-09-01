@@ -1,0 +1,42 @@
+version: 2
+id: internal-exhaustion-is-not-semantic-completion
+fingerprint: semantic.completion.internal-frontier.external-coverage
+severity: high
+invariant: A narrower internal exhaustion signal must not be exposed as a stronger external completeness guarantee unless that equivalence is justified by the provider and user contract.
+scope:
+  - apps/api/src/shared/reddit/service.ts
+  - apps/api/test/reddit.test.mjs
+  - .agents/skills/semantic-falsification/SKILL.md
+prevention:
+  - kind: regression-test
+    path: apps/api/test/reddit.test.mjs
+recurrenceCount: 1
+status: active
+reusableClaim:
+  id: internal-exhaustion-does-not-prove-outcome-completion
+  claim: Internal work exhaustion proves an external completion claim only when the applicable external contract establishes that equivalence.
+  scope:
+    paths: []
+    components:
+      - provider traversal
+      - terminal state reporting
+    conditions:
+      - an internal queue or provider view is used to derive a user-visible completion status
+  relation: supports
+  evidence:
+    kind: deterministic-reproduction
+    source: test:apps/api/test/reddit.test.mjs
+    independence: independent
+  lineageId: reddit.frontier-empty.completeness
+  independenceBasis: The service-boundary fixture deterministically leaves a reported gap after exhausting the supplied sort frontier.
+  applicability: Completion and verification states whose evidence is narrower than the user-visible outcome they claim.
+  exceptions:
+    - scope: Mechanisms whose authoritative external contract explicitly defines queue exhaustion as completion.
+      rationale: In that bounded case the required equivalence has been established rather than assumed.
+  challenge:
+    state: none
+    severity: high
+  enforcement:
+    kind: test
+    reference: apps/api/test/reddit.test.mjs
+  supersedes: []

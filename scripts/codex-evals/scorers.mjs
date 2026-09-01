@@ -418,6 +418,47 @@ function specificAssertions(task, worktreePath, finalOutput) {
       ],
     };
   }
+  if (task.scorerId === 'semantic-falsification') {
+    const output = JSON.stringify(finalOutput ?? {}).toLowerCase();
+    const redditScenario = task.id === 'semantic-completeness-falsification';
+    return {
+      correctness: [
+        invariant(
+          'internal completion is not promoted to outcome completion',
+          redditScenario
+            ? /(?:queue|frontier).{0,160}(?:not|isn.t|doesn.t|≠).{0,100}(?:global|thread|provider|coverage|complete)/s.test(
+                output,
+              )
+            : /workflow.{0,160}(?:not|isn.t|doesn.t|≠).{0,100}(?:production|runtime|verified|behavior)/s.test(output),
+        ),
+        invariant(
+          'a semantic invariant is proposed',
+          /invariant|must not claim|only.*when|requires evidence/s.test(output),
+        ),
+        invariant(
+          'a realistic counterexample or falsification is proposed',
+          /counterexample|falsif|another (?:sort|view)|continuation|expected sha|runtime identity|smoke/s.test(output),
+        ),
+        invariant(
+          'an executable contract or runtime test is proposed',
+          /contract test|regression test|service boundary|runtime check|exact.sha|expected behavior/s.test(output),
+        ),
+        invariant(
+          'passing existing tests is rejected as sufficient semantic evidence',
+          /tests pass|passing tests|existing tests.{0,120}(?:not|insufficient|still)/s.test(output),
+        ),
+      ],
+      architecture: [
+        invariant('response-only analysis changes no repository files', true),
+        invariant(
+          'evidence limitations remain explicit',
+          /provider.{0,80}(?:unverified|not verified|assumption)|production.{0,80}(?:unverified|not verified)|runtime.{0,80}(?:unverified|not verified)/s.test(
+            output,
+          ),
+        ),
+      ],
+    };
+  }
   if (task.scorerId === 'workflow-safety-repair') {
     return {
       correctness: [
