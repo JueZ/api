@@ -1064,7 +1064,40 @@ test('RedditThreadService pages comment skeletons with filters and byte controls
   assert.equal(initialListingCalls, 1);
 });
 
-test('RedditThreadService exhaustively resumes a 2500-comment tree without refetching or duplicates', async () => {
+test('RedditThreadService does not promote one sort frontier exhaustion to whole-thread completeness', async () => {
+  const service = new RedditThreadService({
+    config,
+    snapshotStore: new InMemoryRedditThreadSnapshotStore(),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('/api/v1/access_token'))
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (url.pathname === '/comments/abc123') {
+        assert.equal(url.searchParams.get('sort'), 'confidence');
+        return jsonResponse(semanticGapThreadFixture(), 200, rateHeaders(1));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThreadComments({
+    post: 'abc123',
+    sort: 'confidence',
+    limit: 500,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 10,
+  });
+
+  assert.equal(response.coverage.reportedTotal, 583);
+  assert.equal(response.coverage.retrievedUnique, 500);
+  assert.equal(response.coverage.frontierRemaining, 0);
+  assert.equal(response.coverage.snapshotComplete, true, 'the supplied confidence view has no known traversal work');
+  assert.equal(response.coverage.complete, false, 'one exhausted view does not establish whole-thread coverage');
+  assert.equal(response.coverage.knownRemaining, 83);
+  assert.deepEqual(response.coverage.sortsSampled, ['confidence']);
+});
+
+test('RedditThreadService exhausts its supplied 2500-comment frontier without refetching or duplicates', async () => {
   let initialListingCalls = 0;
   let activeMoreRequests = 0;
   let maximumConcurrentMoreRequests = 0;
@@ -1116,7 +1149,7 @@ test('RedditThreadService exhaustively resumes a 2500-comment tree without refet
       seen.set(comment.id, (seen.get(comment.id) ?? 0) + 1);
       parentIds.set(comment.id, comment.parentId);
     }
-    if (response.coverage.complete && response.page.nextCursor === null) break;
+    if (response.coverage.snapshotComplete && response.page.nextCursor === null) break;
     assert.ok(response.page.nextCursor, 'incomplete crawl must remain resumable');
     response = await service.fetchThreadComments({
       cursor: response.page.nextCursor,
@@ -1147,8 +1180,10 @@ test('RedditThreadService exhaustively resumes a 2500-comment tree without refet
   assert.deepEqual(completedSnapshot?.snapshot.unavailableCommentIds, []);
   assert.equal(response.coverage.unavailable, 0);
   assert.equal(response.coverage.frontierRemaining, 0);
-  assert.equal(response.coverage.complete, true);
+  assert.equal(response.coverage.snapshotComplete, true);
+  assert.equal(response.coverage.complete, false);
   assert.equal(response.coverage.knownRemaining, response.coverage.reportedTotal - expectedIds.length);
+  assert.deepEqual(response.coverage.sortsSampled, ['old']);
   assert.equal(initialListingCalls, 1);
   assert.equal(maximumConcurrentMoreRequests, 1);
   assert.ok(calls > 10, 'small per-call expansion budget should require multiple resumptions');
@@ -1200,7 +1235,8 @@ test('RedditThreadService checkpoints an execution-budget stop and resumes it', 
     includeDeleted: true,
     maxMoreChildrenRequests: 10,
   });
-  assert.equal(resumed.coverage.complete, true);
+  assert.equal(resumed.coverage.snapshotComplete, true);
+  assert.equal(resumed.coverage.complete, false);
   assert.equal(resumed.coverage.frontierRemaining, 0);
   assert.equal(initialListingCalls, 1);
 });
@@ -1255,7 +1291,8 @@ test('RedditThreadService snapshot lease prevents concurrent expansion across se
   );
   releaseExpansion();
   const completed = await firstContinuation;
-  assert.equal(completed.coverage.complete, true);
+  assert.equal(completed.coverage.snapshotComplete, true);
+  assert.equal(completed.coverage.complete, false);
 });
 
 test('RedditThreadService retains progress and retry guidance after Reddit 429', async () => {
@@ -1302,7 +1339,8 @@ test('RedditThreadService retains progress and retry guidance after Reddit 429',
     includeDeleted: true,
     maxMoreChildrenRequests: 1,
   });
-  assert.equal(resumed.coverage.complete, true);
+  assert.equal(resumed.coverage.snapshotComplete, true);
+  assert.equal(resumed.coverage.complete, false);
   assert.equal(resumed.comments.at(-1).id, 'c3');
   assert.equal(initialListingCalls, 1);
 });
@@ -1329,7 +1367,8 @@ test('RedditThreadService marks a vanished MoreChildren branch unavailable witho
   });
   assert.equal(response.coverage.unavailable, 1);
   assert.equal(response.coverage.frontierRemaining, 0);
-  assert.equal(response.coverage.complete, true);
+  assert.equal(response.coverage.snapshotComplete, true);
+  assert.equal(response.coverage.complete, false);
   assert.equal(response.page.nextCursor, null);
 });
 
@@ -2486,6 +2525,15 @@ function exhaustiveThreadFixture() {
       100,
     ),
   ];
+  return fixture;
+}
+
+function semanticGapThreadFixture() {
+  const fixture = threadFixtureWithoutMore();
+  fixture[0].data.children[0].data.num_comments = 583;
+  fixture[1].data.children = Array.from({ length: 500 }, (_, index) =>
+    exhaustiveCommentThing(`confidence${index + 1}`, 't3_abc123', 0),
+  );
   return fixture;
 }
 

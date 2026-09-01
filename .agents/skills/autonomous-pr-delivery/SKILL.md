@@ -11,6 +11,9 @@ Use this skill for routine repository delivery. Add `github-cli-devops` only for
 
 1. Confirm protected `main`, branch, head, and working tree. Work only on a non-`main` `codex/...` branch.
 2. Implement one coherent change. Run one complete local set selected from the protected-base diff and affected risk surface. Do not repeat dependency installation, unchanged application builds, or an already passing check unless the diff, base, environment, or failure changed. Local proportionality never skips or weakens protected remote aggregates or applicable delivery/runtime proof.
+   For a substantial semantic change, use `semantic-falsification` before committing: perform its independent critic
+   phase, repair credible defects, and include its concise outcome/invariants/falsification/evidence result in the PR.
+   This is autonomous review, not an additional required check or human approval.
 3. Commit intentionally, verify the exact commit, confirm repository-scoped GitHub authentication, push, and create/update the PR.
 4. For high-risk or multi-phase work, lead progress updates with the active phase, its status, and the next exact slice.
 5. Monitor compactly with structured one-shot queries. Emit only state transitions and a final summary; do not use continuously repeating `--watch` output. For example:

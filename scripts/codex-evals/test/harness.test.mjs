@@ -100,7 +100,7 @@ function writeCurrentFiles(directory, paths) {
   }
 }
 
-test('all committed historical tasks validate against exact available commits', () => {
+test('all committed historical and semantic falsification tasks validate against exact available commits', () => {
   const result = validateTaskRepository();
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.tasks.map(({ id }) => id).sort(), [
@@ -111,6 +111,8 @@ test('all committed historical tasks validate against exact available commits', 
     'ineligible-automerge-delivery-trigger',
     'reusable-workflow-permission-ceiling',
     'runtime-neutral-classifier-dependency-free',
+    'semantic-completeness-falsification',
+    'semantic-runtime-verification-falsification',
     'setup-node-cache-false',
     'workflow-run-identity',
   ]);

@@ -48,7 +48,8 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
 
     const exhaustive = tools.find((tool) => tool.name === 'reddit_get_thread_page');
     assert.match(exhaustive.description, /all or exhaustive Reddit comments/i);
-    assert.match(exhaustive.description, /coverage\.complete is true and nextCursor is null/i);
+    assert.match(exhaustive.description, /Continue until nextCursor is null/i);
+    assert.match(exhaustive.description, /coverage\.complete truthfully/i);
     assert.ok(exhaustive.inputSchema.properties.cursor);
     assert.equal(exhaustive.inputSchema.properties.pageSize.maximum, 50);
     assert.equal(exhaustive.inputSchema.properties.maxComments, undefined);

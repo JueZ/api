@@ -16,6 +16,12 @@ A user feature request starts full autonomous delivery. For every repository-cha
 8. add executable regression prevention and concise learning when a failure is significant or recurring; and
 9. report the exact applicable terminal state, including runtime evidence for runtime-affecting work.
 
+For substantial semantic changes, use `semantic-falsification` before delivery: derive a small set of outcome
+invariants from the original request, identify material provider assumptions, and independently try to construct a
+case where the implementation and its mechanism tests pass while the requested outcome fails. Turn credible,
+testable counterexamples into contract tests. Never derive a stronger user-visible completion guarantee solely from
+exhaustion of an internal queue or mechanism unless the external contract justifies that equivalence.
+
 Use the equivalent of:
 
 ```bash
@@ -56,5 +62,8 @@ Production uses GitHub Actions with Azure OIDC and the repository delivery path.
 - `.github/` — validation and delivery; follow `.github/AGENTS.md`.
 
 Use `autonomous-pr-delivery` for repository changes, `github-cli-devops` for live GitHub/configuration work, `azure-cli-devops` for Azure/Bicep work, `azure-observability-diagnostics` for runtime failures, `production-rollback` for applicable bounded Delivery v2 recovery, `project-memory-maintainer` for durable operational changes, and `closed-loop-learning` for significant or recurring failures.
+Use `semantic-falsification` proportionally for new or materially changed user-visible behavior, provider/pagination
+or completeness logic, mutations, runtime/deployment semantics, and strong statuses such as `complete`, `verified`,
+or `successful`; typo-only, formatting, and behavior-neutral changes do not require the critic phase.
 
 Project memory stores current durable facts, decisions, and active blockers—not workflow chronology, run IDs, copied logs, acceptance ledgers, or secrets. Query live GitHub, Azure, and runtime state whenever a claim depends on current state.

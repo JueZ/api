@@ -1800,9 +1800,10 @@ components:
             type: string
         snapshotComplete:
           type: boolean
+          description: True when the selected sort's persisted traversal frontier is exhausted without a resource-limit stop.
         complete:
           type: boolean
-          description: True only when the persisted Reddit traversal frontier is exhausted without a resource-limit stop.
+          description: Whole-thread coverage claim. Currently false because a single selected sort cannot establish provider-wide completeness; use snapshotComplete for selected-sort traversal.
         stoppedReason:
           type: string
           enum:

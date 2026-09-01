@@ -23,6 +23,7 @@ export const SCORER_IDS = Object.freeze([
   'ci-script-indirection',
   'bring-singular-add-item',
   'delivery-evidence-truthfulness',
+  'semantic-falsification',
   'fixture-text-repair',
   'workflow-safety-repair',
 ]);

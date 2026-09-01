@@ -1257,7 +1257,12 @@ function coverageForSnapshot(
     (comment) => comment.author === '[deleted]' || comment.body === '[deleted]' || comment.body === '[removed]',
   ).length;
   const unavailable = snapshot.unavailableCommentIds.length + snapshot.unavailableBranches;
-  const complete = snapshot.sourceExhausted && !snapshot.resourceLimitReached;
+  const knownRemaining = Math.max(0, snapshot.reportedTotal - retrievedUnique - unavailable);
+  const snapshotComplete = snapshot.sourceExhausted && !snapshot.resourceLimitReached;
+  // Exhausting one sort's known frontier proves traversal completion for that view, not whole-thread coverage.
+  // num_comments is imperfect provider evidence, so even equality cannot justify provider-wide `complete` while the
+  // crawler has sampled only one sort. Keep the stronger claim false until a cross-view strategy establishes it.
+  const complete = false;
   return {
     reportedTotal: snapshot.reportedTotal,
     retrievedUnique,
@@ -1265,13 +1270,13 @@ function coverageForSnapshot(
     deleted,
     unavailable,
     unavailableBranches: snapshot.unavailableBranches,
-    knownRemaining: Math.max(0, snapshot.reportedTotal - retrievedUnique - unavailable),
+    knownRemaining,
     cursorsRemaining,
     continuationsRemaining: snapshot.frontier.length,
     frontierRemaining: snapshot.frontier.length,
     sortsSampled: [snapshot.sort],
     complete,
-    snapshotComplete: complete,
+    snapshotComplete,
     ...(stoppedReason ? { stoppedReason } : {}),
     ...(snapshot.retryAfterSeconds !== undefined ? { retryAfterSeconds: snapshot.retryAfterSeconds } : {}),
   };

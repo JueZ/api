@@ -57,7 +57,7 @@ Exhaustive workflow:
 1. Use this only when the user explicitly asks for all/exhaustive comments, or when remaining comments from a bounded result materially matter.
 2. Call `postRedditThreadComments` with `post`, the requested `sort`, `includeBody: true`, a bounded `limit`/`maxBytes`, and a bounded `maxMoreChildrenRequests`.
 3. On every later request send the returned `cursor` without `post` or `sort`. The server owns Reddit MoreChildren and continue-thread traversal.
-4. Keep collecting pages until `coverage.complete` is true and `page.nextCursor` is null. A rate-limit or execution-budget stop is incomplete but retains progress.
+4. Keep collecting pages until `page.nextCursor` is null. Report `coverage.complete` truthfully: it can remain false after the selected sort's traversal ends when Reddit's reported total leaves an unexplained gap. A rate-limit or execution-budget stop is incomplete but retains progress.
 5. Treat `coverage.unavailable` as source-unretrievable work. Do not require retrieved comments to equal Reddit's reported comment count, and describe the final result as all retrievable comments.
 
 Specific sort requested:
