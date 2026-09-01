@@ -183,7 +183,7 @@ export class RedditThreadService {
     }
 
     let leaseId: string | undefined;
-    if (cursorInput && maxMoreChildrenRequests > 0 && stored.snapshot.frontier.length > 0) {
+    if (cursorInput && maxMoreChildrenRequests > 0 && !stored.snapshot.sourceExhausted) {
       const activeLease = stored.snapshot.crawlLease;
       if (activeLease && Date.parse(activeLease.expiresAt) > this.now()) throw new RedditSnapshotConflictError();
       leaseId = randomUUID();
@@ -219,11 +219,11 @@ export class RedditThreadService {
       throw new RedditCursorError('cursor offset is outside the persisted snapshot page range.');
     const page = pageRows(rows, offset, limit, maxBytes);
     const comments = page.rows;
-    const sourceComplete = stored.snapshot.sourceExhausted && !stored.snapshot.resourceLimitReached;
-    const hasMore = page.nextOffset < rows.length || !sourceComplete;
+    const snapshotTerminal = stored.snapshot.sourceExhausted || stored.snapshot.resourceLimitReached;
+    const hasMore = page.nextOffset < rows.length || !snapshotTerminal;
     const nextCursor = hasMore ? encodeRedditSnapshotCursor(stored.snapshot, page.nextOffset) : null;
     const coverage = coverageForSnapshot(stored.snapshot, Boolean(nextCursor), crawl.stoppedReason);
-    logRedditSnapshotProgress(stored.snapshot, crawl.requests, coverage.complete, startedAt, crawl.stoppedReason);
+    logRedditSnapshotProgress(stored.snapshot, crawl.requests, coverage, startedAt, crawl.stoppedReason);
     return {
       source: 'reddit',
       fetchedAt: new Date().toISOString(),
@@ -625,6 +625,7 @@ export class RedditThreadService {
     const comments = dedupeNormalizedComments(flattenNormalizedComments(tree.comments));
     const frontier = traversalWorkFromMore(tree.more, {
       postId: input.articleId,
+      sort,
       seenCommentIds: new Set(comments.map((comment) => comment.id.toLowerCase())),
     });
     const snapshot = createRedditThreadSnapshot({
@@ -676,7 +677,7 @@ export class RedditThreadService {
       return { changed, requests, stoppedReason: 'snapshot_resource_limit' };
     }
 
-    while (snapshot.frontier.length > 0) {
+    while (!snapshot.sourceExhausted) {
       if (snapshot.resourceLimitReached || snapshot.comments.length >= this.snapshotMaxComments) {
         snapshot.resourceLimitReached = true;
         snapshot.sourceExhausted = false;
@@ -710,6 +711,72 @@ export class RedditThreadService {
         break;
       }
 
+      if (snapshot.frontier.length === 0) {
+        const nextSort = snapshot.sortPlan[snapshot.sortIndex + 1];
+        if (!nextSort) {
+          snapshot.sourceExhausted = true;
+          changed = true;
+          break;
+        }
+        if (requests >= maxRequests) {
+          stoppedReason = 'execution_budget';
+          break;
+        }
+        if (isProviderExpansionBudgetExhausted(snapshot.redditRateLimit)) {
+          snapshot.retryAfterSeconds = rateLimitResetSeconds(snapshot.redditRateLimit);
+          stoppedReason = 'rate_limit';
+          break;
+        }
+        if (this.now() >= deadlineMs) {
+          stoppedReason = 'execution_budget';
+          break;
+        }
+        let seed;
+        try {
+          seed = await this.client.getJson<unknown>(commentsPath(snapshot.postId), commentsQuery(nextSort, 500), {
+            deadlineMs,
+            normalizedPostId: snapshot.postId,
+          });
+        } catch (error) {
+          if (error instanceof RedditRequestDeadlineError) {
+            stoppedReason = 'execution_budget';
+            break;
+          }
+          if (error instanceof RedditFetchError || error instanceof RedditUpstreamError) {
+            stoppedReason = 'upstream_retryable';
+            break;
+          }
+          throw error;
+        }
+        requests += 1;
+        snapshot.redditRateLimit = seed.rateLimit;
+        if (seed.status === 429) {
+          snapshot.retryAfterSeconds = rateLimitResetSeconds(seed.rateLimit);
+          stoppedReason = 'rate_limit';
+          break;
+        }
+        if (seed.status < 200 || seed.status >= 300) {
+          stoppedReason = 'upstream_retryable';
+          break;
+        }
+        const tree = normalizeInitialThread(snapshot.input, seed.body, { maxComments: this.snapshotMaxComments });
+        snapshot.activeSort = nextSort;
+        snapshot.sortIndex += 1;
+        snapshot.sortsSampled.push(nextSort);
+        snapshot.reportedTotal = Math.max(snapshot.reportedTotal, tree.post.numComments);
+        snapshot.post.numComments = snapshot.reportedTotal;
+        ingestSnapshotComments(
+          snapshot,
+          flattenNormalizedComments(tree.comments),
+          this.snapshotMaxComments,
+          this.snapshotMaxBytes,
+        );
+        enqueueTraversalWork(snapshot, tree.more);
+        if (tree.truncated) snapshot.resourceLimitReached = true;
+        changed = true;
+        continue;
+      }
+
       const work = snapshot.frontier[0];
       if (!work) break;
       if (work.kind === 'continue_thread' && !/^t1_[a-z0-9_]+$/i.test(work.parentId)) {
@@ -733,13 +800,13 @@ export class RedditThreadService {
                   children: work.children.join(','),
                   limit_children: 1,
                   raw_json: 1,
-                  sort: snapshot.sort,
+                  sort: snapshot.activeSort,
                 },
                 { deadlineMs },
               )
             : await this.client.getJson<unknown>(
                 commentsPath(snapshot.postId),
-                focusedCommentsQuery(snapshot.sort, work.parentId.replace(/^t1_/i, ''), 10, 500),
+                focusedCommentsQuery(snapshot.activeSort, work.parentId.replace(/^t1_/i, ''), 10, 500),
                 { deadlineMs, normalizedPostId: snapshot.postId },
               );
       } catch (error) {
@@ -815,6 +882,9 @@ export class RedditThreadService {
         }
         if (block.truncated) snapshot.resourceLimitReached = true;
       } else {
+        const branchSeenInAnotherSort = snapshot.processedFrontierKeys.some(
+          (key) => key.endsWith(`:continue:${work.parentId}`) && key !== work.key,
+        );
         const tree = normalizeInitialThread(snapshot.input, response.body, { maxComments: this.snapshotMaxComments });
         ingestSnapshotComments(
           snapshot,
@@ -825,18 +895,17 @@ export class RedditThreadService {
         finishTraversalWork(snapshot, work);
         enqueueTraversalWork(snapshot, tree.more);
         if (tree.truncated) snapshot.resourceLimitReached = true;
-        if (snapshot.comments.length === beforeComments && snapshot.frontier.length <= beforeFrontier - 1) {
+        if (
+          !branchSeenInAnotherSort &&
+          snapshot.comments.length === beforeComments &&
+          snapshot.frontier.length <= beforeFrontier - 1
+        ) {
           snapshot.unavailableBranches += 1;
           addSnapshotWarning(snapshot, 'A Reddit continue-thread branch returned no additional retrievable comments.');
         }
       }
     }
 
-    const exhausted = snapshot.frontier.length === 0 && !snapshot.resourceLimitReached;
-    if (snapshot.sourceExhausted !== exhausted) {
-      snapshot.sourceExhausted = exhausted;
-      changed = true;
-    }
     return { changed, requests, ...(stoppedReason ? { stoppedReason } : {}) };
   }
 
@@ -1046,6 +1115,7 @@ function traversalWorkFromMore(
   more: MorePlaceholder[],
   options: {
     postId: string;
+    sort: RedditSort;
     seenCommentIds: Set<string>;
     processedChildIds?: Set<string>;
     processedFrontierKeys?: Set<string>;
@@ -1066,7 +1136,7 @@ function traversalWorkFromMore(
   for (const placeholder of more) {
     const parentId = (placeholder.parentId || `t3_${options.postId}`).toLowerCase();
     if (placeholder.children.length === 0) {
-      const key = `continue:${parentId}`;
+      const key = `${options.sort}:continue:${parentId}`;
       if (!processedFrontierKeys.has(key) && !pendingKeys.has(key)) {
         const work: RedditTraversalWork = {
           kind: 'continue_thread',
@@ -1085,7 +1155,7 @@ function traversalWorkFromMore(
       (child) => /^[a-z0-9][a-z0-9_]{1,12}$/i.test(child) && !claimedChildren.has(child),
     );
     for (const batch of chunk(children, MORE_CHILDREN_BATCH_SIZE)) {
-      const key = `more:${parentId}:${batch.join(',')}`;
+      const key = `${options.sort}:more:${parentId}:${batch.join(',')}`;
       if (batch.length === 0 || processedFrontierKeys.has(key) || pendingKeys.has(key)) continue;
       const work: RedditTraversalWork = {
         kind: 'more_children',
@@ -1107,8 +1177,15 @@ function enqueueTraversalWork(snapshot: RedditThreadSnapshot, more: MorePlacehol
   snapshot.frontier.push(
     ...traversalWorkFromMore(more, {
       postId: snapshot.postId,
-      seenCommentIds: new Set(snapshot.seenCommentIds),
-      processedChildIds: new Set(snapshot.processedChildIds),
+      sort: snapshot.activeSort,
+      // A globally seen comment can still identify a provider branch whose descendants
+      // were not materialized in this sort, so only per-sort processed work suppresses it.
+      seenCommentIds: new Set(),
+      processedChildIds: new Set(
+        snapshot.processedChildIds
+          .filter((value) => value.startsWith(`${snapshot.activeSort}:`))
+          .map((value) => value.slice(snapshot.activeSort.length + 1)),
+      ),
       processedFrontierKeys: new Set(snapshot.processedFrontierKeys),
       pending: snapshot.frontier,
     }),
@@ -1126,7 +1203,7 @@ function finishTraversalWork(
     const processed = new Set(snapshot.processedChildIds);
     for (const child of work.children) {
       const normalized = child.toLowerCase();
-      if (!deferredChildIds.has(normalized)) processed.add(normalized);
+      if (!deferredChildIds.has(normalized)) processed.add(`${snapshot.activeSort}:${normalized}`);
     }
     snapshot.processedChildIds = [...processed];
   }
@@ -1144,7 +1221,8 @@ function addUnavailableComment(snapshot: RedditThreadSnapshot, commentId: string
   const normalized = commentId.toLowerCase();
   if (snapshot.seenCommentIds.includes(normalized)) return;
   if (!snapshot.unavailableCommentIds.includes(normalized)) snapshot.unavailableCommentIds.push(normalized);
-  if (!snapshot.processedChildIds.includes(normalized)) snapshot.processedChildIds.push(normalized);
+  const processedIdentity = `${snapshot.activeSort}:${normalized}`;
+  if (!snapshot.processedChildIds.includes(processedIdentity)) snapshot.processedChildIds.push(processedIdentity);
 }
 
 function ingestSnapshotComments(
@@ -1257,7 +1335,17 @@ function coverageForSnapshot(
     (comment) => comment.author === '[deleted]' || comment.body === '[deleted]' || comment.body === '[removed]',
   ).length;
   const unavailable = snapshot.unavailableCommentIds.length + snapshot.unavailableBranches;
-  const complete = snapshot.sourceExhausted && !snapshot.resourceLimitReached;
+  const reportedGap = Math.max(0, snapshot.reportedTotal - retrievedUnique - unavailable);
+  const traversalComplete = snapshot.frontier.length === 0;
+  const snapshotComplete = snapshot.sourceExhausted || snapshot.resourceLimitReached;
+  const coverageComplete = snapshot.sourceExhausted && !snapshot.resourceLimitReached && reportedGap === 0;
+  const coverageStatus: RedditCoverageDto['coverageStatus'] = snapshot.resourceLimitReached
+    ? 'resource_limited'
+    : !snapshot.sourceExhausted
+      ? 'in_progress'
+      : reportedGap > 0
+        ? 'exhausted_with_reported_gap'
+        : 'complete';
   return {
     reportedTotal: snapshot.reportedTotal,
     retrievedUnique,
@@ -1265,13 +1353,17 @@ function coverageForSnapshot(
     deleted,
     unavailable,
     unavailableBranches: snapshot.unavailableBranches,
-    knownRemaining: Math.max(0, snapshot.reportedTotal - retrievedUnique - unavailable),
+    knownRemaining: reportedGap,
+    reportedGap,
     cursorsRemaining,
     continuationsRemaining: snapshot.frontier.length,
     frontierRemaining: snapshot.frontier.length,
-    sortsSampled: [snapshot.sort],
-    complete,
-    snapshotComplete: complete,
+    sortsSampled: snapshot.sortsSampled,
+    traversalComplete,
+    coverageComplete,
+    coverageStatus,
+    complete: coverageComplete,
+    snapshotComplete,
     ...(stoppedReason ? { stoppedReason } : {}),
     ...(snapshot.retryAfterSeconds !== undefined ? { retryAfterSeconds: snapshot.retryAfterSeconds } : {}),
   };
@@ -1294,17 +1386,24 @@ function addSnapshotWarning(snapshot: RedditThreadSnapshot, warning: string): bo
 function logRedditSnapshotProgress(
   snapshot: RedditThreadSnapshot,
   upstreamRequests: number,
-  complete: boolean,
+  coverage: RedditCoverageDto,
   startedAt: number,
   stoppedReason?: RedditCoverageDto['stoppedReason'],
 ): void {
   console.info('reddit_thread_snapshot_progress', {
     snapshot_id: snapshot.snapshotId,
     post_id: snapshot.postId,
+    active_sort: snapshot.activeSort,
+    sorts_sampled: snapshot.sortsSampled,
+    sorts_remaining: snapshot.sortPlan.length - snapshot.sortIndex - 1,
     retrieved_unique: snapshot.seenCommentIds.length,
     frontier_size: snapshot.frontier.length,
+    reported_total: snapshot.reportedTotal,
+    reported_gap: coverage.reportedGap,
+    coverage_status: coverage.coverageStatus,
+    snapshot_complete: coverage.snapshotComplete,
+    coverage_complete: coverage.coverageComplete,
     upstream_requests: upstreamRequests,
-    complete,
     stopped_reason: stoppedReason,
     elapsed_ms: Date.now() - startedAt,
   });
@@ -1545,12 +1644,16 @@ function coverageFor(
     unavailable: 0,
     unavailableBranches: 0,
     knownRemaining,
+    reportedGap: knownRemaining,
     cursorsRemaining: !complete,
     continuationsRemaining,
     frontierRemaining: more.length,
     sortsSampled: [sort],
-    complete: complete && continuationsRemaining === 0,
-    snapshotComplete: complete && continuationsRemaining === 0,
+    traversalComplete: complete && continuationsRemaining === 0,
+    coverageComplete: false,
+    coverageStatus: 'in_progress',
+    complete: false,
+    snapshotComplete: false,
   };
 }
 

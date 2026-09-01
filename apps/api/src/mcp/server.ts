@@ -75,7 +75,7 @@ const maxCategoryScan = 200;
 const serverInstructions = [
   'This private API catalogue MCP server exposes Reddit and Willhaben reads plus controlled Bring reads and item additions for the authenticated operator.',
   'For ordinary Reddit analysis, call reddit_get_thread_overview first; call reddit_get_thread only when a bounded set of comment bodies is needed.',
-  'When the user explicitly asks for all or exhaustive Reddit comments, or a bounded result reports remaining comments that matter, call reddit_get_thread_page. Provide postId or url only on the first call, then repeatedly provide only its returned cursor until coverage.complete is true and nextCursor is absent.',
+  'When the user explicitly asks for all or exhaustive Reddit comments, or a bounded result reports remaining comments that matter, call reddit_get_thread_page. Provide postId or url only on the first call, then repeatedly provide only its returned cursor until nextCursor is absent, then inspect coverage.coverageStatus.',
   'For a specific Willhaben URL or ad ID, call wlh_get_offer directly. For broad Willhaben searches, call wlh_find_category if the category is unclear, then wlh_search, then wlh_get_offer for selected listings.',
   'Bring item additions require bring.write, an explicit writable list UUID, and a caller-generated operation UUID. Complete and remove mutations remain unavailable over MCP.',
   'When a tool fails, read structuredContent.repairable_problem before retrying. Follow caller_instruction and retry_policy.same_request exactly; do not invent arguments after dependency or internal failures.',
@@ -256,10 +256,14 @@ const redditThreadPageOutputSchema = z.object({
     unavailable: z.number(),
     unavailableBranches: z.number(),
     knownRemaining: z.number(),
+    reportedGap: z.number(),
     cursorsRemaining: z.boolean(),
     continuationsRemaining: z.number(),
     frontierRemaining: z.number(),
     sortsSampled: z.array(redditSortSchema),
+    traversalComplete: z.boolean(),
+    coverageComplete: z.boolean(),
+    coverageStatus: z.enum(['in_progress', 'complete', 'exhausted_with_reported_gap', 'resource_limited']),
     complete: z.boolean(),
     snapshotComplete: z.boolean(),
     stoppedReason: z
@@ -535,7 +539,7 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     {
       title: 'Reddit exhaustive thread page',
       description:
-        'Use this when the user explicitly asks for all or exhaustive Reddit comments, or when a bounded Reddit result reports remaining comments that matter. On the first call provide exactly one of postId or url and optionally sort. On every subsequent call provide only the returned cursor (plus pageSize or maxMoreChildrenRequests if desired). Continue until coverage.complete is true and nextCursor is null. The server owns traversal, MoreChildren expansion, deduplication, retry, and durable resume state.',
+        'Use this when the user explicitly asks for all or exhaustive Reddit comments, or when a bounded Reddit result reports remaining comments that matter. On the first call provide exactly one of postId or url and optionally sort. On every subsequent call provide only the returned cursor (plus pageSize or maxMoreChildrenRequests if desired). Continue while nextCursor is non-null; when it is null, inspect coverageStatus for complete, exhausted_with_reported_gap, or resource_limited. The server owns traversal, MoreChildren expansion, deduplication, retry, and durable resume state.',
       inputSchema: {
         postId: redditPostIdSchema.optional(),
         url: redditUrlSchema.optional(),
