@@ -57,8 +57,8 @@ Exhaustive workflow:
 1. Use this only when the user explicitly asks for all/exhaustive comments, or when remaining comments from a bounded result materially matter.
 2. Call `postRedditThreadComments` with `post`, the requested `sort`, `includeBody: true`, a bounded `limit`/`maxBytes`, and a bounded `maxMoreChildrenRequests`.
 3. On every later request send the returned `cursor` without `post` or `sort`. The server owns Reddit MoreChildren and continue-thread traversal.
-4. Keep collecting pages until `coverage.complete` is true and `page.nextCursor` is null. A rate-limit or execution-budget stop is incomplete but retains progress.
-5. Treat `coverage.unavailable` as source-unretrievable work. Do not require retrieved comments to equal Reddit's reported comment count, and describe the final result as all retrievable comments.
+4. Keep collecting pages while `page.nextCursor` is non-null. The durable server crawl traverses the preferred sort, then deterministic `old`, `new`, `controversial`, `top`, and `confidence` provider views with duplicates removed.
+5. When the cursor becomes null, inspect `coverage.coverageStatus`: `complete` has no unexplained provider-reported gap, `exhausted_with_reported_gap` truthfully terminates after every configured view despite a remaining signal, and `resource_limited` is terminal because a safety cap stopped discovery. Reddit's `num_comments` is a changing provider signal, not a guaranteed count of comments retrievable by this API principal.
 
 Specific sort requested:
 Use the requested sort. Otherwise prefer `confidence` first; optionally sample `top` or `controversial` for deep analysis when it would add distinct signal.
