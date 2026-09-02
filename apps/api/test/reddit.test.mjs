@@ -1064,7 +1064,7 @@ test('RedditThreadService pages comment skeletons with filters and byte controls
   assert.equal(initialListingCalls, 1);
 });
 
-test('RedditThreadService keeps whole-submission coverage in progress after one sort exhausts', async () => {
+test('RedditThreadService keeps coverage in progress until every supported sort, including qa, is exhausted', async () => {
   const sampled = [];
   const service = new RedditThreadService({
     config,
@@ -1076,7 +1076,7 @@ test('RedditThreadService keeps whole-submission coverage in progress after one 
       if (url.pathname === '/comments/abc123') {
         const sort = url.searchParams.get('sort');
         sampled.push(sort);
-        const ids = sort === 'old' ? ['shared', 'old-only'] : ['shared'];
+        const ids = sort === 'old' ? ['shared', 'old-only'] : sort === 'qa' ? ['shared', 'qa-only'] : ['shared'];
         return jsonResponse(sortCoverageFixture(ids, 3), 200, rateHeaders(sampled.length));
       }
       throw new Error(`unexpected URL ${String(input)}`);
@@ -1097,10 +1097,11 @@ test('RedditThreadService keeps whole-submission coverage in progress after one 
 
   const terminal = await service.fetchThreadComments({
     cursor: confidenceOnly.page.nextCursor,
+    limit: 1,
     includeDeleted: true,
     maxMoreChildrenRequests: 10,
   });
-  assert.equal(terminal.coverage.retrievedUnique, 2);
+  assert.equal(terminal.coverage.retrievedUnique, 3);
   assert.deepEqual(
     confidenceOnly.comments.map((comment) => comment.id),
     ['shared'],
@@ -1109,12 +1110,26 @@ test('RedditThreadService keeps whole-submission coverage in progress after one 
     terminal.comments.map((comment) => comment.id),
     ['old-only'],
   );
-  assert.deepEqual(terminal.coverage.sortsSampled, ['confidence', 'old', 'new', 'controversial', 'top']);
+  assert.deepEqual(terminal.coverage.sortsSampled, ['confidence', 'old', 'new', 'controversial', 'top', 'qa']);
+  assert.equal(new Set(terminal.coverage.sortsSampled).size, terminal.coverage.sortsSampled.length);
   assert.equal(terminal.coverage.snapshotComplete, true);
-  assert.equal(terminal.coverage.coverageComplete, false);
-  assert.equal(terminal.coverage.coverageStatus, 'exhausted_with_reported_gap');
-  assert.equal(terminal.coverage.reportedGap, 1);
-  assert.equal(terminal.page.nextCursor, null);
+  assert.equal(terminal.coverage.coverageComplete, true);
+  assert.equal(terminal.coverage.coverageStatus, 'complete');
+  assert.equal(terminal.coverage.reportedGap, 0);
+  assert.ok(terminal.page.nextCursor, 'terminal snapshot can still have stored comments to page');
+
+  const finalPage = await service.fetchThreadComments({
+    cursor: terminal.page.nextCursor,
+    limit: 10,
+    includeDeleted: true,
+    maxMoreChildrenRequests: 0,
+  });
+  assert.equal(finalPage.coverage.snapshotComplete, true);
+  assert.deepEqual(
+    finalPage.comments.map((comment) => comment.id),
+    ['qa-only'],
+  );
+  assert.equal(finalPage.page.nextCursor, null);
 });
 
 test('RedditThreadService truthfully converges a production-style 500 to 541 crawl with a reported gap', async () => {
@@ -1165,6 +1180,44 @@ test('RedditThreadService truthfully converges a production-style 500 to 541 cra
   assert.equal(terminal.coverage.coverageComplete, false);
   assert.equal(terminal.coverage.coverageStatus, 'exhausted_with_reported_gap');
   assert.equal(terminal.page.nextCursor, null);
+});
+
+test('RedditThreadService does not use unresolved branch estimates to erase the reported gap', async () => {
+  const service = new RedditThreadService({
+    config,
+    snapshotStore: new InMemoryRedditThreadSnapshotStore(),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('/api/v1/access_token'))
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (url.pathname === '/comments/abc123' && url.searchParams.has('comment')) {
+        return jsonResponse({ message: 'gone' }, 404, rateHeaders(2));
+      }
+      if (url.pathname === '/comments/abc123') {
+        const fixture = sortCoverageFixture(['shared'], 10);
+        if (url.searchParams.get('sort') === 'confidence') {
+          fixture[1].data.children.push(exhaustiveMoreThing('t1_shared', [], 1, 7));
+        }
+        return jsonResponse(fixture, 200, rateHeaders(1));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThreadComments({
+    post: 'abc123',
+    sort: 'confidence',
+    includeDeleted: true,
+    maxMoreChildrenRequests: 10,
+  });
+
+  assert.equal(response.coverage.retrievedUnique, 1);
+  assert.equal(response.coverage.unavailable, 0);
+  assert.equal(response.coverage.unavailableBranches, 7);
+  assert.equal(response.coverage.reportedGap, 9);
+  assert.equal(response.coverage.knownRemaining, response.coverage.reportedGap);
+  assert.equal(response.coverage.coverageStatus, 'exhausted_with_reported_gap');
+  assert.equal(response.coverage.complete, false);
 });
 
 test('RedditThreadService exhaustively traverses a 2500-comment supplied frontier without duplicates', async () => {
@@ -1253,7 +1306,7 @@ test('RedditThreadService exhaustively traverses a 2500-comment supplied frontie
   assert.equal(response.coverage.complete, false);
   assert.equal(response.coverage.coverageStatus, 'exhausted_with_reported_gap');
   assert.equal(response.coverage.knownRemaining, response.coverage.reportedTotal - expectedIds.length);
-  assert.equal(initialListingCalls, 5);
+  assert.equal(initialListingCalls, 6);
   assert.equal(maximumConcurrentMoreRequests, 1);
   assert.ok(calls > 10, 'small per-call expansion budget should require multiple resumptions');
 });
@@ -1273,6 +1326,7 @@ test('RedditThreadService checkpoints an execution-budget stop and resumes it', 
         return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
       if (url.pathname === '/comments/abc123') {
         initialListingCalls += 1;
+        if (url.searchParams.get('sort') === 'qa') return jsonResponse(sortCoverageFixture(['c1', 'c2', 'c3'], 3));
         return jsonResponse(threadFixture(), 200, rateHeaders(1));
       }
       if (url.pathname === '/api/morechildren') {
@@ -1298,15 +1352,23 @@ test('RedditThreadService checkpoints an execution-budget stop and resumes it', 
   assert.equal(first.coverage.stoppedReason, 'execution_budget');
   assert.ok(first.page.nextCursor);
 
-  const resumed = await service.fetchThreadComments({
+  let resumed = await service.fetchThreadComments({
     cursor: first.page.nextCursor,
     limit: 10,
     includeDeleted: true,
     maxMoreChildrenRequests: 10,
   });
+  while (!resumed.coverage.snapshotComplete) {
+    resumed = await service.fetchThreadComments({
+      cursor: resumed.page.nextCursor,
+      limit: 10,
+      includeDeleted: true,
+      maxMoreChildrenRequests: 10,
+    });
+  }
   assert.equal(resumed.coverage.complete, true);
   assert.equal(resumed.coverage.frontierRemaining, 0);
-  assert.equal(initialListingCalls, 5);
+  assert.equal(initialListingCalls, 6);
 });
 
 test('RedditThreadService snapshot lease prevents concurrent expansion across service instances', async () => {
@@ -1421,18 +1483,29 @@ test('RedditThreadService marks a vanished MoreChildren branch unavailable witho
       const url = new URL(String(input));
       if (url.pathname.includes('/api/v1/access_token'))
         return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
-      if (url.pathname === '/comments/abc123') return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      if (url.pathname === '/comments/abc123') {
+        if (url.searchParams.get('sort') === 'qa') return jsonResponse(sortCoverageFixture(['c1', 'c2'], 3));
+        return jsonResponse(threadFixture(), 200, rateHeaders(1));
+      }
       if (url.pathname === '/api/morechildren') return jsonResponse({ message: 'gone' }, 404, rateHeaders(2));
       throw new Error(`unexpected URL ${String(input)}`);
     },
   });
 
-  const response = await service.fetchThreadComments({
+  let response = await service.fetchThreadComments({
     post: 'abc123',
     limit: 10,
     includeDeleted: true,
     maxMoreChildrenRequests: 10,
   });
+  while (!response.coverage.snapshotComplete) {
+    response = await service.fetchThreadComments({
+      cursor: response.page.nextCursor,
+      limit: 10,
+      includeDeleted: true,
+      maxMoreChildrenRequests: 10,
+    });
+  }
   assert.equal(response.coverage.unavailable, 1);
   assert.equal(response.coverage.frontierRemaining, 0);
   assert.equal(response.coverage.complete, true);

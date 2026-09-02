@@ -195,7 +195,11 @@ export function createRedditThreadSnapshot(args: {
 }
 
 export function redditCoverageSortPlan(requested: RedditSort): RedditSort[] {
-  return [...new Set<RedditSort>([requested, 'old', 'new', 'controversial', 'top', 'confidence'])];
+  // Every Reddit listing is bounded and ordered differently. Even a view that adds no
+  // comments can expose different MoreChildren work, so exhaust each supported view.
+  // qa is last because it is usually highly overlapping, but it is still a distinct
+  // provider discovery view and cannot safely be assumed redundant.
+  return [...new Set<RedditSort>([requested, 'old', 'new', 'controversial', 'top', 'confidence', 'qa'])];
 }
 
 interface RedditCursorPayload {
