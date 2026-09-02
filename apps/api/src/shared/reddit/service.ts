@@ -1334,7 +1334,10 @@ function coverageForSnapshot(
   const deleted = snapshot.comments.filter(
     (comment) => comment.author === '[deleted]' || comment.body === '[deleted]' || comment.body === '[removed]',
   ).length;
-  const unavailable = snapshot.unavailableCommentIds.length + snapshot.unavailableBranches;
+  // Only concrete comment IDs can reconcile Reddit's comment count. A failed
+  // continue-thread branch is useful diagnostic evidence, but its `count` is not a
+  // reliable set of distinct comment IDs and must not make the arithmetic gap vanish.
+  const unavailable = snapshot.unavailableCommentIds.length;
   const reportedGap = Math.max(0, snapshot.reportedTotal - retrievedUnique - unavailable);
   const traversalComplete = snapshot.frontier.length === 0;
   const snapshotComplete = snapshot.sourceExhausted || snapshot.resourceLimitReached;

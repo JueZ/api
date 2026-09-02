@@ -539,7 +539,7 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     {
       title: 'Reddit exhaustive thread page',
       description:
-        'Use this when the user explicitly asks for all or exhaustive Reddit comments, or when a bounded Reddit result reports remaining comments that matter. On the first call provide exactly one of postId or url and optionally sort. On every subsequent call provide only the returned cursor (plus pageSize or maxMoreChildrenRequests if desired). Continue while nextCursor is non-null; when it is null, inspect coverageStatus for complete, exhausted_with_reported_gap, or resource_limited. The server owns traversal, MoreChildren expansion, deduplication, retry, and durable resume state.',
+        'Use this when the user explicitly asks for all or exhaustive Reddit comments, or when a bounded Reddit result reports remaining comments that matter. This is best-effort exhaustive retrieval: it traverses publicly reachable comment paths and all supported discovery sorts, but Reddit does not guarantee that num_comments objects are publicly retrievable. On the first call provide exactly one of postId or url and optionally sort. On every subsequent call provide only the returned cursor (plus pageSize or maxMoreChildrenRequests if desired). Continue while nextCursor is non-null; when it is null, inspect coverageStatus for complete, exhausted_with_reported_gap, or resource_limited. The server owns traversal, MoreChildren expansion, deduplication, retry, and durable resume state.',
       inputSchema: {
         postId: redditPostIdSchema.optional(),
         url: redditUrlSchema.optional(),

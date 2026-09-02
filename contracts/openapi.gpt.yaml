@@ -1784,14 +1784,16 @@ components:
           type: integer
         unavailable:
           type: integer
+          description: Distinct known comment IDs that Reddit did not return from a requested expansion.
         unavailableBranches:
           type: integer
+          description: Provider-reported size of inaccessible or empty continue-thread branches; diagnostic only and not subtracted from reportedGap because these are not concrete comment IDs.
         knownRemaining:
           type: integer
           description: Backward-compatible alias for reportedGap; Reddit does not guarantee this many comments are retrievable.
         reportedGap:
           type: integer
-          description: Provider-reported total minus unique retrieved and explicitly unavailable comments.
+          description: Maximum of zero and provider-reported total minus unique retrieved comments and distinct unavailable comment IDs. This is an arithmetic signal against a moving, potentially stale Reddit counter, not a queue size or retrievability guarantee.
         cursorsRemaining:
           type: boolean
         continuationsRemaining:
@@ -1800,11 +1802,12 @@ components:
           type: integer
         sortsSampled:
           type: array
+          description: Distinct Reddit discovery views seeded so far. Terminal exhaustive traversal samples the requested sort, old, new, controversial, top, confidence, and qa, with duplicates removed.
           items:
             type: string
         traversalComplete:
           type: boolean
-          description: True when the active Reddit sort frontier is empty; other planned sorts may remain.
+          description: True when the active Reddit sort frontier is empty; other planned sorts may remain, so this can be true while coverageStatus is in_progress.
         coverageComplete:
           type: boolean
           description: True only after all configured sorts are exhausted with no unexplained reported gap.
@@ -1813,7 +1816,7 @@ components:
           enum: [in_progress, complete, exhausted_with_reported_gap, resource_limited]
         snapshotComplete:
           type: boolean
-          description: True when the durable crawl is terminal and no server-planned discovery work remains.
+          description: True when Reddit discovery into the durable snapshot is terminal (all planned views exhausted or a resource cap reached). Stored comments can still remain to be paged, so page.nextCursor can be non-null.
         complete:
           type: boolean
           description: Backward-compatible alias for coverageComplete.
