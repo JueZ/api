@@ -689,6 +689,14 @@ export class RedditThreadService {
         stoppedReason = 'snapshot_resource_limit';
         break;
       }
+      // Exhausting the final known frontier is a local state transition. Do it
+      // before enforcing network budgets so the request that consumes the last
+      // Reddit work item can also finalize the snapshot.
+      if (snapshot.frontier.length === 0 && !hasUntriedCoverageSort(snapshot)) {
+        snapshot.sourceExhausted = true;
+        changed = true;
+        break;
+      }
       if (requests >= maxRequests) {
         changed =
           addSnapshotWarning(snapshot, 'Per-call Reddit expansion request budget reached; resume with nextCursor.') ||
@@ -713,11 +721,7 @@ export class RedditThreadService {
 
       if (snapshot.frontier.length === 0) {
         const nextSort = snapshot.sortPlan[snapshot.sortIndex + 1];
-        if (!nextSort) {
-          snapshot.sourceExhausted = true;
-          changed = true;
-          break;
-        }
+        if (!nextSort) break;
         if (requests >= maxRequests) {
           stoppedReason = 'execution_budget';
           break;
@@ -1340,6 +1344,7 @@ function coverageForSnapshot(
   const unavailable = snapshot.unavailableCommentIds.length;
   const reportedGap = Math.max(0, snapshot.reportedTotal - retrievedUnique - unavailable);
   const traversalComplete = snapshot.frontier.length === 0;
+  const continuationsRemaining = snapshot.frontier.filter((work) => work.kind === 'continue_thread').length;
   const snapshotComplete = snapshot.sourceExhausted || snapshot.resourceLimitReached;
   const coverageComplete = snapshot.sourceExhausted && !snapshot.resourceLimitReached && reportedGap === 0;
   const coverageStatus: RedditCoverageDto['coverageStatus'] = snapshot.resourceLimitReached
@@ -1359,7 +1364,7 @@ function coverageForSnapshot(
     knownRemaining: reportedGap,
     reportedGap,
     cursorsRemaining,
-    continuationsRemaining: snapshot.frontier.length,
+    continuationsRemaining,
     frontierRemaining: snapshot.frontier.length,
     sortsSampled: snapshot.sortsSampled,
     traversalComplete,
@@ -1370,6 +1375,10 @@ function coverageForSnapshot(
     ...(stoppedReason ? { stoppedReason } : {}),
     ...(snapshot.retryAfterSeconds !== undefined ? { retryAfterSeconds: snapshot.retryAfterSeconds } : {}),
   };
+}
+
+function hasUntriedCoverageSort(snapshot: RedditThreadSnapshot): boolean {
+  return snapshot.sortIndex + 1 < snapshot.sortPlan.length;
 }
 
 function rateLimitResetSeconds(rateLimit: RedditRateLimit): number | undefined {

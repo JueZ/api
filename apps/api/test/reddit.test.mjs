@@ -16,6 +16,7 @@ import {
   RedditSnapshotConflictError,
   RedditSnapshotExpiredError,
   RedditSnapshotNotFoundError,
+  redditCoverageSortPlan,
 } from '../dist/shared/reddit/snapshot.js';
 import { RedditPrincipalConcurrencyError, withRedditPrincipalConcurrency } from '../dist/shared/reddit/concurrency.js';
 import {
@@ -1132,6 +1133,170 @@ test('RedditThreadService keeps coverage in progress until every supported sort,
   assert.equal(finalPage.page.nextCursor, null);
 });
 
+test('Reddit exhaustive sort plans start with the requested sort and never contain duplicates', () => {
+  assert.deepEqual(redditCoverageSortPlan('confidence'), ['confidence', 'old', 'new', 'controversial', 'top', 'qa']);
+  assert.deepEqual(redditCoverageSortPlan('qa'), ['qa', 'old', 'new', 'controversial', 'top', 'confidence']);
+  assert.deepEqual(redditCoverageSortPlan('new'), ['new', 'old', 'controversial', 'top', 'confidence', 'qa']);
+  for (const requested of ['confidence', 'qa', 'new']) {
+    const plan = redditCoverageSortPlan(requested);
+    assert.equal(new Set(plan).size, plan.length);
+  }
+});
+
+test('RedditThreadService keeps the highest reported total observed across a live multi-sort snapshot', async () => {
+  const totals = new Map([
+    ['confidence', 769],
+    ['old', 770],
+    ['new', 768],
+  ]);
+  const service = new RedditThreadService({
+    config,
+    snapshotStore: new InMemoryRedditThreadSnapshotStore(),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('/api/v1/access_token'))
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (url.pathname === '/comments/abc123') {
+        const sort = url.searchParams.get('sort');
+        return jsonResponse(sortCoverageFixture(['shared'], totals.get(sort) ?? 767), 200, rateHeaders(1));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThreadComments({
+    post: 'abc123',
+    sort: 'confidence',
+    includeDeleted: true,
+    maxMoreChildrenRequests: 10,
+  });
+
+  assert.equal(response.coverage.reportedTotal, 770);
+  assert.equal(response.post.numComments, 770);
+  assert.equal(response.coverage.reportedGap, 769);
+  assert.equal(response.coverage.coverageStatus, 'exhausted_with_reported_gap');
+});
+
+test('RedditThreadService clears a deduplicated unavailable ID when a later sort retrieves it', async () => {
+  let moreCalls = 0;
+  const service = new RedditThreadService({
+    config,
+    snapshotStore: new InMemoryRedditThreadSnapshotStore(),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('/api/v1/access_token'))
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (url.pathname === '/api/morechildren') {
+        moreCalls += 1;
+        return jsonResponse({ message: 'gone' }, 404, rateHeaders(2));
+      }
+      if (url.pathname === '/comments/abc123') {
+        const sort = url.searchParams.get('sort');
+        const fixture = sortCoverageFixture(sort === 'old' ? ['shared', 'restored'] : ['shared'], 2);
+        if (sort === 'confidence') {
+          fixture[1].data.children.push(exhaustiveMoreThing('t3_abc123', ['restored'], 0, 1));
+        }
+        return jsonResponse(fixture, 200, rateHeaders(1));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThreadComments({
+    post: 'abc123',
+    sort: 'confidence',
+    includeDeleted: true,
+    maxMoreChildrenRequests: 10,
+  });
+
+  assert.equal(moreCalls, 1);
+  assert.equal(response.coverage.retrievedUnique, 2);
+  assert.equal(response.coverage.unavailable, 0);
+  assert.equal(response.coverage.reportedGap, 0);
+  assert.equal(response.coverage.coverageStatus, 'complete');
+});
+
+test('RedditThreadService finalizes locally when the last allowed request drains the final sort frontier', async () => {
+  let redditRequests = 0;
+  const service = new RedditThreadService({
+    config,
+    snapshotStore: new InMemoryRedditThreadSnapshotStore(),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('/api/v1/access_token'))
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      redditRequests += 1;
+      if (url.pathname === '/api/morechildren') {
+        return jsonResponse(moreWithNextFixture('last'), 200, rateHeaders(redditRequests));
+      }
+      if (url.pathname === '/comments/abc123') {
+        const fixture = sortCoverageFixture(['shared'], 3);
+        if (url.searchParams.get('sort') === 'confidence') {
+          fixture[1].data.children.push(exhaustiveMoreThing('t3_abc123', ['last'], 0, 1));
+        }
+        return jsonResponse(fixture, 200, rateHeaders(redditRequests));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThreadComments({
+    post: 'abc123',
+    sort: 'qa',
+    includeDeleted: true,
+    maxMoreChildrenRequests: 6,
+  });
+
+  assert.equal(redditRequests, 7, 'one initial listing plus exactly six budgeted traversal requests');
+  assert.deepEqual(response.coverage.sortsSampled, ['qa', 'old', 'new', 'controversial', 'top', 'confidence']);
+  assert.equal(response.coverage.frontierRemaining, 0);
+  assert.equal(response.coverage.continuationsRemaining, 0);
+  assert.equal(response.coverage.traversalComplete, true);
+  assert.equal(response.snapshot.sourceExhausted, true);
+  assert.equal(response.coverage.snapshotComplete, true);
+  assert.equal(response.coverage.coverageStatus, 'exhausted_with_reported_gap');
+  assert.equal(response.coverage.stoppedReason, undefined);
+});
+
+test('RedditThreadService remains resumable when the last allowed request discovers more work', async () => {
+  const service = new RedditThreadService({
+    config,
+    snapshotStore: new InMemoryRedditThreadSnapshotStore(),
+    fetchImpl: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('/api/v1/access_token'))
+        return jsonResponse({ ['access_' + 'token']: 'mock-token', expires_in: 3600 });
+      if (url.pathname === '/api/morechildren') {
+        return jsonResponse(moreWithNextFixture('last', 'still_pending'), 200, rateHeaders(7));
+      }
+      if (url.pathname === '/comments/abc123') {
+        const fixture = sortCoverageFixture(['shared'], 3);
+        if (url.searchParams.get('sort') === 'confidence') {
+          fixture[1].data.children.push(exhaustiveMoreThing('t3_abc123', ['last'], 0, 1));
+        }
+        return jsonResponse(fixture, 200, rateHeaders(1));
+      }
+      throw new Error(`unexpected URL ${String(input)}`);
+    },
+  });
+
+  const response = await service.fetchThreadComments({
+    post: 'abc123',
+    sort: 'qa',
+    includeDeleted: true,
+    maxMoreChildrenRequests: 6,
+  });
+
+  assert.equal(response.coverage.frontierRemaining, 1);
+  assert.equal(response.coverage.continuationsRemaining, 0);
+  assert.equal(response.coverage.traversalComplete, false);
+  assert.equal(response.snapshot.sourceExhausted, false);
+  assert.equal(response.coverage.snapshotComplete, false);
+  assert.equal(response.coverage.coverageStatus, 'in_progress');
+  assert.equal(response.coverage.stoppedReason, 'execution_budget');
+  assert.ok(response.page.nextCursor);
+});
+
 test('RedditThreadService truthfully converges a production-style 500 to 541 crawl with a reported gap', async () => {
   const confidenceIds = Array.from({ length: 500 }, (_, index) => `c${String(index + 1).padStart(4, '0')}`);
   const oldIds = Array.from({ length: 92 }, (_, index) => `c${String(index + 450).padStart(4, '0')}`);
@@ -1475,7 +1640,8 @@ test('RedditThreadService retains progress and retry guidance after Reddit 429',
   assert.equal(initialListingCalls, 1);
 });
 
-test('RedditThreadService marks a vanished MoreChildren branch unavailable without looping', async () => {
+test('RedditThreadService counts the same unavailable child ID only once across sorts', async () => {
+  let moreCalls = 0;
   const service = new RedditThreadService({
     config,
     snapshotStore: new InMemoryRedditThreadSnapshotStore(),
@@ -1487,7 +1653,10 @@ test('RedditThreadService marks a vanished MoreChildren branch unavailable witho
         if (url.searchParams.get('sort') === 'qa') return jsonResponse(sortCoverageFixture(['c1', 'c2'], 3));
         return jsonResponse(threadFixture(), 200, rateHeaders(1));
       }
-      if (url.pathname === '/api/morechildren') return jsonResponse({ message: 'gone' }, 404, rateHeaders(2));
+      if (url.pathname === '/api/morechildren') {
+        moreCalls += 1;
+        return jsonResponse({ message: 'gone' }, 404, rateHeaders(2));
+      }
       throw new Error(`unexpected URL ${String(input)}`);
     },
   });
@@ -1506,6 +1675,7 @@ test('RedditThreadService marks a vanished MoreChildren branch unavailable witho
       maxMoreChildrenRequests: 10,
     });
   }
+  assert.ok(moreCalls > 1, 'the same unavailable child was requested from overlapping sorts');
   assert.equal(response.coverage.unavailable, 1);
   assert.equal(response.coverage.frontierRemaining, 0);
   assert.equal(response.coverage.complete, true);

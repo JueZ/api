@@ -1798,8 +1798,10 @@ components:
           type: boolean
         continuationsRemaining:
           type: integer
+          description: Number of pending deep continue-thread work items in the durable frontier.
         frontierRemaining:
           type: integer
+          description: Total number of pending MoreChildren and continue-thread work items in the durable frontier.
         sortsSampled:
           type: array
           description: Distinct Reddit discovery views seeded so far. Terminal exhaustive traversal samples the requested sort, old, new, controversial, top, confidence, and qa, with duplicates removed.
@@ -2155,6 +2157,7 @@ components:
           format: date-time
         sourceExhausted:
           type: boolean
+          description: True when the traversal frontier is empty and every required discovery sort has been sampled. Local finalization does not consume Reddit request budget.
       required:
         - version
         - id
