@@ -11,7 +11,8 @@ const baseEnv = {
   AUTH_ENABLED: 'true',
   DEPLOYED_ENVIRONMENT_NAME: 'test',
   OIDC_AUDIENCE: 'api://catalogue-test',
-  OIDC_REQUIRED_SCOPES: 'catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove',
+  OIDC_REQUIRED_SCOPES:
+    'catalogue.read,reddit.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove',
   OIDC_ALLOWED_OBJECT_IDS: 'allowed-oid',
   OIDC_ALLOWED_SUBJECTS: '',
   OIDC_ALLOWED_APP_OBJECT_IDS: '',
@@ -61,6 +62,7 @@ test('protected resource metadata is generated from safe environment values', as
           'api://catalogue-test/catalogue.read',
           'api://catalogue-test/reddit.read',
           'api://catalogue-test/wlh.read',
+          'api://catalogue-test/weather.read',
           'api://catalogue-test/bring.read',
           'api://catalogue-test/bring.write',
           'api://catalogue-test/bring.complete',

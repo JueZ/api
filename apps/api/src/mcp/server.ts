@@ -42,6 +42,9 @@ import type { BringApplicationPort } from '../application/operations/bring/appli
 import { createBringApplication } from '../infrastructure/composition/bring.js';
 import type { AuthenticatedPrincipal } from '../application/authorization/types.js';
 import { registerBringTools } from './tools/bring.js';
+import { registerWeatherTool } from './tools/weather.js';
+import { createWeatherService } from '../infrastructure/composition/weather.js';
+import type { WeatherService } from '../shared/weather/service.js';
 import { buildDiagnosticCapsule } from '../shared/errors/diagnosticCapsule.js';
 import {
   buildDeterministicRepairableProblem,
@@ -53,6 +56,7 @@ export interface McpGatewayServices {
   reddit: Pick<RedditThreadService, 'fetchThread' | 'fetchThreadOverview' | 'fetchThreadComments'>;
   wlh: Pick<WlhService, 'search' | 'offer' | 'topCategories' | 'children'>;
   bring: BringApplicationPort;
+  weather: WeatherService;
 }
 
 export interface McpRequestOptions {
@@ -73,11 +77,12 @@ const maxCategoryMatches = 10;
 const maxCategoryScan = 200;
 
 const serverInstructions = [
-  'This private API catalogue MCP server exposes Reddit and Willhaben reads plus controlled Bring reads and item additions for the authenticated operator.',
+  'This private API catalogue MCP server exposes Reddit, Willhaben, and Google Weather reads plus controlled Bring reads and item additions for the authenticated operator.',
   'For ordinary Reddit analysis, call reddit_get_thread_overview first; call reddit_get_thread only when a bounded set of comment bodies is needed.',
   'When the user explicitly asks for all or exhaustive Reddit comments, or a bounded result reports remaining comments that matter, call reddit_get_thread_page. Provide postId or url only on the first call, then repeatedly provide only its returned cursor until nextCursor is absent, then inspect coverage.coverageStatus.',
   'For a specific Willhaben URL or ad ID, call wlh_get_offer directly. For broad Willhaben searches, call wlh_find_category if the category is unclear, then wlh_search, then wlh_get_offer for selected listings.',
   'Bring item additions require bring.write, an explicit writable list UUID, and a caller-generated operation UUID. Complete and remove mutations remain unavailable over MCP.',
+  'For current weather, rain, temperature, wind, hourly outdoor planning, or forecasts up to 10 days, call weather_get_forecast. Omit coordinates for “here” or “near me” so openai/userLocation can be used. Use current for now, hourly for a particular hour or part of day, daily for multi-day outlooks, and overview only when both hourly detail and a multi-day outlook help. If location_required is returned, ask for a location or coordinates or suggest enabling location sharing; never guess.',
   'When a tool fails, read structuredContent.repairable_problem before retrying. Follow caller_instruction and retry_policy.same_request exactly; do not invent arguments after dependency or internal failures.',
   'Do not use these tools for unrelated requests, account management, list sharing/deletion, notifications, or arbitrary upstream calls.',
 ].join('\n');
@@ -482,6 +487,17 @@ export function createPrivateMcpServer(options: McpRequestOptions): McpServer {
     securityForOperations: createProtectedToolSecurityForOperations,
     run: (operationId, action) => withToolErrorBoundary('bring', operationId, action),
     invalidArgument: (operationId, message) => invalidArgument(operationId, message),
+  });
+
+  registerWeatherTool(server, {
+    weather: services.weather,
+    requirePrincipal: () => requirePrincipal(OPERATION_IDS.weatherForecast),
+    security: withToolStatus(
+      createProtectedToolSecurity(OPERATION_IDS.weatherForecast),
+      'Checking weather…',
+      'Weather ready',
+    ),
+    failure: (kind, message, status, retryAfterMs) => weatherToolFailure(kind, message, status, retryAfterMs),
   });
 
   server.registerTool(
@@ -1354,6 +1370,65 @@ function defaultServices(context: InvocationContext): McpGatewayServices {
     bring: createBringApplication({
       warn: (message, details) => context.warn(message, details),
     }),
+    weather: createWeatherService(),
+  };
+}
+
+function weatherToolFailure(kind: string, message: string, status = 502, retryAfterMs?: number): CallToolResult {
+  const locationRequired = kind === 'location_required';
+  const invalid = kind === 'invalid_arguments';
+  const retryable = ['rate_limit', 'dependency', 'timeout'].includes(kind);
+  const classification: RepairableErrorClassification =
+    locationRequired || invalid
+      ? 'caller_contract_violation'
+      : kind === 'contract'
+        ? 'version_skew'
+        : kind === 'authorization' || kind === 'disabled'
+          ? 'authorization_context_mismatch'
+          : retryable
+            ? 'dependency_failure'
+            : 'service_bug_likely';
+  const instruction = locationRequired
+    ? "Ask the user to provide a location or coordinates, or enable ChatGPT location sharing. Do not guess the user's location."
+    : invalid
+      ? 'Correct the coordinate arguments and retry. Do not guess coordinates.'
+      : retryable
+        ? 'Retry later with the same request. Do not invent alternate coordinates.'
+        : 'Report the diagnostic ID to the service owner; changing coordinates will not repair this failure.';
+  const problem = buildDeterministicRepairableProblem({
+    operationId: OPERATION_IDS.weatherForecast,
+    status: invalid ? 400 : status,
+    endpoint: '/mcp#weather.forecast',
+    classification,
+    title: locationRequired ? 'Weather location is required' : 'Weather request failed',
+    detail: message,
+    callerInstruction: instruction,
+    safeDebugSummary: `Deterministic weather failure; kind=${kind}; no coordinates, URL, credentials, headers, or upstream body included.`,
+    repairable: locationRequired || invalid || retryable,
+    retryPolicy: {
+      can_retry: locationRequired || invalid || retryable,
+      same_request: retryable,
+      ...(retryAfterMs === undefined ? {} : { retry_after_ms: retryAfterMs }),
+      idempotency_required: false,
+    },
+    repairPlan: [
+      {
+        action:
+          locationRequired || invalid
+            ? 'retry_with_modified_request'
+            : retryable
+              ? 'retry_later'
+              : 'report_diagnostic_id',
+        reason: instruction,
+      },
+    ],
+    confidence: 0.95,
+    analysisMode: 'deterministic',
+  });
+  return {
+    isError: true,
+    structuredContent: { error: kind, source: 'weather', repairable_problem: problem },
+    content: [{ type: 'text', text: `${message} ${instruction} Diagnostic ID: ${problem.diagnostic_id}` }],
   };
 }
 

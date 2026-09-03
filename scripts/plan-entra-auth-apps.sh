@@ -14,7 +14,7 @@ Create manually or adapt these Azure CLI commands after reviewing tenant policy:
 
 2. Set an Application ID URI, commonly api://<api-app-client-id>.
 
-3. Expose delegated scopes catalogue.read, reddit.read, wlh.read, bring.read,
+3. Expose delegated scopes catalogue.read, reddit.read, wlh.read, weather.read, bring.read,
    bring.write, bring.complete, and bring.remove on the API app registration.
    The Azure CLI command requires the API app object ID and an oauth2PermissionScopes
    manifest patch. Review generated GUIDs and tenant policy before applying.

@@ -18,6 +18,7 @@
 | wlh.search | wlh | read | wlh.read | user, service | local, test, prod | not-applicable | not-applicable | POST /api/wlh/search | wlh_search |
 | wlh.offer | wlh | read | wlh.read | user, service | local, test, prod | not-applicable | not-applicable | GET /api/wlh/offers/{adId} | wlh_get_offer |
 | wlh.offer-images | wlh | read | wlh.read | user, service | local, test, prod | not-applicable | not-applicable | GET /api/wlh/offers/{adId}/images | — |
+| weather.forecast | weather | read | weather.read | user, service | local, test, prod | not-applicable | not-applicable | — | weather_get_forecast |
 | bring.list-lists | bring | read | bring.read | user, service | local, test, prod | not-applicable | not-applicable | GET /api/bring/lists | bring_list_lists |
 | bring.get-items | bring | read | bring.read | user, service | local, test, prod | not-applicable | not-applicable | GET /api/bring/lists/{listUuid}/items | bring_get_items |
 | bring.add-items | bring | write | bring.write | user, service | local, prod | required | not-applicable | POST /api/bring/lists/{listUuid}/items | bring_add_item |

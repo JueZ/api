@@ -251,6 +251,7 @@ jobs:
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
+      GOOGLE_WEATHER_API_KEY: ${{ secrets.GOOGLE_WEATHER_API_KEY }}
       BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
       BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
       BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
@@ -343,6 +344,7 @@ jobs:
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
+      GOOGLE_WEATHER_API_KEY: ${{ secrets.GOOGLE_WEATHER_API_KEY }}
       BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
       BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
       BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
@@ -426,6 +428,7 @@ jobs:
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
+      GOOGLE_WEATHER_API_KEY: ${{ secrets.GOOGLE_WEATHER_API_KEY }}
       BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
       BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
       BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}

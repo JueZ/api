@@ -5,6 +5,7 @@ const KNOWN_PERMISSIONS = new Set([
   'catalogue.read',
   'reddit.read',
   'wlh.read',
+  'weather.read',
   'bring.read',
   'bring.write',
   'bring.complete',
