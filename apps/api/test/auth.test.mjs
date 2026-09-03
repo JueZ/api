@@ -328,7 +328,7 @@ test('app-only service role aliases normalize to canonical operation permissions
       idtyp: 'app',
       azp: 'service-client-id',
       azpacr: '2',
-      roles: ['catalogue.service.read', 'reddit.service.read', 'catalogue.read'],
+      roles: ['catalogue.service.read', 'reddit.service.read', 'weather.service.read', 'catalogue.read'],
     },
     {},
     {
@@ -338,7 +338,23 @@ test('app-only service role aliases normalize to canonical operation permissions
   );
 
   assert.equal(result.ok, true);
-  assert.deepEqual(result.user.roles, ['catalogue.read', 'reddit.read']);
+  assert.deepEqual(result.user.roles, ['catalogue.read', 'reddit.read', 'weather.read']);
+
+  const weather = await authorize(
+    'Bearer valid-token',
+    {
+      sub: 'service-subject',
+      oid: 'allowed-app-oid',
+      tid: 'tenant-id',
+      idtyp: 'app',
+      azp: 'service-client-id',
+      azpacr: '2',
+      roles: ['weather.service.read'],
+    },
+    {},
+    { permission: 'weather.read', allowedTokenTypes: ['service'] },
+  );
+  assert.equal(weather.ok, true);
 });
 
 test('service role aliases do not grant delegated user permissions', async () => {

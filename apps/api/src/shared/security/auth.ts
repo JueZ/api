@@ -48,6 +48,7 @@ const discoveryCache = new Map<string, { promise: Promise<string>; expiresAt: nu
 const serviceRolePermissionAliases = new Map<string, Permission>([
   ['catalogue.service.read', 'catalogue.read'],
   ['reddit.service.read', 'reddit.read'],
+  ['weather.service.read', 'weather.read'],
 ]);
 const defaultAuthorizationPolicy = {
   permission: 'catalogue.read',
