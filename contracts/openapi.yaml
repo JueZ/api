@@ -1384,13 +1384,29 @@ paths:
               schema:
                 $ref: "#/components/schemas/YouTubeTranscriptResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Request failed with HTTP 400.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          description: Request failed with HTTP 401.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: Request failed with HTTP 403.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
         "413":
-          $ref: "#/components/responses/PayloadTooLarge"
+          description: Request failed with HTTP 413.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/RepairableProblem"
         "422":
           description: Native transcript unavailable.
           content:
