@@ -24,6 +24,9 @@ param wlhCategoryBlobContainer string = 'wlh-reference'
 @description('Private Reddit resumable thread-snapshot container.')
 param redditSnapshotContainer string = 'reddit-snapshots'
 
+@description('Private YouTube transcript snapshot container.')
+param youtubeTranscriptContainer string = 'youtube-transcripts'
+
 @description('Private Bring session container.')
 param bringSessionCacheContainer string = 'bring-private'
 
@@ -47,6 +50,7 @@ module privateStorage './modules/private-storage.bicep' = {
     deploymentPrincipalObjectId: deploymentPrincipalObjectId
     wlhCategoryBlobContainer: wlhCategoryBlobContainer
     redditSnapshotContainer: redditSnapshotContainer
+    youtubeTranscriptContainer: youtubeTranscriptContainer
     bringSessionCacheContainer: bringSessionCacheContainer
     bringMutationContainer: bringMutationContainer
     bringAuditContainer: bringAuditContainer
