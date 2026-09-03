@@ -152,9 +152,9 @@ export function buildExpectedRuntimeSettings(env = process.env) {
     WLH_STORAGE_ACCOUNT_NAME: privateStorage,
     WLH_CATEGORY_BLOB_CONTAINER: value(env, 'WLH_CATEGORY_BLOB_CONTAINER', 'wlh-reference'),
     WLH_CATEGORY_BLOB_NAME: value(env, 'WLH_CATEGORY_BLOB_NAME', 'categories-marketplace.v1.json.gz'),
-    WEATHER_ENABLED: value(env, 'WEATHER_ENABLED', 'false'),
+    WEATHER_ENABLED: value(env, 'WEATHER_ENABLED', 'true'),
     GOOGLE_WEATHER_API_KEY:
-      value(env, 'WEATHER_ENABLED', 'false') === 'true'
+      value(env, 'WEATHER_ENABLED', 'true') === 'true'
         ? requiredValue(env, 'EXPECTED_GOOGLE_WEATHER_API_KEY_REFERENCE')
         : '',
     BRING_ENABLED: value(env, 'BRING_ENABLED', 'false'),

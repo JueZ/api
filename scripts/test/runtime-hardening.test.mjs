@@ -61,6 +61,8 @@ const runtimeSettingsEnv = {
   EXPECTED_REDDIT_CLIENT_SECRET_REFERENCE:
     '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/reddit-client-secret/version)',
   EXPECTED_WLH_BASE_URL_REFERENCE: '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/wlh-base-url/version)',
+  EXPECTED_GOOGLE_WEATHER_API_KEY_REFERENCE:
+    '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/google-weather-api-key/version)',
   EXPECTED_BRING_CLIENT_API_KEY_REFERENCE:
     '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/bring-client-api-key/version)',
   EXPECTED_BRING_EMAIL_REFERENCE: '@Microsoft.KeyVault(SecretUri=https://vault.test/secrets/bring-email/version)',
@@ -81,6 +83,7 @@ test('deployed runtime policy accepts the complete managed key set without readi
   assert.deepEqual(validateArmRuntimeSettingsResponse({ properties }, runtimeSettingsEnv), []);
   assert.equal(settings.OPENAI_API_KEY, runtimeSettingsEnv.EXPECTED_OPENAI_API_KEY_REFERENCE);
   assert.equal(settings.REDDIT_CLIENT_SECRET, runtimeSettingsEnv.EXPECTED_REDDIT_CLIENT_SECRET_REFERENCE);
+  assert.equal(settings.GOOGLE_WEATHER_API_KEY, runtimeSettingsEnv.EXPECTED_GOOGLE_WEATHER_API_KEY_REFERENCE);
 });
 
 test('deployed runtime policy rejects security drift, missing managed keys, and unmanaged settings', () => {
@@ -102,11 +105,13 @@ test('deployed runtime policy rejects plaintext, wrong-version, and wrong-observ
   const properties = buildExpectedRuntimeSettings(runtimeSettingsEnv);
   properties.APPLICATIONINSIGHTS_CONNECTION_STRING = 'InstrumentationKey=wrong-component';
   properties.REDDIT_CLIENT_SECRET = 'plaintext-secret';
+  properties.GOOGLE_WEATHER_API_KEY = 'plaintext-weather-key';
   properties.OPENAI_API_KEY = '@Microsoft.KeyVault(SecretUri=https://other.test/secrets/openai-api-key/version)';
 
   const errors = validateArmRuntimeSettingsResponse({ properties }, runtimeSettingsEnv);
   assert.ok(errors.some((error) => error.endsWith('APPLICATIONINSIGHTS_CONNECTION_STRING')));
   assert.ok(errors.some((error) => error.endsWith('REDDIT_CLIENT_SECRET')));
+  assert.ok(errors.some((error) => error.endsWith('GOOGLE_WEATHER_API_KEY')));
   assert.ok(errors.some((error) => error.endsWith('OPENAI_API_KEY')));
 });
 
@@ -127,6 +132,12 @@ test('deployed runtime policy requires expected metadata and enforces an empty d
     () => buildExpectedRuntimeSettings(missingDelegatedClientAllowlist),
     /OIDC_ALLOWED_DELEGATED_CLIENT_IDS is required/,
   );
+});
+
+test('disabled weather requires an empty app setting rather than a secret reference', () => {
+  const settings = buildExpectedRuntimeSettings({ ...runtimeSettingsEnv, WEATHER_ENABLED: 'false' });
+  assert.equal(settings.WEATHER_ENABLED, 'false');
+  assert.equal(settings.GOOGLE_WEATHER_API_KEY, '');
 });
 
 test('telemetry KQL sanitizes smoke run IDs', () => {

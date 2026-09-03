@@ -127,6 +127,7 @@ test('Azure Functions loads the fail-closed composition root before registering 
   for (const setting of [
     ['AUTH_ENABLED', 'authEnabled'],
     ['AUTH_DEBUG', 'authDebug'],
+    ['WEATHER_ENABLED', 'weatherEnabled'],
     ['BRING_ENABLED', 'bringEnabled'],
     ['BRING_ADD_ENABLED', 'validatedBringAddEnabled'],
     ['BRING_DESTRUCTIVE_ENABLED', 'validatedBringDestructiveEnabled'],
@@ -150,6 +151,26 @@ test('Azure Functions loads the fail-closed composition root before registering 
     assert.match(infrastructure, new RegExp(`contains\\(existingFunctionAppSettings, '${setting}'\\)`));
   }
   assert.doesNotMatch(infrastructure, /siteConfig:\s*\{[\s\S]*?appSettings:\s*\[/);
+});
+
+test('weather secret follows the environment-isolated GitHub to Key Vault reference chain', () => {
+  const delivery = readFileSync(new URL('../../.github/workflows/delivery-v2.yml', import.meta.url), 'utf8');
+  const deployment = readFileSync(new URL('../../.github/workflows/deploy-environment.yml', import.meta.url), 'utf8');
+  const infrastructure = readFileSync(new URL('../../infra/main.bicep', import.meta.url), 'utf8');
+  assert.match(delivery, /GOOGLE_WEATHER_API_KEY: \$\{\{ secrets\.GOOGLE_WEATHER_API_KEY \}\}/);
+  assert.match(deployment, /GOOGLE_WEATHER_API_KEY:\s*\n\s*description:[\s\S]*?required: false/);
+  assert.match(deployment, /GOOGLE_WEATHER_API_KEY: \$\{\{ secrets\.GOOGLE_WEATHER_API_KEY \}\}/);
+  assert.match(deployment, /EXPECTED_GOOGLE_WEATHER_API_KEY_REFERENCE="\$expected_google_weather_reference"/);
+  assert.match(
+    infrastructure,
+    /@secure\(\)\s*@description\('Google Weather API key;[\s\S]*?param googleWeatherApiKey string/,
+  );
+  assert.match(infrastructure, /name: 'google-weather-api-key'/);
+  assert.match(
+    infrastructure,
+    /GOOGLE_WEATHER_API_KEY: weatherEnabled \? '@Microsoft\.KeyVault\(SecretUri=\$\{googleWeatherApiKeySecret!\.properties\.secretUriWithVersion\}\)' : ''/,
+  );
+  assert.doesNotMatch(deployment, /GOOGLE_WEATHER_API_KEY[^\n]*GITHUB_OUTPUT|echo[^\n]*GOOGLE_WEATHER_API_KEY/);
 });
 
 test('staged deployment Bicep preserves its required output contract', () => {

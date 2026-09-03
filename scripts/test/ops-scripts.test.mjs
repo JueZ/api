@@ -536,3 +536,72 @@ test('smoke and release ledger modules import without operational side effects',
   assert.equal(fetchCalls, 0);
   assert.equal(existsSync(join(tempDir, 'release-ledger.json')), false);
 });
+
+test('authenticated weather smoke uses explicit coordinates without exposing provider credentials', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      const path = new URL(String(url)).pathname;
+      calls.push({ path, options });
+      if (path === '/health')
+        return new Response(
+          JSON.stringify({ status: 'ok', environmentName: 'test', deployedCommitSha: 'e'.repeat(40) }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      if (path === '/api/hello')
+        return new Response(JSON.stringify({ authenticated: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      if (path === '/mcp')
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 'weather-smoke',
+            result: {
+              structuredContent: {
+                source: 'google-weather-api',
+                mode: 'current',
+                location: { coordinateSource: 'explicit' },
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      if (path === '/api/reddit/thread')
+        return new Response(JSON.stringify({ source: 'reddit' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      throw new Error(`unexpected path ${path}`);
+    };
+    const { result, exitCode } = await runAuthenticatedSmoke({
+      env: {
+        API_BASE_URL: 'https://api.example.test',
+        AUTH_ACCESS_TOKEN: 'opaque-smoke-token',
+        ENVIRONMENT_NAME: 'test',
+        EXPECTED_DEPLOYED_COMMIT_SHA: 'e'.repeat(40),
+        SMOKE_RUN_ID: 'weather-smoke',
+        WEATHER_SMOKE_ENABLED: 'true',
+      },
+    });
+    assert.equal(exitCode, 0);
+    assert.equal(
+      result.checks.some((check) => check.name === 'authenticated-weather-current' && check.status === 'passed'),
+      true,
+    );
+    const request = calls.find((call) => call.path === '/mcp');
+    const body = JSON.parse(request.options.body);
+    assert.deepEqual(body.params.arguments, {
+      mode: 'current',
+      latitude: 48.2082,
+      longitude: 16.3738,
+      languageCode: 'en',
+    });
+    assert.equal(JSON.stringify(result).includes('opaque-smoke-token'), false);
+    assert.equal(JSON.stringify(result).includes('GOOGLE_WEATHER_API_KEY'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
