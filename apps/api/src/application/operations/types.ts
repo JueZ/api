@@ -1,7 +1,7 @@
 import type * as z from 'zod/v4';
 import type { Permission, TokenType } from '../authorization/types.js';
 
-export type OperationProvider = 'local' | 'reddit' | 'wlh' | 'bring' | 'weather';
+export type OperationProvider = 'local' | 'reddit' | 'youtube' | 'wlh' | 'bring' | 'weather';
 export type OperationEffect = 'read' | 'write' | 'destructive';
 export type RuntimeEnvironment = 'local' | 'test' | 'prod';
 export type IdempotencyPolicy = 'required' | 'not-applicable';

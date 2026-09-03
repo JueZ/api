@@ -61,6 +61,7 @@ test('protected resource metadata is generated from safe environment values', as
         scopes_supported: [
           'api://catalogue-test/catalogue.read',
           'api://catalogue-test/reddit.read',
+          'api://catalogue-test/youtube.read',
           'api://catalogue-test/wlh.read',
           'api://catalogue-test/weather.read',
           'api://catalogue-test/bring.read',

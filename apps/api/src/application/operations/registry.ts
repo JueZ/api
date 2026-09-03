@@ -1,5 +1,6 @@
 import * as z from 'zod/v4';
 import type { OperationDefinition } from './types.js';
+import { youtubeTranscriptInputSchema, youtubeTranscriptOutputSchema } from '../../shared/youtube/types.js';
 
 const noInput = z.object({}).strict();
 const unknownOutput = z.unknown();
@@ -17,6 +18,7 @@ export const OPERATION_IDS = {
   redditThreadComments: 'reddit.thread-comments',
   redditCommentTree: 'reddit.comment-tree',
   redditCommentsBatch: 'reddit.comments-batch',
+  youtubeTranscript: 'youtube.transcript',
   wlhCategories: 'wlh.categories',
   wlhCategory: 'wlh.category',
   wlhFindCategory: 'wlh.find-category',
@@ -70,6 +72,21 @@ const definitions = [
   }),
   defineRead(OPERATION_IDS.redditCommentsBatch, 'reddit', 'reddit.read', {
     rest: { method: 'POST', path: '/api/reddit/comments/batch' },
+  }),
+  define({
+    id: OPERATION_IDS.youtubeTranscript,
+    provider: 'youtube',
+    effect: 'read',
+    requiredPermission: 'youtube.read',
+    allowedTokenTypes: userAndService,
+    allowedEnvironments: allEnvironments,
+    inputSchema: youtubeTranscriptInputSchema,
+    outputSchema: youtubeTranscriptOutputSchema,
+    idempotency: 'not-applicable',
+    confirmation: 'not-applicable',
+    audit: readAudit,
+    rest: { method: 'POST', path: '/api/youtube/transcript' },
+    mcp: { toolName: 'youtube_get_transcript' },
   }),
   defineRead(OPERATION_IDS.wlhCategories, 'wlh', 'wlh.read', {
     rest: { method: 'GET', path: '/api/wlh/categories/top' },

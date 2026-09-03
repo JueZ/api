@@ -15,7 +15,9 @@ const APPROVED_SECRETS = new Set([
   'BRING_PASSWORD',
   'OPENAI_API_KEY',
   'REDDIT_CLIENT_SECRET',
+  'SUPADATA_API_KEY',
   'WLH_BASE_URL',
+  'YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY',
 ]);
 const OPENAI_RUNTIME_WORKFLOWS = new Set(['delivery-v2.yml', 'deploy-environment.yml']);
 const REPOSITORY_DISPATCH_WORKFLOWS = new Set(['bring-readonly-canary.yml']);

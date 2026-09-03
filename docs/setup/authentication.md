@@ -9,6 +9,7 @@ Configure the API Application ID URI used by `OIDC_AUDIENCE`. Expose delegated s
 ```text
 catalogue.read
 reddit.read
+youtube.read
 wlh.read
 weather.read
 bring.read
@@ -54,7 +55,7 @@ DEPLOYED_ENVIRONMENT_NAME=<local|test|prod>
 AUTH_ENABLED=true
 OIDC_ISSUER=<exact issuer list>
 OIDC_AUDIENCE=api://<api-app-id>
-OIDC_REQUIRED_SCOPES=catalogue.read,reddit.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove
+OIDC_REQUIRED_SCOPES=catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove
 OIDC_ALLOWED_OBJECT_IDS=<operator object id>
 OIDC_ALLOWED_TENANTS=<allowed tenant ids>
 OIDC_ALLOWED_DELEGATED_CLIENT_IDS=<spa,gpt client ids>

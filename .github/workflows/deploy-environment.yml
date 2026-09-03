@@ -86,6 +86,12 @@ on:
       OPENAI_API_KEY:
         description: Optional OpenAI API key for Repairable Error Contract LLM-assisted diagnostics.
         required: false
+      SUPADATA_API_KEY:
+        description: Optional metered transcript provider key; required only when explicitly enabled.
+        required: false
+      YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY:
+        description: Optional YouTube cursor signing key; required only when explicitly enabled.
+        required: false
       WLH_BASE_URL:
         description: WLH upstream base URL.
         required: true
@@ -526,6 +532,9 @@ jobs:
           BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
           BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
           BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
+          SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+          YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY: ${{ secrets.YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY }}
+          YOUTUBE_TRANSCRIPT_ENABLED: ${{ vars.YOUTUBE_TRANSCRIPT_ENABLED || 'false' }}
         run: |
           set -euo pipefail
           : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
@@ -535,6 +544,10 @@ jobs:
           : "${BRING_CLIENT_API_KEY:?BRING_CLIENT_API_KEY environment secret is required for $ENVIRONMENT_NAME}"
           : "${BRING_CONFIRMATION_HMAC_KEY:?BRING_CONFIRMATION_HMAC_KEY environment secret is required for $ENVIRONMENT_NAME}"
           : "${BRING_MUTATION_ENCRYPTION_KEY:?BRING_MUTATION_ENCRYPTION_KEY environment secret is required for $ENVIRONMENT_NAME}"
+          if [ "$YOUTUBE_TRANSCRIPT_ENABLED" = "true" ]; then
+            : "${SUPADATA_API_KEY:?SUPADATA_API_KEY environment secret is required when YouTube transcripts are enabled}"
+            : "${YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY:?YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY environment secret is required when YouTube transcripts are enabled}"
+          fi
           openai_secret_name='OPENAI_API_KEY'
           openai_credential=""
           if [ "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" = "true" ]; then
@@ -574,7 +587,8 @@ jobs:
                 oidcIssuer="${OIDC_ISSUER:-}" \
                 oidcAudience="${OIDC_AUDIENCE:-}" \
                 oidcJwksUri="${OIDC_JWKS_URI:-}" \
-                oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-catalogue.read,reddit.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove}" \
+                oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove}" \
+                oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-catalogue.read,reddit.read,youtube.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove}" \
                 oidcAllowedObjectIds="${OIDC_ALLOWED_OBJECT_IDS:-}" \
                 oidcAllowedSubjects="${OIDC_ALLOWED_SUBJECTS:-}" \
                 oidcAllowedAppObjectIds="${OIDC_ALLOWED_APP_OBJECT_IDS:-}" \
@@ -594,6 +608,9 @@ jobs:
                 redditUserAgent="${REDDIT_USER_AGENT:-}" \
                 weatherEnabled="${WEATHER_ENABLED:-false}" \
                 googleWeatherApiKey="${GOOGLE_WEATHER_API_KEY:-}" \
+                youtubeTranscriptEnabled="$YOUTUBE_TRANSCRIPT_ENABLED" \
+                supadataApiKey="${SUPADATA_API_KEY:-}" \
+                youtubeTranscriptCursorHmacKey="${YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY:-}" \
                 bringBaseUrl="${BRING_BASE_URL:-https://api.getbring.com/rest/}" \
                 bringClientApiKey="$BRING_CLIENT_API_KEY" \
                 bringCountry="${BRING_COUNTRY:-AT}" \
@@ -880,6 +897,12 @@ jobs:
           if [ "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" = "true" ]; then
             expected_openai_reference="$(key_vault_reference openai-api-key)"
           fi
+          expected_supadata_reference=""
+          expected_youtube_cursor_reference=""
+          if [ "${YOUTUBE_TRANSCRIPT_ENABLED:-false}" = "true" ]; then
+            expected_supadata_reference="$(key_vault_reference supadata-api-key)"
+            expected_youtube_cursor_reference="$(key_vault_reference youtube-transcript-cursor-hmac-key)"
+          fi
 
           settings_url="https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$EFFECTIVE_FUNCTIONAPP_NAME/config/appsettings/list?api-version=2023-12-01"
           az rest \
@@ -897,6 +920,9 @@ jobs:
               EXPECTED_BRING_CONFIRMATION_HMAC_KEY_REFERENCE="$expected_bring_confirmation_reference" \
               EXPECTED_BRING_MUTATION_ENCRYPTION_KEY_REFERENCE="$expected_bring_encryption_reference" \
               EXPECTED_OPENAI_API_KEY_REFERENCE="$expected_openai_reference" \
+              EXPECTED_SUPADATA_API_KEY_REFERENCE="$expected_supadata_reference" \
+              EXPECTED_YOUTUBE_CURSOR_HMAC_KEY_REFERENCE="$expected_youtube_cursor_reference" \
+              YOUTUBE_TRANSCRIPT_ENABLED="${YOUTUBE_TRANSCRIPT_ENABLED:-false}" \
               node scripts/validate-deployed-runtime-settings.mjs --arm-response
       - name: Verify private WLH reference data is present
         if: ${{ inputs.deployFunctions }}
