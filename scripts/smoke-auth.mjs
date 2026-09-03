@@ -63,6 +63,7 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
   const shareSmokeRequired = env.REDDIT_SHARE_URL_SMOKE_REQUIRED === 'true';
   const shareSmokeUrl = env.REDDIT_SHARE_URL_SMOKE_URL || env.REDDIT_SHARE_URL_SMOKE || '';
   const shareSmokeExpectedPostId = env.REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID || '';
+  const weatherSmokeEnabled = env.WEATHER_SMOKE_ENABLED === 'true';
   const results = { status: 'passed', smokeRunId, apiBaseUrl, checks: [] };
   const headers = { 'X-Smoke-Run-Id': smokeRunId, Authorization: `Bearer ${token}` };
   const healthRetryAttempts = Number(env.AUTH_HEALTH_RETRY_ATTEMPTS || env.RUNTIME_HEALTH_RETRY_ATTEMPTS || 10);
@@ -135,6 +136,49 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
     assertEqual('authenticated /api/hello status', hello.response.status, 200);
     assertEqual('authenticated /api/hello authenticated flag', hello.json?.authenticated, true);
     record('authenticated-hello', 'passed');
+
+    if (weatherSmokeEnabled) {
+      const weather = await fetchJsonWithRetry(
+        `${apiBaseUrl}/mcp`,
+        {
+          method: 'POST',
+          headers: {
+            ...headers,
+            Accept: 'application/json, text/event-stream',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 'weather-smoke',
+            method: 'tools/call',
+            params: {
+              name: 'weather_get_forecast',
+              arguments: { mode: 'current', latitude: 48.2082, longitude: 16.3738, languageCode: 'en' },
+            },
+          }),
+        },
+        {
+          attempts: protectedRetryAttempts,
+          delayMs: protectedRetryDelayMs,
+          retryStatuses: new Set([404, 429, 502, 503, 504]),
+          label: 'authenticated weather MCP smoke',
+        },
+      );
+      assertEqual('authenticated weather MCP HTTP status', weather.response.status, 200);
+      assertEqual('authenticated weather MCP JSON-RPC version', weather.json?.jsonrpc, '2.0');
+      assertEqual(
+        'authenticated weather MCP source',
+        weather.json?.result?.structuredContent?.source,
+        'google-weather-api',
+      );
+      assertEqual('authenticated weather MCP mode', weather.json?.result?.structuredContent?.mode, 'current');
+      assertEqual(
+        'authenticated weather MCP coordinate source',
+        weather.json?.result?.structuredContent?.location?.coordinateSource,
+        'explicit',
+      );
+      record('authenticated-weather-current', 'passed');
+    }
 
     const reddit = await fetchJsonWithRetry(
       `${apiBaseUrl}/api/reddit/thread`,
