@@ -213,7 +213,10 @@ jobs:
       WLH_CATEGORY_VERSION: ${{ vars.WLH_CATEGORY_VERSION }}
       WLH_CATEGORY_BLOB_NAME: ${{ vars.WLH_CATEGORY_BLOB_NAME }}
       WLH_CATEGORY_BLOB_CONTAINER: ${{ vars.WLH_CATEGORY_BLOB_CONTAINER }}
-      WEATHER_ENABLED: ${{ vars.WEATHER_ENABLED }}
+      # Weather is enabled for protected environments by default because each
+      # GitHub Environment owns its own GOOGLE_WEATHER_API_KEY secret. An
+      # explicit environment variable can still disable it independently.
+      WEATHER_ENABLED: ${{ vars.WEATHER_ENABLED || 'true' }}
       BRING_BASE_URL: ${{ vars.BRING_BASE_URL }}
       BRING_COUNTRY: ${{ vars.BRING_COUNTRY }}
       BRING_ENABLED: ${{ vars.BRING_ENABLED }}
@@ -1374,6 +1377,7 @@ jobs:
         shell: bash
         env:
           REDDIT_SHARE_URL_SMOKE_REQUESTED: ${{ inputs.redditShareUrlSmokeEnabled && 'true' || 'false' }}
+          WEATHER_SMOKE_ENABLED: ${{ vars.WEATHER_ENABLED || 'true' }}
         run: |
           set -euo pipefail
           smoke_dir="$RUNNER_TEMP/smoke"

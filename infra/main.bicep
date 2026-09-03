@@ -711,7 +711,7 @@ module functionAppSettings './modules/function-app-settings.bicep' = {
       WLH_CATEGORY_BLOB_CONTAINER: wlhCategoryBlobContainer
       WLH_CATEGORY_BLOB_NAME: wlhCategoryBlobName
       WEATHER_ENABLED: toLower(string(weatherEnabled))
-      GOOGLE_WEATHER_API_KEY: weatherEnabled ? '@Microsoft.KeyVault(SecretUri=${googleWeatherApiKeySecret.properties.secretUriWithVersion})' : ''
+      GOOGLE_WEATHER_API_KEY: weatherEnabled ? '@Microsoft.KeyVault(SecretUri=${googleWeatherApiKeySecret!.properties.secretUriWithVersion})' : ''
       BRING_ENABLED: toLower(string(bringEnabled))
       BRING_ADD_ENABLED: toLower(string(validatedBringAddEnabled))
       BRING_DESTRUCTIVE_ENABLED: toLower(string(validatedBringDestructiveEnabled))
