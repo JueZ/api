@@ -108,6 +108,13 @@ param wlhCategoryBlobContainer string = 'wlh-reference'
 @description('WLH category-data blob name.')
 param wlhCategoryBlobName string = 'categories-marketplace.v1.json.gz'
 
+@description('Enable Google Weather API forecasts.')
+param weatherEnabled bool = false
+
+@secure()
+@description('Google Weather API key; stored in Key Vault and restricted to the Weather API.')
+param googleWeatherApiKey string = ''
+
 @description('Enable the unofficial Bring integration.')
 param bringEnabled bool = false
 
@@ -475,6 +482,12 @@ resource wlhBaseUrlSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   }
 }
 
+resource googleWeatherApiKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (weatherEnabled) {
+  parent: keyVault
+  name: 'google-weather-api-key'
+  properties: { value: googleWeatherApiKey }
+}
+
 resource bringClientApiKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: keyVault
   name: 'bring-client-api-key'
@@ -661,6 +674,8 @@ module functionAppSettings './modules/function-app-settings.bicep' = {
       WLH_STORAGE_ACCOUNT_NAME: privateStorage.name
       WLH_CATEGORY_BLOB_CONTAINER: wlhCategoryBlobContainer
       WLH_CATEGORY_BLOB_NAME: wlhCategoryBlobName
+      WEATHER_ENABLED: toLower(string(weatherEnabled))
+      GOOGLE_WEATHER_API_KEY: weatherEnabled ? '@Microsoft.KeyVault(SecretUri=${googleWeatherApiKeySecret.properties.secretUriWithVersion})' : ''
       BRING_ENABLED: toLower(string(bringEnabled))
       BRING_ADD_ENABLED: toLower(string(validatedBringAddEnabled))
       BRING_DESTRUCTIVE_ENABLED: toLower(string(validatedBringDestructiveEnabled))

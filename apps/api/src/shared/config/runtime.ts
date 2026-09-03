@@ -12,6 +12,7 @@ const canonicalPermissions = [
   'catalogue.read',
   'reddit.read',
   'wlh.read',
+  'weather.read',
   'bring.read',
   'bring.write',
   'bring.complete',
@@ -90,6 +91,12 @@ export function validateRuntimeSafety(env: NodeJS.ProcessEnv = process.env): str
     }
   }
   const bringEnabled = env['BRING_ENABLED'] === 'true';
+  if (!['true', 'false'].includes(env['WEATHER_ENABLED'] ?? '')) {
+    problems.push(`WEATHER_ENABLED must be explicitly true or false in ${environment}`);
+  }
+  if (env['WEATHER_ENABLED'] === 'true' && !env['GOOGLE_WEATHER_API_KEY']?.trim()) {
+    problems.push(`GOOGLE_WEATHER_API_KEY is required when WEATHER_ENABLED=true in ${environment}`);
+  }
   const bringWritesEnabled = env['BRING_ADD_ENABLED'] === 'true' || env['BRING_DESTRUCTIVE_ENABLED'] === 'true';
   if (bringWritesEnabled && !bringEnabled) {
     problems.push('Bring write flags require BRING_ENABLED=true');

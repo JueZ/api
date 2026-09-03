@@ -24,6 +24,7 @@ export const OPERATION_IDS = {
   wlhSearch: 'wlh.search',
   wlhOffer: 'wlh.offer',
   wlhOfferImages: 'wlh.offer-images',
+  weatherForecast: 'weather.forecast',
   bringListLists: 'bring.list-lists',
   bringGetItems: 'bring.get-items',
   bringAddItems: 'bring.add-items',
@@ -97,6 +98,9 @@ const definitions = [
   }),
   defineRead(OPERATION_IDS.wlhOfferImages, 'wlh', 'wlh.read', {
     rest: { method: 'GET', path: '/api/wlh/offers/{adId}/images' },
+  }),
+  defineRead(OPERATION_IDS.weatherForecast, 'weather', 'weather.read', {
+    mcp: { toolName: 'weather_get_forecast' },
   }),
   defineRead(OPERATION_IDS.bringListLists, 'bring', 'bring.read', {
     rest: { method: 'GET', path: '/api/bring/lists' },
@@ -197,8 +201,8 @@ function define<Input, Output>(definition: OperationDefinition<Input, Output>): 
 
 function defineRead(
   id: string,
-  provider: 'local' | 'reddit' | 'wlh' | 'bring',
-  requiredPermission: 'catalogue.read' | 'reddit.read' | 'wlh.read' | 'bring.read',
+  provider: 'local' | 'reddit' | 'wlh' | 'bring' | 'weather',
+  requiredPermission: 'catalogue.read' | 'reddit.read' | 'wlh.read' | 'bring.read' | 'weather.read',
   transports: Pick<OperationDefinition, 'rest' | 'mcp'>,
 ): OperationDefinition {
   return define({

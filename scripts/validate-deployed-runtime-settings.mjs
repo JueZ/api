@@ -37,6 +37,8 @@ export const requiredManagedSettingNames = [
   'WLH_STORAGE_ACCOUNT_NAME',
   'WLH_CATEGORY_BLOB_CONTAINER',
   'WLH_CATEGORY_BLOB_NAME',
+  'WEATHER_ENABLED',
+  'GOOGLE_WEATHER_API_KEY',
   'BRING_ENABLED',
   'BRING_ADD_ENABLED',
   'BRING_DESTRUCTIVE_ENABLED',
@@ -126,7 +128,7 @@ export function buildExpectedRuntimeSettings(env = process.env) {
     OIDC_REQUIRED_SCOPES: value(
       env,
       'OIDC_REQUIRED_SCOPES',
-      'catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove',
+      'catalogue.read,reddit.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove',
     ),
     OIDC_ALLOWED_OBJECT_IDS: value(env, 'OIDC_ALLOWED_OBJECT_IDS'),
     OIDC_ALLOWED_SUBJECTS: value(env, 'OIDC_ALLOWED_SUBJECTS'),
@@ -150,6 +152,11 @@ export function buildExpectedRuntimeSettings(env = process.env) {
     WLH_STORAGE_ACCOUNT_NAME: privateStorage,
     WLH_CATEGORY_BLOB_CONTAINER: value(env, 'WLH_CATEGORY_BLOB_CONTAINER', 'wlh-reference'),
     WLH_CATEGORY_BLOB_NAME: value(env, 'WLH_CATEGORY_BLOB_NAME', 'categories-marketplace.v1.json.gz'),
+    WEATHER_ENABLED: value(env, 'WEATHER_ENABLED', 'false'),
+    GOOGLE_WEATHER_API_KEY:
+      value(env, 'WEATHER_ENABLED', 'false') === 'true'
+        ? requiredValue(env, 'EXPECTED_GOOGLE_WEATHER_API_KEY_REFERENCE')
+        : '',
     BRING_ENABLED: value(env, 'BRING_ENABLED', 'false'),
     BRING_ADD_ENABLED: value(env, 'BRING_ADD_ENABLED', 'false'),
     BRING_DESTRUCTIVE_ENABLED: value(env, 'BRING_DESTRUCTIVE_ENABLED', 'false'),

@@ -89,6 +89,9 @@ on:
       WLH_BASE_URL:
         description: WLH upstream base URL.
         required: true
+      GOOGLE_WEATHER_API_KEY:
+        description: Optional Google Weather API key; required only when WEATHER_ENABLED is true.
+        required: false
       BRING_EMAIL:
         description: Bring! technical account email.
         required: true
@@ -204,6 +207,7 @@ jobs:
       WLH_CATEGORY_VERSION: ${{ vars.WLH_CATEGORY_VERSION }}
       WLH_CATEGORY_BLOB_NAME: ${{ vars.WLH_CATEGORY_BLOB_NAME }}
       WLH_CATEGORY_BLOB_CONTAINER: ${{ vars.WLH_CATEGORY_BLOB_CONTAINER }}
+      WEATHER_ENABLED: ${{ vars.WEATHER_ENABLED }}
       BRING_BASE_URL: ${{ vars.BRING_BASE_URL }}
       BRING_COUNTRY: ${{ vars.BRING_COUNTRY }}
       BRING_ENABLED: ${{ vars.BRING_ENABLED }}
@@ -516,6 +520,7 @@ jobs:
         env:
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_WEATHER_API_KEY: ${{ secrets.GOOGLE_WEATHER_API_KEY }}
           BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
           BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
           BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
@@ -524,6 +529,7 @@ jobs:
         run: |
           set -euo pipefail
           : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
+          if [ "${WEATHER_ENABLED:-false}" = "true" ]; then : "${GOOGLE_WEATHER_API_KEY:?GOOGLE_WEATHER_API_KEY is required when weather is enabled}"; fi
           : "${BRING_EMAIL:?BRING_EMAIL environment secret is required for $ENVIRONMENT_NAME}"
           : "${BRING_PASSWORD:?BRING_PASSWORD environment secret is required for $ENVIRONMENT_NAME}"
           : "${BRING_CLIENT_API_KEY:?BRING_CLIENT_API_KEY environment secret is required for $ENVIRONMENT_NAME}"
@@ -568,7 +574,7 @@ jobs:
                 oidcIssuer="${OIDC_ISSUER:-}" \
                 oidcAudience="${OIDC_AUDIENCE:-}" \
                 oidcJwksUri="${OIDC_JWKS_URI:-}" \
-                oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove}" \
+                oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-catalogue.read,reddit.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove}" \
                 oidcAllowedObjectIds="${OIDC_ALLOWED_OBJECT_IDS:-}" \
                 oidcAllowedSubjects="${OIDC_ALLOWED_SUBJECTS:-}" \
                 oidcAllowedAppObjectIds="${OIDC_ALLOWED_APP_OBJECT_IDS:-}" \
@@ -586,6 +592,8 @@ jobs:
                 redditClientId="${REDDIT_CLIENT_ID:-}" \
                 redditOAuthSecret="${REDDIT_CLIENT_SECRET:-}" \
                 redditUserAgent="${REDDIT_USER_AGENT:-}" \
+                weatherEnabled="${WEATHER_ENABLED:-false}" \
+                googleWeatherApiKey="${GOOGLE_WEATHER_API_KEY:-}" \
                 bringBaseUrl="${BRING_BASE_URL:-https://api.getbring.com/rest/}" \
                 bringClientApiKey="$BRING_CLIENT_API_KEY" \
                 bringCountry="${BRING_COUNTRY:-AT}" \
@@ -861,6 +869,8 @@ jobs:
 
           expected_reddit_reference="$(key_vault_reference reddit-client-secret)"
           expected_wlh_reference="$(key_vault_reference wlh-base-url)"
+          expected_google_weather_reference=""
+          if [ "${WEATHER_ENABLED:-false}" = "true" ]; then expected_google_weather_reference="$(key_vault_reference google-weather-api-key)"; fi
           expected_bring_api_reference="$(key_vault_reference bring-client-api-key)"
           expected_bring_email_reference="$(key_vault_reference bring-email)"
           expected_bring_password_reference="$(key_vault_reference bring-password)"
@@ -880,6 +890,7 @@ jobs:
             | EXPECTED_APPLICATIONINSIGHTS_CONNECTION_STRING="$expected_app_insights_connection" \
               EXPECTED_REDDIT_CLIENT_SECRET_REFERENCE="$expected_reddit_reference" \
               EXPECTED_WLH_BASE_URL_REFERENCE="$expected_wlh_reference" \
+              EXPECTED_GOOGLE_WEATHER_API_KEY_REFERENCE="$expected_google_weather_reference" \
               EXPECTED_BRING_CLIENT_API_KEY_REFERENCE="$expected_bring_api_reference" \
               EXPECTED_BRING_EMAIL_REFERENCE="$expected_bring_email_reference" \
               EXPECTED_BRING_PASSWORD_REFERENCE="$expected_bring_password_reference" \

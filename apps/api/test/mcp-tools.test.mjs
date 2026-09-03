@@ -38,6 +38,7 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
         'reddit_get_thread',
         'reddit_get_thread_overview',
         'reddit_get_thread_page',
+        'weather_get_forecast',
         'wlh_categories_top',
         'wlh_category_children',
         'wlh_find_category',
@@ -90,6 +91,63 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
         assert.deepEqual(tool._meta.securitySchemes, expectedSecurity);
       }
     }
+  });
+});
+
+test('weather tool resolves current-location metadata, explicit override, locale, and location errors', async () => {
+  await withEnv(authEnv, async () => {
+    const calls = [];
+    const services = stubServices();
+    services.weather.forecast = async (request, location) => {
+      calls.push({ request, location });
+      return {
+        source: 'google-weather-api',
+        fetchedAt: '2026-09-03T00:00:00Z',
+        mode: request.mode,
+        location,
+        hourly: [],
+      };
+    };
+    const metadata = {
+      'openai/userLocation': { latitude: 48.2, longitude: 16.37, city: 'Vienna' },
+      'openai/locale': 'de-AT',
+    };
+    const fromMetadata = await mcpRequest(
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'weather_get_forecast', arguments: { mode: 'hourly' }, _meta: metadata },
+      },
+      undefined,
+      services,
+    );
+    assert.equal(fromMetadata.jsonBody.result.structuredContent.location.coordinateSource, 'chatgpt_user_location');
+    assert.equal(calls[0].request.languageCode, 'de-AT');
+    await mcpRequest(
+      {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: {
+          name: 'weather_get_forecast',
+          arguments: { latitude: 1, longitude: 2, languageCode: 'en' },
+          _meta: metadata,
+        },
+      },
+      undefined,
+      services,
+    );
+    assert.deepEqual(
+      [calls[1].request.latitude, calls[1].request.longitude, calls[1].request.languageCode],
+      [1, 2, 'en'],
+    );
+    const partial = await mcpCall('weather_get_forecast', { latitude: 1 }, undefined, services);
+    assert.equal(partial.jsonBody.result.structuredContent.error, 'invalid_arguments');
+    const missing = await mcpCall('weather_get_forecast', {}, undefined, services);
+    assert.equal(missing.jsonBody.result.structuredContent.error, 'location_required');
+    assert.match(missing.jsonBody.result.structuredContent.repairable_problem.caller_instruction, /Do not guess/);
+    assert.equal(calls.length, 2);
   });
 });
 
@@ -744,6 +802,15 @@ function stubServices(calls = []) {
         ];
       },
     },
+    weather: {
+      forecast: async (request, location) => ({
+        source: 'google-weather-api',
+        fetchedAt: '2026-09-03T00:00:00Z',
+        mode: request.mode,
+        location,
+        hourly: [],
+      }),
+    },
     bring: {
       listLists: async () => ({
         source: 'bring',
@@ -792,6 +859,7 @@ function expectedScopes(toolName) {
   if (toolName === 'hello_authenticated') return ['catalogue.read'];
   if (toolName.startsWith('reddit_')) return ['reddit.read'];
   if (toolName.startsWith('wlh_')) return ['wlh.read'];
+  if (toolName === 'weather_get_forecast') return ['weather.read'];
   if (toolName === 'bring_add_item') return ['bring.write'];
   if (toolName === 'bring_prepare_item_mutation' || toolName === 'bring_apply_item_mutation') {
     return ['bring.complete', 'bring.remove'];
