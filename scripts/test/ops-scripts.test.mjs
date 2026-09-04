@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { validateReleaseLedger } from '../validate-release-ledger.mjs';
 import { forbiddenDiffFindings, highRiskPaths, learningControlPlaneFindings } from '../policy-guardrails.mjs';
@@ -147,6 +148,13 @@ test('smoke token endpoint error code sanitizer avoids unsafe response text', ()
   assert.equal(sanitizeTokenEndpointErrorCode('invalid_client'), 'invalid_client');
   assert.equal(sanitizeTokenEndpointErrorCode('invalid client: token abc123'), '');
   assert.equal(sanitizeTokenEndpointErrorCode('x'.repeat(97)), '');
+});
+
+test('weather user grant selects unsupported Graph predicates locally', async () => {
+  const script = await readFile(new URL('../grant-weather-user-access.sh', import.meta.url), 'utf8');
+  assert.match(script, /oauth2PermissionGrants' --output json/);
+  assert.match(script, /\.consentType == "Principal"/);
+  assert.doesNotMatch(script, /oauth2PermissionGrants\?\\\$filter=/);
 });
 
 test('fetchWithTimeout aborts slow fetch calls', async () => {

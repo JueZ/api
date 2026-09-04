@@ -21,6 +21,8 @@ USER_UPN='mkos_postat_outlook.com#EXT#@mkospostatoutlook.onmicrosoft.com' APPLY=
 
 The helper creates the missing `weather.read` delegated scope when necessary and grants only that user a `Principal` consent for the configured ChatGPT OAuth client. Future users can be added by rerunning it with their exact Entra UPN. It does not assign a service-only role to a human user.
 
+The helper intentionally reads the bounded tenant grant collection and matches the client, resource, consent type, and user locally. Microsoft Graph does not support combining all four predicates in an `oauth2PermissionGrants` server-side `$filter` and returns `Request_UnsupportedQuery` for that form.
+
 If an administrator explicitly wants the automation identity to maintain these assignments later, first review and run the separate bootstrap helper. This is a tenant-wide privileged grant and must not be applied to the runtime Function identity:
 
 ```bash
