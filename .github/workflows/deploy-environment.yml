@@ -217,6 +217,9 @@ jobs:
       # GitHub Environment owns its own GOOGLE_WEATHER_API_KEY secret. An
       # explicit environment variable can still disable it independently.
       WEATHER_ENABLED: ${{ vars.WEATHER_ENABLED || 'true' }}
+      # This non-secret feature flag must be job-scoped so deployment and the
+      # later exact-settings verifier evaluate the same environment policy.
+      YOUTUBE_TRANSCRIPT_ENABLED: ${{ vars.YOUTUBE_TRANSCRIPT_ENABLED || 'false' }}
       BRING_BASE_URL: ${{ vars.BRING_BASE_URL }}
       BRING_COUNTRY: ${{ vars.BRING_COUNTRY }}
       BRING_ENABLED: ${{ vars.BRING_ENABLED }}

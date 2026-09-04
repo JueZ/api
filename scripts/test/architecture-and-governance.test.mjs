@@ -173,6 +173,22 @@ test('weather secret follows the environment-isolated GitHub to Key Vault refere
   assert.doesNotMatch(deployment, /GOOGLE_WEATHER_API_KEY[^\n]*GITHUB_OUTPUT|echo[^\n]*GOOGLE_WEATHER_API_KEY/);
 });
 
+test('YouTube secret and feature flag remain consistent through deployment verification', () => {
+  const delivery = readFileSync(new URL('../../.github/workflows/delivery-v2.yml', import.meta.url), 'utf8');
+  const deployment = readFileSync(new URL('../../.github/workflows/deploy-environment.yml', import.meta.url), 'utf8');
+  const infrastructure = readFileSync(new URL('../../infra/main.bicep', import.meta.url), 'utf8');
+  assert.match(delivery, /SUPADATA_API_KEY: \$\{\{ secrets\.SUPADATA_API_KEY \}\}/);
+  assert.match(deployment, /YOUTUBE_TRANSCRIPT_ENABLED: \$\{\{ vars\.YOUTUBE_TRANSCRIPT_ENABLED \|\| 'false' \}\}/);
+  assert.match(deployment, /EXPECTED_SUPADATA_API_KEY_REFERENCE="\$expected_supadata_reference"/);
+  assert.match(infrastructure, /@secure\(\)[\s\S]*?param supadataApiKey string/);
+  assert.match(infrastructure, /name: 'supadata-api-key'/);
+  assert.match(
+    infrastructure,
+    /SUPADATA_API_KEY: youtubeTranscriptEnabled \? '@Microsoft\.KeyVault\(SecretUri=\$\{supadataSecret!\.properties\.secretUriWithVersion\}\)' : ''/,
+  );
+  assert.doesNotMatch(deployment, /SUPADATA_API_KEY[^\n]*GITHUB_OUTPUT|echo[^\n]*SUPADATA_API_KEY/);
+});
+
 test('staged deployment Bicep preserves its required output contract', () => {
   const infrastructure = readFileSync(new URL('../../infra/main.bicep', import.meta.url), 'utf8');
   for (const output of [
