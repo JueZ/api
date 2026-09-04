@@ -16,6 +16,7 @@ catalogue.read
 reddit.read
 youtube.read
 wlh.read
+weather.read
 bring.read
 bring.write
 bring.complete
@@ -35,3 +36,5 @@ Every accepted token must contain an expiry and pass issuer, audience, expiry/no
 When `OIDC_JWKS_URI` is configured explicitly, it is a protected operator pin and may intentionally use a different HTTPS origin from the issuer. Without that pin, discovery metadata is untrusted: redirects are rejected, metadata `issuer` must match the configured issuer or its supported Entra alias, and `jwks_uri` must be a clean same-origin HTTPS URL. Loopback HTTP exists only for controlled local tests. Remote JWKS caching and unknown-key refresh preserve normal key rotation.
 
 Authenticated deployment smoke uses an already configured external test identity and short-lived tokens. This repository does not create, repair, rotate, or audit that service identity or its trust routes. Any future identity or permission maintenance is a separate privileged operator task outside the application delivery path. Runtime authorization remains fail closed on exact issuer, audience, allowlists, token type, and per-operation permissions.
+
+Application-role assignment is an Entra tenant bootstrap operation, not an Azure resource-group RBAC operation. An operator performing it needs Microsoft Graph `AppRoleAssignment.ReadWrite.All` (and ordinarily `Application.Read.All`) with tenant admin consent. Assign the narrow service alias to the deployment smoke enterprise application; do not assign it to human users. Human/GPT delegated access uses the canonical `weather.read` OAuth scope instead.
