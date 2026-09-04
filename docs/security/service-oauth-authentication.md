@@ -16,6 +16,7 @@ catalogue.read
 reddit.read
 youtube.read
 wlh.read
+weather.read
 bring.read
 bring.write
 bring.complete
@@ -45,4 +46,4 @@ Every accepted token must contain an expiry and pass issuer, audience, expiry/no
 
 When `OIDC_JWKS_URI` is configured explicitly, it is a protected operator pin and may intentionally use a different HTTPS origin from the issuer. Without that pin, discovery metadata is untrusted: redirects are rejected, metadata `issuer` must match the configured issuer or its supported Entra alias, and `jwks_uri` must be a clean same-origin HTTPS URL. Loopback HTTP exists only for controlled local tests. Remote JWKS caching and unknown-key refresh preserve normal key rotation.
 
-Authenticated deployment smoke uses configured external identities and short-lived tokens. The repository's idempotent role-assignment helper may maintain their non-destructive provider roles, but it never creates credentials or changes trust routes. The Azure CLI identity needs a suitably scoped Entra directory role or Microsoft Graph permission that permits app-role assignment management (for example, Cloud Application Administrator); Azure subscription `Owner` or `Contributor` is insufficient. An administrator must grant that authority to the managed identity used by the autonomous environment before future role assignments can be completed without handoff. Do not add a client secret or broad subscription role for this purpose. Runtime authorization remains fail closed on exact issuer, audience, allowlists, token type, and per-operation permissions.
+Authenticated deployment smoke uses configured external identities and short-lived tokens. The repository's idempotent role-assignment helper may maintain their non-destructive provider roles, but it never creates credentials or changes trust routes. Application-role assignment is an Entra tenant bootstrap operation, not Azure resource-group RBAC. The autonomous Azure CLI identity needs Microsoft Graph `AppRoleAssignment.ReadWrite.All` (and ordinarily `Application.Read.All`) with tenant admin consent, or a suitably scoped directory role. An administrator must grant that authority before future role assignments can be completed without handoff; do not add a client secret or broad subscription role. Runtime authorization remains fail closed on exact issuer, audience, allowlists, token type, and per-operation permissions.
