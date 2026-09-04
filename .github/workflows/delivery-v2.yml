@@ -299,11 +299,11 @@ jobs:
             echo "Production health did not report an immutable source SHA." >&2
             exit 1
           fi
-          if [ "$previous_production_sha" = "$DELIVERY_SHA" ]; then
-            promote="false"
-          else
-            promote="true"
-          fi
+          # A matching health SHA proves only that files reached production; it
+          # does not prove that the promotion's smoke, telemetry, ledger, and
+          # runtime-identity gates completed. Re-run the idempotent production
+          # deployment and verification for every full delivery generation.
+          promote="true"
           {
             echo "confirmed_sha=$current_main"
             echo "previous_production_sha=$previous_production_sha"
