@@ -185,6 +185,19 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
         youtube.json?.result?.structuredContent?.transcript?.mode,
         'native',
       );
+      assertEqual(
+        'authenticated YouTube transcript MCP language',
+        youtube.json?.result?.structuredContent?.transcript?.language,
+        'en',
+      );
+      const transcriptChunk = youtube.json?.result?.structuredContent?.chunks?.[0];
+      if (
+        typeof transcriptChunk?.text !== 'string' ||
+        transcriptChunk.text.length === 0 ||
+        !Number.isSafeInteger(transcriptChunk.startMs) ||
+        !Number.isSafeInteger(transcriptChunk.endMs)
+      )
+        throw new Error('authenticated YouTube transcript MCP did not return a timestamped transcript chunk');
       record('authenticated-youtube-native-transcript', 'passed');
     }
 
