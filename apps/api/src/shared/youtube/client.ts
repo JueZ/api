@@ -13,6 +13,9 @@ const responseSchema = z
       .array(
         z
           .object({
+            // Supadata's timestamped response includes the language on every
+            // chunk as well as at the response root.
+            lang: tag,
             text: z.string().max(YOUTUBE_LIMITS.segmentChars),
             offset: z.number().finite().nonnegative(),
             duration: z.number().finite().nonnegative(),

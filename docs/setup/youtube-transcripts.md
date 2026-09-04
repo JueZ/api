@@ -19,4 +19,6 @@ The feature is disabled by default (`YOUTUBE_TRANSCRIPT_ENABLED=false`) and retu
 
 Supadata is externally metered. Cache/lease coordination and the no-automatic-retry rule limit duplicate charges, but Azure budget resources do not include Supadata charges. CI, deployment smoke, and production verification do not make a live provider request by default; no paid canary should be enabled without an explicit protected cost-policy-controlled switch.
 
+Operators can exercise the production adapter against the fixed public regression video with `npm run test:youtube:live` only in an explicitly enabled environment that supplies `SUPADATA_API_KEY`. The test asserts language, timing, and non-empty transcript data but never prints transcript text or the key. Protected deployment smoke uses the same video only when `YOUTUBE_TRANSCRIPT_SMOKE_ENABLED=true`; it performs one request without retries or transcript logging.
+
 Resource limits include a 64 KiB caller body, 20-second provider timeout, 8 MiB provider body, 100,000 provider segments, 2,000,000 normalized characters, 2,000 characters per normalized chunk, 25 chunks and 128 KiB per page, and a bounded 24-hour default cache.
