@@ -103,6 +103,9 @@ jobs:
       - name: Audit registry dependencies
         run: |
           npm audit --audit-level=high
+          # Rebuild npm's logical tree for the independently deployed Function
+          # manifest before its audit. This installs nothing and runs no scripts.
+          npm --prefix apps/api install --package-lock-only --ignore-scripts
           npm --prefix apps/api audit --omit=dev --audit-level=high
 
   codeqlJavascript:
