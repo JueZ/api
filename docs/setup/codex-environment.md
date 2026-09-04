@@ -6,9 +6,11 @@ Both scripts are deployment-free. They install or verify tooling only and must n
 
 Codex base images can include an `apt.llvm.org` source that is unreachable through the environment's egress proxy. This repository does not require LLVM or Clang, so setup and maintenance remove only `apt.llvm.org` entries from inherited APT source files before updating package indexes. Ubuntu and the explicitly configured Microsoft and GitHub signed repositories remain enabled; APT signature verification is never disabled.
 
+For the repository instruction baseline and fresh-session trial checklist, see [Sol-to-Astra agent migration](astra-agent-migration.md).
+
 ## Related Codex skills
 
-Use the repo-scoped `github-cli-devops` skill for GitHub CLI work, pull requests, workflow runs, CI logs, and repository automation. Use the repo-scoped `azure-cli-devops` skill for Azure CLI work, resource diagnostics, Bicep validation, RBAC checks, Azure Functions, Storage, and deployment debugging.
+Use the repo-scoped `autonomous-pr-delivery` skill for routine branch, pull request, checks, merge, and delivery work. Load `github-cli-devops` for non-routine GitHub CLI diagnostics, failed Actions runs, repository configuration, or delivery-controller investigation. Use the repo-scoped `azure-cli-devops` skill for Azure CLI work, resource diagnostics, Bicep validation, RBAC checks, Azure Functions, Storage, and deployment debugging.
 
 Azure CLI setup uses an explicit host-appropriate authentication mode. Azure-hosted environments default to Managed Identity. Codex Cloud must set `CODEX_AZURE_AUTH_MODE=service-principal` because the OpenAI-managed compute host has no project Azure Managed Identity attached and direct Azure CLI access is required for repository operations.
 

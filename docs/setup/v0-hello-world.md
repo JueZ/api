@@ -1,5 +1,7 @@
 # v0 Hello World skeleton
 
+> Historical milestone snapshot. The implementation and deployment notes below describe the v0 setup and may be superseded. Use the [current architecture](../architecture/operation-model.md), [autonomous delivery contract](../autonomous-delivery.md), and [project memory](../project-memory/current-state.md) for maintained guidance; query live sources for deployed state.
+
 This milestone creates the smallest useful foundation for the personal API catalogue platform:
 Angular for the frontend, Azure Functions for the backend, OpenAPI for the API contract, and
 Bicep for low-cost Azure infrastructure planning.

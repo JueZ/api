@@ -27,6 +27,8 @@
 
 ## Learning and memory
 
+- Repository agent guidance separates read-only planning/review from authorized implementation and ordinary delivery repair. Root/scoped instructions retain safety and completion requirements; skills load operational recipes on demand. Astra adoption uses fresh-session manual trials, not provider-backed governance or automatic model evaluation.
+
 - Significant and recurring failures use executable prevention plus concise schema-v2 learning artifacts. Hard invariants remain mechanically protected; reusable architectural guidance is advisory and may be bounded by scoped counterevidence. Learning validation runs only when learning files or their validator change.
 - Completed phase ledgers, historical acceptance evidence, required model-review gates, workflow hashes, and chronological project-memory logs have been removed. The lean local historical Codex task harness remains advisory and outside merge or delivery eligibility. GitHub and Git history are the execution record.
 - Query live GitHub/Azure/runtime state for the current deployed SHA and workflow outcome; do not copy routine run narration into this file.
