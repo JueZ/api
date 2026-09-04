@@ -182,7 +182,10 @@ test('YouTube secret and feature flag remain consistent through deployment verif
   assert.match(deployment, /EXPECTED_SUPADATA_API_KEY_REFERENCE="\$expected_supadata_reference"/);
   assert.match(infrastructure, /@secure\(\)[\s\S]*?param supadataApiKey string/);
   assert.match(infrastructure, /name: 'supadata-api-key'/);
-  assert.match(infrastructure, /SUPADATA_API_KEY: youtubeTranscriptEnabled \? '@Microsoft\.KeyVault\(SecretUri=\$\{supadataSecret!\.properties\.secretUriWithVersion\}\)' : ''/);
+  assert.match(
+    infrastructure,
+    /SUPADATA_API_KEY: youtubeTranscriptEnabled \? '@Microsoft\.KeyVault\(SecretUri=\$\{supadataSecret!\.properties\.secretUriWithVersion\}\)' : ''/,
+  );
   assert.doesNotMatch(deployment, /SUPADATA_API_KEY[^\n]*GITHUB_OUTPUT|echo[^\n]*SUPADATA_API_KEY/);
 });
 
