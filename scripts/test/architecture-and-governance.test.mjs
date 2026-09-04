@@ -173,6 +173,14 @@ test('weather secret follows the environment-isolated GitHub to Key Vault refere
   assert.doesNotMatch(deployment, /GOOGLE_WEATHER_API_KEY[^\n]*GITHUB_OUTPUT|echo[^\n]*GOOGLE_WEATHER_API_KEY/);
 });
 
+test('provider enable flags remain available to deployment and later runtime validation steps', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/deploy-environment.yml', import.meta.url), 'utf8');
+  const jobEnvironment =
+    /jobs:\s*\n\s*deploy:[\s\S]*?\n\s{4}env:\s*\n([\s\S]*?)\n\s{4}steps:/.exec(workflow)?.[1] ?? '';
+  assert.match(jobEnvironment, /WEATHER_ENABLED: \$\{\{ vars\.WEATHER_ENABLED \|\| 'true' \}\}/);
+  assert.match(jobEnvironment, /YOUTUBE_TRANSCRIPT_ENABLED: \$\{\{ vars\.YOUTUBE_TRANSCRIPT_ENABLED \|\| 'false' \}\}/);
+});
+
 test('staged deployment Bicep preserves its required output contract', () => {
   const infrastructure = readFileSync(new URL('../../infra/main.bicep', import.meta.url), 'utf8');
   for (const output of [

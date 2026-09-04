@@ -217,6 +217,7 @@ jobs:
       # GitHub Environment owns its own GOOGLE_WEATHER_API_KEY secret. An
       # explicit environment variable can still disable it independently.
       WEATHER_ENABLED: ${{ vars.WEATHER_ENABLED || 'true' }}
+      YOUTUBE_TRANSCRIPT_ENABLED: ${{ vars.YOUTUBE_TRANSCRIPT_ENABLED || 'false' }}
       BRING_BASE_URL: ${{ vars.BRING_BASE_URL }}
       BRING_COUNTRY: ${{ vars.BRING_COUNTRY }}
       BRING_ENABLED: ${{ vars.BRING_ENABLED }}
@@ -537,7 +538,6 @@ jobs:
           BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
           YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY: ${{ secrets.YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY }}
-          YOUTUBE_TRANSCRIPT_ENABLED: ${{ vars.YOUTUBE_TRANSCRIPT_ENABLED || 'false' }}
         run: |
           set -euo pipefail
           : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
