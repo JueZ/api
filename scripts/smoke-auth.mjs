@@ -65,6 +65,7 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
   const shareSmokeUrl = env.REDDIT_SHARE_URL_SMOKE_URL || env.REDDIT_SHARE_URL_SMOKE || '';
   const shareSmokeExpectedPostId = env.REDDIT_SHARE_URL_SMOKE_EXPECTED_POST_ID || '';
   const weatherSmokeEnabled = env.WEATHER_SMOKE_ENABLED === 'true';
+  const youtubeTranscriptSmokeEnabled = env.YOUTUBE_TRANSCRIPT_SMOKE_ENABLED === 'true';
   const results = { status: 'passed', smokeRunId, apiBaseUrl, checks: [] };
   const headers = { 'X-Smoke-Run-Id': smokeRunId, Authorization: `Bearer ${token}` };
   const healthRetryAttempts = Number(env.AUTH_HEALTH_RETRY_ATTEMPTS || env.RUNTIME_HEALTH_RETRY_ATTEMPTS || 10);
@@ -137,6 +138,55 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
     assertEqual('authenticated /api/hello status', hello.response.status, 200);
     assertEqual('authenticated /api/hello authenticated flag', hello.json?.authenticated, true);
     record('authenticated-hello', 'passed');
+
+    if (youtubeTranscriptSmokeEnabled) {
+      const youtube = await fetchJsonWithRetry(
+        `${apiBaseUrl}/mcp`,
+        {
+          method: 'POST',
+          headers: {
+            ...headers,
+            Accept: 'application/json, text/event-stream',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 'youtube-transcript-smoke',
+            method: 'tools/call',
+            params: {
+              name: 'youtube_get_transcript',
+              // This stable public identifier is sent to the API, which constructs
+              // the allowlisted provider URL. The smoke never prints transcript text.
+              arguments: { videoId: 'dQw4w9WgXcQ', language: 'en', pageSize: 1 },
+            },
+          }),
+        },
+        {
+          attempts: 1,
+          delayMs: 0,
+          retryStatuses: new Set(),
+          label: 'authenticated YouTube transcript MCP smoke',
+        },
+      );
+      assertEqual('authenticated YouTube transcript MCP HTTP status', youtube.response.status, 200);
+      assertEqual('authenticated YouTube transcript MCP JSON-RPC version', youtube.json?.jsonrpc, '2.0');
+      assertEqual(
+        'authenticated YouTube transcript MCP source',
+        youtube.json?.result?.structuredContent?.source,
+        'youtube',
+      );
+      assertEqual(
+        'authenticated YouTube transcript MCP video ID',
+        youtube.json?.result?.structuredContent?.video?.id,
+        'dQw4w9WgXcQ',
+      );
+      assertEqual(
+        'authenticated YouTube transcript MCP mode',
+        youtube.json?.result?.structuredContent?.transcript?.mode,
+        'native',
+      );
+      record('authenticated-youtube-native-transcript', 'passed');
+    }
 
     if (weatherSmokeEnabled) {
       const weather = await fetchJsonWithRetry(

@@ -1380,6 +1380,7 @@ jobs:
         env:
           REDDIT_SHARE_URL_SMOKE_REQUESTED: ${{ inputs.redditShareUrlSmokeEnabled && 'true' || 'false' }}
           WEATHER_SMOKE_ENABLED: ${{ vars.WEATHER_ENABLED || 'true' }}
+          YOUTUBE_TRANSCRIPT_SMOKE_ENABLED: ${{ vars.YOUTUBE_TRANSCRIPT_SMOKE_ENABLED || 'false' }}
         run: |
           set -euo pipefail
           smoke_dir="$RUNNER_TEMP/smoke"
