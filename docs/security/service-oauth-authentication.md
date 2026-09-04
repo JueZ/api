@@ -2,12 +2,12 @@
 
 All protected REST and MCP operations use Microsoft Entra JWTs. The backend validates exact issuer/JWKS, audience, time claims, tenant, delegated client or app identity allowlists, and the operation's granular scope/app role.
 
-| Caller               | Token                                           | Allowed permissions                                                                  |
-| -------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Browser/GPT operator | delegated `scp` plus user and client allowlists | Explicit consented read/write permissions; destructive Bring only for the operator   |
-| Deployment smoke app | app-only `roles` plus client/object allowlists  | `catalogue.service.read`, `reddit.service.read`, normalized to canonical permissions |
-| Bring read canary    | app-only `roles` plus dedicated allowlists      | `bring.read` only                                                                    |
-| Other service client | app-only `roles` plus dedicated allowlists      | Only documented non-destructive permissions; never `bring.complete`/`bring.remove`   |
+| Caller               | Token                                           | Allowed permissions                                                                                          |
+| -------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Browser/GPT operator | delegated `scp` plus user and client allowlists | Explicit consented read/write permissions; destructive Bring only for the operator                           |
+| Deployment smoke app | app-only `roles` plus client/object allowlists  | `catalogue.service.read`, `reddit.service.read`, `weather.service.read`, normalized to canonical permissions |
+| Bring read canary    | app-only `roles` plus dedicated allowlists      | `bring.read` only                                                                                            |
+| Other service client | app-only `roles` plus dedicated allowlists      | Only documented non-destructive permissions; never `bring.complete`/`bring.remove`                           |
 
 Canonical permissions:
 
@@ -22,7 +22,7 @@ bring.complete
 bring.remove
 ```
 
-`api.access` and `api.test` are retired. Entra exposes the canonical values above as delegated scopes. Because Entra custom applications reject a delegated scope whose value duplicates an application-role value, service-only roles use aliases such as `catalogue.service.read`, `reddit.service.read`, and `youtube.service.read`. The backend normalizes aliases to canonical operation permissions only after it has classified and allowlisted an app-only service token. Delegated user tokens never receive service-role alias normalization.
+`api.access` and `api.test` are retired. Entra exposes the canonical values above as delegated scopes. Because Entra custom applications reject a delegated scope whose value duplicates an application-role value, service-only roles use aliases such as `catalogue.service.read`, `reddit.service.read`, `youtube.service.read`, and `weather.service.read`. The backend normalizes aliases to canonical operation permissions only after it has classified and allowlisted an app-only service token. Delegated user tokens never receive service-role alias normalization.
 
 `OIDC_REQUIRED_SCOPES` remains the canonical operation-permission vocabulary. Operation authorization always evaluates the canonical permission after the service-only normalization boundary.
 
