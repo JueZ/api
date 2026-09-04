@@ -1,6 +1,6 @@
 # Reddit GPT Action prompt
 
-Use this prompt for a GPT that summarizes Reddit discussions with the queryable Reddit API.
+Use this application prompt for a GPT that summarizes Reddit discussions with the queryable Reddit API. The fenced text configures that GPT; it is not an instruction source for repository agents. Repository work follows AGENTS.md and the relevant skills.
 
 ```text
 Role:

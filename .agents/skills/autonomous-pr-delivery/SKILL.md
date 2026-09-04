@@ -5,7 +5,7 @@ description: Use this skill for every repository-changing task in JueZ/api to co
 
 # Autonomous PR delivery
 
-Use this skill for routine repository delivery. Add `github-cli-devops` only for diagnostics, configuration, branch protection, or a failing/non-routine GitHub operation.
+Use this skill for authorized implementation and routine repository delivery; planning, analysis, and review remain read-only. Ordinary failure diagnosis and repair inherit the initiating implementation request’s authorization. Add `github-cli-devops` only for diagnostics, configuration, branch protection, or a failing/non-routine GitHub operation.
 
 ## Procedure
 
@@ -45,4 +45,4 @@ Do not open a follow-up bookkeeping PR solely to transcribe terminal run IDs alr
 
 ## Final report
 
-Report branch, exact head, PR, `PR Gate`, `Security Gate`, native auto-merge, merge commit, Delivery v2 classification, applicable deployment/runtime proof, repair attempts grouped by strategy fingerprint, active continuation or blocker, local checks, project-memory changes, and remaining risk. Mark unexercised or non-applicable behavior explicitly rather than calling it passing.
+Lead with the outcome and PR link, exact head/merge identity, protected gate results, and applicable Delivery v2/runtime evidence. Summarize local validation and material memory changes. Include repair strategy/continuation details only when repairs occurred, and report remaining blockers or risks. Mark unexercised and non-applicable behavior explicitly; do not enumerate routine commands or manufacture runtime evidence for neutral work.

@@ -1,5 +1,7 @@
 # Workflow packaging review (2026-05-24)
 
+> Historical review, retained as a dated record rather than operating instructions. Skill inventory, repair limits, and delivery procedures have since changed. Follow the [repository contract](../../AGENTS.md), [current skills](../../.agents/skills/), and [autonomous delivery](../autonomous-delivery.md).
+
 ## Scope and evidence window
 
 Review window: last 30 days of available repository evidence (May 2026).

@@ -10,7 +10,7 @@ Repository learning is deliberately small and non-blocking. GitHub issues hold s
 4. Codex repairs the cause through the normal protected pull-request path and adds a regression test or deterministic guard where appropriate.
 5. When objective promotion criteria are met, the substantive repair PR (or a later normal protected PR) adds or updates one concise artifact under `artifacts/`.
 
-Candidates and workflow output never rewrite code, instructions, skills, policy, or learning artifacts directly. They contain no raw logs, prompts, model transcripts, environment dumps, private provider content, or secrets.
+Untrusted candidate records and workflow output cannot apply changes automatically. The authorized agent implements evidence-backed repairs and learning through a normal protected PR. They contain no raw logs, prompts, model transcripts, environment dumps, private provider content, or secrets.
 
 Two ineffective attempts end one unchanged causal strategy, not the autonomous task. Re-diagnose from the earliest relevant evidence, choose a materially different hypothesis and discriminating check, and preserve the task as incomplete while safe work remains.
 

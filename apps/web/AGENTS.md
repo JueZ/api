@@ -5,4 +5,4 @@
 - Never persist or print bearer/confirmation tokens, provider credentials, or sensitive API responses.
 - Preserve the separate prepare/review/apply UI for destructive Bring mutations.
 - Keep error rendering limited to sanitized repairable-problem fields.
-- Validate with type-check, web build, and web tests.
+- For frontend behavior changes, validate with type-check, web build, and relevant web tests. Documentation-only edits follow the protected diff classification.
