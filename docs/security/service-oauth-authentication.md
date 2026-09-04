@@ -36,6 +36,18 @@ SERVICE_ROLE_VALUE='youtube.service.read' \
 
 Human and ChatGPT users receive `youtube.read` as a delegated scope, not the service-only role. Their OAuth client must request the scope, tenant policy must allow or pre-consent it, and existing sessions must be reauthorized so newly issued access tokens contain `youtube.read`. Never assign `youtube.service.read` to a human-facing client as a substitute for delegated consent.
 
+An Entra administrator can pre-consent the scope for one user and one already-registered OAuth client without granting it tenant-wide:
+
+```bash
+API_APP_ID='<API application client ID>' \
+OAUTH_CLIENT_APP_ID='<web or ChatGPT OAuth client application ID>' \
+USER_ID='<user object ID or user principal name>' \
+DELEGATED_SCOPE_VALUE='youtube.read' \
+./scripts/grant-entra-user-scope.sh
+```
+
+The helper preserves the user's other scopes on the same OAuth grant. It requires Microsoft Graph `DelegatedPermissionGrant.ReadWrite.All` with tenant-admin consent (or an equivalent directory role), handles no user password or client secret, and does not eliminate the need to sign out/in or reconnect ChatGPT so a fresh token is issued.
+
 `OIDC_REQUIRED_SCOPES` remains the canonical operation-permission vocabulary. Operation authorization always evaluates the canonical permission after the service-only normalization boundary.
 
 Service tokens with `idtyp=app` use the explicit service object-ID or client-ID allowlist. For older Entra access tokens that omit `idtyp`, the roles-only compatibility path additionally requires a confidential-client marker (`azpacr`/`appidacr` `1` or `2`) and the service principal `oid` in `OIDC_ALLOWED_APP_OBJECT_IDS`; a client ID alone is deliberately insufficient. `idtyp=user` and every token with `scp` stay on the delegated user path, while ambiguous or unknown `idtyp` values are rejected. Delegated authorization uses only `scp`; app roles and service-role aliases never grant user permissions. The code denies service tokens for destructive Bring operations even if a role is accidentally assigned.

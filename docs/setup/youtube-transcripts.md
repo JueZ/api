@@ -15,6 +15,7 @@ The feature is disabled by default (`YOUTUBE_TRANSCRIPT_ENABLED=false`) and retu
 3. Set `youtubeTranscriptEnabled=true`. Bicep writes both values to Key Vault and exposes only versioned Key Vault references to the Function App. The existing managed identity accesses the private `youtube-transcripts` container.
 4. Expose delegated `youtube.read` and application role `youtube.service.read` in Entra. Reauthorize an already-connected ChatGPT OAuth client so it can consent to the new delegated scope.
 5. Assign `youtube.service.read` to both protected deployment-smoke service principals with the idempotent administrator command in [service OAuth authentication](../security/service-oauth-authentication.md). To make future assignments autonomous, an Entra administrator must first grant the autonomous managed identity a narrowly suitable directory role/Graph permission; Azure subscription RBAC alone is insufficient.
+6. Users must reconnect or sign in again to obtain a token containing delegated `youtube.read`. An administrator may use `scripts/grant-entra-user-scope.sh` to pre-consent one user for an existing web or ChatGPT OAuth client; do not assign the service-only role to a user.
 
 Supadata is externally metered. Cache/lease coordination and the no-automatic-retry rule limit duplicate charges, but Azure budget resources do not include Supadata charges. CI, deployment smoke, and production verification do not make a live provider request by default; no paid canary should be enabled without an explicit protected cost-policy-controlled switch.
 
