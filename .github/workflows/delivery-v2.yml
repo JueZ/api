@@ -250,6 +250,8 @@ jobs:
     secrets:
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+      YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY: ${{ secrets.YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY }}
       WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
       GOOGLE_WEATHER_API_KEY: ${{ secrets.GOOGLE_WEATHER_API_KEY }}
       BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
@@ -343,6 +345,8 @@ jobs:
     secrets:
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+      YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY: ${{ secrets.YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY }}
       WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
       GOOGLE_WEATHER_API_KEY: ${{ secrets.GOOGLE_WEATHER_API_KEY }}
       BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
@@ -427,6 +431,8 @@ jobs:
     secrets:
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+      YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY: ${{ secrets.YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY }}
       WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
       GOOGLE_WEATHER_API_KEY: ${{ secrets.GOOGLE_WEATHER_API_KEY }}
       BRING_EMAIL: ${{ secrets.BRING_EMAIL }}

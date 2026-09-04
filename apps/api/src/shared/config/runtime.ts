@@ -11,6 +11,7 @@ export class RuntimeConfigurationError extends Error {
 const canonicalPermissions = [
   'catalogue.read',
   'reddit.read',
+  'youtube.read',
   'wlh.read',
   'weather.read',
   'bring.read',
@@ -96,6 +97,21 @@ export function validateRuntimeSafety(env: NodeJS.ProcessEnv = process.env): str
   }
   if (env['WEATHER_ENABLED'] === 'true' && !env['GOOGLE_WEATHER_API_KEY']?.trim()) {
     problems.push(`GOOGLE_WEATHER_API_KEY is required when WEATHER_ENABLED=true in ${environment}`);
+  }
+  if (!['true', 'false'].includes(env['YOUTUBE_TRANSCRIPT_ENABLED'] ?? '')) {
+    problems.push(`YOUTUBE_TRANSCRIPT_ENABLED must be explicitly true or false in ${environment}`);
+  }
+  if (env['YOUTUBE_TRANSCRIPT_ENABLED'] === 'true') {
+    if (!env['SUPADATA_API_KEY']?.trim())
+      problems.push(`SUPADATA_API_KEY is required when YouTube transcripts are enabled in ${environment}`);
+    if (!env['YOUTUBE_TRANSCRIPT_STORAGE_ACCOUNT_NAME']?.trim())
+      problems.push(
+        `YOUTUBE_TRANSCRIPT_STORAGE_ACCOUNT_NAME is required when YouTube transcripts are enabled in ${environment}`,
+      );
+    if ((env['YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY']?.length ?? 0) < 32)
+      problems.push(
+        `YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY must be at least 32 characters when YouTube transcripts are enabled in ${environment}`,
+      );
   }
   const bringWritesEnabled = env['BRING_ADD_ENABLED'] === 'true' || env['BRING_DESTRUCTIVE_ENABLED'] === 'true';
   if (bringWritesEnabled && !bringEnabled) {

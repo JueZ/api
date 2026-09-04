@@ -32,7 +32,7 @@ param oidcAudience string
 param oidcJwksUri string = ''
 
 @description('Comma-separated delegated scopes/application roles recognized by the operation policy.')
-param oidcRequiredScopes string = 'catalogue.read,reddit.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove'
+param oidcRequiredScopes string = 'catalogue.read,reddit.read,youtube.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove'
 
 @description('Comma-separated allowed Microsoft Entra user object IDs.')
 param oidcAllowedObjectIds string
@@ -97,6 +97,21 @@ param redditSnapshotMaxComments int = 100000
 
 @description('High serialized-byte safety cap per Reddit snapshot; leaves headroom below the application Blob read limit.')
 param redditSnapshotMaxBytes int = 100663296
+
+@description('Enable metered native-caption YouTube transcripts. Disabled by default.')
+param youtubeTranscriptEnabled bool = false
+@secure()
+@description('Supadata API key, stored in Key Vault. Empty while the feature is disabled.')
+param supadataApiKey string = ''
+@secure()
+@description('HMAC key for principal-bound YouTube transcript cursors.')
+param youtubeTranscriptCursorHmacKey string = ''
+@description('Private YouTube transcript snapshot container.')
+param youtubeTranscriptContainer string = 'youtube-transcripts'
+@description('Positive transcript cache lifetime in seconds.')
+@minValue(300)
+@maxValue(172800)
+param youtubeTranscriptCacheTtlSeconds int = 86400
 
 @secure()
 @description('WLH upstream base URL; stored in Key Vault because the existing integration treats it as sensitive.')
@@ -307,6 +322,7 @@ module privateStorageDeployment './modules/private-storage.bicep' = {
     deploymentPrincipalObjectId: deploymentPrincipalObjectId
     wlhCategoryBlobContainer: wlhCategoryBlobContainer
     redditSnapshotContainer: redditSnapshotContainer
+    youtubeTranscriptContainer: youtubeTranscriptContainer
     bringSessionCacheContainer: bringSessionCacheContainer
     bringMutationContainer: bringMutationContainer
     bringAuditContainer: bringAuditContainer
@@ -385,6 +401,10 @@ resource wlhReferenceContainer 'Microsoft.Storage/storageAccounts/blobServices/c
 resource redditThreadSnapshotContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
   parent: privateBlobService
   name: redditSnapshotContainer
+}
+resource youtubeTranscriptSnapshotContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
+  parent: privateBlobService
+  name: youtubeTranscriptContainer
 }
 
 resource bringSessionContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' existing = {
@@ -472,6 +492,16 @@ resource redditSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   properties: {
     value: redditOAuthSecret
   }
+}
+resource supadataSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (youtubeTranscriptEnabled) {
+  parent: keyVault
+  name: 'supadata-api-key'
+  properties: { value: supadataApiKey }
+}
+resource youtubeCursorSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (youtubeTranscriptEnabled) {
+  parent: keyVault
+  name: 'youtube-transcript-cursor-hmac-key'
+  properties: { value: youtubeTranscriptCursorHmacKey }
 }
 
 resource wlhBaseUrlSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
@@ -670,6 +700,12 @@ module functionAppSettings './modules/function-app-settings.bicep' = {
       REDDIT_SNAPSHOT_TTL_SECONDS: string(redditSnapshotTtlSeconds)
       REDDIT_SNAPSHOT_MAX_COMMENTS: string(redditSnapshotMaxComments)
       REDDIT_SNAPSHOT_MAX_BYTES: string(redditSnapshotMaxBytes)
+      YOUTUBE_TRANSCRIPT_ENABLED: toLower(string(youtubeTranscriptEnabled))
+      SUPADATA_API_KEY: youtubeTranscriptEnabled ? '@Microsoft.KeyVault(SecretUri=${supadataSecret!.properties.secretUriWithVersion})' : ''
+      YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY: youtubeTranscriptEnabled ? '@Microsoft.KeyVault(SecretUri=${youtubeCursorSecret!.properties.secretUriWithVersion})' : ''
+      YOUTUBE_TRANSCRIPT_STORAGE_ACCOUNT_NAME: privateStorage.name
+      YOUTUBE_TRANSCRIPT_CONTAINER: youtubeTranscriptContainer
+      YOUTUBE_TRANSCRIPT_CACHE_TTL_SECONDS: string(youtubeTranscriptCacheTtlSeconds)
       WLH_BASE_URL: '@Microsoft.KeyVault(SecretUri=${wlhBaseUrlSecret.properties.secretUriWithVersion})'
       WLH_STORAGE_ACCOUNT_NAME: privateStorage.name
       WLH_CATEGORY_BLOB_CONTAINER: wlhCategoryBlobContainer
@@ -767,6 +803,19 @@ resource functionWlhReaderRole 'Microsoft.Authorization/roleAssignments@2022-04-
 resource functionRedditSnapshotRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(redditThreadSnapshotContainer.id, functionApp.id, 'reddit-snapshot-contributor')
   scope: redditThreadSnapshotContainer
+  properties: {
+    roleDefinitionId: storageBlobDataContributorRole
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+  dependsOn: [
+    privateStorageDeployment
+  ]
+}
+
+resource functionYoutubeTranscriptRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(youtubeTranscriptSnapshotContainer.id, functionApp.id, 'youtube-transcript-contributor')
+  scope: youtubeTranscriptSnapshotContainer
   properties: {
     roleDefinitionId: storageBlobDataContributorRole
     principalId: functionApp.identity.principalId

@@ -4,6 +4,7 @@ import { getSmokeRunId, requireUrl, fetchJson, assertEqual, safeSummary } from '
 const KNOWN_PERMISSIONS = new Set([
   'catalogue.read',
   'reddit.read',
+  'youtube.read',
   'wlh.read',
   'weather.read',
   'bring.read',

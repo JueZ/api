@@ -24,6 +24,8 @@ param wlhCategoryBlobContainer string
 
 @description('Private Reddit resumable thread-snapshot container.')
 param redditSnapshotContainer string
+@description('Private YouTube transcript snapshot and lease container.')
+param youtubeTranscriptContainer string
 
 @description('Private Bring session container.')
 param bringSessionCacheContainer string
@@ -102,6 +104,13 @@ resource redditThreadSnapshotContainer 'Microsoft.Storage/storageAccounts/blobSe
     publicAccess: 'None'
   }
 }
+resource youtubeTranscriptSnapshotContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: privateBlobService
+  name: youtubeTranscriptContainer
+  properties: {
+    publicAccess: 'None'
+  }
+}
 
 resource bringSessionContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
   parent: privateBlobService
@@ -156,6 +165,35 @@ resource privateLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@
               ]
               prefixMatch: [
                 '${redditSnapshotContainer}/snapshots/'
+              ]
+            }
+          }
+        }
+        {
+          name: 'expire-youtube-transcript-snapshots'
+          enabled: true
+          type: 'Lifecycle'
+          definition: {
+            actions: {
+              baseBlob: {
+                delete: {
+                  daysAfterModificationGreaterThan: 2
+                }
+              }
+              version: {
+                delete: {
+                  daysAfterCreationGreaterThan: 2
+                }
+              }
+            }
+            filters: {
+              blobTypes: [
+                'blockBlob'
+              ]
+              prefixMatch: [
+                '${youtubeTranscriptContainer}/snapshots/'
+                '${youtubeTranscriptContainer}/cache/'
+                '${youtubeTranscriptContainer}/leases/'
               ]
             }
           }
