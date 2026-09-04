@@ -8,6 +8,75 @@ In a billing-enabled Google Cloud project, enable **Weather API** in Google Maps
 
 Also add `weather.read` to `OIDC_REQUIRED_SCOPES`, expose/grant that scope in the Entra API application, consent it to the ChatGPT MCP OAuth client, and reconnect the connector if fresh consent is needed. The Google project needs billing and the Weather API enabled, as described by the [Google Weather API overview](https://developers.google.com/maps/documentation/weather/overview).
 
+## Entra assignment commands
+
+The production/test smoke identity is an application, so assign the service-only `weather.service.read` app role to its **enterprise application service principal**. `az role assignment create` is not applicable because that command manages Azure RBAC, not Microsoft Graph app roles. Run the following while signed in as a tenant administrator whose Azure CLI token has Microsoft Graph `AppRoleAssignment.ReadWrite.All` and `Application.Read.All`:
+
+```bash
+API_APP_ID='<API application client ID>'
+SMOKE_APP_ID='<deployment smoke application client ID>'
+
+RESOURCE_SP_ID="$(az ad sp show --id "$API_APP_ID" --query id --output tsv)"
+SMOKE_SP_ID="$(az ad sp show --id "$SMOKE_APP_ID" --query id --output tsv)"
+WEATHER_ROLE_ID="$(az ad app show --id "$API_APP_ID" \
+  --query "appRoles[?value=='weather.service.read' && isEnabled].id | [0]" \
+  --output tsv)"
+
+test -n "$RESOURCE_SP_ID" && test -n "$SMOKE_SP_ID" && test -n "$WEATHER_ROLE_ID"
+az rest --method POST \
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/${SMOKE_SP_ID}/appRoleAssignments" \
+  --headers Content-Type=application/json \
+  --body "{\"principalId\":\"${SMOKE_SP_ID}\",\"resourceId\":\"${RESOURCE_SP_ID}\",\"appRoleId\":\"${WEATHER_ROLE_ID}\"}" \
+  --output none
+
+az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/${SMOKE_SP_ID}/appRoleAssignments" \
+  --query "value[?resourceId=='${RESOURCE_SP_ID}' && appRoleId=='${WEATHER_ROLE_ID}'].{resourceId:resourceId,appRoleId:appRoleId}" \
+  --output table
+```
+
+Entra does not support assigning an application role to a synthetic “all users” principal. For all tenant users of the ChatGPT OAuth client, use tenant-wide delegated admin consent for the canonical `weather.read` scope instead. The safe sequence below preserves scopes on an existing grant rather than replacing them. It requires Microsoft Graph `DelegatedPermissionGrant.ReadWrite.All` and `Application.Read.All`:
+
+```bash
+API_APP_ID='<API application client ID>'
+CHATGPT_APP_ID='<ChatGPT OAuth client application ID>'
+
+RESOURCE_SP_ID="$(az ad sp show --id "$API_APP_ID" --query id --output tsv)"
+CHATGPT_SP_ID="$(az ad sp show --id "$CHATGPT_APP_ID" --query id --output tsv)"
+GRANT_ID="$(az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?\$filter=clientId%20eq%20'${CHATGPT_SP_ID}'%20and%20resourceId%20eq%20'${RESOURCE_SP_ID}'%20and%20consentType%20eq%20'AllPrincipals'" \
+  --query 'value[0].id' --output tsv)"
+
+if [ -n "$GRANT_ID" ]; then
+  EXISTING_SCOPES="$(az rest --method GET \
+    --url "https://graph.microsoft.com/v1.0/oauth2PermissionGrants/${GRANT_ID}" \
+    --query scope --output tsv)"
+  MERGED_SCOPES="$(printf '%s\nweather.read\n' "$EXISTING_SCOPES" \
+    | tr ' ' '\n' | sed '/^$/d' | sort -u | paste -sd' ' -)"
+  az rest --method PATCH \
+    --url "https://graph.microsoft.com/v1.0/oauth2PermissionGrants/${GRANT_ID}" \
+    --headers Content-Type=application/json \
+    --body "$(jq -cn --arg scope "$MERGED_SCOPES" '{scope:$scope}')" \
+    --output none
+else
+  az rest --method POST \
+    --url 'https://graph.microsoft.com/v1.0/oauth2PermissionGrants' \
+    --headers Content-Type=application/json \
+    --body "$(jq -cn \
+      --arg clientId "$CHATGPT_SP_ID" \
+      --arg resourceId "$RESOURCE_SP_ID" \
+      '{clientId:$clientId,consentType:"AllPrincipals",resourceId:$resourceId,scope:"weather.read"}')" \
+    --output none
+fi
+
+az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?\$filter=clientId%20eq%20'${CHATGPT_SP_ID}'%20and%20resourceId%20eq%20'${RESOURCE_SP_ID}'%20and%20consentType%20eq%20'AllPrincipals'" \
+  --query 'value[].{consentType:consentType,scope:scope}' \
+  --output table
+```
+
+These are tenant-wide identity changes, so test the exact smoke identity and ChatGPT client IDs before running them. A `403 Authorization_RequestDenied` means the signed-in operator lacks the required Microsoft Graph permission or tenant-admin consent; subscription `Owner` or resource-group permissions do not grant it. After assignment, mint a new token because existing access tokens do not gain newly assigned roles or scopes.
+
 ## Location and locale
 
 Explicit `latitude` and `longitude` must be supplied together, are range checked, and override ChatGPT metadata. When they are omitted, the tool best-effort reads optional, untrusted `_meta["openai/userLocation"]` coordinates. City, region, country, and timezone are descriptive only; they are never used for authorization or geocoding. ChatGPT location can be coarse. If neither source contains usable coordinates, the tool tells ChatGPT to ask for a location/coordinates or enable location sharing and never to guess. `_meta["openai/locale"]` supplies `languageCode` only when the caller did not specify one.
