@@ -594,7 +594,6 @@ jobs:
                 oidcAudience="${OIDC_AUDIENCE:-}" \
                 oidcJwksUri="${OIDC_JWKS_URI:-}" \
                 oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove}" \
-                oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-catalogue.read,reddit.read,youtube.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove}" \
                 oidcAllowedObjectIds="${OIDC_ALLOWED_OBJECT_IDS:-}" \
                 oidcAllowedSubjects="${OIDC_ALLOWED_SUBJECTS:-}" \
                 oidcAllowedAppObjectIds="${OIDC_ALLOWED_APP_OBJECT_IDS:-}" \
