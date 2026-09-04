@@ -10,6 +10,27 @@ Also add `weather.read` to `OIDC_REQUIRED_SCOPES`, expose/grant that scope in th
 
 ## Entra assignment commands
 
+For a single delegated user, use the checked-in, dry-run-by-default helper. The guest UPN must be copied exactly from Entra:
+
+```bash
+USER_UPN='mkos_postat_outlook.com#EXT#@mkospostatoutlook.onmicrosoft.com' \
+  ./scripts/grant-weather-user-access.sh
+USER_UPN='mkos_postat_outlook.com#EXT#@mkospostatoutlook.onmicrosoft.com' APPLY=true \
+  ./scripts/grant-weather-user-access.sh
+```
+
+The helper creates the missing `weather.read` delegated scope when necessary and grants only that user a `Principal` consent for the configured ChatGPT OAuth client. Future users can be added by rerunning it with their exact Entra UPN. It does not assign a service-only role to a human user.
+
+If an administrator explicitly wants the automation identity to maintain these assignments later, first review and run the separate bootstrap helper. This is a tenant-wide privileged grant and must not be applied to the runtime Function identity:
+
+```bash
+AUTOMATION_APP_ID='<Codex automation application client ID>' ./scripts/grant-entra-bootstrap-rights.sh
+AUTOMATION_APP_ID='<Codex automation application client ID>' APPLY=true \
+  ./scripts/grant-entra-bootstrap-rights.sh
+```
+
+The bootstrap helper grants exactly Microsoft Graph `Application.Read.All`, `AppRoleAssignment.ReadWrite.All`, and `DelegatedPermissionGrant.ReadWrite.All`. A Privileged Role Administrator must execute the initial grant; no script can legitimately self-elevate around that Entra boundary. Revoke these roles when ongoing autonomous Entra maintenance is not intended.
+
 The production/test smoke identity is an application, so assign the service-only `weather.service.read` app role to its **enterprise application service principal**. `az role assignment create` is not applicable because that command manages Azure RBAC, not Microsoft Graph app roles. Run the following while signed in as a tenant administrator whose Azure CLI token has Microsoft Graph `AppRoleAssignment.ReadWrite.All` and `Application.Read.All`:
 
 ```bash
