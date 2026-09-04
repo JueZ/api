@@ -52,6 +52,13 @@ test('delivery DAG builds and attests once before test, then reads main once bef
   assert.equal(workflow.jobs['promote-production'].with.expectedSbomDigest, '${{ needs.build.outputs.sbom_digest }}');
 });
 
+test('full delivery re-verifies production even when health already reports the target SHA', () => {
+  const source = readFileSync(new URL('../../.github/workflows/delivery-v2.yml', import.meta.url), 'utf8');
+  assert.match(source, /matching health SHA proves only that files reached production/);
+  assert.doesNotMatch(source, /if \[ "\$previous_production_sha" = "\$DELIVERY_SHA" \]; then\s*promote="false"/);
+  assert.match(source, /promote="true"/);
+});
+
 test('reusable deployment permissions fit every direct caller and centralize issue writes', () => {
   assert.deepEqual(environmentWorkflow.permissions, {
     contents: 'read',

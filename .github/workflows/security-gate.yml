@@ -102,8 +102,19 @@ jobs:
             apps/api/package-lock.json
       - name: Audit registry dependencies
         run: |
-          npm audit --audit-level=high
-          npm --prefix apps/api audit --omit=dev --audit-level=high
+          audit_with_retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              if "$@"; then return 0; fi
+              if [ "$attempt" = "3" ]; then return 1; fi
+              sleep $((attempt * 10))
+            done
+          }
+          audit_with_retry npm audit --audit-level=high
+          # Rebuild npm's logical tree for the independently deployed Function
+          # manifest before its audit. This installs nothing and runs no scripts.
+          npm --prefix apps/api install --package-lock-only --ignore-scripts --no-audit
+          audit_with_retry npm --prefix apps/api audit --omit=dev --audit-level=high
 
   codeqlJavascript:
     name: CodeQL javascript-typescript

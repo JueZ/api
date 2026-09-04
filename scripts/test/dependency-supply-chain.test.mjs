@@ -54,6 +54,13 @@ test('Function dependency changes run both lockfile audits in the existing Secur
   assert.ok(workflow.jobs.aggregate.needs.includes('dependencyAudit'));
 });
 
+test('Function dependency audit rebuilds its isolated logical tree without lifecycle scripts', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/security-gate.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /npm --prefix apps\/api install --package-lock-only --ignore-scripts --no-audit/);
+  assert.match(workflow, /audit_with_retry npm --prefix apps\/api audit --omit=dev --audit-level=high/);
+  assert.match(workflow, /for attempt in 1 2 3/);
+});
+
 test('Dependabot monitors the deployed Function manifest as an independent npm project', () => {
   const config = parseYaml(repositoryFile('.github/dependabot.yml'));
   const npmUpdates = config.updates.filter((update) => update['package-ecosystem'] === 'npm');
