@@ -16,27 +16,36 @@ export const YOUTUBE_LIMITS = {
   retryAfterSeconds: 3600,
 } as const;
 
-const pageSize = z.number().int().min(1).max(YOUTUBE_LIMITS.pageChunks).default(20);
-const language = z
+export const youtubePageSizeSchema = z.number().int().min(1).max(YOUTUBE_LIMITS.pageChunks).default(20);
+export const youtubeLanguageSchema = z
   .string()
   .trim()
   .toLowerCase()
   .regex(/^[a-z]{2}$/);
-const videoId = z.string().regex(/^[A-Za-z0-9_-]{11}$/);
+export const youtubeVideoIdSchema = z.string().regex(/^[A-Za-z0-9_-]{11}$/);
+export const youtubeUrlSchema = z.string().min(1).max(YOUTUBE_LIMITS.urlChars);
+export const youtubeCursorSchema = z.string().min(20).max(YOUTUBE_LIMITS.cursorChars);
 export const youtubeTranscriptInputSchema = z.union([
   z
     .object({
-      url: z.string().min(1).max(YOUTUBE_LIMITS.urlChars),
+      url: youtubeUrlSchema,
       videoId: z.never().optional(),
-      language: language.optional(),
-      pageSize,
+      language: youtubeLanguageSchema.optional(),
+      pageSize: youtubePageSizeSchema,
     })
     .strict(),
-  z.object({ videoId, url: z.never().optional(), language: language.optional(), pageSize }).strict(),
   z
     .object({
-      cursor: z.string().min(20).max(YOUTUBE_LIMITS.cursorChars),
-      pageSize,
+      videoId: youtubeVideoIdSchema,
+      url: z.never().optional(),
+      language: youtubeLanguageSchema.optional(),
+      pageSize: youtubePageSizeSchema,
+    })
+    .strict(),
+  z
+    .object({
+      cursor: youtubeCursorSchema,
+      pageSize: youtubePageSizeSchema,
       url: z.never().optional(),
       videoId: z.never().optional(),
       language: z.never().optional(),
@@ -53,9 +62,9 @@ export const youtubeChunkSchema = z.object({
 export const youtubeTranscriptOutputSchema = z.object({
   source: z.literal('youtube'),
   fetchedAt: z.string().datetime(),
-  video: z.object({ id: videoId }),
+  video: z.object({ id: youtubeVideoIdSchema }),
   transcript: z.object({
-    requestedLanguage: language.optional(),
+    requestedLanguage: youtubeLanguageSchema.optional(),
     language: z.string().min(1).max(35).optional(),
     availableLanguages: z.array(z.string().min(1).max(35)).max(100),
     mode: z.literal('native'),

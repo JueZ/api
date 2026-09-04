@@ -4,6 +4,7 @@ import { normalizeYouTubeVideoId } from '../dist/shared/youtube/input.js';
 import { SupadataYouTubeTranscriptProvider } from '../dist/shared/youtube/client.js';
 import { YouTubeTranscriptService } from '../dist/shared/youtube/service.js';
 import { InMemoryYouTubeSnapshotStore, normalizeTranscript, youtubeCacheKey } from '../dist/shared/youtube/snapshot.js';
+import { youtubeTranscriptInputSchema } from '../dist/shared/youtube/types.js';
 
 const id = 'dQw4w9WgXcQ';
 test('normalizes only supported YouTube authorities and shapes', () => {
@@ -31,14 +32,42 @@ test('normalizes only supported YouTube authorities and shapes', () => {
   ])
     assert.throws(() => normalizeYouTubeVideoId(value));
 });
-test('provider sends one native-only canonical bounded request', async () => {
+test('input contract accepts one initial source or cursor-only continuation', () => {
+  for (const input of [
+    { url: `https://youtu.be/${id}` },
+    { videoId: id, language: 'EN' },
+    { cursor: 'x'.repeat(20), pageSize: 1 },
+  ])
+    assert.equal(youtubeTranscriptInputSchema.safeParse(input).success, true);
+  for (const input of [
+    {},
+    { url: `https://youtu.be/${id}`, videoId: id },
+    { url: `https://youtu.be/${id}`, cursor: 'x'.repeat(20) },
+    { videoId: id, cursor: 'x'.repeat(20) },
+    { cursor: 'x'.repeat(20), language: 'en' },
+  ])
+    assert.equal(youtubeTranscriptInputSchema.safeParse(input).success, false);
+});
+test('provider accepts the documented timestamped Supadata response and sends one native-only request', async () => {
   let calls = 0;
   let seen;
   const provider = new SupadataYouTubeTranscriptProvider('secret', async (url, init) => {
     calls++;
     seen = { url: String(url), init };
     return new Response(
-      JSON.stringify({ content: [{ text: 'hello', offset: 0, duration: 1000 }], lang: 'en', availableLangs: ['en'] }),
+      JSON.stringify({
+        lang: 'en',
+        availableLangs: ['en'],
+        content: [
+          {
+            lang: 'en',
+            text: 'It all sounds very unlikely. Electronic',
+            offset: 3659,
+            duration: 4429,
+          },
+          { lang: 'en', text: 'Arts, released in 2026. A high-quality', offset: 7161, duration: 5027 },
+        ],
+      }),
       { status: 200 },
     );
   });
@@ -51,7 +80,23 @@ test('provider sends one native-only canonical bounded request', async () => {
   assert.equal(u.searchParams.get('text'), 'false');
   assert.equal(u.searchParams.get('chunkSize'), '1500');
   assert.equal(seen.init.headers['x-api-key'], 'secret');
-  assert.equal(result.content.length, 1);
+  assert.equal(result.content.length, 2);
+  assert.deepEqual(result.content[0], {
+    text: 'It all sounds very unlikely. Electronic',
+    offsetMs: 3659,
+    durationMs: 4429,
+  });
+  assert.equal(result.language, 'en');
+  assert.deepEqual(result.availableLanguages, ['en']);
+});
+test('provider rejects a malformed success response', async () => {
+  const provider = new SupadataYouTubeTranscriptProvider('secret', async () =>
+    Response.json({ lang: 'en', availableLangs: ['en'], content: [{ text: 'missing timing and language' }] }),
+  );
+  await assert.rejects(
+    () => provider.fetchNativeTranscript({ videoId: id }),
+    (error) => error.code === 'upstream_invalid_response' && error.status === 502,
+  );
 });
 test('provider errors and timeout never retry', async () => {
   for (const status of [202, 206, 400, 401, 403, 404, 429, 500]) {
@@ -62,6 +107,20 @@ test('provider errors and timeout never retry', async () => {
     });
     await assert.rejects(() => p.fetchNativeTranscript({ videoId: id }));
     assert.equal(calls, 1);
+  }
+});
+test('provider classifies unavailable, authentication, and rate-limit responses', async () => {
+  for (const [status, code] of [
+    [206, 'transcript_unavailable'],
+    [401, 'provider_not_configured'],
+    [403, 'provider_not_configured'],
+    [429, 'upstream_rate_limited'],
+  ]) {
+    const provider = new SupadataYouTubeTranscriptProvider('x', async () => new Response('{}', { status }));
+    await assert.rejects(
+      () => provider.fetchNativeTranscript({ videoId: id }),
+      (error) => error.code === code,
+    );
   }
 });
 test('normalization preserves injection-like text as ordered inert data', () => {

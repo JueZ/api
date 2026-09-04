@@ -157,7 +157,7 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
               name: 'youtube_get_transcript',
               // This stable public identifier is sent to the API, which constructs
               // the allowlisted provider URL. The smoke never prints transcript text.
-              arguments: { videoId: 'dQw4w9WgXcQ', language: 'en', pageSize: 1 },
+              arguments: { videoId: 'ZOE9ud6rSSw', language: 'en', pageSize: 1 },
             },
           }),
         },
@@ -178,7 +178,7 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
       assertEqual(
         'authenticated YouTube transcript MCP video ID',
         youtube.json?.result?.structuredContent?.video?.id,
-        'dQw4w9WgXcQ',
+        'ZOE9ud6rSSw',
       );
       assertEqual(
         'authenticated YouTube transcript MCP mode',

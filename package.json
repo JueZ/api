@@ -9,6 +9,7 @@
     "type-check": "tsc -p apps/api/tsconfig.json --noEmit && ng build --configuration development --no-progress",
     "test": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs apps/web/test/*.test.mjs scripts/test/*.test.mjs'",
     "test:api": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs'",
+    "test:youtube:live": "sh -c 'npm run build:api --silent && YOUTUBE_LIVE_PROVIDER_TEST=true node --test apps/api/test/youtube-live.test.mjs'",
     "test:gates": "node --test scripts/test/path-classifier.test.mjs scripts/test/gate-aggregate.test.mjs scripts/test/native-automerge-policy.test.mjs",
     "test:delivery": "node --test scripts/test/deployment-impact.test.mjs scripts/test/deployment-generation.test.mjs scripts/test/delivery-v2-workflow.test.mjs scripts/test/known-good-release.test.mjs",
     "test:repair": "node --test scripts/test/agent-learning-triage.test.mjs scripts/test/agent-learning-artifacts.test.mjs",

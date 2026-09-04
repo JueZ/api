@@ -56,6 +56,14 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
     assert.equal(exhaustive.inputSchema.properties.pageSize.maximum, 50);
     assert.equal(exhaustive.inputSchema.properties.maxComments, undefined);
 
+    const youtube = tools.find((tool) => tool.name === 'youtube_get_transcript');
+    assert.ok(youtube.inputSchema.properties.url);
+    assert.ok(youtube.inputSchema.properties.videoId);
+    assert.ok(youtube.inputSchema.properties.cursor);
+    assert.ok(youtube.inputSchema.properties.language);
+    assert.ok(youtube.inputSchema.properties.pageSize);
+    assert.notDeepEqual(youtube.inputSchema.properties, {});
+
     for (const tool of tools) {
       assert.equal(tool.annotations.readOnlyHint, tool.name !== 'bring_add_item', `${tool.name} read-only hint`);
       assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`);
