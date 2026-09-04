@@ -1,6 +1,7 @@
 export const PERMISSIONS = [
   'catalogue.read',
   'reddit.read',
+  'youtube.read',
   'wlh.read',
   'weather.read',
   'bring.read',

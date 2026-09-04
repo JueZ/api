@@ -11,6 +11,7 @@
 | reddit.thread-comments | reddit | read | reddit.read | user, service | local, test, prod | not-applicable | not-applicable | POST /api/reddit/thread/comments | reddit_get_thread_page |
 | reddit.comment-tree | reddit | read | reddit.read | user, service | local, test, prod | not-applicable | not-applicable | POST /api/reddit/comment-tree | — |
 | reddit.comments-batch | reddit | read | reddit.read | user, service | local, test, prod | not-applicable | not-applicable | POST /api/reddit/comments/batch | — |
+| youtube.transcript | youtube | read | youtube.read | user, service | local, test, prod | not-applicable | not-applicable | POST /api/youtube/transcript | youtube_get_transcript |
 | wlh.categories | wlh | read | wlh.read | user, service | local, test, prod | not-applicable | not-applicable | GET /api/wlh/categories/top | wlh_categories_top |
 | wlh.category | wlh | read | wlh.read | user, service | local, test, prod | not-applicable | not-applicable | GET /api/wlh/categories/{categoryId} | — |
 | wlh.find-category | wlh | read | wlh.read | user, service | local, test, prod | not-applicable | not-applicable | — | wlh_find_category |

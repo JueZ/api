@@ -22,6 +22,7 @@
 - Bring mutation integrity v2 binds replay identity and confirmation tokens to the action, list, payload, client, token type, and tenant-tagged object-ID-or-subject principal. Durable results require the exact consumed-token HMAC, encrypted payloads use record-bound AAD, and legacy v1 records/tokens are retained but never replayed or decrypted.
 - Authentication, authorization, operation permissions, audit, idempotency, destructive confirmation, allowlists, and provider-data minimization remain fail closed.
 - Optional OpenAI use is restricted to bounded sanitized runtime repairable-error analysis. Pull-request governance, repair callbacks, and required checks use no provider key.
+- YouTube transcripts are a disabled-by-default, native-caption-only provider integration protected by `youtube.read`. Initial cache misses make at most one metered request; bounded normalized provider responses are retained temporarily in private managed-identity Blob state and principal-bound cursors never refetch. Coverage describes stored provider-response chunks only, not spoken-word completeness. External provider charges are outside Azure budgets.
 
 ## Learning and memory
 

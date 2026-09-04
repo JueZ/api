@@ -39,6 +39,7 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
         'reddit_get_thread_overview',
         'reddit_get_thread_page',
         'weather_get_forecast',
+        'youtube_get_transcript',
         'wlh_categories_top',
         'wlh_category_children',
         'wlh_find_category',
@@ -711,6 +712,30 @@ function assertToolError(response, error, source = undefined) {
 
 function stubServices(calls = []) {
   return {
+    youtube: {
+      getTranscript: async () => ({
+        source: 'youtube',
+        fetchedAt: '2026-01-01T00:00:00.000Z',
+        video: { id: 'dQw4w9WgXcQ' },
+        transcript: {
+          availableLanguages: ['en'],
+          language: 'en',
+          mode: 'native',
+          empty: false,
+          totalChunks: 1,
+          totalCharacters: 5,
+        },
+        chunks: [{ index: 0, startMs: 0, endMs: 1000, text: 'hello' }],
+        page: { returned: 1, returnedCharacters: 5, hasMore: false, nextCursor: null },
+        coverage: {
+          basis: 'provider_response',
+          providerResponseFullyStored: true,
+          storedChunks: 1,
+          allStoredChunksReturned: true,
+        },
+        warnings: [],
+      }),
+    },
     reddit: {
       fetchThread: async (args) => {
         calls.push(['fetchThread', args]);
@@ -858,6 +883,7 @@ function stubServices(calls = []) {
 function expectedScopes(toolName) {
   if (toolName === 'hello_authenticated') return ['catalogue.read'];
   if (toolName.startsWith('reddit_')) return ['reddit.read'];
+  if (toolName.startsWith('youtube_')) return ['youtube.read'];
   if (toolName.startsWith('wlh_')) return ['wlh.read'];
   if (toolName === 'weather_get_forecast') return ['weather.read'];
   if (toolName === 'bring_add_item') return ['bring.write'];

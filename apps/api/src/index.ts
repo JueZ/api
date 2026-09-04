@@ -9,6 +9,7 @@ await import('./functions/redditCommentTree.js');
 await import('./functions/redditCommentsBatch.js');
 await import('./functions/redditThreadComments.js');
 await import('./functions/redditThreadOverview.js');
+await import('./functions/youtubeTranscript.js');
 await import('./functions/wlhCategories.js');
 await import('./functions/wlhSearch.js');
 await import('./functions/wlhOffer.js');
