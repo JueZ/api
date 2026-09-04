@@ -378,35 +378,39 @@ test('shared-list summaries never bypass current Bring membership verification',
   await assert.rejects(service.addItems(sharedListUuid, [{ name: 'Milk' }]), BringPolicyError);
 });
 
-test('list versions are stable and batch mutations preserve the observed Bring wire protocol', async () => {
+test('list versions are stable and exact-item mutations preserve the observed Bring wire protocol', async () => {
   const calls = [];
+  const firstMilkUuid = '44444444-4444-4444-8444-444444444444';
+  const secondMilkUuid = '55555555-5555-4555-8555-555555555555';
+  const currentList = {
+    items: {
+      purchase: [
+        { itemId: 'Milk', uuid: firstMilkUuid, specification: 'whole' },
+        { itemId: 'Milk', uuid: secondMilkUuid, specification: 'skimmed' },
+      ],
+      recently: [{ itemId: 'Bread', uuid: '66666666-6666-4666-8666-666666666666' }],
+    },
+  };
   const service = new BringService({
     config: cfg,
     sessionStore: null,
     fetchImpl: bringFixtureFetch({
       calls,
-      list: providerFixture.responses.list,
+      list: currentList,
     }),
   });
   const first = await service.getList(listUuid);
   const second = await service.getList(listUuid);
   assert.equal(first.version, second.version);
-  assert.deepEqual(first.items, [
-    {
-      name: 'Fixture active item',
-      specification: 'Fixture specification',
-      status: 'active',
-    },
-    { name: 'Fixture completed item', status: 'completed' },
-  ]);
+  assert.equal(first.items.length, 3);
 
   const items = [
     { name: 'Äpfel & Milch', specification: '2 Liter' },
     { name: 'Äpfel & Milch', specification: '1 Liter' },
   ];
   await service.addItems(listUuid, items, first.version);
-  await service.completeItems(listUuid, items);
-  await service.removeItems(listUuid, items);
+  await service.completeItems(listUuid, [{ name: 'Milk', uuid: firstMilkUuid }]);
+  await service.removeItems(listUuid, [{ name: 'Milk', uuid: secondMilkUuid }]);
   assert.deepEqual(
     calls.map((payload) => payload.changes[0].operation),
     ['TO_PURCHASE', 'TO_RECENTLY', 'REMOVE'],
@@ -436,6 +440,29 @@ test('list versions are stable and batch mutations preserve the observed Bring w
     ],
     sender: '',
   });
+  assert.deepEqual(calls[1].changes[0], {
+    accuracy: '0.0',
+    altitude: '0.0',
+    latitude: '0.0',
+    longitude: '0.0',
+    itemId: 'Milk',
+    spec: 'whole',
+    uuid: firstMilkUuid,
+    operation: 'TO_RECENTLY',
+  });
+  assert.equal(calls[2].changes[0].uuid, secondMilkUuid);
+  assert.equal(calls[2].changes[0].spec, 'skimmed');
+
+  await assert.rejects(
+    service.removeItems(listUuid, [{ name: 'Milk', uuid: '77777777-7777-4777-8777-777777777777' }]),
+    /exact active Bring item UUID was not found/,
+  );
+  await assert.rejects(
+    service.removeItems(listUuid, [{ name: 'Wrong name', uuid: secondMilkUuid }]),
+    /name no longer matches/,
+  );
+  await assert.rejects(service.completeItems(listUuid, [{ name: 'Milk' }]), /uuid is required/);
+  assert.equal(calls.length, 3);
 });
 
 test('mutation failures retain metadata-only diagnostics and no provider response content', async () => {
@@ -974,6 +1001,20 @@ test('destructive mutations require a fresh principal-bound confirmation and exe
       'trace-apply-wrong-list',
     ),
     BringConfirmationError,
+  );
+  await assert.rejects(
+    coordinator.apply(
+      principal,
+      {
+        operationId: secondOperationId,
+        listUuid,
+        confirmationToken: refreshed.confirmationToken,
+        operation: 'remove',
+        items: [{ name: 'Different item' }],
+      },
+      'trace-apply-changed-payload',
+    ),
+    BringIdempotencyConflictError,
   );
   const result = await coordinator.apply(
     principal,

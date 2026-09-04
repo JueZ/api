@@ -23,7 +23,7 @@
 | bring.list-lists | bring | read | bring.read | user, service | local, test, prod | not-applicable | not-applicable | GET /api/bring/lists | bring_list_lists |
 | bring.get-items | bring | read | bring.read | user, service | local, test, prod | not-applicable | not-applicable | GET /api/bring/lists/{listUuid}/items | bring_get_items |
 | bring.add-items | bring | write | bring.write | user, service | local, prod | required | not-applicable | POST /api/bring/lists/{listUuid}/items | bring_add_item |
-| bring.prepare-complete-items | bring | destructive | bring.complete | user | local, prod | required | required | POST /api/bring/lists/{listUuid}/mutations/prepare | — |
-| bring.prepare-remove-items | bring | destructive | bring.remove | user | local, prod | required | required | POST /api/bring/lists/{listUuid}/mutations/prepare | — |
+| bring.prepare-complete-items | bring | destructive | bring.complete | user | local, prod | required | required | POST /api/bring/lists/{listUuid}/mutations/prepare | bring_complete_item |
+| bring.prepare-remove-items | bring | destructive | bring.remove | user | local, prod | required | required | POST /api/bring/lists/{listUuid}/mutations/prepare | bring_remove_item |
 | bring.apply-complete-items | bring | destructive | bring.complete | user | local, prod | required | required | POST /api/bring/lists/{listUuid}/mutations/apply | — |
 | bring.apply-remove-items | bring | destructive | bring.remove | user | local, prod | required | required | POST /api/bring/lists/{listUuid}/mutations/apply | — |

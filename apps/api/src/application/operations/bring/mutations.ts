@@ -38,6 +38,9 @@ export interface ApplyMutationCommand {
   operationId: string;
   listUuid: string;
   confirmationToken: string;
+  expectedListVersion?: string;
+  operation?: BringDestructiveOperation;
+  items?: BringItemInput[];
 }
 
 export interface PreparedBringMutation {
@@ -198,6 +201,24 @@ export class BringMutationCoordinator {
       );
     }
     const identity = this.identity(principal, listUuid);
+    if (command.operation !== undefined || command.items !== undefined || command.expectedListVersion !== undefined) {
+      if (!command.operation || !command.items) {
+        throw new BringInputError('operation and items are required when applying with payload verification.', 'items');
+      }
+      const verifiedCommand = normalizePrepareCommand({
+        operationId,
+        listUuid,
+        operation: command.operation,
+        items: command.items,
+        expectedListVersion: command.expectedListVersion,
+      });
+      this.assertReplayIdentity(
+        stored.record,
+        verifiedCommand.operation,
+        this.security.payloadHash(verifiedCommand.operation, toPayload(verifiedCommand)),
+        identity,
+      );
+    }
     this.assertSamePrincipal(stored.record, identity.principalPseudonym);
     if (stored.record.listPseudonym !== identity.listPseudonym) {
       throw new BringConfirmationError('Prepared mutation belongs to another list.');

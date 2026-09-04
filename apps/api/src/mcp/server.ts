@@ -89,11 +89,11 @@ const maxCategoryMatches = 10;
 const maxCategoryScan = 200;
 
 const serverInstructions = [
-  'This private API catalogue MCP server exposes Reddit, Willhaben, and Google Weather reads plus controlled Bring reads and item additions for the authenticated operator.',
+  'This private API catalogue MCP server exposes Reddit, Willhaben, and Google Weather reads plus controlled Bring reads and item mutations for the authenticated operator.',
   'For ordinary Reddit analysis, call reddit_get_thread_overview first; call reddit_get_thread only when a bounded set of comment bodies is needed.',
   'When the user explicitly asks for all or exhaustive Reddit comments, or a bounded result reports remaining comments that matter, call reddit_get_thread_page. Provide postId or url only on the first call, then repeatedly provide only its returned cursor until nextCursor is absent, then inspect coverage.coverageStatus.',
   'For a specific Willhaben URL or ad ID, call wlh_get_offer directly. For broad Willhaben searches, call wlh_find_category if the category is unclear, then wlh_search, then wlh_get_offer for selected listings.',
-  'Bring item additions require bring.write, an explicit writable list UUID, and a caller-generated operation UUID. Complete and remove mutations remain unavailable over MCP.',
+  'Bring writes require an explicit writable list UUID and caller-generated operation UUID. Before complete or remove, read the list, resolve the exact item UUID and current version, then complete the tool confirmation flow.',
   'For current weather, rain, temperature, wind, hourly outdoor planning, or forecasts up to 10 days, call weather_get_forecast. Omit coordinates for “here” or “near me” so openai/userLocation can be used. Use current for now, hourly for a particular hour or part of day, daily for multi-day outlooks, and overview only when both hourly detail and a multi-day outlook help. If location_required is returned, ask for a location or coordinates or suggest enabling location sharing; never guess.',
   'When a tool fails, read structuredContent.repairable_problem before retrying. Follow caller_instruction and retry_policy.same_request exactly; do not invent arguments after dependency or internal failures.',
   'Do not use these tools for unrelated requests, account management, list sharing/deletion, notifications, or arbitrary upstream calls.',

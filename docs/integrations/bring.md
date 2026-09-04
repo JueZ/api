@@ -39,7 +39,9 @@ Prepare validates policy, input, current list membership, sharing status, and op
 
 Confirmation tokens and durable mutation records created before integrity format v2 are intentionally non-replayable because their principal pseudonyms did not bind a tenant. They remain retained for audit/lifecycle policy and are never rewritten or decrypted as a compatibility fallback. On a legacy conflict, re-read the list and inspect its current state; use a fresh operation ID only when an operator deliberately determines that another mutation is still required. Never resubmit a destructive operation automatically.
 
-MCP exposes `bring_list_lists`, `bring_get_items`, and the controlled singular `bring_add_item` operation. Destructive complete/remove mutations stay on the authenticated REST/web-explorer path so provider-controlled Reddit, Willhaben, or Bring content cannot ask the same model session to replay a destructive write or confirmation token. The explorer keeps a prepared confirmation token only in private in-memory state, redacts it from rendered results and generated curl commands, and clears it after use or sign-out.
+MCP exposes `bring_list_lists`, `bring_get_items`, `bring_add_item`, `bring_remove_item`, and `bring_complete_item`. For a safe removal, call `bring_get_items(listUuid)`, select the exact current item UUID and name, generate a fresh `operationId`, then call `bring_remove_item` with the explicit `listUuid`, returned `expectedListVersion`, and item. The first call prepares the destructive mutation; repeat the same request with its short-lived `confirmationToken` to apply it. Completion uses the same flow. Typo correction should use remove-old plus add-new rather than an in-place rename because Bring clients can retain stale names.
+
+The destructive MCP tools preserve the authenticated REST pipeline's delegated-user permissions, writable-list and shared-list allowlists, durable replay record, optimistic concurrency, and principal/payload-bound confirmation. They never select by name alone: the UUID must identify an active item and its current name must match.
 
 ## Storage, encryption, and audit
 

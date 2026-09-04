@@ -12,6 +12,8 @@ const authEnv = {
 };
 const bringListUuid = '22222222-2222-4222-8222-222222222222';
 const bringAddOperationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const bringRemoveOperationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const bringItemUuid = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
 test('MCP initialize and tools/list expose reads and controlled Bring additions', async () => {
   await withEnv(authEnv, async () => {
@@ -31,8 +33,10 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
       names,
       [
         'bring_add_item',
+        'bring_complete_item',
         'bring_get_items',
         'bring_list_lists',
+        'bring_remove_item',
         'health_check',
         'hello_authenticated',
         'reddit_get_thread',
@@ -65,8 +69,10 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
     assert.notDeepEqual(youtube.inputSchema.properties, {});
 
     for (const tool of tools) {
-      assert.equal(tool.annotations.readOnlyHint, tool.name !== 'bring_add_item', `${tool.name} read-only hint`);
-      assert.equal(tool.annotations.destructiveHint, false, `${tool.name} must be non-destructive`);
+      const bringWrite = ['bring_add_item', 'bring_complete_item', 'bring_remove_item'].includes(tool.name);
+      const bringDestructive = ['bring_complete_item', 'bring_remove_item'].includes(tool.name);
+      assert.equal(tool.annotations.readOnlyHint, !bringWrite, `${tool.name} read-only hint`);
+      assert.equal(tool.annotations.destructiveHint, bringDestructive, `${tool.name} destructive hint`);
       assert.equal(tool.annotations.idempotentHint, true, `${tool.name} must be idempotent`);
       assert.ok(tool.outputSchema, `${tool.name} must expose an output schema`);
       assert.equal(typeof tool._meta['openai/toolInvocation/invoking'], 'string');
@@ -171,7 +177,7 @@ test('authenticated MCP hello returns safe user shape without full claims or tok
   });
 });
 
-test('MCP Bring exposes reads and idempotent add while destructive mutations remain unavailable', async () => {
+test('MCP Bring exposes reads, add, and confirmed exact-item remove/complete tools', async () => {
   const services = stubServices();
   services.bring.listLists = async () => ({
     source: 'bring',
@@ -201,6 +207,34 @@ test('MCP Bring exposes reads and idempotent add while destructive mutations rem
       state: 'succeeded',
       replayed: false,
     });
+
+    const removal = {
+      operationId: bringRemoveOperationId,
+      listUuid: bringListUuid,
+      expectedListVersion: '0'.repeat(64),
+      item: { uuid: bringItemUuid, name: 'Wollwick Wasser', specification: '1 l' },
+    };
+    const prepared = await mcpCall('bring_remove_item', removal, 'Bearer local-dev-token', services);
+    assert.equal(prepared.jsonBody.result.structuredContent.state, 'prepared');
+    assert.equal(prepared.jsonBody.result.structuredContent.operation, 'remove');
+    const removed = await mcpCall(
+      'bring_remove_item',
+      { ...removal, confirmationToken: prepared.jsonBody.result.structuredContent.confirmationToken },
+      'Bearer local-dev-token',
+      services,
+    );
+    assert.equal(removed.jsonBody.result.structuredContent.operation, 'remove');
+    assert.equal(removed.jsonBody.result.structuredContent.state, 'succeeded');
+
+    const listedTools = (
+      await mcpRequest({ jsonrpc: '2.0', id: 9, method: 'tools/list', params: {} }, undefined, services)
+    ).jsonBody.result.tools;
+    const removeTool = listedTools.find((tool) => tool.name === 'bring_remove_item');
+    assert.deepEqual(removeTool.inputSchema.required.sort(), ['item', 'listUuid', 'operationId']);
+    assert.deepEqual(removeTool.inputSchema.properties.item.required.sort(), ['name', 'uuid']);
+    assert.match(removeTool.description, /permanently remove|destructive write/i);
+    assert.match(removeTool.description, /bring_get_items|exact item UUID/i);
+    assert.match(listedTools.find((tool) => tool.name === 'bring_complete_item').description, /completed\/bought/i);
   });
 });
 
@@ -895,9 +929,8 @@ function expectedScopes(toolName) {
   if (toolName.startsWith('wlh_')) return ['wlh.read'];
   if (toolName === 'weather_get_forecast') return ['weather.read'];
   if (toolName === 'bring_add_item') return ['bring.write'];
-  if (toolName === 'bring_prepare_item_mutation' || toolName === 'bring_apply_item_mutation') {
-    return ['bring.complete', 'bring.remove'];
-  }
+  if (toolName === 'bring_complete_item') return ['bring.complete'];
+  if (toolName === 'bring_remove_item') return ['bring.remove'];
   if (toolName.startsWith('bring_')) return ['bring.read'];
   throw new Error(`Unhandled protected MCP tool: ${toolName}`);
 }
