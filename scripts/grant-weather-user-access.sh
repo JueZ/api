@@ -46,10 +46,15 @@ if [[ -z "$scope_id" ]]; then
   fi
 fi
 
-grant_filter="clientId eq '${chatgpt_sp_id}' and resourceId eq '${resource_sp_id}' and consentType eq 'Principal' and principalId eq '${user_id}'"
-grant_id="$(az rest --method GET \
-  --url "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?\$filter=$(jq -rn --arg value "$grant_filter" '$value|@uri')" \
-  --query 'value[0].id' --output tsv)"
+grants_json="$(az rest --method GET \
+  --url 'https://graph.microsoft.com/v1.0/oauth2PermissionGrants' --output json)"
+grant_id="$(jq -r \
+  --arg clientId "$chatgpt_sp_id" \
+  --arg resourceId "$resource_sp_id" \
+  --arg principalId "$user_id" \
+  '[.value[]? | select(.clientId == $clientId and .resourceId == $resourceId and
+    .consentType == "Principal" and .principalId == $principalId)] | first.id // empty' \
+  <<<"$grants_json")"
 
 if [[ -n "$grant_id" ]]; then
   existing_scopes="$(az rest --method GET \
