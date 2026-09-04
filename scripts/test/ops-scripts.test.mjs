@@ -614,6 +614,69 @@ test('authenticated weather smoke uses explicit coordinates without exposing pro
   }
 });
 
+test('authenticated weather smoke retries bounded same-request MCP dependency failures', async () => {
+  const originalFetch = globalThis.fetch;
+  let weatherCalls = 0;
+  try {
+    globalThis.fetch = async (url, options = {}) => {
+      const path = new URL(String(url)).pathname;
+      if (path === '/health')
+        return Response.json({ status: 'ok', environmentName: 'test', deployedCommitSha: 'e'.repeat(40) });
+      if (path === '/api/hello') return Response.json({ authenticated: true });
+      if (path === '/api/reddit/thread') return Response.json({ source: 'reddit' });
+      if (path === '/mcp') {
+        const request = JSON.parse(options.body);
+        if (request.params.name !== 'weather_get_forecast') throw new Error('unexpected MCP tool');
+        weatherCalls += 1;
+        if (weatherCalls === 1)
+          return Response.json({
+            jsonrpc: '2.0',
+            id: 'weather-smoke',
+            result: {
+              isError: true,
+              structuredContent: {
+                error: 'dependency',
+                repairable_problem: {
+                  classification: 'dependency_failure',
+                  status: 502,
+                  retry_policy: { can_retry: true, same_request: true },
+                },
+              },
+            },
+          });
+        return Response.json({
+          jsonrpc: '2.0',
+          id: 'weather-smoke',
+          result: {
+            structuredContent: {
+              source: 'google-weather-api',
+              mode: 'current',
+              location: { coordinateSource: 'explicit' },
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    };
+    const { exitCode } = await runAuthenticatedSmoke({
+      env: {
+        API_BASE_URL: 'https://api.example.test',
+        AUTH_ACCESS_TOKEN: 'opaque-smoke-token',
+        ENVIRONMENT_NAME: 'test',
+        EXPECTED_DEPLOYED_COMMIT_SHA: 'e'.repeat(40),
+        SMOKE_RUN_ID: 'weather-retry-smoke',
+        WEATHER_SMOKE_ENABLED: 'true',
+        AUTH_PROTECTED_RETRY_ATTEMPTS: '3',
+        AUTH_PROTECTED_RETRY_DELAY_MS: '0',
+      },
+    });
+    assert.equal(exitCode, 0);
+    assert.equal(weatherCalls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('authenticated YouTube smoke performs one bounded MCP call without logging transcript text', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];

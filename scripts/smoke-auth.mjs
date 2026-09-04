@@ -94,6 +94,38 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
     throw new Error(`${label} did not return after ${attempts} attempts`);
   }
 
+  async function fetchMcpToolWithRetry(options, { attempts, delayMs, label }) {
+    let response;
+    for (let attempt = 1; attempt <= Math.min(attempts, 3); attempt += 1) {
+      response = await fetchJsonWithRetry(`${apiBaseUrl}/mcp`, options, {
+        attempts: 1,
+        delayMs: 0,
+        retryStatuses: new Set(),
+        label,
+      });
+      const problem = response.json?.result?.structuredContent?.repairable_problem;
+      const sameRequestRetry =
+        problem &&
+        typeof problem === 'object' &&
+        !Array.isArray(problem) &&
+        problem.retry_policy?.can_retry === true &&
+        problem.retry_policy?.same_request === true;
+      if (!sameRequestRetry || attempt >= Math.min(attempts, 3)) return response;
+      await sleep(delayMs);
+    }
+    return response;
+  }
+
+  function mcpFailureSummary(response) {
+    const content = response?.json?.result?.structuredContent;
+    const problem = content?.repairable_problem;
+    return {
+      error: typeof content?.error === 'string' ? content.error : undefined,
+      classification: typeof problem?.classification === 'string' ? problem.classification : undefined,
+      status: Number.isSafeInteger(problem?.status) ? problem.status : undefined,
+    };
+  }
+
   if (!token) {
     results.status = requireAuthSmoke ? 'blocked_auth_smoke' : 'skipped_auth_smoke';
     results.blockedReason =
@@ -202,8 +234,7 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
     }
 
     if (weatherSmokeEnabled) {
-      const weather = await fetchJsonWithRetry(
-        `${apiBaseUrl}/mcp`,
+      const weather = await fetchMcpToolWithRetry(
         {
           method: 'POST',
           headers: {
@@ -224,17 +255,16 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
         {
           attempts: protectedRetryAttempts,
           delayMs: protectedRetryDelayMs,
-          retryStatuses: new Set([404, 429, 502, 503, 504]),
           label: 'authenticated weather MCP smoke',
         },
       );
       assertEqual('authenticated weather MCP HTTP status', weather.response.status, 200);
       assertEqual('authenticated weather MCP JSON-RPC version', weather.json?.jsonrpc, '2.0');
-      assertEqual(
-        'authenticated weather MCP source',
-        weather.json?.result?.structuredContent?.source,
-        'google-weather-api',
-      );
+      const weatherSource = weather.json?.result?.structuredContent?.source;
+      if (weatherSource !== 'google-weather-api')
+        throw new Error(
+          `authenticated weather MCP source expected google-weather-api; failure=${JSON.stringify(mcpFailureSummary(weather))}`,
+        );
       assertEqual('authenticated weather MCP mode', weather.json?.result?.structuredContent?.mode, 'current');
       assertEqual(
         'authenticated weather MCP coordinate source',
