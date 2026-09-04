@@ -605,3 +605,55 @@ test('authenticated weather smoke uses explicit coordinates without exposing pro
     globalThis.fetch = originalFetch;
   }
 });
+
+test('authenticated weather smoke reports only safe authorization classification', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === '/health')
+        return new Response(
+          JSON.stringify({ status: 'ok', environmentName: 'test', deployedCommitSha: 'f'.repeat(40) }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      if (path === '/api/hello')
+        return new Response(JSON.stringify({ authenticated: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      if (path === '/mcp')
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 'weather-smoke',
+            result: {
+              isError: true,
+              structuredContent: {
+                repairable_problem: {
+                  classification: 'authorization_context_mismatch',
+                  operation_id: 'weather.forecast',
+                },
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      throw new Error(`unexpected path ${path}`);
+    };
+    const { result, exitCode } = await runAuthenticatedSmoke({
+      env: {
+        API_BASE_URL: 'https://api.example.test',
+        AUTH_ACCESS_TOKEN: 'opaque-never-reported',
+        ENVIRONMENT_NAME: 'test',
+        EXPECTED_DEPLOYED_COMMIT_SHA: 'f'.repeat(40),
+        SMOKE_RUN_ID: 'weather-auth-smoke',
+        WEATHER_SMOKE_ENABLED: 'true',
+      },
+    });
+    assert.equal(exitCode, 1);
+    assert.match(result.error, /classification=authorization_context_mismatch; operation=weather\.forecast/);
+    assert.doesNotMatch(JSON.stringify(result), /opaque-never-reported|latitude|longitude/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

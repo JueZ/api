@@ -167,6 +167,20 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
       );
       assertEqual('authenticated weather MCP HTTP status', weather.response.status, 200);
       assertEqual('authenticated weather MCP JSON-RPC version', weather.json?.jsonrpc, '2.0');
+      const weatherProblem = weather.json?.result?.structuredContent?.repairable_problem;
+      if (weather.json?.result?.isError === true) {
+        const safeClassification =
+          weatherProblem && typeof weatherProblem === 'object' && !Array.isArray(weatherProblem)
+            ? weatherProblem.classification
+            : undefined;
+        const safeOperationId =
+          weatherProblem && typeof weatherProblem === 'object' && !Array.isArray(weatherProblem)
+            ? weatherProblem.operation_id
+            : undefined;
+        throw new Error(
+          `authenticated weather MCP returned a tool error; classification=${safeClassification || 'unknown'}; operation=${safeOperationId || 'unknown'}`,
+        );
+      }
       assertEqual(
         'authenticated weather MCP source',
         weather.json?.result?.structuredContent?.source,
