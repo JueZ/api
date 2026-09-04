@@ -155,17 +155,20 @@ export class BringService {
   ): Promise<{ listUuid: string; items: BringItemInput[] }> {
     this.assertEnabled();
     this.assertMutationEnabled(operation);
-    const items = validateItems(input);
+    let items = validateItems(input);
     const id = await this.resolveListUuid(listUuid);
     await this.assertWritableList(id);
 
-    if (expectedListVersion) {
-      if (!/^[0-9a-f]{64}$/.test(expectedListVersion)) {
-        throw new BringInputError('expectedListVersion must be a lowercase SHA-256 digest.', 'expectedListVersion');
-      }
+    if (expectedListVersion !== undefined && !/^[0-9a-f]{64}$/.test(expectedListVersion)) {
+      throw new BringInputError('expectedListVersion must be a lowercase SHA-256 digest.', 'expectedListVersion');
+    }
+    if (expectedListVersion || operation !== 'add') {
       const current = await this.getList(id);
-      if (current.version !== expectedListVersion) {
+      if (expectedListVersion && current.version !== expectedListVersion) {
         throw new BringVersionConflictError('Bring list changed after it was read.');
+      }
+      if (operation !== 'add') {
+        items = validateExactActiveItems(current, items);
       }
     }
     return { listUuid: id, items };
@@ -328,6 +331,30 @@ export class BringService {
     }
     return session;
   }
+}
+
+function validateExactActiveItems(list: BringList, items: BringItemInput[]): BringItemInput[] {
+  return items.map((item, index) => {
+    if (!item.uuid) {
+      throw new BringInputError(`items[${index}].uuid is required for complete and remove.`, 'items');
+    }
+    const exact = list.items.find((candidate) => candidate.uuid?.toLowerCase() === item.uuid?.toLowerCase());
+    if (!exact || exact.status !== 'active') {
+      throw new BringNotFoundError('The exact active Bring item UUID was not found.');
+    }
+    if (exact.name !== item.name) {
+      throw new BringVersionConflictError('The Bring item name no longer matches the supplied UUID.');
+    }
+    return {
+      uuid: exact.uuid,
+      name: exact.name,
+      ...(item.specification !== undefined
+        ? { specification: item.specification }
+        : exact.specification !== undefined
+          ? { specification: exact.specification }
+          : {}),
+    };
+  });
 }
 
 function listRows(value: unknown): unknown[] | undefined {

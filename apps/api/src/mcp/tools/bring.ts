@@ -42,6 +42,19 @@ const itemInputSchema = z
     uuid: z.string().uuid().optional(),
   })
   .strict();
+const exactItemInputSchema = z
+  .object({
+    uuid: z.string().uuid().describe('Exact item UUID returned by bring_get_items.'),
+    name: nonEmptyText(200, 'Current item name returned for that UUID by bring_get_items.'),
+    specification: z.string().max(500).optional(),
+  })
+  .strict();
+const confirmationTokenSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .describe('Confirmation token returned by the first identical call. Omit only to prepare the mutation.')
+  .optional();
 const listsOutputSchema = z.object({
   source: z.literal('bring'),
   lists: z.array(
@@ -76,6 +89,18 @@ const mutationOutputSchema = z.object({
   state: z.literal('succeeded'),
   replayed: z.boolean(),
 });
+const destructiveMutationOutputSchema = z.object({
+  source: z.literal('bring'),
+  state: z.enum(['prepared', 'succeeded']),
+  operationId: z.string(),
+  operation: z.enum(['complete', 'remove']),
+  itemCount: z.number(),
+  replayed: z.boolean(),
+  listUuid: z.string().optional(),
+  listPseudonym: z.string().optional(),
+  expiresAt: z.string().optional(),
+  confirmationToken: z.string().optional(),
+});
 
 const readAnnotations = {
   readOnlyHint: true,
@@ -89,6 +114,7 @@ const addAnnotations = {
   idempotentHint: true,
   openWorldHint: true,
 };
+const destructiveAnnotations = { ...addAnnotations, destructiveHint: true };
 
 export function registerBringTools(server: McpServer, options: BringToolRegistration): void {
   const security = (operationIds: readonly string[], invoking: string, invoked: string) =>
@@ -165,6 +191,110 @@ export function registerBringTools(server: McpServer, options: BringToolRegistra
       });
     },
   );
+
+  const removeDefinition = {
+    title: 'Remove exact Bring item',
+    description:
+      'Permanently remove one exact shopping-list item. This is a destructive write: normally call bring_get_items first and supply its explicit list UUID, current list version, exact item UUID, and matching name. The first call prepares a confirmation; repeat the identical item request with the returned confirmationToken to apply REMOVE.',
+    operation: 'remove',
+    prepareOperationId: OPERATION_IDS.bringPrepareRemove,
+    applyOperationId: OPERATION_IDS.bringApplyRemove,
+  } as const;
+  server.registerTool(
+    'bring_remove_item',
+    destructiveItemToolConfig(options, removeDefinition),
+    destructiveItemToolHandler(options, removeDefinition),
+  );
+
+  const completeDefinition = {
+    title: 'Complete exact Bring item',
+    description:
+      'Mark one exact shopping-list item as completed/bought. Call bring_get_items first and supply its explicit list UUID, current list version, exact item UUID, and matching name. The first call prepares a confirmation; repeat the identical item request with the returned confirmationToken to apply COMPLETE.',
+    operation: 'complete',
+    prepareOperationId: OPERATION_IDS.bringPrepareComplete,
+    applyOperationId: OPERATION_IDS.bringApplyComplete,
+  } as const;
+  server.registerTool(
+    'bring_complete_item',
+    destructiveItemToolConfig(options, completeDefinition),
+    destructiveItemToolHandler(options, completeDefinition),
+  );
+}
+
+type DestructiveItemToolDefinition = {
+  title: string;
+  description: string;
+  operation: 'remove' | 'complete';
+  prepareOperationId: string;
+  applyOperationId: string;
+};
+
+function destructiveItemToolConfig(options: BringToolRegistration, definition: DestructiveItemToolDefinition) {
+  return {
+    title: definition.title,
+    description: definition.description,
+    inputSchema: {
+      operationId: operationIdSchema,
+      listUuid: writeListUuidSchema,
+      expectedListVersion: expectedListVersionSchema,
+      item: exactItemInputSchema,
+      confirmationToken: confirmationTokenSchema,
+    },
+    outputSchema: destructiveMutationOutputSchema,
+    annotations: destructiveAnnotations,
+    ...withToolStatus(
+      options.securityForOperations([definition.prepareOperationId, definition.applyOperationId]),
+      `${definition.operation === 'remove' ? 'Removing' : 'Completing'} Bring item…`,
+      `Bring item ${definition.operation === 'remove' ? 'removed' : 'completed'}`,
+    ),
+  };
+}
+
+function destructiveItemToolHandler(options: BringToolRegistration, definition: DestructiveItemToolDefinition) {
+  return async ({
+    operationId,
+    listUuid,
+    expectedListVersion,
+    item,
+    confirmationToken,
+  }: {
+    operationId: string;
+    listUuid: string;
+    expectedListVersion?: string;
+    item: { uuid: string; name: string; specification?: string };
+    confirmationToken?: string;
+  }) => {
+    const selectedOperationId = confirmationToken ? definition.applyOperationId : definition.prepareOperationId;
+    const principal = await options.requirePrincipal(selectedOperationId);
+    if (isToolResult(principal)) return principal;
+    return options.run(selectedOperationId, async () => {
+      const result = confirmationToken
+        ? await options.bring.applyMutation(
+            principal,
+            {
+              operationId,
+              listUuid,
+              confirmationToken,
+              expectedListVersion,
+              operation: definition.operation,
+              items: [item],
+            },
+            options.invocationId,
+          )
+        : await options.bring.prepareMutation(
+            principal,
+            { operationId, listUuid, expectedListVersion, operation: definition.operation, items: [item] },
+            options.invocationId,
+          );
+      const verb = definition.operation === 'remove' ? 'Removed' : 'Completed';
+      return textResult(
+        result,
+        result.state === 'prepared'
+          ? `Prepared exact Bring item ${definition.operation}; confirm by repeating this request with confirmationToken.`
+          : `${result.replayed ? 'Replayed' : verb} exact Bring item.`,
+      );
+    });
+  };
 }
 
 function withToolStatus(security: ToolSecurity, invoking: string, invoked: string): ToolSecurity {

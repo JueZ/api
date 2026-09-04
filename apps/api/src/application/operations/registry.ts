@@ -155,6 +155,7 @@ const definitions = [
     confirmation: 'required',
     audit: mutationAudit,
     rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/mutations/prepare' },
+    mcp: { toolName: 'bring_complete_item' },
   }),
   define({
     id: OPERATION_IDS.bringPrepareRemove,
@@ -169,6 +170,7 @@ const definitions = [
     confirmation: 'required',
     audit: mutationAudit,
     rest: { method: 'POST', path: '/api/bring/lists/{listUuid}/mutations/prepare' },
+    mcp: { toolName: 'bring_remove_item' },
   }),
   define({
     id: OPERATION_IDS.bringApplyComplete,
