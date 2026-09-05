@@ -80,7 +80,13 @@ export class BringService {
     const lists = rows
       .map((row) => normalizeListSummary(row, this.config.defaultListUuid ?? session.defaultListUuid))
       .filter((row): row is BringListSummary => row !== undefined)
-      .filter((row) => allowed.size === 0 || allowed.has(row.uuid));
+      .filter((row) => allowed.size === 0 || allowed.has(row.uuid))
+      .map((row) => ({
+        ...row,
+        writable:
+          this.config.writableListUuids.includes(row.uuid) &&
+          (!row.shared || this.config.writableSharedListUuids.includes(row.uuid)),
+      }));
     return { source: 'bring', lists };
   }
 
@@ -382,6 +388,7 @@ function normalizeListSummary(value: unknown, defaultListUuid: string | undefine
     ...(theme ? { theme } : {}),
     isDefault: uuid === defaultListUuid?.toLowerCase(),
     shared: record['shared'] === true || record['isShared'] === true || (Array.isArray(users) && users.length > 1),
+    writable: false,
   };
 }
 

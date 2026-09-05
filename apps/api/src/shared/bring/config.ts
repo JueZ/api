@@ -30,7 +30,7 @@ export function readBringConfig(env: NodeJS.ProcessEnv = process.env): BringConf
     env['BRING_WRITABLE_SHARED_LIST_UUIDS'],
     'BRING_WRITABLE_SHARED_LIST_UUIDS',
   );
-  const defaultListUuid = optional(env, 'BRING_DEFAULT_LIST_UUID');
+  const defaultListUuid = optional(env, 'BRING_DEFAULT_LIST_UUID')?.toLowerCase();
   if (defaultListUuid && !uuidPattern.test(defaultListUuid)) {
     throw new BringConfigError('BRING_DEFAULT_LIST_UUID must be a valid UUID.');
   }
