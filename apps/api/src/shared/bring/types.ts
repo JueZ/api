@@ -50,6 +50,7 @@ export interface BringListSummary {
   theme?: string;
   isDefault: boolean;
   shared: boolean;
+  writable: boolean;
 }
 
 export interface BringItem {

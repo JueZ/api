@@ -7,7 +7,7 @@ Bring! has no supported public API for this use case. The integration therefore 
 - The existing Bring technical account remains in use.
 - `test` may read the same account but cannot add, complete, or remove items.
 - Production reads require `BRING_READABLE_LIST_UUIDS`.
-- Production writes require an explicit UUID in `BRING_WRITABLE_LIST_UUIDS`.
+- Production writes require an explicit UUID in the comma-separated `BRING_WRITABLE_LIST_UUIDS`; one UUID remains a valid backwards-compatible configuration and duplicates/case are normalized.
 - Shared-list writes require the same UUID in the additional `BRING_WRITABLE_SHARED_LIST_UUIDS` allowlist. Empty denies every shared-list write; unlisted lists are always denied.
 - Whole-list creation, deletion, sharing, membership, and notification operations are unsupported.
 - `BRING_EXPECTED_ACCOUNT_FINGERPRINT` binds the deployment to the intended technical account without storing its email in state or audit records.
@@ -40,6 +40,8 @@ Prepare validates policy, input, current list membership, sharing status, and op
 Confirmation tokens and durable mutation records created before integrity format v2 are intentionally non-replayable because their principal pseudonyms did not bind a tenant. They remain retained for audit/lifecycle policy and are never rewritten or decrypted as a compatibility fallback. On a legacy conflict, re-read the list and inspect its current state; use a fresh operation ID only when an operator deliberately determines that another mutation is still required. Never resubmit a destructive operation automatically.
 
 MCP exposes `bring_list_lists`, `bring_get_items`, `bring_add_item`, `bring_remove_item`, and `bring_complete_item`. For a safe removal, call `bring_get_items(listUuid)`, select the exact current item UUID and name, generate a fresh `operationId`, then call `bring_remove_item` with the explicit `listUuid`, returned `expectedListVersion`, and item. The first call prepares the destructive mutation; repeat the same request with its short-lived `confirmationToken` to apply it. Completion uses the same flow. Typo correction should use remove-old plus add-new rather than an in-place rename because Bring clients can retain stale names.
+
+Each `bring_list_lists` entry includes `writable`. This reports the configured list and shared-list policy for discovery; mutation authorization still revalidates current provider membership and sharing before writing. List names are display metadata only and never participate in authorization or name-to-UUID resolution.
 
 The destructive MCP tools preserve the authenticated REST pipeline's delegated-user permissions, writable-list and shared-list allowlists, durable replay record, optimistic concurrency, and principal/payload-bound confirmation. They never select by name alone: the UUID must identify an active item and its current name must match.
 

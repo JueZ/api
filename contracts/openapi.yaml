@@ -1539,6 +1539,7 @@ components:
         - name
         - isDefault
         - shared
+        - writable
       properties:
         uuid:
           type: string
@@ -1552,6 +1553,9 @@ components:
         shared:
           type: boolean
           description: True when Bring marks or exposes the list as shared.
+        writable:
+          type: boolean
+          description: Whether this list is explicitly authorized for mutations in the current environment.
     BringListsResponse:
       type: object
       additionalProperties: false

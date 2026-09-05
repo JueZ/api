@@ -64,6 +64,7 @@ const listsOutputSchema = z.object({
       theme: z.string().optional(),
       isDefault: z.boolean(),
       shared: z.boolean(),
+      writable: z.boolean(),
     }),
   ),
 });
@@ -125,7 +126,7 @@ export function registerBringTools(server: McpServer, options: BringToolRegistra
     {
       title: 'Bring lists',
       description:
-        'List normalized, explicitly readable Bring shopping lists. Never returns credentials, tokens, or raw account data.',
+        'List normalized, explicitly readable Bring shopping lists and whether each list is explicitly writable. Never returns credentials, tokens, or raw account data.',
       inputSchema: {},
       outputSchema: listsOutputSchema,
       annotations: readAnnotations,

@@ -181,11 +181,12 @@ test('MCP Bring exposes reads, add, and confirmed exact-item remove/complete too
   const services = stubServices();
   services.bring.listLists = async () => ({
     source: 'bring',
-    lists: [{ uuid: bringListUuid, name: 'Home', isDefault: false, shared: false }],
+    lists: [{ uuid: bringListUuid, name: 'Home', isDefault: false, shared: false, writable: true }],
   });
   await withEnv(authEnv, async () => {
     const lists = await mcpCall('bring_list_lists', {}, 'Bearer local-dev-token', services);
     assert.equal(lists.jsonBody.result.structuredContent.lists[0].shared, false);
+    assert.equal(lists.jsonBody.result.structuredContent.lists[0].writable, true);
     const selected = await mcpCall('bring_get_items', { listUuid: bringListUuid }, 'Bearer local-dev-token', services);
     assert.equal(selected.jsonBody.result.structuredContent.uuid, bringListUuid);
     const added = await mcpCall(
@@ -881,7 +882,15 @@ function stubServices(calls = []) {
     bring: {
       listLists: async () => ({
         source: 'bring',
-        lists: [{ uuid: '11111111-1111-4111-8111-111111111111', name: 'Home', isDefault: true, shared: false }],
+        lists: [
+          {
+            uuid: '11111111-1111-4111-8111-111111111111',
+            name: 'Home',
+            isDefault: true,
+            shared: false,
+            writable: true,
+          },
+        ],
       }),
       getList: async (listUuid) => ({
         uuid: listUuid ?? '11111111-1111-4111-8111-111111111111',

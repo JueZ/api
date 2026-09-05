@@ -161,6 +161,52 @@ test('Bring configuration fails closed and test remains read-only for the same a
   );
 });
 
+test('Bring writable-list configuration accepts an explicit normalized set without broadening reads', () => {
+  const configured = readBringConfig({
+    DEPLOYED_ENVIRONMENT_NAME: 'prod',
+    BRING_ENABLED: 'true',
+    BRING_ADD_ENABLED: 'true',
+    BRING_DESTRUCTIVE_ENABLED: 'false',
+    BRING_BASE_URL: 'https://bring.test/rest/',
+    BRING_CLIENT_API_KEY: 'x',
+    BRING_COUNTRY: 'AT',
+    BRING_EMAIL: cfg.email,
+    BRING_PASSWORD: 'p',
+    BRING_READABLE_LIST_UUIDS: `${listUuid},${sharedListUuid},${unlistedListUuid}`,
+    BRING_DEFAULT_LIST_UUID: listUuid.toUpperCase(),
+    BRING_WRITABLE_LIST_UUIDS: ` ${listUuid.toUpperCase()}, ${sharedListUuid},${listUuid} `,
+    BRING_WRITABLE_SHARED_LIST_UUIDS: sharedListUuid.toUpperCase(),
+    BRING_CONFIRMATION_HMAC_KEY: hmacKey,
+    BRING_MUTATION_ENCRYPTION_KEY: encryptionKey,
+  });
+
+  assert.deepEqual(configured.writableListUuids, [listUuid, sharedListUuid]);
+  assert.deepEqual(configured.writableSharedListUuids, [sharedListUuid]);
+  assert.deepEqual(configured.readableListUuids, [listUuid, sharedListUuid, unlistedListUuid]);
+
+  for (const value of ['', 'not-a-uuid', `${listUuid},not-a-uuid`]) {
+    assert.throws(
+      () =>
+        readBringConfig({
+          DEPLOYED_ENVIRONMENT_NAME: 'prod',
+          BRING_ENABLED: 'true',
+          BRING_ADD_ENABLED: 'true',
+          BRING_DESTRUCTIVE_ENABLED: 'false',
+          BRING_BASE_URL: 'https://bring.test/rest/',
+          BRING_CLIENT_API_KEY: 'x',
+          BRING_COUNTRY: 'AT',
+          BRING_EMAIL: cfg.email,
+          BRING_PASSWORD: 'p',
+          BRING_READABLE_LIST_UUIDS: `${listUuid},${sharedListUuid}`,
+          BRING_WRITABLE_LIST_UUIDS: value,
+          BRING_CONFIRMATION_HMAC_KEY: hmacKey,
+          BRING_MUTATION_ENCRYPTION_KEY: encryptionKey,
+        }),
+      BringConfigError,
+    );
+  }
+});
+
 test('login form-encodes private values and normalizes the session', async () => {
   let body = '';
   let headers;
@@ -329,10 +375,10 @@ test('list reads are allowlisted and shared writes require a second exact-list a
 
   const lists = await service.listLists();
   assert.deepEqual(
-    lists.lists.map((entry) => [entry.name, entry.shared]),
+    lists.lists.map((entry) => [entry.name, entry.shared, entry.writable]),
     [
-      ['Mine', false],
-      ['Family', true],
+      ['Mine', false, true],
+      ['Family', true, false],
     ],
   );
   assert.equal((await service.getList(sharedListUuid)).uuid, sharedListUuid);
@@ -356,7 +402,9 @@ test('list reads are allowlisted and shared writes require a second exact-list a
       },
     }),
   });
-  await sharedWriteService.addItems(sharedListUuid, [{ name: 'Milk' }]);
+  const sharedLists = await sharedWriteService.listLists();
+  assert.equal(sharedLists.lists[0].writable, true);
+  await sharedWriteService.addItems(sharedListUuid.toUpperCase(), [{ name: 'Milk' }]);
   assert.equal(calls.length, 1);
 });
 
