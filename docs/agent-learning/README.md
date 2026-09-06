@@ -12,7 +12,7 @@ Repository learning is deliberately small and non-blocking. GitHub issues hold s
 
 Untrusted candidate records and workflow output cannot apply changes automatically. The authorized agent implements evidence-backed repairs and learning through a normal protected PR. They contain no raw logs, prompts, model transcripts, environment dumps, private provider content, or secrets.
 
-Two ineffective attempts end one unchanged causal strategy, not the autonomous task. Re-diagnose from the earliest relevant evidence, choose a materially different hypothesis and discriminating check, and preserve the task as incomplete while safe work remains.
+Two ineffective attempts retire an unchanged repair action without disproving its diagnosis. Reconsider the earliest relevant evidence and run a discriminating check; continue with a different mechanism or verified changed preconditions when supported. Retain a supported cause, preserve exhausted action history across generations, and keep the task incomplete while safe work remains. Renaming metadata cannot reset the budget.
 
 ## Promotion criteria
 

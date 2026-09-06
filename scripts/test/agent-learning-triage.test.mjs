@@ -93,6 +93,62 @@ function strategy(overrides = {}) {
   };
 }
 
+function repairEvidence(overrides = {}) {
+  return {
+    id: 'operation-proof',
+    kind: 'discriminating-observation',
+    summary: 'The declared operation and current preconditions were independently inspected.',
+    sourceRef: `https://github.com/${REPOSITORY}/actions/runs/101`,
+    ...overrides,
+  };
+}
+
+function repairAction(overrides = {}) {
+  return {
+    failingGate: 'pr-gate.workflow-validation',
+    target: 'github-workflows',
+    verifiedPreconditions: [],
+    ...overrides,
+    repairOperation: {
+      kind: 'patch',
+      locator: 'github-workflows/invoke-fixed-validator',
+      contentDigest: `sha256.${'1'.repeat(64)}`,
+      evidenceId: 'operation-proof',
+      ...(overrides.repairOperation || {}),
+    },
+  };
+}
+
+function repairDiagnosis(overrides = {}) {
+  return {
+    version: 1,
+    failureClassification: 'deterministic-test-or-policy',
+    rootCauseHypothesisKey: 'candidate-bypasses-fixed-command',
+    rootCauseHypothesis: 'The candidate bypasses the fixed validation command.',
+    discriminatingAction: 'Inspect the exact action evidence before applying a repair.',
+    ...overrides,
+  };
+}
+
+function repairAttempt({
+  number,
+  generation = 1,
+  action = repairAction(),
+  evidence = [repairEvidence()],
+  ...overrides
+}) {
+  return {
+    number,
+    generation,
+    strategyFingerprint: buildStrategyFingerprint(action),
+    action,
+    evidence,
+    outcome: 'ineffective',
+    candidateSha: HEAD_SHA,
+    ...overrides,
+  };
+}
+
 function deliverySummary(overrides = {}) {
   return {
     schemaVersion: 2,
@@ -260,249 +316,307 @@ test('causal failed job selection does not treat the aggregate as the root failu
   );
 });
 
-test('strategy fingerprints use causal keys rather than cosmetic descriptions', () => {
-  const first = buildStrategyFingerprint({ ...strategy(), description: 'Call the fixed validator directly.' });
-  const restated = buildStrategyFingerprint({ ...strategy(), description: 'Directly call the fixed validator.' });
-  const different = buildStrategyFingerprint(strategy({ repairMechanism: 'pin-reviewed-package-command' }));
-  assert.equal(first, restated);
-  assert.notEqual(first, different);
-  assert.match(first, /^strategy-v1\.[0-9a-f]{64}$/);
+test('action fingerprints ignore diagnosis and cosmetic metadata but bind concrete operation and conditions', () => {
+  const first = buildStrategyFingerprint(repairAction());
+  const renamed = buildStrategyFingerprint({
+    ...repairAction(),
+    classification: 'renamed-classification',
+    rootCauseHypothesis: 'renamed-hypothesis',
+    candidateSha: NEXT_SHA,
+    version: 99,
+    generation: 42,
+    label: 'cosmetic-operation-name',
+    conditions: 'permission restored',
+  });
+  const differentOperation = buildStrategyFingerprint(
+    repairAction({ repairOperation: { contentDigest: `sha256.${'2'.repeat(64)}` } }),
+  );
+  const renamedOperationProvenance = buildStrategyFingerprint(
+    repairAction({ repairOperation: { kind: 'command', locator: 'renamed-operation-label' } }),
+  );
+  assert.equal(first, renamed);
+  assert.equal(first, renamedOperationProvenance);
+  assert.notEqual(first, differentOperation);
+  assert.match(first, /^strategy-v2\.[0-9a-f]{64}$/);
 });
 
-test('two ineffective identical strategies prevent a third repetition and mandate re-diagnosis', () => {
-  const strategyFingerprint = buildStrategyFingerprint(strategy());
-  const proseOnlyInitialDiagnosis = decideRepairAttempt({
-    attempts: [],
-    proposedStrategy: strategy(),
-    rediagnosis: {
-      version: 1,
-      strategyFingerprint,
-      failureClassification: strategy().failureClass,
-      rootCauseHypothesis: 'The candidate bypasses the fixed validation command.',
-      discriminatingAction: 'run the fixed validator directly',
-    },
+test('two ineffective identical actions prevent a third despite renamed diagnosis, new evidence, or generation', () => {
+  const action = repairAction();
+  const fingerprint = buildStrategyFingerprint(action);
+  const attempts = [repairAttempt({ number: 1 }), repairAttempt({ number: 2, generation: 2 })];
+  const repeated = decideRepairAttempt({
+    attempts,
+    currentGenerationAttemptCount: 0,
+    proposedStrategy: { ...action, label: 'renamed action', conditions: 'new evidence says ready' },
+    rediagnosis: repairDiagnosis({
+      version: 8,
+      failureClassification: 'renamed-classification',
+      rootCauseHypothesisKey: 'renamed-hypothesis',
+    }),
+    priorRediagnosisVersion: 1,
   });
-  assert.equal(proseOnlyInitialDiagnosis.allowed, false);
-  assert.deepEqual(proseOnlyInitialDiagnosis.missingRediagnosis, ['rootCauseHypothesisKey']);
-
-  const boundInitialDiagnosis = decideRepairAttempt({
-    attempts: [],
-    proposedStrategy: strategy(),
-    rediagnosis: {
-      version: 1,
-      strategyFingerprint,
-      failureClassification: strategy().failureClass,
-      rootCauseHypothesisKey: strategy().rootCauseHypothesis,
-      rootCauseHypothesis: 'The candidate bypasses the fixed validation command.',
-      discriminatingAction: 'run the fixed validator directly',
-    },
-  });
-  assert.equal(boundInitialDiagnosis.allowed, true);
-  assert.equal(boundInitialDiagnosis.action, 'attempt');
-
-  const attempts = [
-    { strategyFingerprint, outcome: 'ineffective' },
-    { strategyFingerprint, outcome: 'ineffective' },
-  ];
-  const repeated = decideRepairAttempt({ attempts, proposedStrategy: strategy() });
+  assert.equal(repeated.strategyFingerprint, fingerprint);
   assert.equal(repeated.allowed, false);
-  assert.equal(repeated.action, 'strategy-exhausted');
+  assert.equal(repeated.action, 'action-exhausted');
   assert.equal(repeated.taskStatus, 'active');
   assert.equal(repeated.continuationRequired, true);
-  assert.deepEqual(repeated.missingRediagnosis, [
-    'version',
-    'strategyFingerprint',
-    'failureClassification',
-    'rootCauseHypothesisKey',
-    'discriminatingAction',
-  ]);
-
-  const differentStrategy = strategy({
-    rootCauseHypothesis: 'candidate-controlled-command-resolution',
-    repairMechanism: 'pin-reviewed-package-command',
-  });
-  const premature = decideRepairAttempt({ attempts, proposedStrategy: differentStrategy });
-  assert.equal(premature.allowed, false);
-  assert.equal(premature.action, 'rediagnose');
-
-  const mechanismOnlyStrategy = strategy({ repairMechanism: 'pin-reviewed-package-command' });
-  const staleHypothesis = decideRepairAttempt({
-    attempts,
-    proposedStrategy: mechanismOnlyStrategy,
-    priorRediagnosisVersion: 1,
-    priorRediagnosisStrategyFingerprint: strategyFingerprint,
-    priorRootCauseHypothesisKey: strategy().rootCauseHypothesis,
-    rediagnosis: {
-      version: 2,
-      strategyFingerprint: buildStrategyFingerprint(mechanismOnlyStrategy),
-      failureClassification: mechanismOnlyStrategy.failureClass,
-      rootCauseHypothesisKey: mechanismOnlyStrategy.rootCauseHypothesis,
-      rootCauseHypothesis: 'The original strategy hypothesis is unchanged despite a new mechanism.',
-      discriminatingAction: 'run the fixed validator against a no-op package script fixture',
-    },
-  });
-  assert.equal(staleHypothesis.allowed, false);
-  assert.equal(staleHypothesis.action, 'rediagnose');
-  assert.ok(staleHypothesis.missingRediagnosis.includes('rootCauseHypothesisKey'));
-
-  const rediagnosed = decideRepairAttempt({
-    attempts,
-    proposedStrategy: differentStrategy,
-    priorRediagnosisVersion: 1,
-    priorRediagnosisStrategyFingerprint: strategyFingerprint,
-    priorRootCauseHypothesisKey: strategy().rootCauseHypothesis,
-    rediagnosis: {
-      version: 2,
-      strategyFingerprint: buildStrategyFingerprint(differentStrategy),
-      failureClassification: differentStrategy.failureClass,
-      rootCauseHypothesisKey: differentStrategy.rootCauseHypothesis,
-      discriminatingAction: 'run the fixed validator against a no-op package script fixture',
-    },
-  });
-  assert.equal(rediagnosed.allowed, true);
-  assert.equal(rediagnosed.action, 'attempt-different-strategy');
-  assert.equal(rediagnosed.taskStatus, 'active');
 });
 
-test('retired strategy history survives a new generation while a different re-diagnosed strategy remains allowed', () => {
-  const retiredStrategyFingerprint = buildStrategyFingerprint(strategy());
-  const sameStrategy = decideRepairAttempt({
-    attempts: [],
-    exhaustedStrategyFingerprints: [retiredStrategyFingerprint],
-    proposedStrategy: strategy(),
-  });
-  assert.equal(sameStrategy.allowed, false);
-  assert.equal(sameStrategy.action, 'strategy-exhausted');
-  assert.equal(sameStrategy.generationStatus, 'active');
-
-  const differentStrategy = strategy({
-    rootCauseHypothesis: 'candidate-controlled-command-resolution',
-    repairMechanism: 'pin-reviewed-package-command',
-  });
-  const allowed = decideRepairAttempt({
-    attempts: [],
-    exhaustedStrategyFingerprints: [retiredStrategyFingerprint],
-    proposedStrategy: differentStrategy,
-    priorRediagnosisVersion: 1,
-    priorRediagnosisStrategyFingerprint: retiredStrategyFingerprint,
-    priorRootCauseHypothesisKey: strategy().rootCauseHypothesis,
-    rediagnosis: {
-      version: 2,
-      strategyFingerprint: buildStrategyFingerprint(differentStrategy),
-      failureClassification: differentStrategy.failureClass,
-      rootCauseHypothesisKey: differentStrategy.rootCauseHypothesis,
-      discriminatingAction: 'invoke the fixed validator without the package indirection',
+test('the same supported cause may use a different evidence-backed repair mechanism', () => {
+  const firstAction = repairAction();
+  const secondAction = repairAction({
+    repairOperation: {
+      locator: 'github-workflows/pin-reviewed-validator',
+      contentDigest: `sha256.${'2'.repeat(64)}`,
     },
   });
-  assert.equal(allowed.allowed, true);
-  assert.equal(allowed.action, 'attempt-different-strategy');
-  assert.equal(allowed.strategyFingerprint, buildStrategyFingerprint(differentStrategy));
-});
-
-test('a freshly bound different strategy gets both bounded attempts without reusing an exhausted third attempt', () => {
-  const firstStrategy = strategy();
-  const firstStrategyFingerprint = buildStrategyFingerprint(firstStrategy);
-  const secondStrategy = strategy({
-    rootCauseHypothesis: 'candidate-controlled-command-resolution',
-    repairMechanism: 'pin-reviewed-package-command',
-  });
-  const secondStrategyFingerprint = buildStrategyFingerprint(secondStrategy);
-  const secondDiagnosis = {
-    version: 2,
-    strategyFingerprint: secondStrategyFingerprint,
-    failureClassification: secondStrategy.failureClass,
-    rootCauseHypothesisKey: secondStrategy.rootCauseHypothesis,
-    discriminatingAction: 'invoke the fixed validator without the candidate-controlled command resolution',
-  };
-  const firstAttempt = decideRepairAttempt({
-    attempts: [],
-    exhaustedStrategyFingerprints: [firstStrategyFingerprint],
-    proposedStrategy: secondStrategy,
-    rediagnosis: secondDiagnosis,
-    priorRediagnosisVersion: 1,
-    priorRediagnosisStrategyFingerprint: firstStrategyFingerprint,
-    priorRootCauseHypothesisKey: firstStrategy.rootCauseHypothesis,
-  });
-  assert.equal(firstAttempt.allowed, true);
-  assert.equal(firstAttempt.requiredRediagnosisVersion, 2);
-
-  const oneIneffectiveAttempt = [{ strategyFingerprint: secondStrategyFingerprint, outcome: 'ineffective' }];
-  const secondAttempt = decideRepairAttempt({
-    attempts: oneIneffectiveAttempt,
-    exhaustedStrategyFingerprints: [firstStrategyFingerprint],
-    proposedStrategy: secondStrategy,
-    rediagnosis: secondDiagnosis,
-    priorRediagnosisVersion: 2,
-    priorRediagnosisStrategyFingerprint: secondStrategyFingerprint,
-    priorRootCauseHypothesisKey: secondStrategy.rootCauseHypothesis,
-  });
-  assert.equal(secondAttempt.allowed, true);
-  assert.equal(secondAttempt.requiredRediagnosisVersion, 2);
-
-  const thirdAttempt = decideRepairAttempt({
-    attempts: [...oneIneffectiveAttempt, ...oneIneffectiveAttempt],
-    exhaustedStrategyFingerprints: [firstStrategyFingerprint],
-    proposedStrategy: secondStrategy,
-    rediagnosis: secondDiagnosis,
-    priorRediagnosisVersion: 2,
-    priorRediagnosisStrategyFingerprint: secondStrategyFingerprint,
-    priorRootCauseHypothesisKey: secondStrategy.rootCauseHypothesis,
-  });
-  assert.equal(thirdAttempt.allowed, false);
-  assert.equal(thirdAttempt.action, 'strategy-exhausted');
-});
-
-test('an interleaved exhausted causal hypothesis cannot return under a third strategy fingerprint', () => {
-  const firstStrategy = strategy({ rootCauseHypothesis: 'root-a' });
-  const secondStrategy = strategy({ rootCauseHypothesis: 'root-b', repairMechanism: 'repair-b' });
-  const thirdStrategy = strategy({ rootCauseHypothesis: 'root-a', repairMechanism: 'repair-c' });
-  const firstStrategyFingerprint = buildStrategyFingerprint(firstStrategy);
-  const secondStrategyFingerprint = buildStrategyFingerprint(secondStrategy);
-  const thirdStrategyFingerprint = buildStrategyFingerprint(thirdStrategy);
   const decision = decideRepairAttempt({
-    attempts: [
+    attempts: [repairAttempt({ number: 1 }), repairAttempt({ number: 2 })],
+    currentGenerationAttemptCount: 0,
+    proposedStrategy: secondAction,
+    rediagnosis: repairDiagnosis(),
+    priorRediagnosisVersion: 1,
+  });
+  assert.notEqual(buildStrategyFingerprint(firstAction), buildStrategyFingerprint(secondAction));
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.action, 'attempt-different-action');
+});
+
+test('restoring an evidence-linked prerequisite changes action identity while a free-form condition does not', () => {
+  const blocked = repairAction({
+    verifiedPreconditions: [{ key: 'repository-write-permission', state: 'blocked', evidenceId: 'permission-proof' }],
+  });
+  const restored = repairAction({
+    verifiedPreconditions: [{ key: 'repository-write-permission', state: 'restored', evidenceId: 'permission-proof' }],
+  });
+  assert.notEqual(buildStrategyFingerprint(blocked), buildStrategyFingerprint(restored));
+  assert.equal(
+    buildStrategyFingerprint({ ...blocked, conditions: 'repository-write-permission=restored' }),
+    buildStrategyFingerprint(blocked),
+  );
+});
+
+test('a retained immutable condition transition supports a later attempt without duplicate transition metadata', () => {
+  const blocked = repairAction({
+    verifiedPreconditions: [{ key: 'repository-write-permission', state: 'missing', evidenceId: 'permission-proof' }],
+  });
+  const restoredWithTransition = repairAction({
+    verifiedPreconditions: [
+      { key: 'repository-write-permission', state: 'restored', evidenceId: 'permission-restored-proof' },
+    ],
+    conditionTransitions: [
       {
-        strategyFingerprint: firstStrategyFingerprint,
-        rootCauseHypothesisKey: firstStrategy.rootCauseHypothesis,
-        outcome: 'ineffective',
-      },
-      {
-        strategyFingerprint: secondStrategyFingerprint,
-        rootCauseHypothesisKey: secondStrategy.rootCauseHypothesis,
-        outcome: 'ineffective',
-      },
-      {
-        strategyFingerprint: firstStrategyFingerprint,
-        rootCauseHypothesisKey: firstStrategy.rootCauseHypothesis,
-        outcome: 'ineffective',
+        key: 'repository-write-permission',
+        fromState: 'missing',
+        toState: 'restored',
+        evidenceId: 'permission-restored-proof',
       },
     ],
+  });
+  const restoredEvidence = [
+    repairEvidence(),
+    repairEvidence({ id: 'permission-restored-proof', summary: 'Write permission is restored.' }),
+  ];
+  const restoredWithoutDuplicateTransition = repairAction({
+    verifiedPreconditions: [
+      { key: 'repository-write-permission', state: 'restored', evidenceId: 'permission-restored-proof' },
+    ],
+  });
+  const decision = decideRepairAttempt({
+    attempts: [
+      repairAttempt({
+        number: 1,
+        action: blocked,
+        evidence: [
+          repairEvidence(),
+          repairEvidence({ id: 'permission-proof', summary: 'Write permission is missing.' }),
+        ],
+      }),
+      repairAttempt({ number: 2, action: restoredWithTransition, evidence: restoredEvidence }),
+    ],
     currentGenerationAttemptCount: 0,
-    proposedStrategy: thirdStrategy,
-    priorRediagnosisVersion: 2,
-    priorRediagnosisStrategyFingerprint: secondStrategyFingerprint,
-    priorRootCauseHypothesisKey: secondStrategy.rootCauseHypothesis,
-    rediagnosis: {
-      version: 3,
-      strategyFingerprint: thirdStrategyFingerprint,
-      failureClassification: thirdStrategy.failureClass,
-      rootCauseHypothesisKey: thirdStrategy.rootCauseHypothesis,
-      discriminatingAction: 'try a third mechanism without changing the retired causal hypothesis',
-    },
+    proposedStrategy: restoredWithoutDuplicateTransition,
+    rediagnosis: repairDiagnosis(),
+  });
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.action, 'attempt');
+});
+
+test('legacy exhausted causes remain informational and do not veto a different action', () => {
+  const decision = decideRepairAttempt({
+    attempts: [],
+    exhaustedRootCauseHypothesisKeys: ['candidate-bypasses-fixed-command'],
+    proposedStrategy: repairAction(),
+    rediagnosis: repairDiagnosis(),
+  });
+  assert.equal(decision.allowed, true);
+  assert.deepEqual(decision.exhaustedRootCauseHypothesisKeys, ['candidate-bypasses-fixed-command']);
+});
+
+test('conflicting condition states and transitions borrowed from another target cannot reset budgets', () => {
+  const missing = { key: 'permission', state: 'missing', evidenceId: 'operation-proof' };
+  assert.throws(
+    () => buildStrategyFingerprint(repairAction({ verifiedPreconditions: [missing, { ...missing, state: 'absent' }] })),
+    /preconditions must be unique/,
+  );
+  const transition = { key: 'permission', fromState: 'missing', toState: 'restored', evidenceId: 'operation-proof' };
+  const first = repairAction({ verifiedPreconditions: [missing] });
+  const elsewhere = repairAction({
+    target: 'other-target',
+    verifiedPreconditions: [{ ...missing, state: 'restored' }],
+    conditionTransitions: [transition],
+  });
+  const restored = repairAction({ verifiedPreconditions: [{ ...missing, state: 'restored' }] });
+  const decision = decideRepairAttempt({
+    attempts: [repairAttempt({ number: 1, action: first }), repairAttempt({ number: 2, action: elsewhere })],
+    proposedStrategy: restored,
+    rediagnosis: repairDiagnosis(),
   });
   assert.equal(decision.allowed, false);
-  assert.equal(decision.action, 'causal-hypothesis-exhausted');
-  assert.deepEqual(decision.exhaustedRootCauseHypothesisKeys, ['root-a']);
+  assert.equal(decision.action, 'condition-transition-required');
+});
+
+test('legacy strategies remain bounded and opaque exhausted identities fail conservatively', () => {
+  const legacyFingerprint = buildStrategyFingerprint(strategy());
+  const legacyAttempts = [
+    { strategyFingerprint: legacyFingerprint, outcome: 'ineffective' },
+    { strategyFingerprint: legacyFingerprint, outcome: 'ineffective' },
+  ];
+  assert.equal(
+    decideRepairAttempt({ attempts: legacyAttempts, proposedStrategy: strategy() }).action,
+    'strategy-exhausted',
+  );
+  const unknown = decideRepairAttempt({
+    attempts: legacyAttempts,
+    currentGenerationAttemptCount: 0,
+    proposedStrategy: repairAction(),
+    rediagnosis: repairDiagnosis(),
+  });
+  assert.equal(unknown.allowed, false);
+  assert.equal(unknown.action, 'legacy-action-identity-unknown');
+  const partiallyConsumed = decideRepairAttempt({
+    attempts: legacyAttempts.slice(0, 1),
+    proposedStrategy: repairAction(),
+    rediagnosis: repairDiagnosis(),
+  });
+  assert.equal(partiallyConsumed.allowed, false);
+  assert.equal(partiallyConsumed.action, 'legacy-action-identity-unknown');
+});
+
+test('exact legacy enrichment permits a different mechanism with the same supported cause', () => {
+  const legacyFingerprint = buildStrategyFingerprint(strategy());
+  const legacyAttempts = [
+    { strategyFingerprint: legacyFingerprint, outcome: 'ineffective', candidateSha: HEAD_SHA },
+    { strategyFingerprint: legacyFingerprint, outcome: 'ineffective', candidateSha: HEAD_SHA },
+  ];
+  const mappedLegacyAction = repairAction({
+    repairOperation: { legacyMechanism: strategy().repairMechanism },
+  });
+  const binding = {
+    strategyFingerprint: legacyFingerprint,
+    legacyStrategy: strategy(),
+    action: mappedLegacyAction,
+    evidence: [
+      repairEvidence({
+        kind: 'legacy-operation-provenance',
+        sourceRef: `https://github.com/${REPOSITORY}/commit/${HEAD_SHA}`,
+      }),
+    ],
+  };
+  const same = decideRepairAttempt({
+    attempts: legacyAttempts,
+    currentGenerationAttemptCount: 0,
+    legacyActionBindings: [binding],
+    proposedStrategy: mappedLegacyAction,
+    rediagnosis: repairDiagnosis(),
+  });
+  assert.equal(same.action, 'action-exhausted');
+
+  const different = decideRepairAttempt({
+    attempts: legacyAttempts,
+    currentGenerationAttemptCount: 0,
+    legacyActionBindings: [binding],
+    proposedStrategy: repairAction({
+      repairOperation: {
+        locator: 'github-workflows/pin-reviewed-validator',
+        contentDigest: `sha256.${'2'.repeat(64)}`,
+      },
+    }),
+    rediagnosis: repairDiagnosis(),
+  });
+  assert.equal(different.allowed, true);
+  assert.equal(different.action, 'attempt-different-action');
+});
+
+test('equivalent partially consumed v1 and v2 action history shares one two-attempt budget', () => {
+  const legacyFingerprint = buildStrategyFingerprint(strategy());
+  const mappedAction = repairAction({
+    repairOperation: { legacyMechanism: strategy().repairMechanism },
+  });
+  const provenanceEvidence = [
+    repairEvidence({
+      kind: 'legacy-operation-provenance',
+      sourceRef: `https://github.com/${REPOSITORY}/commit/${HEAD_SHA}`,
+    }),
+  ];
+  const attempts = [
+    { strategyFingerprint: legacyFingerprint, outcome: 'ineffective', candidateSha: HEAD_SHA },
+    repairAttempt({ number: 2, action: mappedAction, evidence: provenanceEvidence }),
+  ];
+  const decision = decideRepairAttempt({
+    attempts,
+    currentGenerationAttemptCount: 0,
+    legacyActionBindings: [
+      {
+        strategyFingerprint: legacyFingerprint,
+        legacyStrategy: strategy(),
+        action: mappedAction,
+        evidence: provenanceEvidence,
+      },
+    ],
+    proposedStrategy: mappedAction,
+    rediagnosis: repairDiagnosis(),
+  });
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.action, 'action-exhausted');
+  assert.ok(decision.exhaustedStrategyFingerprints.includes(legacyFingerprint));
+  assert.ok(decision.exhaustedStrategyFingerprints.includes(buildStrategyFingerprint(mappedAction)));
+});
+
+test('legacy enrichment with unrelated evidence cannot relabel historical action identity', () => {
+  const legacyFingerprint = buildStrategyFingerprint(strategy());
+  const mappedAction = repairAction({
+    repairOperation: { legacyMechanism: strategy().repairMechanism },
+  });
+  const decision = decideRepairAttempt({
+    attempts: [{ strategyFingerprint: legacyFingerprint, outcome: 'ineffective', candidateSha: HEAD_SHA }],
+    currentGenerationAttemptCount: 0,
+    exhaustedStrategyFingerprints: [legacyFingerprint],
+    legacyActionBindings: [
+      {
+        strategyFingerprint: legacyFingerprint,
+        legacyStrategy: strategy(),
+        action: mappedAction,
+        evidence: [repairEvidence({ kind: 'legacy-operation-provenance' })],
+      },
+    ],
+    proposedStrategy: repairAction({ repairOperation: { contentDigest: `sha256.${'9'.repeat(64)}` } }),
+    rediagnosis: repairDiagnosis(),
+  });
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.action, 'legacy-action-identity-unknown');
 });
 
 test('repair generation exhaustion requires durable continuation instead of task completion', () => {
-  const attempts = ['one', 'two', 'three'].map((rootCauseHypothesis) => ({
-    strategyFingerprint: buildStrategyFingerprint(strategy({ rootCauseHypothesis })),
-    outcome: 'ineffective',
-  }));
+  const attempts = [1, 2, 3].map((number) =>
+    repairAttempt({
+      number,
+      action: repairAction({ repairOperation: { contentDigest: `sha256.${String(number).repeat(64)}` } }),
+    }),
+  );
   const decision = decideRepairAttempt({
     attempts,
-    proposedStrategy: strategy({ rootCauseHypothesis: 'four' }),
+    proposedStrategy: repairAction({ repairOperation: { contentDigest: `sha256.${'4'.repeat(64)}` } }),
   });
   assert.equal(decision.allowed, false);
   assert.equal(decision.action, 'continue-next-generation');
@@ -511,7 +625,6 @@ test('repair generation exhaustion requires durable continuation instead of task
   assert.equal(decision.continuationRequired, true);
   assert.deepEqual(decision.missingRediagnosis, [
     'version',
-    'strategyFingerprint',
     'failureClassification',
     'rootCauseHypothesisKey',
     'discriminatingAction',
@@ -591,7 +704,7 @@ test('repair issue schema v2 persists an active safe continuation target and run
   ]);
   assert.deepEqual(state.repair.strategyFingerprints, [strategyFingerprint]);
   assert.deepEqual(state.repair.exhaustedStrategyFingerprints, [strategyFingerprint]);
-  assert.equal(state.repair.policyDecision.action, 'await-materially-different-strategy');
+  assert.equal(state.repair.policyDecision.action, 'await-different-action');
   assert.equal(state.repair.policyDecision.attemptsInGeneration, 1);
   assert.deepEqual(state.repair.policyDecision.missingRediagnosis, []);
   assert.equal(state.continuation.required, true);
@@ -1400,8 +1513,17 @@ test('authenticated queue progress writer persists policy-checked advisory state
   const created = await runRepairQueue({ api, env: baseEnv, logger: { log() {} } });
   assert.equal(created.action, 'create');
 
-  const strategyInputs = strategy();
-  const strategyFingerprint = buildStrategyFingerprint(strategyInputs);
+  const action = repairAction({
+    verifiedPreconditions: [{ key: 'repository-write-permission', state: 'missing', evidenceId: 'permission-proof' }],
+  });
+  const actionEvidence = [
+    repairEvidence(),
+    repairEvidence({
+      id: 'permission-proof',
+      summary: 'Repository write permission is absent for the current repair operation.',
+    }),
+  ];
+  const strategyFingerprint = buildStrategyFingerprint(action);
   const progress = {
     schemaVersion: 1,
     repository: REPOSITORY,
@@ -1410,10 +1532,7 @@ test('authenticated queue progress writer persists policy-checked advisory state
     candidateSha: HEAD_SHA,
     failureFingerprint: created.fingerprint,
     diagnosis: {
-      version: 1,
-      strategyFingerprint,
-      failureClassification: strategyInputs.failureClass,
-      rootCauseHypothesisKey: strategyInputs.rootCauseHypothesis,
+      ...repairDiagnosis(),
       rootCauseHypothesis: 'The candidate invokes a mutable validator indirection.',
       evidence: [
         {
@@ -1426,16 +1545,7 @@ test('authenticated queue progress writer persists policy-checked advisory state
     },
     repair: {
       generation: 1,
-      attempts: [
-        {
-          number: 1,
-          generation: 1,
-          strategyFingerprint,
-          strategy: strategyInputs,
-          outcome: 'in-progress',
-          candidateSha: HEAD_SHA,
-        },
-      ],
+      attempts: [repairAttempt({ number: 1, action, evidence: actionEvidence, outcome: 'in-progress' })],
       strategyFingerprints: [strategyFingerprint],
       exhaustedStrategyFingerprints: [],
     },
@@ -1517,12 +1627,7 @@ test('authenticated queue progress writer persists policy-checked advisory state
   assert.equal(comments.get(77).length, 1);
 
   const secondAttempt = {
-    number: 2,
-    generation: 1,
-    strategyFingerprint,
-    strategy: strategyInputs,
-    outcome: 'ineffective',
-    candidateSha: HEAD_SHA,
+    ...repairAttempt({ number: 2, action, evidence: actionEvidence }),
   };
   const concurrentProgress = {
     ...progress,
@@ -1554,6 +1659,84 @@ test('authenticated queue progress writer persists policy-checked advisory state
   assert.equal(serialized.action, 'record-progress');
   assert.equal(comments.get(77).length, 2);
 
+  const conditionChangeAttempt = (changedAction, evidence) =>
+    repairAttempt({ number: 3, action: changedAction, evidence });
+  const removedConditionProgress = {
+    ...serializedProgress,
+    repair: {
+      ...serializedProgress.repair,
+      attempts: [...serializedProgress.repair.attempts, conditionChangeAttempt(repairAction(), [repairEvidence()])],
+    },
+  };
+  await assert.rejects(
+    runRepairQueue({
+      api,
+      env: { ...baseEnv, REPAIR_PROGRESS_JSON: JSON.stringify(removedConditionProgress) },
+      logger: { log() {} },
+    }),
+    /condition-transition-required/,
+  );
+  const renamedConditionAction = repairAction({
+    verifiedPreconditions: [{ key: 'repo-write-access', state: 'restored', evidenceId: 'permission-proof' }],
+    conditionTransitions: [
+      { key: 'repo-write-access', fromState: 'missing', toState: 'restored', evidenceId: 'permission-proof' },
+    ],
+  });
+  await assert.rejects(
+    runRepairQueue({
+      api,
+      env: {
+        ...baseEnv,
+        REPAIR_PROGRESS_JSON: JSON.stringify({
+          ...serializedProgress,
+          repair: {
+            ...serializedProgress.repair,
+            attempts: [
+              ...serializedProgress.repair.attempts,
+              conditionChangeAttempt(renamedConditionAction, actionEvidence),
+            ],
+          },
+        }),
+      },
+      logger: { log() {} },
+    }),
+    /condition-transition-required/,
+  );
+  const restoredAction = repairAction({
+    verifiedPreconditions: [
+      { key: 'repository-write-permission', state: 'restored', evidenceId: 'permission-restored-proof' },
+    ],
+    conditionTransitions: [
+      {
+        key: 'repository-write-permission',
+        fromState: 'missing',
+        toState: 'restored',
+        evidenceId: 'permission-restored-proof',
+      },
+    ],
+  });
+  const restoredEvidence = [
+    repairEvidence(),
+    repairEvidence({
+      id: 'permission-restored-proof',
+      summary: 'Repository write permission was restored and rechecked for this operation.',
+    }),
+  ];
+  const restoredProgress = {
+    ...serializedProgress,
+    repair: {
+      ...serializedProgress.repair,
+      attempts: [...serializedProgress.repair.attempts, conditionChangeAttempt(restoredAction, restoredEvidence)],
+    },
+  };
+  const restored = await runRepairQueue({
+    api,
+    env: { ...baseEnv, REPAIR_PROGRESS_JSON: JSON.stringify(restoredProgress) },
+    logger: { log() {} },
+  });
+  assert.equal(restored.action, 'record-progress');
+  assert.equal(comments.get(77).length, 3);
+
   currentRun = run({ id: 303, head_sha: THIRD_SHA });
   currentPullRequest = pullRequest({ head: { ...pullRequest().head, sha: THIRD_SHA } });
   const recurrence = await runRepairQueue({
@@ -1567,7 +1750,7 @@ test('authenticated queue progress writer persists policy-checked advisory state
   assert.equal(carriedState.diagnosis.rootCauseHypothesis, progress.diagnosis.rootCauseHypothesis);
   assert.equal(carriedState.diagnosis.discriminatingAction, progress.diagnosis.discriminatingAction);
   assert.equal(carriedState.repair.generation, 1);
-  assert.equal(carriedState.repair.attempts.length, 2);
+  assert.equal(carriedState.repair.attempts.length, 3);
   assert.equal(carriedState.repair.attempts[0].strategyFingerprint, strategyFingerprint);
   assert.deepEqual(carriedState.repair.exhaustedStrategyFingerprints, [strategyFingerprint]);
   assert.equal(carriedState.continuation.blocker, progress.continuation.blocker);
@@ -1630,14 +1813,16 @@ test('protected-main history follows one exact declared candidate and resets for
   const created = await runRepairQueue({ api, env: baseEnv, logger: { log() {} } });
   assert.equal(created.action, 'create');
 
-  const strategyInputs = {
-    failureClass: 'deployment-failure',
+  const action = repairAction({
     failingGate: 'delivery.test',
-    rootCauseHypothesis: 'test-deployment-package-mismatch',
-    affectedSurface: 'azure-functions',
-    repairMechanism: 'rebuild-immutable-release',
-  };
-  const strategyFingerprint = buildStrategyFingerprint(strategyInputs);
+    target: 'azure-functions',
+    repairOperation: {
+      locator: 'azure-functions/rebuild-immutable-release',
+      contentDigest: `sha256.${'5'.repeat(64)}`,
+    },
+  });
+  const actionEvidence = [repairEvidence({ sourceRef: `https://github.com/${REPOSITORY}/actions/runs/501` })];
+  const strategyFingerprint = buildStrategyFingerprint(action);
   const progress = {
     schemaVersion: 1,
     repository: REPOSITORY,
@@ -1646,25 +1831,16 @@ test('protected-main history follows one exact declared candidate and resets for
     candidateSha: HEAD_SHA,
     failureFingerprint: created.fingerprint,
     diagnosis: {
-      version: 1,
-      strategyFingerprint,
-      failureClassification: strategyInputs.failureClass,
-      rootCauseHypothesisKey: strategyInputs.rootCauseHypothesis,
+      ...repairDiagnosis({
+        failureClassification: 'deployment-failure',
+        rootCauseHypothesisKey: 'test-deployment-package-mismatch',
+      }),
       rootCauseHypothesis: 'The test deployment package does not match the candidate release.',
       discriminatingAction: 'Compare the immutable package digest with the trusted build artifact.',
     },
     repair: {
       generation: 1,
-      attempts: [
-        {
-          number: 1,
-          generation: 1,
-          strategyFingerprint,
-          strategy: strategyInputs,
-          outcome: 'ineffective',
-          candidateSha: HEAD_SHA,
-        },
-      ],
+      attempts: [repairAttempt({ number: 1, action, evidence: actionEvidence })],
       strategyFingerprints: [strategyFingerprint],
       exhaustedStrategyFingerprints: [],
     },
@@ -1720,6 +1896,15 @@ test('late one-hop progress deterministically reconciles without rewinding a new
   const firstPlan = planRepairIssue({ incident: firstIncident });
   const strategyInputs = strategy();
   const strategyFingerprint = buildStrategyFingerprint(strategyInputs);
+  const mappedLegacyAction = repairAction({
+    repairOperation: { legacyMechanism: strategyInputs.repairMechanism },
+  });
+  const legacyEvidence = [
+    repairEvidence({
+      kind: 'legacy-operation-provenance',
+      sourceRef: `https://github.com/${REPOSITORY}/commit/${HEAD_SHA}`,
+    }),
+  ];
   const progressState = buildPublicRepairState({
     ...firstPlan.state,
     diagnosis: {
@@ -1740,6 +1925,14 @@ test('late one-hop progress deterministically reconciles without rewinding a new
           rootCauseHypothesisKey: strategyInputs.rootCauseHypothesis,
           outcome: 'ineffective',
           candidateSha: HEAD_SHA,
+        },
+      ],
+      legacyActionBindings: [
+        {
+          strategyFingerprint,
+          legacyStrategy: strategyInputs,
+          action: mappedLegacyAction,
+          evidence: legacyEvidence,
         },
       ],
     },
@@ -1783,6 +1976,7 @@ test('late one-hop progress deterministically reconciles without rewinding a new
   assert.equal(reconciled.state.task.targetRequirementRef, `https://github.com/${REPOSITORY}/commit/${HEAD_SHA}`);
   assert.equal(reconciled.state.task.candidateSha, NEXT_SHA);
   assert.equal(reconciled.state.repair.attempts.length, 1);
+  assert.equal(reconciled.state.repair.legacyActionBindings.length, 1);
 
   const reconciliationComment = {
     user: { login: 'github-actions[bot]' },
@@ -1853,6 +2047,33 @@ test('late one-hop progress deterministically reconciles without rewinding a new
   assert.equal(progressiveReconciliation.action, 'reconcile');
   assert.equal(progressiveReconciliation.state.repair.attempts[0].outcome, 'ineffective');
 
+  const terminalSuccessor = buildPublicRepairState(nextCarryingFirstProgress.state);
+  terminalSuccessor.repair.attempts[0].outcome = 'ineffective';
+  terminalSuccessor.repair.legacyActionBindings = [];
+  const terminalSuccessorComment = {
+    user: { login: 'github-actions[bot]' },
+    created_at: '2026-08-30T22:35:00Z',
+    updated_at: '2026-08-30T22:35:00Z',
+    body: markedProgressState(terminalSuccessor),
+  };
+  const enrichedAfterCompletion = planRepairIssue({
+    incident: nextIncident,
+    issues: [issue],
+    comments: [firstProgressComment, terminalSuccessorComment],
+  });
+  assert.equal(enrichedAfterCompletion.action, 'reconcile');
+  assert.equal(enrichedAfterCompletion.state.repair.attempts[0].outcome, 'ineffective');
+  assert.equal(enrichedAfterCompletion.state.repair.legacyActionBindings.length, 1);
+  const enrichedComment = { ...terminalSuccessorComment, body: enrichedAfterCompletion.comment };
+  assert.equal(
+    planRepairIssue({
+      incident: nextIncident,
+      issues: [issue],
+      comments: [firstProgressComment, terminalSuccessorComment, enrichedComment],
+    }).action,
+    'deduplicated',
+  );
+
   const reverseOrderStable = planRepairIssue({
     incident: nextIncident,
     issues: [issue],
@@ -1879,49 +2100,35 @@ test('late one-hop progress deterministically reconciles without rewinding a new
   );
 });
 
-test('batched next-generation progress cannot exceed the task-wide two-attempt strategy bound', async () => {
-  const firstStrategy = strategy();
-  const firstStrategyFingerprint = buildStrategyFingerprint(firstStrategy);
-  const secondStrategy = strategy({
-    rootCauseHypothesis: 'candidate-controlled-command-resolution',
-    repairMechanism: 'pin-reviewed-package-command',
+test('batched next-generation progress cannot exceed the task-wide two-attempt action bound', async () => {
+  const firstAction = repairAction();
+  const secondAction = repairAction({
+    repairOperation: {
+      locator: 'github-workflows/pin-reviewed-validator',
+      contentDigest: `sha256.${'2'.repeat(64)}`,
+    },
   });
-  const secondStrategyFingerprint = buildStrategyFingerprint(secondStrategy);
+  const thirdAction = repairAction({
+    repairOperation: {
+      locator: 'github-workflows/replace-validation-entrypoint',
+      contentDigest: `sha256.${'3'.repeat(64)}`,
+    },
+  });
+  const secondStrategyFingerprint = buildStrategyFingerprint(secondAction);
   const initialPlan = planRepairIssue({ incident: incident() });
   const previousState = buildPublicRepairState({
     ...initialPlan.state,
     diagnosis: {
-      version: 1,
-      strategyFingerprint: secondStrategyFingerprint,
-      failureClassification: secondStrategy.failureClass,
-      rootCauseHypothesisKey: secondStrategy.rootCauseHypothesis,
+      ...repairDiagnosis(),
       rootCauseHypothesis: 'The candidate-controlled command resolution selects the wrong validator.',
       discriminatingAction: 'Run the reviewed command without candidate-controlled resolution.',
     },
     repair: {
       generation: 1,
       attempts: [
-        {
-          number: 1,
-          generation: 1,
-          strategyFingerprint: firstStrategyFingerprint,
-          outcome: 'ineffective',
-          candidateSha: HEAD_SHA,
-        },
-        {
-          number: 2,
-          generation: 1,
-          strategyFingerprint: secondStrategyFingerprint,
-          outcome: 'ineffective',
-          candidateSha: HEAD_SHA,
-        },
-        {
-          number: 3,
-          generation: 1,
-          strategyFingerprint: secondStrategyFingerprint,
-          outcome: 'ineffective',
-          candidateSha: HEAD_SHA,
-        },
+        repairAttempt({ number: 1, action: firstAction }),
+        repairAttempt({ number: 2, action: secondAction }),
+        repairAttempt({ number: 3, action: secondAction }),
       ],
       exhaustedStrategyFingerprints: [secondStrategyFingerprint],
     },
@@ -1933,14 +2140,7 @@ test('batched next-generation progress cannot exceed the task-wide two-attempt s
     author: { login: 'github-actions[bot]' },
     body: `${repairFingerprintMarker(initialPlan.state.fingerprint)}\n${markedRepairState(previousState)}`,
   };
-  const appendedAttempt = (number) => ({
-    number,
-    generation: 2,
-    strategyFingerprint: firstStrategyFingerprint,
-    strategy: firstStrategy,
-    outcome: 'ineffective',
-    candidateSha: HEAD_SHA,
-  });
+  const appendedAttempt = (number) => repairAttempt({ number, generation: 2, action: firstAction });
   const progress = {
     schemaVersion: 1,
     repository: REPOSITORY,
@@ -1949,10 +2149,7 @@ test('batched next-generation progress cannot exceed the task-wide two-attempt s
     candidateSha: HEAD_SHA,
     failureFingerprint: initialPlan.state.fingerprint,
     diagnosis: {
-      version: 2,
-      strategyFingerprint: firstStrategyFingerprint,
-      failureClassification: firstStrategy.failureClass,
-      rootCauseHypothesisKey: firstStrategy.rootCauseHypothesis,
+      ...repairDiagnosis({ version: 2 }),
       rootCauseHypothesis: 'The fixed validator command itself is bypassed.',
       discriminatingAction: 'Invoke the fixed validator without command resolution.',
     },
@@ -2003,56 +2200,23 @@ test('batched next-generation progress cannot exceed the task-wide two-attempt s
       },
       logger: { log() {} },
     }),
-    /strategy-exhausted/,
+    /action-exhausted/,
   );
 
-  const thirdStrategy = strategy({ rootCauseHypothesis: 'third-causal-hypothesis', repairMechanism: 'third-repair' });
-  const thirdStrategyFingerprint = buildStrategyFingerprint(thirdStrategy);
   const atomicPreviousState = buildPublicRepairState({
     ...initialPlan.state,
     diagnosis: {
-      version: 2,
-      strategyFingerprint: firstStrategyFingerprint,
-      failureClassification: firstStrategy.failureClass,
-      rootCauseHypothesisKey: firstStrategy.rootCauseHypothesis,
+      ...repairDiagnosis({ version: 2 }),
       rootCauseHypothesis: 'The first causal hypothesis is being tested again in generation two.',
       discriminatingAction: 'Complete the exact generation-two attempt before admitting another.',
     },
     repair: {
       generation: 2,
       attempts: [
-        {
-          number: 1,
-          generation: 1,
-          strategyFingerprint: firstStrategyFingerprint,
-          rootCauseHypothesisKey: firstStrategy.rootCauseHypothesis,
-          outcome: 'ineffective',
-          candidateSha: HEAD_SHA,
-        },
-        {
-          number: 2,
-          generation: 1,
-          strategyFingerprint: secondStrategyFingerprint,
-          rootCauseHypothesisKey: secondStrategy.rootCauseHypothesis,
-          outcome: 'ineffective',
-          candidateSha: HEAD_SHA,
-        },
-        {
-          number: 3,
-          generation: 1,
-          strategyFingerprint: thirdStrategyFingerprint,
-          rootCauseHypothesisKey: thirdStrategy.rootCauseHypothesis,
-          outcome: 'ineffective',
-          candidateSha: HEAD_SHA,
-        },
-        {
-          number: 4,
-          generation: 2,
-          strategyFingerprint: firstStrategyFingerprint,
-          rootCauseHypothesisKey: firstStrategy.rootCauseHypothesis,
-          outcome: 'in-progress',
-          candidateSha: HEAD_SHA,
-        },
+        repairAttempt({ number: 1, action: firstAction }),
+        repairAttempt({ number: 2, action: secondAction }),
+        repairAttempt({ number: 3, action: thirdAction }),
+        repairAttempt({ number: 4, generation: 2, action: firstAction, outcome: 'in-progress' }),
       ],
     },
   });
@@ -2072,12 +2236,7 @@ test('batched next-generation progress cannot exceed the task-wide two-attempt s
         ...atomicPreviousState.repair.attempts.slice(0, 3),
         { ...atomicPreviousState.repair.attempts[3], outcome: 'ineffective' },
         {
-          number: 5,
-          generation: 2,
-          strategyFingerprint: firstStrategyFingerprint,
-          strategy: firstStrategy,
-          outcome: 'in-progress',
-          candidateSha: HEAD_SHA,
+          ...repairAttempt({ number: 5, generation: 2, action: firstAction, outcome: 'in-progress' }),
         },
       ],
       exhaustedStrategyFingerprints: [],
@@ -2102,8 +2261,111 @@ test('batched next-generation progress cannot exceed the task-wide two-attempt s
       },
       logger: { log() {} },
     }),
-    /strategy-exhausted/,
+    /action-exhausted/,
   );
+});
+
+test('progress writer enriches legacy history without resetting it and rejects replay or remapping', async () => {
+  const legacyFingerprint = buildStrategyFingerprint(strategy());
+  const oldAttempts = [1, 2].map((number) => ({
+    number,
+    generation: 1,
+    strategyFingerprint: legacyFingerprint,
+    outcome: 'ineffective',
+    candidateSha: HEAD_SHA,
+  }));
+  const prior = buildPublicRepairState({
+    ...planRepairIssue({ incident: incident() }).state,
+    diagnosis: repairDiagnosis(),
+    repair: { generation: 1, attempts: oldAttempts },
+  });
+  const binding = {
+    strategyFingerprint: legacyFingerprint,
+    legacyStrategy: strategy(),
+    action: repairAction({ repairOperation: { legacyMechanism: strategy().repairMechanism } }),
+    evidence: [
+      repairEvidence({
+        kind: 'legacy-operation-provenance',
+        sourceRef: `https://github.com/${REPOSITORY}/commit/${HEAD_SHA}`,
+      }),
+    ],
+  };
+  const newAction = repairAction({ repairOperation: { contentDigest: `sha256.${'2'.repeat(64)}` } });
+  const progress = {
+    schemaVersion: 1,
+    repository: REPOSITORY,
+    issueNumber: 77,
+    sourceRunId: 101,
+    candidateSha: HEAD_SHA,
+    failureFingerprint: prior.failureFingerprint,
+    diagnosis: repairDiagnosis(),
+    repair: {
+      generation: 1,
+      attempts: [...oldAttempts, repairAttempt({ number: 3, action: newAction })],
+      legacyActionBindings: [binding],
+    },
+    continuation: {},
+  };
+  const comments = [];
+  const api = {
+    async getRun() {
+      return run();
+    },
+    async getPullRequest() {
+      return pullRequest();
+    },
+    async getJobs() {
+      return [{ id: 202, name: 'backend and contracts', conclusion: 'failure' }];
+    },
+    async listRepairIssues() {
+      return [
+        {
+          number: 77,
+          state: 'OPEN',
+          author: { login: 'github-actions[bot]' },
+          body: `${repairFingerprintMarker(prior.failureFingerprint)}\n${markedRepairState(prior)}`,
+        },
+      ];
+    },
+    async listIssueComments() {
+      return comments;
+    },
+    async ensureLabels() {},
+    async addLabels() {},
+    async commentIssue(_repository, _number, body) {
+      comments.push({
+        user: { login: 'github-actions[bot]' },
+        created_at: '2026-09-06T14:00:00Z',
+        updated_at: '2026-09-06T14:00:00Z',
+        body,
+      });
+    },
+  };
+  const invoke = (value) =>
+    runRepairQueue({
+      api,
+      env: {
+        GITHUB_REPOSITORY: REPOSITORY,
+        GITHUB_ACTIONS: 'true',
+        GITHUB_EVENT_NAME: 'workflow_dispatch',
+        SOURCE_RUN_ID: '101',
+        DRY_RUN: 'false',
+        REPAIR_PROGRESS_JSON: JSON.stringify(value),
+      },
+      logger: { log() {} },
+    });
+  assert.equal((await invoke(progress)).action, 'record-progress');
+  const recorded = JSON.parse(comments[0].body.match(/```json\n([\s\S]*?)\n```/)[1]);
+  assert.deepEqual(recorded.repair.attempts.slice(0, 2), prior.repair.attempts);
+  assert.equal(recorded.repair.legacyActionBindings.length, 1);
+  assert.ok(recorded.repair.exhaustedStrategyFingerprints.includes(legacyFingerprint));
+  assert.ok(recorded.repair.exhaustedStrategyFingerprints.includes(buildStrategyFingerprint(binding.action)));
+  assert.equal(recorded.task.completionStatus, 'unverified');
+  await assert.rejects(invoke(progress), /replayed snapshots/);
+  const remapped = structuredClone(progress);
+  remapped.repair.legacyActionBindings[0].action.repairOperation.contentDigest = `sha256.${'3'.repeat(64)}`;
+  await assert.rejects(invoke(remapped), /legacy action binding/);
+  assert.equal(comments.length, 1);
 });
 
 test('workflow callback is bounded, trusted-main checked out, and cannot self-trigger', () => {

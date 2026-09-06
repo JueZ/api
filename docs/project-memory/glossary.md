@@ -7,7 +7,7 @@
 - Rendered frontend digest: environment-specific frontend archive identity; it may differ between test and production while the application-source digest remains identical.
 - GitHub Actions OIDC identity: Azure federated identity used by workflows without a long-lived Azure client secret.
 - Failure fingerprint: sanitized stable failure-lineage identifier used to deduplicate delivery/production repair issues and learning candidates.
-- Repair strategy fingerprint: stable combination of failure class or gate, root-cause hypothesis, affected surface, and repair mechanism; cosmetic changes do not create a new strategy.
+- Repair action identity: stable binding of the failing gate, affected target, concrete operation or patch, and relevant verified preconditions; diagnosis labels and cosmetic changes do not create a new action. Legacy strategy fingerprints remain preserved in repair history.
 - Repair generation: one bounded execution run that may try materially different strategies without treating budget exhaustion as task completion.
 - Active repair continuation: deduplicated durable state for an unfinished requirement, including evidence, attempted strategies, next discriminating action, blocker, and resume condition.
 - Hard invariant: mechanically protected safety or delivery boundary whose violation blocks work.

@@ -1,4 +1,4 @@
-<!-- project-memory-asOf: 2026-09-04 -->
+<!-- project-memory-asOf: 2026-09-06 -->
 # Current state
 
 ## Repository delivery
@@ -12,7 +12,7 @@
 - The root/build and standalone `apps/api` Function manifests are independent dependency projects. Both receive pair-local lock policy, audit, Dependabot, CodeQL, and Trivy coverage; the release CycloneDX SBOM describes the exact installed production Function stage.
 - `Delivery v2` is the sole normal controller. A push to protected `main` classifies runtime impact, builds one immutable release when applicable, verifies test, promotes the same application digests to production, and verifies production without per-task deployment approval. Runtime-affecting work remains incomplete until its applicable runtime evidence passes.
 - `DELIVERY_V2_ENABLED=true` and `DEPLOY_PRODUCTION_ENABLED=true`. Production and one-shot package rollback share `production-deployment` concurrency.
-- The repair queue creates or updates one sanitized issue per exact run/failure fingerprint. It cannot invoke Codex or rewrite repository files. Two ineffective attempts retire one repair strategy rather than the task; a bounded generation that ends first leaves an active continuation for later applicable unblocked repository work. A protected workflow-dispatch path records schema-sanitized advisory progress against an exact source run, and an exact expected candidate SHA links protected-main repair generations without carrying state into unrelated candidates.
+- The repair queue creates or updates one sanitized issue per exact run/failure fingerprint. It cannot invoke Codex or rewrite repository files. Two ineffective attempts retire an unchanged repair action; a supported diagnosis can remain when a different mechanism or verified changed preconditions justify continuation. Cosmetic metadata does not reset action budgets, and legacy exhausted causes are historical information rather than eligibility vetoes. Three attempts exhaust a generation and leave an active continuation. A protected workflow-dispatch path records schema-sanitized advisory progress against an exact source run, and an exact expected candidate SHA links protected-main repair generations without carrying state into unrelated candidates.
 
 ## Runtime and security
 
