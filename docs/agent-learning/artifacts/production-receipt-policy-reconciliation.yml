@@ -1,0 +1,20 @@
+version: 2
+id: production-receipt-policy-reconciliation
+fingerprint: delivery.production.mutation-receipt-policy
+severity: high
+invariant: Release mutation metadata must be registered in the runtime policy; uncertain configuration can become accepted only through exact failed-run evidence, fresh lock-time attribution, explicit reconciliation, and complete runtime verification.
+scope:
+  - scripts/validate-deployed-runtime-settings.mjs
+  - scripts/lib/production-state.mjs
+  - .github/workflows/deploy-environment.yml
+  - .github/workflows/delivery-v2.yml
+prevention:
+  - kind: regression-test
+    path: scripts/test/runtime-hardening.test.mjs
+  - kind: regression-test
+    path: scripts/test/production-state.test.mjs
+  - kind: regression-test
+    path: scripts/test/delivery-v2-workflow.test.mjs
+broken: b194a5eea097c70e9fab02ed207f8f682121c8c0
+recurrenceCount: 1
+status: active

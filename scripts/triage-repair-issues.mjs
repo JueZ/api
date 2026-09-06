@@ -1808,7 +1808,9 @@ function issueNumber(issue) {
 }
 
 function isBotAuthor(author) {
-  return BOT_LOGINS.has(String(author?.login || ''));
+  return (
+    BOT_LOGINS.has(String(author?.login || '')) || (author?.login === 'app/github-actions' && author?.is_bot === true)
+  );
 }
 
 function reusableBotSnapshotSource(source, comment) {

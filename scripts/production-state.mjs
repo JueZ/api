@@ -104,6 +104,7 @@ async function run() {
       failedIntent,
       observed,
       rollbackAlreadyAttempted: args.get('--rollback-attempted') === 'true',
+      reconcileConfiguration: args.get('--reconcile-configuration') === 'true',
       currentMainRef: args.get('--current-main'),
       failedControllerRef: args.get('--failed-controller'),
     });

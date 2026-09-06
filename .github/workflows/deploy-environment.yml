@@ -3,6 +3,21 @@ name: Deploy Environment
 on:
   workflow_call:
     inputs:
+      reconcileConfiguration:
+        description: Explicit protected recovery must reconcile current infrastructure and policy before accepting the restored bundle.
+        required: false
+        default: false
+        type: boolean
+      evidenceRunId:
+        description: Trusted failed Delivery run containing baseline and mutation evidence for explicit recovery.
+        required: false
+        default: ''
+        type: string
+      failedControllerRef:
+        description: Trusted immutable controller SHA that recorded the failed mutation.
+        required: false
+        default: ''
+        type: string
       baselineOnly:
         description: Verify accepted installed production evidence without deployment.
         required: false
@@ -406,7 +421,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ inputs.environmentName }}" != "prod" ] || [ "${{ inputs.allowRollback }}" = "true" ]; then
+          if [ "${{ inputs.reconcileConfiguration }}" = "true" ]; then
+            if [ "${{ github.event_name }}" != "workflow_dispatch" ] ||
+               [ "${{ github.event.inputs.mode }}" != "recover-production" ] ||
+               [ "${{ inputs.environmentName }}" != "prod" ] || [ "${{ inputs.allowRollback }}" != "true" ]; then
+              echo "Configuration reconciliation requires explicit protected production recovery." >&2
+              exit 1
+            fi
+          fi
+          if [ "${{ inputs.environmentName }}" != "prod" ] ||
+             { [ "${{ inputs.allowRollback }}" = "true" ] && [ "${{ inputs.reconcileConfiguration }}" != "true" ]; }; then
             {
               echo "proceed=true"
               echo "guard_state=not-applicable"
@@ -415,7 +439,9 @@ jobs:
             exit 0
           fi
           current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
-          if [ "$current_main" != "${{ inputs.sourceRef }}" ]; then
+          expected_main="${{ inputs.sourceRef }}"
+          if [ "${{ inputs.reconcileConfiguration }}" = "true" ]; then expected_main="$GITHUB_SHA"; fi
+          if [ "$current_main" != "$expected_main" ]; then
             {
               echo "proceed=false"
               echo "guard_state=superseded"
@@ -575,6 +601,9 @@ jobs:
         with:
           name: ${{ inputs.acceptedBaselineArtifact }}
           path: ${{ runner.temp }}/accepted-baseline
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.evidenceRunId || github.run_id }}
       - name: Download exact accepted production release ledger
         if: ${{ inputs.environmentName == 'prod' }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
@@ -599,6 +628,9 @@ jobs:
         with:
           name: ${{ inputs.failedMutationArtifact }}
           path: ${{ runner.temp }}/failed-mutation
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.evidenceRunId || github.run_id }}
       - name: Validate protected-main source and immutable identity
         id: source
         shell: bash
@@ -915,15 +947,28 @@ jobs:
           set -euo pipefail
           current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
           if [ "$ALLOW_ROLLBACK" = "true" ]; then
+            if [ "${{ inputs.reconcileConfiguration }}" = "true" ] && [ "$current_main" != "$GITHUB_SHA" ]; then
+              echo "Explicit reconciliation requires current protected main inside the mutation lock." >&2
+              exit 1
+            fi
             failed_intent="$RUNNER_TEMP/failed-mutation/intent.json"
             [ -f "$failed_intent" ] || { echo "Failed production mutation intent is unavailable." >&2; exit 1; }
+            if [ "${{ inputs.reconcileConfiguration }}" = "true" ]; then
+              jq -e --arg controller "${{ inputs.failedControllerRef }}" --arg run "${{ inputs.evidenceRunId }}" \
+                '.schemaVersion == 1 and .persistedBeforeWrite == true and
+                 .expectedIdentity.mutationReceipt.recorded == true and
+                 .expectedIdentity.mutationReceipt.controllerRef == $controller and
+                 .expectedIdentity.mutationReceipt.runId == $run and
+                 .expectedIdentity.mutationReceipt.kind == "promotion"' "$failed_intent" >/dev/null
+            fi
             node scripts/production-state.mjs rollback-decision \
               --accepted "$RUNNER_TEMP/accepted-baseline/accepted-baseline.json" \
               --observed "$RUNNER_TEMP/lock-production/observation.json" \
               --intent "$failed_intent" \
               --rollback-attempted false \
               --current-main "$current_main" \
-              --failed-controller "$GITHUB_SHA" \
+              --failed-controller "${{ inputs.failedControllerRef || github.sha }}" \
+              --reconcile-configuration "${{ inputs.reconcileConfiguration }}" \
               --json-output "$RUNNER_TEMP/production-guard.json" \
               --output "$GITHUB_OUTPUT"
           else
@@ -968,7 +1013,7 @@ jobs:
             --arg functionDigest "$FUNCTION_ARTIFACT_SHA256" \
             --arg renderedFrontendDigest "$FRONTEND_ARTIFACT_SHA256" \
             --arg sbomDigest "$SBOM_SHA256" \
-            --argjson configurationMayChange '${{ !inputs.allowRollback }}' \
+            --argjson configurationMayChange '${{ !inputs.allowRollback || inputs.reconcileConfiguration }}' \
             '{schemaVersion:1,phase:"intent-recorded",persistedBeforeWrite:true,configurationMayChange:$configurationMayChange,rollbackAttempted:false,expectedIdentity:{function:{sourceRef:$sourceRef,runId:$runId,deliveryCorrelation:$correlation,digests:{function:$functionDigest,renderedFrontend:$renderedFrontendDigest,sbom:$sbomDigest},package:null},frontend:{sourceRef:$sourceRef,runId:$runId,deliveryCorrelation:$correlation,metadataSha256:null,inventorySha256:null},mutationReceipt:{recorded:true,runId:$mutationRunId,correlation:$mutationCorrelation,controllerRef:$mutationControllerRef,kind:$mutationKind}}}' \
             > "$RUNNER_TEMP/production-mutation/intent.json"
           echo "artifact_name=production-mutation-${DELIVERY_CORRELATION}" >> "$GITHUB_OUTPUT"
@@ -998,7 +1043,7 @@ jobs:
               "DELIVERY_MUTATION_KIND=$mutation_kind" \
             -o none
       - name: Deploy Bicep infrastructure
-        if: ${{ !inputs.allowRollback && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
+        if: ${{ (!inputs.allowRollback || inputs.reconcileConfiguration) && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         id: infra
         shell: bash
         env:
@@ -1327,6 +1372,7 @@ jobs:
             echo "- Frontend URL: ${effective_frontend_url:-<not resolved>}"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Verify complete deployed runtime safety policy
+        id: runtime_policy
         if: ${{ inputs.deployFunctions && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         shell: bash
         run: |
@@ -2055,6 +2101,13 @@ jobs:
             export RECOVERY_ORIGINAL_RUN_ID="$ACCEPTED_RELEASE_RUN_ID"
             export RECOVERY_ORIGINAL_CORRELATION="$ACCEPTED_RELEASE_CORRELATION"
             export RECOVERY_CONFIGURATION_UNCERTAIN='${{ steps.observe_mutation.outputs.configuration_uncertain }}'
+            if [ "${{ inputs.reconcileConfiguration }}" = "true" ]; then
+              if [ "${{ steps.infra.outcome }}" != "success" ] || [ "${{ steps.runtime_policy.outcome }}" != "success" ]; then
+                echo "Configuration recovery lacks successful reconciliation and runtime policy evidence." >&2
+                exit 1
+              fi
+              export RECOVERY_CONFIGURATION_UNCERTAIN=false
+            fi
           fi
           export SMOKE_RUN_ID="${SMOKE_RUN_ID:-smoke-${ENVIRONMENT_NAME}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
           export RELEASE_LEDGER_PATH="$smoke_dir/release-ledger-${ENVIRONMENT_NAME}.json"

@@ -285,6 +285,49 @@ test('configuration uncertainty is never reported as production unchanged', () =
   assert.equal(decision.configurationUncertain, true);
 });
 
+test('explicit configuration reconciliation requires the exact failed receipt even when accepted bytes remain', () => {
+  const accepted = observation().identity;
+  const receipt = {
+    recorded: true,
+    runId: '456',
+    correlation: 'prod-456-1',
+    controllerRef: failedSha,
+    kind: 'promotion',
+  };
+  const failedIntent = {
+    phase: 'intent-recorded',
+    persistedBeforeWrite: true,
+    configurationMayChange: true,
+    expectedIdentity: { ...accepted, mutationReceipt: receipt },
+  };
+  const observed = observation({ mutationReceipt: receipt });
+  const options = {
+    acceptedIdentity: accepted,
+    failedIntent,
+    observed,
+    currentMainRef: newerSha,
+    failedControllerRef: failedSha,
+  };
+  assert.equal(decideRollbackGuard(options).mutate, false);
+  assert.equal(
+    decideRollbackGuard({ ...options, reconcileConfiguration: true }).state,
+    'configuration-reconciliation-required',
+  );
+  assert.equal(decideRollbackGuard({ ...options, reconcileConfiguration: true }).mutate, true);
+  assert.equal(
+    decideRollbackGuard({ ...options, reconcileConfiguration: true, observed: observation() }).mutate,
+    false,
+  );
+  assert.equal(
+    decideRollbackGuard({
+      ...options,
+      reconcileConfiguration: true,
+      observed: observation({ mutationReceipt: { ...receipt, runId: '789' } }),
+    }).mutate,
+    false,
+  );
+});
+
 test('invalid observation cannot pass component comparisons', () => {
   const accepted = observation().identity;
   const invalid = observation({ packageDigest: '9'.repeat(64) });

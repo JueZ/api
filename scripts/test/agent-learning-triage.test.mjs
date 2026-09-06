@@ -1075,6 +1075,19 @@ test('same causal PR failure on a different PR resets the active target and repa
   assert.equal(plan.state.continuation.blocker, null);
 });
 
+test('GitHub CLI bot identity reuses its repair issue without accepting an unverified app alias', () => {
+  const first = planRepairIssue({ incident: incident() });
+  const issue = { number: 9, state: 'OPEN', body: first.body, author: { login: 'app/github-actions', is_bot: true } };
+  assert.equal(planRepairIssue({ incident: incident(), issues: [issue] }).action, 'deduplicated');
+  for (const author of [
+    { login: 'app/github-actions' },
+    { login: 'app/github-actions', is_bot: false },
+    { login: 'app/other-app', is_bot: true },
+  ]) {
+    assert.equal(planRepairIssue({ incident: incident(), issues: [{ ...issue, author }] }).action, 'create');
+  }
+});
+
 test('human, unmarked, malformed, and secret-shaped persisted state cannot influence recurrence', () => {
   const initialPlan = planRepairIssue({ incident: incident() });
   const strategyFingerprint = buildStrategyFingerprint(strategy());

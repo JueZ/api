@@ -41,7 +41,14 @@ Confirm these jobs and outcomes in the workflow summary:
 - public and authenticated smoke, telemetry, and release identity passed;
 - the repair queue created or updated one sanitized issue for the failed release.
 
-If automatic rollback is blocked or fails, stop further mutation, keep the urgent repair issue open, and report the exact identity, permission, artifact, smoke, telemetry, or Azure blocker. A standalone manual rollback path must be added through a protected PR; do not recreate the removed dispatch workflow ad hoc.
+If automatic rollback is blocked or fails, keep the urgent repair issue open and identify the exact blocker before any further mutation. For a proven failed promotion with retained accepted artifacts and the exact failed receipt still installed, Delivery v2 provides an explicit configuration reconciliation mode on current protected main:
+
+```bash
+gh workflow run delivery-v2.yml --repo JueZ/api --ref main \
+  -f mode=recover-production -f failedRunId=<exact-failed-delivery-run-id>
+```
+
+This mode validates the prior run and evidence, acquires the same production lock, checks current main and the exact failed mutation, then reapplies current Bicep and validates runtime policy before restoring and verifying the accepted bundle. It is distinct from automatic package rollback. Configuration becomes accepted only after reconciliation, public/authenticated smoke, telemetry, and the recovery ledger pass. A newer or ambiguous installed mutation blocks this path. Recovery acceptance of an older bundle is not completion of the current feature: subsequently run full Delivery v2 for current main. Do not create an ad hoc standalone rollback controller or retry unchanged failed reconciliation.
 
 ## Report
 

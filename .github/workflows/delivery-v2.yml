@@ -15,6 +15,11 @@ on:
           - dry-run
           - test-only
           - full
+          - recover-production
+      failedRunId:
+        description: Exact failed Delivery v2 run whose bounded production mutation needs explicit configuration reconciliation.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -54,7 +59,7 @@ jobs:
 
   classify:
     name: classify protected-main change
-    if: always()
+    if: ${{ always() && inputs.mode != 'recover-production' }}
     needs: baseline
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -495,9 +500,96 @@ jobs:
       BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
       BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
 
+  recovery-context:
+    name: resolve explicit production recovery
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'recover-production' && github.ref == 'refs/heads/main' && vars.DEPLOY_PRODUCTION_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      acceptedSourceRef: ${{ steps.resolve.outputs.acceptedSourceRef }}
+      acceptedReleaseRunId: ${{ steps.resolve.outputs.acceptedReleaseRunId }}
+      acceptedReleaseCorrelation: ${{ steps.resolve.outputs.acceptedReleaseCorrelation }}
+      acceptedLedgerRunId: ${{ steps.resolve.outputs.acceptedLedgerRunId }}
+      acceptedLedgerCorrelation: ${{ steps.resolve.outputs.acceptedLedgerCorrelation }}
+      acceptedBaselineArtifact: ${{ steps.resolve.outputs.acceptedBaselineArtifact }}
+      failedMutationArtifact: ${{ steps.resolve.outputs.failedMutationArtifact }}
+      evidenceRunId: ${{ steps.resolve.outputs.evidenceRunId }}
+      failedControllerRef: ${{ steps.resolve.outputs.failedControllerRef }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout protected recovery controller
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: '22'
+      - name: Resolve exact failed mutation and accepted evidence
+        id: resolve
+        shell: bash
+        env:
+          FAILED_RUN_ID: ${{ inputs.failedRunId }}
+        run: |
+          set -euo pipefail
+          node scripts/resolve-recovery-context.mjs --failed-run "$FAILED_RUN_ID" --repository "$GITHUB_REPOSITORY" --current-run "$GITHUB_RUN_ID" --controller "$GITHUB_SHA" --output "$GITHUB_OUTPUT"
+  reconcile-production:
+    name: rollback production
+    needs:
+      - recovery-context
+    if: ${{ inputs.mode == 'recover-production' && needs.recovery-context.result == 'success' }}
+    concurrency:
+      group: production-deployment
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environmentName: prod
+      azureResourceGroup: rg-api-prod
+      githubEnvironment: production
+      deployFrontend: true
+      deployFunctions: true
+      sourceRef: ${{ needs.recovery-context.outputs.acceptedSourceRef }}
+      currentMainConfirmedRef: ${{ github.sha }}
+      allowRollback: true
+      reconcileConfiguration: true
+      deliveryCorrelation: rollback-${{ github.run_id }}-${{ github.run_attempt }}
+      rollbackReleaseRunId: ${{ needs.recovery-context.outputs.acceptedReleaseRunId }}
+      rollbackReleaseCorrelation: ${{ needs.recovery-context.outputs.acceptedReleaseCorrelation }}
+      acceptedSourceRef: ${{ needs.recovery-context.outputs.acceptedSourceRef }}
+      acceptedReleaseRunId: ${{ needs.recovery-context.outputs.acceptedReleaseRunId }}
+      acceptedReleaseCorrelation: ${{ needs.recovery-context.outputs.acceptedReleaseCorrelation }}
+      acceptedLedgerRunId: ${{ needs.recovery-context.outputs.acceptedLedgerRunId }}
+      acceptedLedgerCorrelation: ${{ needs.recovery-context.outputs.acceptedLedgerCorrelation }}
+      acceptedBaselineArtifact: ${{ needs.recovery-context.outputs.acceptedBaselineArtifact }}
+      failedMutationArtifact: ${{ needs.recovery-context.outputs.failedMutationArtifact }}
+      evidenceRunId: ${{ needs.recovery-context.outputs.evidenceRunId }}
+      failedControllerRef: ${{ needs.recovery-context.outputs.failedControllerRef }}
+    secrets:
+      REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+      YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY: ${{ secrets.YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY }}
+      WLH_BASE_URL: ${{ secrets.WLH_BASE_URL }}
+      GOOGLE_WEATHER_API_KEY: ${{ secrets.GOOGLE_WEATHER_API_KEY }}
+      BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
+      BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
+      BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
+      BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
+      BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
+
   summary:
     name: delivery summary
-    if: always()
+    if: ${{ always() && inputs.mode != 'recover-production' }}
     needs:
       - baseline
       - classify
