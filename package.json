@@ -76,7 +76,7 @@
     "@angular/cli": "21.2.19",
     "@angular/compiler-cli": "21.2.19",
     "@eslint/js": "10.0.1",
-    "@redocly/cli": "2.40.0",
+    "@redocly/cli": "2.51.1",
     "@types/node": "24.10.1",
     "eslint": "10.8.0",
     "globals": "17.8.0",
