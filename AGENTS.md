@@ -35,12 +35,12 @@ Delegate independent, well-defined subtasks when this improves speed, cost, or q
 
 Explicitly select the cheapest capable available model for each subtask:
 
-| Model | Use |
-| --- | --- |
-| Luna (`gpt-5.6-luna`) | Simple, mechanical work |
-| Terra (`gpt-5.6-terra`) | Routine implementation, extraction, transformation |
-| Sol (`gpt-5.6-sol`) | Research, coding, analysis, debugging, substantial reasoning |
-| Astra (`gpt-6-astra`) | Difficult judgment, ambiguity, planning, critical review |
+| Model                   | Use                                                          |
+| ----------------------- | ------------------------------------------------------------ |
+| Luna (`gpt-5.6-luna`)   | Simple, mechanical work                                      |
+| Terra (`gpt-5.6-terra`) | Routine implementation, extraction, transformation           |
+| Sol (`gpt-5.6-sol`)     | Research, coding, analysis, debugging, substantial reasoning |
+| Astra (`gpt-6-astra`)   | Difficult judgment, ambiguity, planning, critical review     |
 
 The main thread retains its configured model. If a preferred subagent model is unavailable, use the next capable available tier and disclose the substitution. Escalate uncertain or failed subtasks to a stronger capable model.
 
