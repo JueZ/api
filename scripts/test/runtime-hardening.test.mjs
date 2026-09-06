@@ -101,6 +101,24 @@ test('deployed runtime policy rejects security drift, missing managed keys, and 
   assert.ok(errors.some((error) => error.endsWith('OIDC_ALLOWED_DELEGATED_CLIENT_IDS')));
 });
 
+test('release correlation and mutation receipts are managed metadata without allowing arbitrary settings', () => {
+  const settings = buildExpectedRuntimeSettings(runtimeSettingsEnv);
+  const names = [
+    ...Object.keys(settings),
+    'DELIVERY_CORRELATION',
+    'DELIVERY_MUTATION_RUN_ID',
+    'DELIVERY_MUTATION_CORRELATION',
+    'DELIVERY_MUTATION_CONTROLLER_SHA',
+    'DELIVERY_MUTATION_KIND',
+  ];
+  assert.deepEqual(validateDeployedRuntimeSettings(settings, names, runtimeSettingsEnv), []);
+  assert.ok(
+    validateDeployedRuntimeSettings(settings, [...names, 'DELIVERY_MUTATION_AUTH_OVERRIDE'], runtimeSettingsEnv).some(
+      (error) => error.endsWith('DELIVERY_MUTATION_AUTH_OVERRIDE'),
+    ),
+  );
+});
+
 test('deployed runtime policy rejects plaintext, wrong-version, and wrong-observability managed values', () => {
   const properties = buildExpectedRuntimeSettings(runtimeSettingsEnv);
   properties.APPLICATIONINSIGHTS_CONNECTION_STRING = 'InstrumentationKey=wrong-component';

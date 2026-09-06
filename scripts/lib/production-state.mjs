@@ -238,6 +238,7 @@ export function decideRollbackGuard({
   failedIntent,
   observed,
   rollbackAlreadyAttempted = false,
+  reconcileConfiguration = false,
   currentMainRef,
   failedControllerRef,
 }) {
@@ -283,6 +284,17 @@ export function decideRollbackGuard({
     });
   }
   if (Object.values(componentStates).every((state) => state === 'accepted')) {
+    if (
+      configurationUncertain &&
+      reconcileConfiguration &&
+      mutationReceiptMatches(failedIntent.expectedIdentity?.mutationReceipt, observedIdentity?.mutationReceipt)
+    ) {
+      return decision('configuration-reconciliation-required', true, {
+        reason: 'explicit-reconciliation-of-exact-failed-mutation',
+        componentStates,
+        configurationUncertain: true,
+      });
+    }
     if (
       !configurationUncertain &&
       mutationReceiptMatches(failedIntent.expectedIdentity?.mutationReceipt, observedIdentity?.mutationReceipt)

@@ -75,7 +75,7 @@ test('accepted baseline requires full protected-main mode before production envi
   const currentMainIndex = trustedBaseline.steps.findIndex((step) => step.name.includes('current protected main'));
   const loginIndex = trustedBaseline.steps.findIndex((step) => step.name.includes('Azure OIDC login'));
   assert.ok(currentMainIndex >= 0 && currentMainIndex < loginIndex);
-  assert.equal(workflow.jobs.classify.if, 'always()');
+  assert.equal(workflow.jobs.classify.if, "${{ always() && inputs.mode != 'recover-production' }}");
   assert.ok(
     workflow.jobs.classify.steps.some((step) => /accepted-production-baseline-unavailable/.test(step.run ?? '')),
   );
@@ -247,4 +247,30 @@ test('baseline and rollback keep original bundle provenance separate from curren
   );
   assert.match(environmentSource, /RECOVERY_ORIGINAL_RUN_ID/);
   assert.match(environmentSource, /DELIVERY_MUTATION_RUN_ID/);
+});
+
+test('explicit configuration recovery stays in the trusted controller and cannot bypass fresh state or policy proof', () => {
+  assert.ok(workflow.on.workflow_dispatch.inputs.mode.options.includes('recover-production'));
+  const context = workflow.jobs['recovery-context'];
+  assert.match(context.if, /workflow_dispatch/);
+  assert.match(context.if, /refs\/heads\/main/);
+  assert.match(context.if, /DEPLOY_PRODUCTION_ENABLED/);
+  assert.equal(context.permissions['id-token'], undefined);
+  const recovery = workflow.jobs['reconcile-production'];
+  assert.equal(recovery.uses, './.github/workflows/deploy-environment.yml');
+  assert.equal(recovery.with.reconcileConfiguration, true);
+  assert.equal(recovery.with.allowRollback, true);
+  assert.equal(recovery.concurrency.group, workflow.jobs['promote-production'].concurrency.group);
+  assert.match(workflow.jobs.classify.if, /inputs.mode != 'recover-production'/);
+  assert.match(workflow.jobs.summary.if, /inputs.mode != 'recover-production'/);
+  const steps = environmentWorkflow.jobs.deploy.steps;
+  const guard = steps.find((step) => step.id === 'production_guard').run;
+  assert.match(guard, /current_main.*GITHUB_SHA/);
+  assert.match(guard, /mutationReceipt.controllerRef == \$controller/);
+  assert.match(guard, /mutationReceipt.runId == \$run/);
+  assert.match(steps.find((step) => step.id === 'infra').if, /inputs.reconcileConfiguration/);
+  const ledger = steps.find((step) => step.name === 'Write release ledger').run;
+  assert.match(ledger, /steps.infra.outcome/);
+  assert.match(ledger, /steps.runtime_policy.outcome/);
+  assert.match(ledger, /RECOVERY_CONFIGURATION_UNCERTAIN=false/);
 });
