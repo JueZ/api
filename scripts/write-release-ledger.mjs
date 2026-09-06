@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { getSmokeRunId } from './lib/smoke-utils.mjs';
@@ -53,7 +54,7 @@ export async function writeReleaseLedger({ env = process.env, argv = process.arg
   return { ledger, out };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { out } = await writeReleaseLedger();
   console.log(`Wrote release ledger to ${out}`);
 }

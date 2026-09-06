@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { appendFile } from 'node:fs/promises';
 import { fetchWithTimeout, getSmokeFetchTimeoutMs, isTimeoutError } from './lib/smoke-utils.mjs';
 
@@ -60,7 +61,7 @@ export function missingServiceAuthFields(config) {
     .map(([name]) => name);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const config = selectServiceAuthConfig();
   const missing = missingServiceAuthFields(config);
   const requireToken = process.env.REQUIRE_AUTH_SMOKE === 'true' || config.environmentName === 'prod';

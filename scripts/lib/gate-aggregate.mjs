@@ -4,6 +4,7 @@ const GATE_RULES = Object.freeze({
     policy: 'always',
     backend: 'backendOrContracts',
     frontend: 'frontend',
+    portability: 'privileged',
     infrastructure: 'infrastructure',
     workflow: 'workflow',
   }),

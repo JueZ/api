@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { safeSummary, sanitizeSmokeRunId } from './lib/smoke-utils.mjs';
@@ -225,7 +226,7 @@ export async function runTelemetryCheck({
   return finish({ ...baseResult, ...finalDecision, checks: finalDecision.checks }, outputPath);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const result = await runTelemetryCheck();
   process.exit(result.exitCode ?? DEFAULT_STATUSES[result.status] ?? 1);
 }

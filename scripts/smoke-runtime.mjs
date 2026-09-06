@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import {
   getSmokeRunId,
   requireUrl,
@@ -106,7 +107,7 @@ export async function runRuntimeSmoke({ env = process.env, fetchImpl = fetchWith
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { result, exitCode, output } = await runRuntimeSmoke();
   const rendered = safeSummary(result);
   if (output === 'stderr') console.error(rendered);

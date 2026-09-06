@@ -2107,8 +2107,14 @@ test('batched next-generation progress cannot exceed the task-wide two-attempt s
 });
 
 test('workflow callback is bounded, trusted-main checked out, and cannot self-trigger', () => {
-  const workflow = readFileSync(new URL('../../.github/workflows/repair-triage.yml', import.meta.url), 'utf8');
-  const prGate = readFileSync(new URL('../../.github/workflows/pr-gate.yml', import.meta.url), 'utf8');
+  const workflow = readFileSync(new URL('../../.github/workflows/repair-triage.yml', import.meta.url), 'utf8').replace(
+    /\r\n/g,
+    '\n',
+  );
+  const prGate = readFileSync(new URL('../../.github/workflows/pr-gate.yml', import.meta.url), 'utf8').replace(
+    /\r\n/g,
+    '\n',
+  );
   const deliveryDoc = readFileSync(new URL('../../docs/autonomous-delivery.md', import.meta.url), 'utf8');
   const workflowLines = workflow.split('\n');
   const repairProgressInputIndex = workflowLines.indexOf('      repair_progress_json:');

@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   extractRoutesFromSource,
   findDuplicateOperationIds,
@@ -11,6 +13,20 @@ import {
   findStaleSplitContractReferences,
   findUnexpectedSplitContractFiles,
 } from '../check-openapi-route-drift.mjs';
+
+test('OpenAPI drift CLI executes its check on native filesystem paths', () => {
+  const result = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL('../check-openapi-route-drift.mjs', import.meta.url))],
+    {
+      cwd: fileURLToPath(new URL('../../', import.meta.url)),
+      encoding: 'utf8',
+      timeout: 30_000,
+    },
+  );
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /OpenAPI route drift check passed for \d+ implementation route\(s\)\./);
+});
 
 test('extracts app.http routes and documentable methods from Azure Functions source', () => {
   const source = `

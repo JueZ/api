@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -241,7 +242,7 @@ export async function runRuntimeTruth({ argv = process.argv.slice(2), env = proc
   return { result, exitCode: decision.exitCode };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { result, exitCode } = await runRuntimeTruth();
   const rendered = safeSummary(result);
   if (exitCode === 0) console.log(rendered);

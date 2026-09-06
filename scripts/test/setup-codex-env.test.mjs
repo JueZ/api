@@ -185,8 +185,8 @@ test('Codex environment setup removes only inherited apt.llvm.org sources before
 });
 
 test('Codex environment scripts sanitize inherited LLVM sources without weakening apt security', async () => {
-  const setupSource = await readFile(setupScript, 'utf8');
-  const maintainSource = await readFile(maintainScript, 'utf8');
+  const setupSource = (await readFile(setupScript, 'utf8')).replace(/\r\n/g, '\n');
+  const maintainSource = (await readFile(maintainScript, 'utf8')).replace(/\r\n/g, '\n');
 
   assert.equal(
     extractShellFunction(setupSource, 'remove_inherited_llvm_apt_source'),

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const mainSource = await readFile(new URL('../src/main.ts', import.meta.url), 'utf8');
@@ -302,7 +303,7 @@ async function importWebHelpers() {
   );
 
   const modules = await Promise.all(
-    sourceFiles.map((fileName) => import(join(tempDirectory, fileName.replace(/\.ts$/, '.js')))),
+    sourceFiles.map((fileName) => import(pathToFileURL(join(tempDirectory, fileName.replace(/\.ts$/, '.js'))))),
   );
   await rm(tempDirectory, { recursive: true, force: true });
   return Object.assign({}, ...modules);

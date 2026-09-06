@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import {
@@ -125,7 +126,7 @@ function git(args) {
   return completed.stdout;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const policy = loadAutonomousPolicy();
   const policyErrors = validateAutonomousPolicy(policy);
   if (policyErrors.length > 0) {

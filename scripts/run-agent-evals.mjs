@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { authorizeOperation } from '../apps/api/dist/application/authorization/policy.js';
 import { getOperationDefinition, listOperationDefinitions } from '../apps/api/dist/application/operations/registry.js';
@@ -125,7 +126,7 @@ export function evaluateOperationGovernanceMutations(operations = listOperationD
   return { total, survivors };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const suite = JSON.parse(await readFile(new URL('../evals/agent-safety.json', import.meta.url), 'utf8'));
   if (
     suite.schemaVersion !== 2 ||

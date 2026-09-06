@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { execFile } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -171,7 +172,7 @@ function positiveInteger(value, name) {
   return parsed;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = new Map();
   for (let index = 2; index < process.argv.length; index += 2) {
     args.set(process.argv[index], process.argv[index + 1]);

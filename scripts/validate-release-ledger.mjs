@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const ledgerPath = process.argv[2];
   if (!ledgerPath) {
     console.error('Usage: node scripts/validate-release-ledger.mjs <ledger.json>');

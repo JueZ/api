@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { readFileSync } from 'node:fs';
 
 export function functionSbomFindings(sbom, lockfile) {
@@ -29,7 +30,7 @@ export function functionSbomFindings(sbom, lockfile) {
   return findings;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [sbomPath, lockfilePath] = process.argv.slice(2);
   if (!sbomPath || !lockfilePath) {
     console.error('Usage: node scripts/verify-function-sbom.mjs <sbom-path> <Function-lockfile-path>');

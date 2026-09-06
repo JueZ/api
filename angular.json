@@ -49,6 +49,13 @@
             }
           },
           "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@angular/build:dev-server",
+          "options": {
+            "buildTarget": "web:build:development",
+            "host": "127.0.0.1"
+          }
         }
       }
     }

@@ -2,6 +2,8 @@
 import { spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { classifyDeploymentImpact } from './lib/deployment-impact.mjs';
 import { parseGitNameStatus } from './lib/path-classifier.mjs';
 
@@ -55,7 +57,7 @@ function assertSha(value, name) {
   if (!/^[0-9a-f]{40}$/.test(value ?? '')) throw new Error(`${name} must be a full lowercase commit SHA`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   if (!process.argv[2]?.startsWith('--')) {
     const result = await classifyDeploymentImpactFile(process.argv[2]);
     process.stdout.write(`${JSON.stringify(result)}\n`);

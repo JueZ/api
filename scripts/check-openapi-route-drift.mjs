@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 import YAML from 'yaml';
 
@@ -274,7 +275,7 @@ export function findUnexpectedSplitContractFiles(baseDir = '.') {
     .filter((contractPath) => fs.existsSync(contractPath))
     .map(
       (contractPath) =>
-        `${path.relative(baseDir, contractPath) || contractPath} was removed; use ${GPT_CONTRACT} as the only GPT Actions contract.`,
+        `${(path.relative(baseDir, contractPath) || contractPath).split(path.sep).join('/')} was removed; use ${GPT_CONTRACT} as the only GPT Actions contract.`,
     );
 }
 
@@ -368,6 +369,6 @@ function main() {
   process.exitCode = 1;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main();
 }
