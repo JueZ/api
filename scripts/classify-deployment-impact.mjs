@@ -4,7 +4,7 @@ import { appendFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { classifyDeploymentImpact } from './lib/deployment-impact.mjs';
+import { classifyCumulativeDeploymentImpact, classifyDeploymentImpact } from './lib/deployment-impact.mjs';
 import { parseGitNameStatus } from './lib/path-classifier.mjs';
 
 export async function classifyDeploymentImpactFile(path) {
@@ -18,6 +18,14 @@ export async function classifyDeploymentImpactFile(path) {
 export function classifyDeploymentGitRange(baseSha, headSha, cwd = process.cwd()) {
   assertSha(baseSha, 'base SHA');
   assertSha(headSha, 'head SHA');
+  const ancestry = spawnSync('git', ['merge-base', '--is-ancestor', baseSha, headSha], {
+    cwd,
+    encoding: 'utf8',
+  });
+  if (ancestry.status === 1) {
+    return { ...classifyDeploymentImpact([]), reason: 'accepted-baseline-not-ancestor' };
+  }
+  if (ancestry.status !== 0) throw new Error(`git ancestry check failed: ${ancestry.stderr.trim()}`);
   const diff = spawnSync('git', ['diff', '--name-status', '--find-renames', '-z', `${baseSha}...${headSha}`], {
     cwd,
     encoding: 'utf8',
@@ -27,7 +35,7 @@ export function classifyDeploymentGitRange(baseSha, headSha, cwd = process.cwd()
   const files = parseGitNameStatus(diff.stdout);
   return files === null
     ? { ...classifyDeploymentImpact([]), reason: 'malformed-git-diff' }
-    : classifyDeploymentImpact(files);
+    : classifyCumulativeDeploymentImpact(files);
 }
 
 function outputClassification(result, baseSha, headSha, outputPath = process.env.GITHUB_OUTPUT) {

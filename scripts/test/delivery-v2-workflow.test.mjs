@@ -29,14 +29,21 @@ test('delivery v2 is a protected-main push DAG with a guarded manual cutover sur
   assert.equal(loadAutonomousPolicy().deployment.controllerWorkflow, 'delivery-v2.yml');
 });
 
-test('delivery DAG builds and attests once before test, then reads main once before production', () => {
+test('delivery DAG resolves accepted production before cumulative classification and promotion', () => {
+  assert.deepEqual(needs(workflow.jobs.classify), ['baseline']);
   assert.deepEqual(needs(workflow.jobs.build), ['classify']);
   assert.deepEqual(needs(workflow.jobs.attest), ['build']);
   assert.deepEqual(needs(workflow.jobs['deploy-test']), ['classify', 'build', 'attest']);
-  assert.deepEqual(needs(workflow.jobs['current-main']), ['classify', 'deploy-test']);
-  assert.deepEqual(needs(workflow.jobs['promote-production']), ['classify', 'build', 'deploy-test', 'current-main']);
+  assert.deepEqual(needs(workflow.jobs['current-main']), ['baseline', 'classify', 'deploy-test']);
+  assert.deepEqual(needs(workflow.jobs['promote-production']), [
+    'baseline',
+    'classify',
+    'build',
+    'deploy-test',
+    'current-main',
+  ]);
   assert.equal((source.match(/build-release-artifacts\.sh/g) ?? []).length, 1);
-  assert.equal((source.match(/git\/ref\/heads\/main/g) ?? []).length, 2);
+  assert.equal((source.match(/git\/ref\/heads\/main/g) ?? []).length, 3);
   assert.match(workflow.jobs['current-main'].steps[0].name, /Read current main once/);
   assert.equal(workflow.jobs['deploy-test'].with.expectedFunctionDigest, '${{ needs.build.outputs.function_digest }}');
   assert.equal(
@@ -52,11 +59,19 @@ test('delivery DAG builds and attests once before test, then reads main once bef
   assert.equal(workflow.jobs['promote-production'].with.expectedSbomDigest, '${{ needs.build.outputs.sbom_digest }}');
 });
 
-test('full delivery re-verifies production even when health already reports the target SHA', () => {
-  const source = readFileSync(new URL('../../.github/workflows/delivery-v2.yml', import.meta.url), 'utf8');
-  assert.match(source, /matching health SHA proves only that files reached production/);
-  assert.doesNotMatch(source, /if \[ "\$previous_production_sha" = "\$DELIVERY_SHA" \]; then\s*promote="false"/);
-  assert.match(source, /promote="true"/);
+test('accepted baseline requires full protected-main mode before production environment and OIDC', () => {
+  const baseline = workflow.jobs.baseline;
+  assert.match(baseline.if, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(baseline.if, /DEPLOY_PRODUCTION_ENABLED/);
+  assert.match(baseline.if, /inputs\.mode == 'full'/);
+  assert.equal(baseline.environment, 'production');
+  const currentMainIndex = baseline.steps.findIndex((step) => step.name.includes('current protected main'));
+  const loginIndex = baseline.steps.findIndex((step) => step.name.includes('Azure OIDC login'));
+  assert.ok(currentMainIndex >= 0 && currentMainIndex < loginIndex);
+  assert.equal(workflow.jobs.classify.if, 'always()');
+  assert.ok(
+    workflow.jobs.classify.steps.some((step) => /accepted-production-baseline-unavailable/.test(step.run ?? '')),
+  );
 });
 
 test('reusable deployment permissions fit every direct caller and centralize issue writes', () => {
@@ -78,7 +93,12 @@ test('production and rollback share one bounded concurrency group and exact know
   assert.equal(workflow.jobs['promote-production'].concurrency['cancel-in-progress'], false);
   assert.equal(workflow.jobs['rollback-production'].concurrency['cancel-in-progress'], false);
   assert.match(source, /resolve-known-good-release\.mjs/);
-  assert.match(source, /previous_production_sha/);
+  assert.match(source, /production-mutation-intent-/);
+  assert.match(source, /production-mutation-prepared-/);
+  assert.equal(
+    workflow.jobs['rollback-production'].with.failedMutationArtifact,
+    '${{ needs.resolve-rollback.outputs.mutation_artifact }}',
+  );
   assert.equal(workflow.jobs['rollback-production'].with.allowRollback, true);
   assert.doesNotMatch(source, /secrets:\s*inherit/);
 });
@@ -98,6 +118,12 @@ test('direct environment mode preserves OIDC, exact artifact, smoke, telemetry, 
   assert.match(environmentSource, /\.github\/workflows\/delivery-v2\.yml/);
   assert.doesNotMatch(environmentSource, /repository_dispatch|deliveryMode|deploy-test-provenance/);
   assert.match(environmentSource, /expectedFunctionDigest/);
+  assert.deepEqual(Object.keys(environmentWorkflow.jobs), ['preflight', 'deploy']);
+  assert.equal(environmentWorkflow.jobs.deploy.needs, 'preflight');
+  assert.equal(environmentWorkflow.jobs.deploy.if, "${{ needs.preflight.outputs.proceed == 'true' }}");
+  const preflight = environmentWorkflow.jobs.preflight.steps[0];
+  assert.match(preflight.name, /before production environment and OIDC/);
+  assert.match(preflight.run, /guard_state=superseded/);
 });
 
 test('normal environment deployment disables and deletes every retired scheduled-query alert', () => {
@@ -105,7 +131,10 @@ test('normal environment deployment disables and deletes every retired scheduled
     (step) => step.name === 'Remove retired scheduled-query alerts',
   );
 
-  assert.equal(cleanup.if, '${{ !inputs.allowRollback }}');
+  assert.equal(
+    cleanup.if,
+    "${{ !inputs.allowRollback && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}",
+  );
   for (const suffix of ['function-5xx', 'auth-spike', 'bring-protocol']) {
     assert.match(cleanup.run, new RegExp(`alert-api-catalogue-\\$\\{ENVIRONMENT_NAME\\}-${suffix}`));
   }
@@ -144,5 +173,68 @@ test('delivery summary reports classification, duration, skips, identity, enviro
   assert.match(summary, /deploymentRequired:/);
   assert.match(summary, /supersededBy/);
   assert.match(summary, /rawJobs:/);
+  assert.match(summary, /mutation:\{guard:/);
+  assert.match(summary, /started:\(\$mutationStarted=="true"\)/);
   assert.equal(workflow.jobs.summary.steps[1].with['retention-days'], 30);
+});
+
+test('production recovery is fully prepared and durably recorded before mutating application identity', () => {
+  const steps = environmentWorkflow.jobs.deploy.steps;
+  const index = (name) => steps.findIndex((step) => step.name === name);
+  const verifyRecovery = index('Verify complete recovery bundle before production mutation');
+  const observe = index('Capture production state inside mutation lock');
+  const guard = index('Decide production mutation inside lock');
+  const intent = index('Upload pre-write production mutation intent');
+  const receipt = index('Record production mutation receipt before infrastructure or application writes');
+  const infra = index('Deploy Bicep infrastructure');
+  const frontendIdentity = index('Bind rendered frontend identity before application writes');
+  const preparePackage = index('Prepare immutable Azure Functions package');
+  const checkpoint = index('Upload application-ready production mutation checkpoint');
+  const installPackage = index('Install immutable Azure Functions package');
+  const installFrontend = index('Deploy Angular static site with Azure OIDC');
+  for (const value of [
+    verifyRecovery,
+    observe,
+    guard,
+    intent,
+    receipt,
+    infra,
+    frontendIdentity,
+    preparePackage,
+    checkpoint,
+    installPackage,
+    installFrontend,
+  ]) {
+    assert.ok(value >= 0);
+  }
+  assert.ok(verifyRecovery < observe && observe < guard && guard < intent && intent < receipt && receipt < infra);
+  assert.match(steps[receipt].run, /--name "\$AZURE_FUNCTIONAPP_NAME"/);
+  assert.doesNotMatch(steps[receipt].run, /\$EFFECTIVE_FUNCTIONAPP_NAME/);
+  assert.ok(frontendIdentity < preparePackage && preparePackage < checkpoint);
+  assert.ok(checkpoint < installPackage && checkpoint < installFrontend);
+  assert.match(steps[checkpoint].with.name, /production-mutation-prepared-/);
+});
+
+test('production capture resolves existing deployment resources instead of stale repository storage settings', () => {
+  const capture = readFileSync(new URL('../capture-production-state.sh', import.meta.url), 'utf8');
+  assert.match(capture, /deployment group show[^\n]*--name main-prod/);
+  assert.match(capture, /staticWebStorageAccountResourceName/);
+  assert.match(capture, /releaseStorageAccountResourceName/);
+  assert.match(capture, /--query primaryEndpoints\.web/);
+  assert.doesNotMatch(capture, /\$AZURE_STATIC_WEB_STORAGE_ACCOUNT/);
+  assert.equal(workflow.jobs['resolve-rollback'].steps[0].env.GH_TOKEN, '${{ github.token }}');
+});
+
+test('baseline and rollback keep original bundle provenance separate from current acceptance evidence', () => {
+  assert.equal(workflow.jobs['promote-production'].with.acceptedReleaseRunId, '${{ needs.baseline.outputs.run_id }}');
+  assert.equal(
+    workflow.jobs['promote-production'].with.acceptedLedgerRunId,
+    '${{ needs.baseline.outputs.acceptance_run_id }}',
+  );
+  assert.equal(
+    workflow.jobs['rollback-production'].with.rollbackReleaseRunId,
+    '${{ needs.resolve-rollback.outputs.rollback_run_id }}',
+  );
+  assert.match(environmentSource, /RECOVERY_ORIGINAL_RUN_ID/);
+  assert.match(environmentSource, /DELIVERY_MUTATION_RUN_ID/);
 });

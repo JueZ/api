@@ -16,6 +16,61 @@ async function readJson(path, fallback) {
 export async function writeReleaseLedger({ env = process.env, argv = process.argv.slice(2) } = {}) {
   const out = env.RELEASE_LEDGER_PATH || argv[0] || 'release-ledger.json';
   const smokeRunId = getSmokeRunId(env.SMOKE_RUN_ID);
+  const installationValues = [
+    env.INSTALLED_RELEASE_RUN_ID,
+    env.INSTALLED_RELEASE_CORRELATION,
+    env.RELEASE_PACKAGE_STORAGE_ACCOUNT,
+    env.RELEASE_PACKAGE_CONTAINER,
+    env.RELEASE_PACKAGE_BLOB,
+    env.RELEASE_PACKAGE_VERSION_ID,
+    env.FRONTEND_METADATA_SHA256,
+    env.FRONTEND_INVENTORY_SHA256,
+  ];
+  const installation = installationValues.every((value) => String(value || '') !== '')
+    ? {
+        runId: String(env.INSTALLED_RELEASE_RUN_ID),
+        correlation: String(env.INSTALLED_RELEASE_CORRELATION),
+        functionPackage: {
+          storageAccountName: String(env.RELEASE_PACKAGE_STORAGE_ACCOUNT),
+          containerName: String(env.RELEASE_PACKAGE_CONTAINER),
+          blobName: String(env.RELEASE_PACKAGE_BLOB),
+          versionId: String(env.RELEASE_PACKAGE_VERSION_ID),
+        },
+        frontend: {
+          metadataSha256: String(env.FRONTEND_METADATA_SHA256).toLowerCase(),
+          inventorySha256: String(env.FRONTEND_INVENTORY_SHA256).toLowerCase(),
+        },
+      }
+    : null;
+  const smokeResults = await readJson(env.SMOKE_RESULTS_PATH, {
+    status: 'blocked',
+    blockedReason: 'SMOKE_RESULTS_PATH was not provided.',
+  });
+  const authenticatedSmokeResults = await readJson(env.AUTH_SMOKE_RESULTS_PATH, {
+    status: 'blocked_auth_smoke',
+    blockedReason: 'AUTH_SMOKE_RESULTS_PATH was not provided; token minting or authenticated smoke did not complete.',
+  });
+  const telemetryCheckResult = await readJson(env.TELEMETRY_RESULTS_PATH, {
+    status: 'blocked_telemetry',
+    blockedReason: 'TELEMETRY_RESULTS_PATH was not provided.',
+  });
+  const recoveryRequested = String(env.RECOVERY_ORIGINAL_RUN_ID || '') !== '';
+  const configurationUncertain = String(env.RECOVERY_CONFIGURATION_UNCERTAIN || 'false') === 'true';
+  const recovery = recoveryRequested
+    ? {
+        status:
+          !configurationUncertain &&
+          [smokeResults, authenticatedSmokeResults, telemetryCheckResult].every((result) => result.status === 'passed')
+            ? 'verified'
+            : 'incomplete',
+        configurationUncertain,
+        originalBundle: {
+          sourceRef: String(env.RECOVERY_ORIGINAL_SOURCE_REF || '').toLowerCase(),
+          runId: String(env.RECOVERY_ORIGINAL_RUN_ID || ''),
+          correlation: String(env.RECOVERY_ORIGINAL_CORRELATION || ''),
+        },
+      }
+    : null;
   const ledger = {
     environment: env.ENVIRONMENT_NAME,
     deployedCommit: String(env.EXPECTED_DEPLOYED_COMMIT_SHA || env.DEPLOYED_COMMIT_SHA || '').toLowerCase(),
@@ -33,19 +88,12 @@ export async function writeReleaseLedger({ env = process.env, argv = process.arg
       frontendSha256: String(env.RELEASE_FRONTEND_SHA256 || '').toLowerCase(),
       sbomSha256: String(env.RELEASE_SBOM_SHA256 || '').toLowerCase(),
     },
+    ...(installation ? { installation } : {}),
+    ...(recovery ? { recovery } : {}),
     smokeRunId,
-    smokeResults: await readJson(env.SMOKE_RESULTS_PATH, {
-      status: 'blocked',
-      blockedReason: 'SMOKE_RESULTS_PATH was not provided.',
-    }),
-    authenticatedSmokeResults: await readJson(env.AUTH_SMOKE_RESULTS_PATH, {
-      status: 'blocked_auth_smoke',
-      blockedReason: 'AUTH_SMOKE_RESULTS_PATH was not provided; token minting or authenticated smoke did not complete.',
-    }),
-    telemetryCheckResult: await readJson(env.TELEMETRY_RESULTS_PATH, {
-      status: 'blocked_telemetry',
-      blockedReason: 'TELEMETRY_RESULTS_PATH was not provided.',
-    }),
+    smokeResults,
+    authenticatedSmokeResults,
+    telemetryCheckResult,
     verifiedAt: new Date().toISOString(),
   };
 

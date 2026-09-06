@@ -11,7 +11,7 @@
     "test:api": "npm run build:api && node scripts/run-tests.mjs apps/api/test",
     "test:youtube:live": "npm run build:api --silent && node scripts/run-tests.mjs --youtube-live apps/api/test/youtube-live.test.mjs",
     "test:gates": "node --test scripts/test/path-classifier.test.mjs scripts/test/gate-aggregate.test.mjs scripts/test/native-automerge-policy.test.mjs",
-    "test:delivery": "node --test scripts/test/deployment-impact.test.mjs scripts/test/deployment-generation.test.mjs scripts/test/delivery-v2-workflow.test.mjs scripts/test/known-good-release.test.mjs",
+    "test:delivery": "node --test scripts/test/deployment-impact.test.mjs scripts/test/deployment-generation.test.mjs scripts/test/delivery-v2-workflow.test.mjs scripts/test/known-good-release.test.mjs scripts/test/production-baseline.test.mjs scripts/test/production-state.test.mjs",
     "test:repair": "node --test scripts/test/agent-learning-triage.test.mjs scripts/test/agent-learning-artifacts.test.mjs",
     "build": "npm run build:web && npm run build:api",
     "build:web": "ng build --configuration production --no-progress",

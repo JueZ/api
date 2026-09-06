@@ -45,29 +45,33 @@ behavior, and strong terminal statuses. Trivial or behavior-neutral changes rema
 `Delivery v2` starts directly on a push to `main`:
 
 ```text
-classify protected-main diff
+resolve accepted production evidence
+  -> classify cumulative accepted-release/main diff
   -> build immutable release once
   -> attest and upload
   -> deploy exact artifact to test
   -> verify test
-  -> read current main once
+  -> verify recovery readiness
+  -> acquire production lock and reread main/installed state
   -> promote the same digest to production
   -> verify production
 ```
 
 The trusted change classifier and repository-level delivery variables select this path. Routine protected deployment and production promotion do not require a per-task request or approval.
 
-A diff composed entirely of the small runtime-neutral allowlist finishes successfully without application build or environment mutation. Ambiguous classification deploys.
+A cumulative diff from the accepted production source to current main may skip build and deployment only when it is proven empty or entirely covered by the runtime-neutral allowlist. The accepted source must be an ancestor. A neutral successor therefore inherits undeployed runtime changes beneath it. Missing or ambiguous accepted evidence conservatively requires delivery and blocks promotion until readiness can be established. Shadow, dry-run, and test-only modes do not require production access.
 
 The immutable release contains the Function package, environment-neutral frontend bundle, CycloneDX SBOM, checksums, and source manifest. The SBOM is generated from the exact installed production Function stage; the compiled frontend/build graph remains covered by the root lock audit, Dependabot, CodeQL, and Trivy rather than being misrepresented as a second installed runtime tree. A separate compiled-frontend component inventory remains a future concern only if release-level frontend inventory is needed. Test and production verify the same Function/frontend-source/SBOM digests. Environment-specific frontend configuration is rendered after verification and recorded separately.
 
-Both environments use Azure OIDC and require exact source SHA, artifact identity, public smoke, authenticated `GET /api/hello` and `POST /api/reddit/thread` smoke, telemetry correlation, and a compact release ledger. Before production, one current-main read marks an older run superseded without polling. Production promotion and rollback share one concurrency group.
+Both environments use Azure OIDC and require exact source SHA, artifact identity, public smoke, authenticated `GET /api/hello` and `POST /api/reddit/thread` smoke, telemetry correlation, and a compact release ledger. Production promotion and rollback share one concurrency group. Promotion checks current main before OIDC and rereads main and installed state before its first write inside that lock. A superseded no-op retains truthful raw job results and explicit evidence that mutation did not start; job success alone cannot become runtime verification.
 
 A superseded generation records the newer protected-main SHA but is not completion evidence. Codex verifies that the requested change is present in that newer commit and follows the Delivery v2 generation representing current main.
 
 Runtime-affecting work is not complete at merge or after test deployment alone. Its terminal success requires the applicable current-main Delivery v2 generation and production runtime evidence. A runtime-neutral change may finish without environment mutation only when the trusted classifier records that result.
 
-If production verification fails after mutation, the workflow accepts only one retained previous successful Delivery v2 release whose immutable artifact and production ledger match exactly. It redeploys that release once, repeats production verification, and never rolls back infrastructure or destructive data migrations. Missing or ambiguous identity stops mutation.
+Before production writes, the workflow downloads and verifies the previous accepted bundle and ledger against the installed versioned Function package and exact frontend inventory. Health is corroboration, not the sole identity source. A missing or expired recovery bundle blocks promotion. Long-term artifact retention remains a separate operational requirement.
+
+If verification fails after mutation, recovery rereads installed state inside the shared lock and restores at most once, only from evidence belonging to that failed attempt. Durable prewrite intent and phase receipts preserve what may have changed if the final runner receipt is unavailable. An older failure cannot overwrite a newer installation. The original bundle's identity remains separate from the actual recovery attempt and its verification ledger: a failed restore cannot inherit the original release's acceptance. Package recovery never rolls back Bicep or destructive data migrations; unresolved configuration changes remain incomplete even if package smoke passes. Missing or ambiguous evidence stops mutation.
 
 ## Repair and learning
 

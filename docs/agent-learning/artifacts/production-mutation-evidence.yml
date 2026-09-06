@@ -1,0 +1,20 @@
+version: 2
+id: production-mutation-evidence
+fingerprint: delivery.production-state.stale-or-unavailable-health
+severity: high
+invariant: Production mutation requires preverified recovery evidence and fresh installed identity inside the shared lock; unavailable health cannot erase package identity, and old acceptance cannot certify a failed restore or uncertain configuration.
+scope:
+  - .github/workflows/delivery-v2.yml
+  - .github/workflows/deploy-environment.yml
+  - scripts/lib/production-state.mjs
+  - scripts/verify-production-baseline.mjs
+prevention:
+  - kind: regression-test
+    path: scripts/test/production-state.test.mjs
+  - kind: regression-test
+    path: scripts/test/production-baseline.test.mjs
+  - kind: regression-test
+    path: scripts/test/delivery-v2-workflow.test.mjs
+broken: 48be239a67fc8cd8f5fde49a6dfb1c8f81ae0ad7
+recurrenceCount: 1
+status: active

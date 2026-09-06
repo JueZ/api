@@ -171,6 +171,27 @@ test('protected-main git ranges classify runtime-neutral and deployment-impactin
     await execFileAsync('git', ['commit', '-q', '-m', 'api'], { cwd: directory });
     const apiHead = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: directory })).stdout.trim();
     assert.equal(classifyDeploymentGitRange(docsHead, apiHead, directory).deploymentRequired, true);
+
+    await writeFile(join(directory, 'docs', 'successor.md'), '# Neutral successor\n');
+    await execFileAsync('git', ['add', 'docs/successor.md'], { cwd: directory });
+    await execFileAsync('git', ['commit', '-q', '-m', 'neutral successor'], { cwd: directory });
+    const neutralSuccessor = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: directory })).stdout.trim();
+    assert.equal(classifyDeploymentGitRange(base, neutralSuccessor, directory).deploymentRequired, true);
+    assert.equal(classifyDeploymentGitRange(neutralSuccessor, neutralSuccessor, directory).deploymentRequired, false);
+    assert.equal(
+      classifyDeploymentGitRange(neutralSuccessor, neutralSuccessor, directory).reason,
+      'no-change-since-accepted',
+    );
+
+    await execFileAsync('git', ['checkout', '-q', '--detach', base], { cwd: directory });
+    await writeFile(join(directory, 'diverged.md'), '# Diverged\n');
+    await execFileAsync('git', ['add', 'diverged.md'], { cwd: directory });
+    await execFileAsync('git', ['commit', '-q', '-m', 'diverged'], { cwd: directory });
+    const diverged = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: directory })).stdout.trim();
+    const invalid = classifyDeploymentGitRange(neutralSuccessor, diverged, directory);
+    assert.equal(invalid.valid, false);
+    assert.equal(invalid.deploymentRequired, true);
+    assert.equal(invalid.reason, 'accepted-baseline-not-ancestor');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

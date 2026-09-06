@@ -18,7 +18,18 @@ export function pathsMatchingPatterns(paths, patterns) {
 }
 
 export function classifyDeploymentImpact(files, runtimeNeutralPaths = RUNTIME_NEUTRAL_DEPLOYMENT_PATHS) {
+  return classifyPaths(files, runtimeNeutralPaths, false);
+}
+
+export function classifyCumulativeDeploymentImpact(files, runtimeNeutralPaths = RUNTIME_NEUTRAL_DEPLOYMENT_PATHS) {
+  return classifyPaths(files, runtimeNeutralPaths, true);
+}
+
+function classifyPaths(files, runtimeNeutralPaths, allowEmpty) {
   if (!Array.isArray(files) || files.length === 0) {
+    if (allowEmpty && Array.isArray(files)) {
+      return deploymentImpactResult({ valid: true, reason: 'no-change-since-accepted' });
+    }
     return deploymentImpactResult({ valid: false, reason: 'missing-changed-files' });
   }
   if (!validPatterns(runtimeNeutralPaths)) {

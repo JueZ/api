@@ -1373,7 +1373,16 @@ export function isAcceptedDeliverySummary(summary, headSha) {
   const rawProduction = String(summary.rawJobs.production || '');
   if (!DELIVERY_RAW_JOB_RESULTS.has(rawTest) || !DELIVERY_RAW_JOB_RESULTS.has(rawProduction)) return false;
   if (!deliveryVerificationMatchesRaw(summary.test, rawTest)) return false;
-  if (!deliveryVerificationMatchesRaw(summary.production, rawProduction)) return false;
+  const guardedSupersession =
+    summary.terminalOutcome === 'superseded' &&
+    summary.superseded === true &&
+    rawProduction === 'success' &&
+    summary.production === 'not_applicable' &&
+    summary.mutation?.guard === 'superseded' &&
+    summary.mutation.started === false &&
+    summary.mutation.artifact === null &&
+    summary.mutation.configurationUncertain === false;
+  if (!deliveryVerificationMatchesRaw(summary.production, rawProduction) && !guardedSupersession) return false;
   if (typeof summary.superseded !== 'boolean') return false;
   if (summary.superseded !== (summary.terminalOutcome === 'superseded')) return false;
 
@@ -1382,7 +1391,8 @@ export function isAcceptedDeliverySummary(summary, headSha) {
       summary.deploymentRequired &&
       summary.test === 'passed' &&
       summary.production === 'passed' &&
-      summary.supersededBy === null
+      summary.supersededBy === null &&
+      (summary.mutation === undefined || (summary.mutation?.guard === 'proceed' && summary.mutation.started === true))
     );
   }
   if (summary.terminalOutcome === 'not_applicable') {
