@@ -35,7 +35,7 @@ jobs:
       trivy: ${{ steps.classify.outputs.trivy }}
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
@@ -68,13 +68,13 @@ jobs:
       contents: read
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ needs.classify.outputs.head_sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Scan for secrets
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # tag=v2
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # tag=v3.0.0
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
@@ -88,12 +88,12 @@ jobs:
       contents: read
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ needs.classify.outputs.head_sha }}
           persist-credentials: false
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -128,17 +128,17 @@ jobs:
       security-events: write
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ needs.classify.outputs.head_sha }}
           persist-credentials: false
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # tag=v4
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # tag=v4
         with:
           languages: javascript-typescript
           build-mode: none
       - name: Analyze
-        uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # tag=v4
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # tag=v4
         with:
           category: /language:javascript-typescript
 
@@ -154,17 +154,17 @@ jobs:
       security-events: write
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ needs.classify.outputs.head_sha }}
           persist-credentials: false
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # tag=v4
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # tag=v4
         with:
           languages: actions
           build-mode: none
       - name: Analyze
-        uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # tag=v4
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # tag=v4
         with:
           category: /language:actions
 
@@ -178,7 +178,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ needs.classify.outputs.head_sha }}
           persist-credentials: false
@@ -207,7 +207,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ needs.classify.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
