@@ -1,0 +1,14 @@
+version: 2
+id: production-baseline-oidc-workflow
+fingerprint: delivery.baseline.oidc-job-workflow-ref
+severity: high
+invariant: Production baseline inspection must request OIDC through the existing trusted deploy-environment reusable workflow, with deployment jobs disabled and full protected-main applicability enforced.
+scope:
+  - .github/workflows/delivery-v2.yml
+  - .github/workflows/deploy-environment.yml
+prevention:
+  - kind: regression-test
+    path: scripts/test/delivery-v2-workflow.test.mjs
+broken: 105b4e761a91cbc2eb4eb445840b594724175e35
+recurrenceCount: 1
+status: active

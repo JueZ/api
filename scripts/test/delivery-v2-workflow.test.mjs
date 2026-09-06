@@ -43,7 +43,7 @@ test('delivery DAG resolves accepted production before cumulative classification
     'current-main',
   ]);
   assert.equal((source.match(/build-release-artifacts\.sh/g) ?? []).length, 1);
-  assert.equal((source.match(/git\/ref\/heads\/main/g) ?? []).length, 3);
+  assert.equal((source.match(/git\/ref\/heads\/main/g) ?? []).length, 2);
   assert.match(workflow.jobs['current-main'].steps[0].name, /Read current main once/);
   assert.equal(workflow.jobs['deploy-test'].with.expectedFunctionDigest, '${{ needs.build.outputs.function_digest }}');
   assert.equal(
@@ -64,9 +64,16 @@ test('accepted baseline requires full protected-main mode before production envi
   assert.match(baseline.if, /github\.ref == 'refs\/heads\/main'/);
   assert.match(baseline.if, /DEPLOY_PRODUCTION_ENABLED/);
   assert.match(baseline.if, /inputs\.mode == 'full'/);
-  assert.equal(baseline.environment, 'production');
-  const currentMainIndex = baseline.steps.findIndex((step) => step.name.includes('current protected main'));
-  const loginIndex = baseline.steps.findIndex((step) => step.name.includes('Azure OIDC login'));
+  assert.equal(baseline.uses, './.github/workflows/deploy-environment.yml');
+  assert.equal(baseline.with.baselineOnly, true);
+  assert.equal(baseline.steps, undefined);
+  const trustedBaseline = environmentWorkflow.jobs.baseline;
+  assert.equal(trustedBaseline.environment, 'production');
+  assert.match(trustedBaseline.if, /inputs\.baselineOnly/);
+  assert.match(trustedBaseline.if, /github\.event\.inputs\.mode == 'full'/);
+  assert.match(environmentWorkflow.jobs.preflight.if, /!inputs\.baselineOnly/);
+  const currentMainIndex = trustedBaseline.steps.findIndex((step) => step.name.includes('current protected main'));
+  const loginIndex = trustedBaseline.steps.findIndex((step) => step.name.includes('Azure OIDC login'));
   assert.ok(currentMainIndex >= 0 && currentMainIndex < loginIndex);
   assert.equal(workflow.jobs.classify.if, 'always()');
   assert.ok(
@@ -92,7 +99,10 @@ test('production and rollback share one bounded concurrency group and exact know
   assert.equal(workflow.jobs['rollback-production'].concurrency.group, 'production-deployment');
   assert.equal(workflow.jobs['promote-production'].concurrency['cancel-in-progress'], false);
   assert.equal(workflow.jobs['rollback-production'].concurrency['cancel-in-progress'], false);
-  assert.match(source, /resolve-known-good-release\.mjs/);
+  assert.match(
+    environmentWorkflow.jobs.baseline.steps.find((step) => step.id === 'select').run,
+    /resolve-known-good-release\.mjs/,
+  );
   assert.match(source, /production-mutation-intent-/);
   assert.match(source, /production-mutation-prepared-/);
   assert.equal(
@@ -118,7 +128,7 @@ test('direct environment mode preserves OIDC, exact artifact, smoke, telemetry, 
   assert.match(environmentSource, /\.github\/workflows\/delivery-v2\.yml/);
   assert.doesNotMatch(environmentSource, /repository_dispatch|deliveryMode|deploy-test-provenance/);
   assert.match(environmentSource, /expectedFunctionDigest/);
-  assert.deepEqual(Object.keys(environmentWorkflow.jobs), ['preflight', 'deploy']);
+  assert.deepEqual(Object.keys(environmentWorkflow.jobs), ['baseline', 'preflight', 'deploy']);
   assert.equal(environmentWorkflow.jobs.deploy.needs, 'preflight');
   assert.equal(environmentWorkflow.jobs.deploy.if, "${{ needs.preflight.outputs.proceed == 'true' }}");
   const preflight = environmentWorkflow.jobs.preflight.steps[0];

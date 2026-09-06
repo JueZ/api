@@ -3,6 +3,11 @@ name: Deploy Environment
 on:
   workflow_call:
     inputs:
+      baselineOnly:
+        description: Verify accepted installed production evidence without deployment.
+        required: false
+        default: false
+        type: boolean
       environmentName:
         description: Bicep environment name. Use test or prod.
         required: true
@@ -149,6 +154,36 @@ on:
         description: Bring prepared-mutation encryption key.
         required: true
     outputs:
+      status:
+        description: Accepted production baseline status.
+        value: ${{ jobs.baseline.outputs.status }}
+      source_ref:
+        description: Accepted production baseline source ref.
+        value: ${{ jobs.baseline.outputs.source_ref }}
+      run_id:
+        description: Accepted production baseline run id.
+        value: ${{ jobs.baseline.outputs.run_id }}
+      correlation:
+        description: Accepted production baseline correlation.
+        value: ${{ jobs.baseline.outputs.correlation }}
+      acceptance_run_id:
+        description: Accepted production baseline acceptance run id.
+        value: ${{ jobs.baseline.outputs.acceptance_run_id }}
+      acceptance_correlation:
+        description: Accepted production baseline acceptance correlation.
+        value: ${{ jobs.baseline.outputs.acceptance_correlation }}
+      acceptance_kind:
+        description: Accepted production baseline acceptance kind.
+        value: ${{ jobs.baseline.outputs.acceptance_kind }}
+      release_artifact:
+        description: Accepted production baseline release artifact.
+        value: ${{ jobs.baseline.outputs.release_artifact }}
+      ledger_artifact:
+        description: Accepted production baseline ledger artifact.
+        value: ${{ jobs.baseline.outputs.ledger_artifact }}
+      baseline_artifact:
+        description: Accepted production baseline baseline artifact.
+        value: ${{ jobs.baseline.outputs.baseline_artifact }}
       effectiveBaseUrl:
         description: Resolved Function App base URL.
         value: ${{ jobs.deploy.outputs.effectiveBaseUrl }}
@@ -195,7 +230,167 @@ permissions:
   actions: read
 
 jobs:
+  baseline:
+    name: resolve accepted production baseline
+    if: >-
+      ${{
+        inputs.baselineOnly && inputs.environmentName == 'prod' &&
+        github.ref == 'refs/heads/main' &&
+        vars.DEPLOY_PRODUCTION_ENABLED == 'true' &&
+        (
+          (github.event_name == 'push' && vars.DELIVERY_V2_ENABLED == 'true') ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'full')
+        )
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    outputs:
+      status: ${{ steps.verify.outputs.baseline_status }}
+      source_ref: ${{ steps.verify.outputs.baseline_source_ref }}
+      run_id: ${{ steps.verify.outputs.baseline_run_id }}
+      correlation: ${{ steps.verify.outputs.baseline_correlation }}
+      acceptance_run_id: ${{ steps.verify.outputs.baseline_acceptance_run_id }}
+      acceptance_correlation: ${{ steps.verify.outputs.baseline_acceptance_correlation }}
+      acceptance_kind: ${{ steps.select.outputs.baseline_acceptance_kind }}
+      release_artifact: ${{ steps.verify.outputs.baseline_release_artifact }}
+      ledger_artifact: ${{ steps.verify.outputs.baseline_ledger_artifact }}
+      baseline_artifact: accepted-production-baseline-${{ github.sha }}-${{ github.run_id }}
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: rg-api-prod
+      AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
+      AZURE_STATIC_WEB_STORAGE_ACCOUNT: ${{ vars.AZURE_STATIC_WEB_STORAGE_ACCOUNT }}
+      PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
+      ENVIRONMENT_NAME: prod
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout trusted baseline resolver
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        with:
+          node-version: '22'
+      - name: Validate production identity inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${AZURE_CLIENT_ID:?AZURE_CLIENT_ID is required}"
+          : "${AZURE_TENANT_ID:?AZURE_TENANT_ID is required}"
+          : "${AZURE_SUBSCRIPTION_ID:?AZURE_SUBSCRIPTION_ID is required}"
+          : "${AZURE_FUNCTIONAPP_NAME:?AZURE_FUNCTIONAPP_NAME is required}"
+          : "${PRODUCTION_BASE_URL:?PRODUCTION_BASE_URL is required}"
+      - name: Confirm exact current protected main before production OIDC
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [ "$current_main" != "$GITHUB_SHA" ]; then
+            echo "Accepted baseline resolution requires the exact current protected-main SHA." >&2
+            exit 1
+          fi
+      - name: Azure OIDC login for read-only baseline evidence
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # tag=v3
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Capture installed production identity
+        shell: bash
+        run: bash scripts/capture-production-state.sh "$RUNNER_TEMP/installed-production"
+      - name: Select exact trusted accepted release artifacts
+        id: select
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            | jq '[.[] | .artifacts[]]' > "$RUNNER_TEMP/production-artifacts.json"
+          node scripts/resolve-known-good-release.mjs \
+            --installed-state "$RUNNER_TEMP/installed-production/observation.json" \
+            --artifacts "$RUNNER_TEMP/production-artifacts.json" \
+            --repository "$GITHUB_REPOSITORY" \
+            --current-run "$GITHUB_RUN_ID" \
+            --output "$GITHUB_OUTPUT"
+      - name: Download selected accepted production ledger
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        with:
+          name: ${{ steps.select.outputs.baseline_ledger_artifact }}
+          path: ${{ runner.temp }}/accepted-ledger
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.select.outputs.baseline_acceptance_run_id }}
+      - name: Download selected accepted rendered release
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        with:
+          name: ${{ steps.select.outputs.baseline_release_artifact }}
+          path: ${{ runner.temp }}/accepted-release
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.select.outputs.baseline_run_id }}
+      - name: Fully verify accepted baseline
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-release-artifacts.mjs \
+            "$RUNNER_TEMP/accepted-release" \
+            "${{ steps.select.outputs.baseline_source_ref }}" >/dev/null
+          tar -tzf "$RUNNER_TEMP/accepted-release/frontend.tar.gz" \
+            | awk 'BEGIN { ok=1 } /(^|\/)\.\.($|\/)|^\// { ok=0 } END { exit ok ? 0 : 1 }'
+          tar -tvzf "$RUNNER_TEMP/accepted-release/frontend.tar.gz" \
+            | awk 'substr($1,1,1) != "-" && substr($1,1,1) != "d" { bad=1 } END { exit bad ? 1 : 0 }'
+          mkdir -p "$RUNNER_TEMP/accepted-frontend"
+          tar --no-same-owner --no-same-permissions \
+            -xzf "$RUNNER_TEMP/accepted-release/frontend.tar.gz" \
+            -C "$RUNNER_TEMP/accepted-frontend"
+          node scripts/verify-production-baseline.mjs \
+            --observation "$RUNNER_TEMP/installed-production/observation.json" \
+            --ledger "$RUNNER_TEMP/accepted-ledger/release-ledger-prod.json" \
+            --source "${{ steps.select.outputs.baseline_source_ref }}" \
+            --run-id "${{ steps.select.outputs.baseline_run_id }}" \
+            --correlation "${{ steps.select.outputs.baseline_correlation }}" \
+            --acceptance-run-id "${{ steps.select.outputs.baseline_acceptance_run_id }}" \
+            --acceptance-correlation "${{ steps.select.outputs.baseline_acceptance_correlation }}" \
+            --acceptance-kind "${{ steps.select.outputs.baseline_acceptance_kind }}" \
+            --release-artifact "${{ steps.select.outputs.baseline_release_artifact }}" \
+            --ledger-artifact "${{ steps.select.outputs.baseline_ledger_artifact }}" \
+            --release-dir "$RUNNER_TEMP/accepted-release" \
+            --accepted-frontend-dir "$RUNNER_TEMP/accepted-frontend" \
+            --deployed-frontend-dir "$RUNNER_TEMP/installed-production/frontend" \
+            --expected-resource "$RUNNER_TEMP/installed-production/resource.json" \
+            --json-output "$RUNNER_TEMP/accepted-baseline.json" \
+            --output "$GITHUB_OUTPUT"
+      - name: Summarize accepted baseline
+        shell: bash
+        run: |
+          {
+            echo "### Accepted production baseline"
+            echo "- Source: ${{ steps.verify.outputs.baseline_source_ref }}"
+            echo "- Original accepted run: ${{ steps.verify.outputs.baseline_run_id }}"
+            echo "- Correlation: ${{ steps.verify.outputs.baseline_correlation }}"
+            echo "- Health corroboration: $(jq -r '.identity.health.status' "$RUNNER_TEMP/accepted-baseline.json")"
+            echo "- Immutable package bytes and complete rendered frontend inventory: verified"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve accepted baseline identity for lock-time checks
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
+        with:
+          name: accepted-production-baseline-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/accepted-baseline.json
+          if-no-files-found: error
+          retention-days: 30
+
   preflight:
+    if: ${{ !inputs.baselineOnly }}
     name: pre-OIDC production generation guard
     runs-on: ubuntu-latest
     timeout-minutes: 5
