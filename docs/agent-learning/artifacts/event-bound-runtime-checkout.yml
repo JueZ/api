@@ -1,0 +1,13 @@
+version: 2
+id: event-bound-runtime-checkout
+fingerprint: security.actions.runtime-checkout-cache-scope
+severity: high
+invariant: Runtime validation that also supports workflow_dispatch checks out the event-bound revision and verifies classifier equality before executing candidate code; omitting an explicit cache action alone does not isolate default-branch cache access.
+scope:
+  - .github/workflows/pr-gate.yml
+prevention:
+  - kind: regression-test
+    path: scripts/test/gate-aggregate.test.mjs
+broken: 7ab2c22b0bf1c0146281cec2f2e321d0cf4543a3
+recurrenceCount: 1
+status: active

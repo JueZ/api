@@ -248,8 +248,13 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify classified candidate identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ needs.classify.outputs.head_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
         with:
