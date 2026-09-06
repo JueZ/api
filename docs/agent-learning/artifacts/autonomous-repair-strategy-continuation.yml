@@ -2,7 +2,7 @@ version: 2
 id: autonomous-repair-strategy-continuation
 fingerprint: agent-repair.same-strategy-exhaustion-vs-task-continuation
 severity: high
-invariant: Two ineffective attempts with one repair strategy require re-diagnosis and a materially different strategy; exhausting that strategy does not complete or abandon the autonomous task.
+invariant: Two ineffective attempts retire an unchanged repair action without disproving a supported diagnosis; only a different mechanism or verified changed preconditions justify continuation, and cosmetic metadata never resets the budget.
 scope:
   - .agents/skills/closed-loop-learning/SKILL.md
   - docs/agent-learning/**
@@ -15,11 +15,9 @@ prevention:
     path: scripts/test/agent-learning-artifacts.test.mjs
   - kind: regression-test
     path: scripts/test/agent-learning-triage.test.mjs
-broken: 47e4b50d81825065ed6bc15ac71c6c00e39a3b84
-fixed: 51ea0668cd2bd46506efae88d8e497947bc41b84
-repairPr: 443
-recurrenceCount: 1
-status: verified
+broken: 48be239a67fc8cd8f5fde49a6dfb1c8f81ae0ad7
+recurrenceCount: 2
+status: active
 reusableClaim:
   id: repair-strategy-exhaustion-requires-rediagnosis
   claim: Two ineffective attempts with one unchanged repair strategy trigger causal re-diagnosis and do not end the autonomous task.
@@ -40,7 +38,7 @@ reusableClaim:
     independence: independent
   lineageId: agent-repair.same-strategy-rediagnosis
   independenceBasis: This artifact records one owner requirement as one evidence lineage; agent restatements of that requirement are not independent corroboration.
-  applicability: Repository repair remains safe to continue after an unchanged causal strategy is exhausted and a materially different diagnosis is available.
+  applicability: Repository repair can continue with a supported diagnosis after an unchanged action is exhausted when a different mechanism or verified changed preconditions support the next bounded attempt.
   exceptions: []
   challenge:
     state: none
