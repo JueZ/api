@@ -27,7 +27,26 @@ Use `semantic-falsification` for substantial user-visible, provider, mutation, c
 
 Repair on the same PR before merge; after merge use the documented bounded production recovery when applicable and a linked repair PR from current main. Follow `autonomous-pr-delivery` for the three-attempt generation, two-ineffective-attempt strategy limit, and one demonstrated external/flaky rerun. Preserve unfinished requirements in the deduplicated repair lineage. Resume applicable unblocked `codex-repair` work; unrelated or externally blocked work does not freeze safe progress. Use `closed-loop-learning` for significant or recurring failures.
 
-Delegate bounded independent work when it materially helps. Give agents distinct ownership; one primary agent integrates changes and owns delivery. Avoid overlapping mutations and duplicate monitoring.
+## Agent orchestration and model selection
+
+Act as the lead orchestrator. The main thread first understands the goal and makes the plan, and retains responsibility for architecture, decisions, integration, testing, delivery, and the final answer.
+
+Delegate independent, well-defined subtasks when this improves speed, cost, or quality. Handle trivial work locally when delegation adds overhead. Optimize overall quality relative to cost, not the number of agents.
+
+Explicitly select the cheapest capable available model for each subtask:
+
+| Model | Use |
+| --- | --- |
+| Luna (`gpt-5.6-luna`) | Simple, mechanical work |
+| Terra (`gpt-5.6-terra`) | Routine implementation, extraction, transformation |
+| Sol (`gpt-5.6-sol`) | Research, coding, analysis, debugging, substantial reasoning |
+| Astra (`gpt-6-astra`) | Difficult judgment, ambiguity, planning, critical review |
+
+The main thread retains its configured model. If a preferred subagent model is unavailable, use the next capable available tier and disclose the substitution. Escalate uncertain or failed subtasks to a stronger capable model.
+
+Give each subagent a bounded objective, distinct ownership, only the necessary context, constraints, and acceptance criteria; avoid inheriting the entire conversation. Request concise structured results: outcome, evidence or validation, changed files where applicable, and uncertainties.
+
+Run independent subtasks in parallel where possible. Avoid overlapping mutations and duplicate monitoring. Verify important or conflicting subagent results in the main thread before integrating them or reporting completion.
 
 ## Safety boundaries
 
