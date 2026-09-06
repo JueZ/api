@@ -7,9 +7,9 @@
   "scripts": {
     "lint": "eslint apps scripts --max-warnings 0 && prettier --check .",
     "type-check": "tsc -p apps/api/tsconfig.json --noEmit && ng build --configuration development --no-progress",
-    "test": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs apps/web/test/*.test.mjs scripts/test/*.test.mjs'",
-    "test:api": "sh -c 'npm run build:api && node --test apps/api/test/*.test.mjs'",
-    "test:youtube:live": "sh -c 'npm run build:api --silent && YOUTUBE_LIVE_PROVIDER_TEST=true node --test apps/api/test/youtube-live.test.mjs'",
+    "test": "npm run build:api && node scripts/run-tests.mjs apps/api/test apps/web/test scripts/test",
+    "test:api": "npm run build:api && node scripts/run-tests.mjs apps/api/test",
+    "test:youtube:live": "npm run build:api --silent && node scripts/run-tests.mjs --youtube-live apps/api/test/youtube-live.test.mjs",
     "test:gates": "node --test scripts/test/path-classifier.test.mjs scripts/test/gate-aggregate.test.mjs scripts/test/native-automerge-policy.test.mjs",
     "test:delivery": "node --test scripts/test/deployment-impact.test.mjs scripts/test/deployment-generation.test.mjs scripts/test/delivery-v2-workflow.test.mjs scripts/test/known-good-release.test.mjs",
     "test:repair": "node --test scripts/test/agent-learning-triage.test.mjs scripts/test/agent-learning-artifacts.test.mjs",
@@ -18,7 +18,7 @@
     "build:api": "tsc -p apps/api/tsconfig.json",
     "build:functions": "npm run build:api",
     "build:release": "npm run build && bash scripts/build-release-artifacts.sh",
-    "test:ops": "node --test scripts/test/*.test.mjs",
+    "test:ops": "node scripts/run-tests.mjs scripts/test",
     "ops:smoke": "node scripts/smoke-runtime.mjs",
     "ops:smoke:auth": "node scripts/smoke-auth.mjs",
     "ops:runtime-truth": "node scripts/runtime-truth.mjs",
@@ -40,7 +40,7 @@
     "agent:learning:index": "node scripts/agent-learning/generate-index.mjs",
     "docs:check-operations": "npm run build:api --silent && node scripts/generate-operation-docs.mjs --check",
     "eval:codex:validate": "node scripts/codex-evals/validate.mjs",
-    "eval:codex:test": "node --test scripts/codex-evals/test/*.test.mjs",
+    "eval:codex:test": "node scripts/run-tests.mjs scripts/codex-evals/test",
     "eval:codex": "node scripts/codex-evals/run.mjs",
     "eval:codex:report": "node scripts/codex-evals/report.mjs",
     "agent:env": "node scripts/agent-env/cli.mjs start",
@@ -50,7 +50,7 @@
     "agent:env:reset": "node scripts/agent-env/cli.mjs reset",
     "agent:env:stop": "node scripts/agent-env/cli.mjs stop",
     "agent:verify": "node scripts/agent-env/cli.mjs verify",
-    "agent:env:test": "node --test scripts/agent-env/test/*.test.mjs"
+    "agent:env:test": "node scripts/run-tests.mjs scripts/agent-env/test"
   },
   "packageManager": "npm@10.9.8",
   "dependencies": {

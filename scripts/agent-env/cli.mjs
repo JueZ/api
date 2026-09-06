@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   clean,
-  commandExists,
+  resolveFunctionsCommand,
   loadManifest,
   owned,
   processIdentity,
@@ -18,16 +18,36 @@ import {
 const action = process.argv[2] ?? 'start';
 const json = process.argv.includes('--json');
 const sleep = (n) => new Promise((r) => setTimeout(r, n));
+async function servicesHealthy(m) {
+  if (!['fixture', 'api', 'web'].every((name) => owned(m.processes?.[name], m))) return false;
+  try {
+    const responses = await Promise.all([
+      fetch(`${m.urls.fixture}/health`, { signal: AbortSignal.timeout(2000) }),
+      fetch(`${m.urls.api}/health`, { signal: AbortSignal.timeout(2000) }),
+      fetch(m.urls.frontend, { signal: AbortSignal.timeout(2000) }),
+    ]);
+    return responses.every((response) => response.ok);
+  } catch {
+    return false;
+  }
+}
 async function start() {
   let m = loadManifest();
-  if (m && Object.values(m.processes).every((p) => owned(p, m))) return m;
+  if (m && (await servicesHealthy(m))) return m;
   if (m) {
     stopOwned(m);
     clean();
   }
-  if (spawnSync('npm', ['run', 'build:api', '--silent'], { cwd: root, stdio: 'inherit' }).status !== 0)
+  if (
+    spawnSync(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '-p', 'apps/api/tsconfig.json'], {
+      cwd: root,
+      stdio: 'inherit',
+      windowsHide: true,
+    }).status !== 0
+  )
     throw new Error('API build failed before local startup.');
-  if (!commandExists('func'))
+  const functions = resolveFunctionsCommand();
+  if (!functions)
     throw new Error(
       'Azure Functions Core Tools is required: install func for Node.js 22, then rerun npm run agent:env:start.',
     );
@@ -48,6 +68,8 @@ async function start() {
     processes: {},
   };
   saveManifest(m);
+  const proxyConfig = join(runtimeDir, 'proxy.json');
+  writeFileSync(proxyConfig, JSON.stringify({ '/api/**': { target: m.urls.api } }) + '\n', { mode: 0o600 });
   try {
     m.processes.fixture = spawnService(
       'fixture',
@@ -62,11 +84,12 @@ async function start() {
     );
     m.processes.api = spawnService(
       'api',
-      'func',
-      ['start', '--script-root', join(root, 'apps/api'), '--port', String(p.api)],
+      functions.command,
+      [...functions.args, 'start', '--script-root', join(root, 'apps/api'), '--port', String(p.api)],
       {
         ...process.env,
         DEPLOYED_ENVIRONMENT_NAME: 'local',
+        FUNCTIONS_WORKER_RUNTIME: 'node',
         AUTH_ENABLED: 'false',
         WLH_BASE_URL: m.urls.fixture,
       },
@@ -83,33 +106,26 @@ async function start() {
         '127.0.0.1',
         '--port',
         String(p.web),
+        '--proxy-config',
+        proxyConfig,
       ],
       process.env,
       m,
     );
     saveManifest(m);
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    const deadline = Date.now() + 120000;
+    while (Date.now() < deadline) {
       await sleep(500);
-      if (!Object.values(m.processes).every((x) => owned(x, m))) continue;
-      try {
-        const responses = await Promise.all([
-          fetch(`${m.urls.fixture}/health`),
-          fetch(m.urls.api),
-          fetch(m.urls.frontend),
-        ]);
-        if (responses.every((response) => response.status < 500)) {
-          m.readiness = 'ready';
-          break;
-        }
-      } catch {
-        // Continue bounded readiness polling while a service starts.
+      if (await servicesHealthy(m)) {
+        m.readiness = 'ready';
+        break;
       }
     }
     m.readiness = m.readiness === 'ready' ? 'ready' : 'failed';
     saveManifest(m);
     if (m.readiness !== 'ready')
       throw new Error(
-        `Local services did not become ready within 20 seconds: ${JSON.stringify(Object.fromEntries(Object.entries(m.processes).map(([name, p]) => [name, { recorded: p.startTime, actual: processIdentity(p.pid) }])))}`,
+        `Local services did not become ready within 120 seconds: ${JSON.stringify(Object.fromEntries(Object.entries(m.processes).map(([name, p]) => [name, { recorded: p.startTime, actual: processIdentity(p.pid) }])))}`,
       );
     return m;
   } catch (e) {
@@ -135,7 +151,7 @@ async function main() {
   }
   const m = loadManifest();
   if (action === 'status') {
-    const out = m ? { ...m, healthy: Object.values(m.processes).every((p) => owned(p, m)) } : { readiness: 'stopped' };
+    const out = m ? { ...m, healthy: await servicesHealthy(m) } : { readiness: 'stopped' };
     console.log(JSON.stringify(out, null, json ? 0 : 2));
     return;
   }
@@ -173,13 +189,15 @@ async function main() {
     const checks = { ownership: Object.values(current.processes).every((p) => owned(p, current)) };
     for (const [k, u] of Object.entries(current.urls)) {
       try {
-        const r = await fetch(k === 'fixture' ? `${u}/health` : u);
-        checks[k] = r.status < 500;
+        const r = await fetch(k === 'frontend' ? u : `${u}/health`, { signal: AbortSignal.timeout(2000) });
+        checks[k] = r.ok;
       } catch {
         checks[k] = false;
       }
     }
     try {
+      const frontendApi = await fetch(`${current.urls.frontend}/api/hello`, { signal: AbortSignal.timeout(5000) });
+      checks.frontendApi = frontendApi.ok && (await frontendApi.json()).message === 'Hello, Martin';
       const response = await fetch(`${current.urls.fixture}/wlh/search`);
       checks.providerOperation = response.ok && (await response.json()).items?.[0]?.id === 'fixture-offer';
       checks.fixtureEvidence = readFileSync(join(runtimeDir, 'fixture-requests.jsonl'), 'utf8').includes('/wlh/search');

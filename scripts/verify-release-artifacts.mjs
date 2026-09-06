@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -58,7 +59,7 @@ export async function verifyReleaseArtifacts(directory, expectedSourceRef) {
   return { ok: errors.length === 0, errors, manifest };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const directory = process.argv[2];
   const expectedSourceRef = process.argv[3];
   if (!directory || !/^[0-9a-f]{40}$/i.test(expectedSourceRef ?? '')) {

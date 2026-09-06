@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoot = resolve(repositoryRoot, 'apps/api/src');
@@ -108,7 +108,7 @@ function walk(directory) {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const findings = architectureFindings();
   if (findings.length) {
     console.error(`Architecture dependency violations:\n- ${findings.join('\n- ')}`);

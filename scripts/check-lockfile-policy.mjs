@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -81,7 +81,7 @@ function readBasePackageJson(baseRef, packagePath) {
   return JSON.parse(completed.stdout);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const baseRef = process.env.BASE_REF || process.argv[2];
   if (baseRef) {
     const changed = new Set(changedFiles(baseRef));

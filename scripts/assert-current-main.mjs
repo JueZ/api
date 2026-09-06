@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 
 const shaPattern = /^[0-9a-f]{40}$/i;
@@ -41,4 +42,4 @@ export async function assertCurrentMain(env = process.env) {
   return decision;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) await assertCurrentMain();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await assertCurrentMain();

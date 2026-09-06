@@ -3,6 +3,8 @@
 
 ## Repository delivery
 
+- Local Node.js 22 development supports Windows and Linux. Portable test enumeration and file-URL entrypoints avoid shell/path assumptions; the isolated agent environment uses platform-specific process identity and tree shutdown. PR Gate includes Windows and Ubuntu local lifecycle/runtime coverage for privileged changes. Codex Cloud setup and maintenance remain separate, unchanged Linux scripts.
+
 - Codex environment setup and maintenance remove inherited `apt.llvm.org` entries before APT refreshes because the repository does not require LLVM or Clang; Ubuntu plus the explicitly configured Microsoft and GitHub repositories remain signature-verified.
 - Protected `main` requires exactly `PR Gate` and `Security Gate` from GitHub Actions, with strict/up-to-date PRs, admin enforcement, linear history, conversation resolution, force-push denial, and deletion denial.
 - Repository-native exact-head squash auto-merge is enabled. No custom merge controller, check-run writer, arbitrary status rollup, or required model review exists.

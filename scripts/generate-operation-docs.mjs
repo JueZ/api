@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { listOperationDefinitions } from '../apps/api/dist/application/operations/registry.js';
 
@@ -37,7 +38,7 @@ function escapeCell(value) {
   return String(value).replaceAll('|', '\\|');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const rendered = renderOperationCatalogue();
   if (process.argv.includes('--check')) {
     const current = await readFile(targetUrl, 'utf8');

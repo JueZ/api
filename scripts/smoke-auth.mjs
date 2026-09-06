@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { getSmokeRunId, requireUrl, fetchJson, assertEqual, safeSummary } from './lib/smoke-utils.mjs';
 
 const KNOWN_PERMISSIONS = new Set([
@@ -359,7 +360,7 @@ export async function runAuthenticatedSmoke({ env = process.env } = {}) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { result, exitCode, output } = await runAuthenticatedSmoke();
   const rendered = safeSummary(result);
   if (output === 'stderr') console.error(rendered);

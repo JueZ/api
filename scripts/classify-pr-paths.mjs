@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { appendFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { classifyChangedFiles, fullValidation, parseGitNameStatus, VALIDATION_FLAGS } from './lib/path-classifier.mjs';
@@ -47,7 +48,7 @@ function snakeCase(value) {
   return value.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = new Map();
   for (let index = 2; index < process.argv.length; index += 2) {
     args.set(process.argv[index], process.argv[index + 1]);

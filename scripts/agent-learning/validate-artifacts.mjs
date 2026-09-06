@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseDocument } from 'yaml';
 
 export const REPOSITORY_ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -620,7 +620,7 @@ function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const result = loadLearningArtifacts();
   if (result.errors.length > 0) {
     console.error(`Learning artifact validation failed:\n- ${result.errors.join('\n- ')}`);

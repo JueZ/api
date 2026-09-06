@@ -1,0 +1,16 @@
+version: 2
+id: local-development-platform-assumptions
+fingerprint: local-development.platform-assumptions
+severity: medium
+invariant: Local development commands enumerate tests and identify, verify, and stop owned service trees on Windows and Linux without changing the Linux Codex Cloud bootstrap path.
+scope:
+  - scripts/agent-env/**
+  - scripts/run-tests.mjs
+  - .github/workflows/pr-gate.yml
+prevention:
+  - kind: regression-test
+    path: scripts/agent-env/test/lifecycle.test.mjs
+  - kind: regression-test
+    path: scripts/test/run-tests.test.mjs
+recurrenceCount: 1
+status: active

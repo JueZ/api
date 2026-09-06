@@ -234,6 +234,44 @@ jobs:
           node --test apps/web/test/*.test.mjs
           ./node_modules/.bin/ng build --configuration production --no-progress
 
+  portability:
+    name: local development (${{ matrix.os }})
+    if: needs.classify.outputs.privileged == 'true'
+    needs: classify
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ needs.classify.outputs.head_sha }}
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify local process management and frontend tests
+        run: node scripts/run-tests.mjs scripts/agent-env/test apps/web/test scripts/test/run-tests.test.mjs
+      - name: Install pinned Azure Functions Core Tools
+        run: npm install --global azure-functions-core-tools@4.13.0
+      - name: Start local environment
+        run: npm run agent:env:start
+      - name: Inspect detached local services
+        run: npm run agent:env:status
+      - name: Verify running local environment
+        run: npm run agent:verify
+      - name: Stop local environment
+        if: always()
+        run: npm run agent:env:stop
+
   infrastructure:
     name: Bicep validation
     if: needs.classify.outputs.infrastructure == 'true'
@@ -305,6 +343,7 @@ jobs:
       - policy
       - backend
       - frontend
+      - portability
       - infrastructure
       - workflow
     runs-on: ubuntu-latest
