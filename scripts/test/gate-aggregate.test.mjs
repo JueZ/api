@@ -1,8 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { parse } from 'yaml';
 import { verifyGateAggregate } from '../lib/gate-aggregate.mjs';
 
 const result = (value) => ({ result: value });
+
+test('portability runtime executes candidate code without saving a shared dependency cache', () => {
+  const workflow = parse(readFileSync(new URL('../../.github/workflows/pr-gate.yml', import.meta.url), 'utf8'));
+  const job = workflow.jobs.portability;
+  assert.deepEqual(job.strategy.matrix.os, ['ubuntu-latest', 'windows-latest']);
+  const nodeSetup = job.steps.find((step) => step.uses?.startsWith('actions/setup-node@'));
+  assert.ok(nodeSetup);
+  assert.equal(nodeSetup.with.cache, undefined);
+  assert.equal(
+    job.steps.some((step) => step.uses?.startsWith('actions/cache')),
+    false,
+  );
+  assert.equal(job.steps.find((step) => step.run === 'npm run agent:env:stop').if, 'always()');
+});
 
 test('PR aggregate accepts only classifier-authorized documentation skips', () => {
   const flags = { backend: false, contracts: false, frontend: false, infrastructure: false, workflow: false };
