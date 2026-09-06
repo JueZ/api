@@ -79,6 +79,41 @@ on:
         required: false
         default: ''
         type: string
+      acceptedSourceRef:
+        description: Exact source of the accepted production release that must still be installed before mutation.
+        required: false
+        default: ''
+        type: string
+      acceptedReleaseRunId:
+        description: Original successful Delivery v2 run containing the accepted production bundle.
+        required: false
+        default: ''
+        type: string
+      acceptedReleaseCorrelation:
+        description: Correlation of the original accepted production bundle.
+        required: false
+        default: ''
+        type: string
+      acceptedLedgerRunId:
+        description: Trusted run containing the ledger that currently accepts the installed production state.
+        required: false
+        default: ''
+        type: string
+      acceptedLedgerCorrelation:
+        description: Correlation of the ledger that currently accepts the installed production state.
+        required: false
+        default: ''
+        type: string
+      acceptedBaselineArtifact:
+        description: Current-run artifact containing the fully verified accepted production identity.
+        required: false
+        default: ''
+        type: string
+      failedMutationArtifact:
+        description: Current-run artifact containing the failed production mutation intent and observation.
+        required: false
+        default: ''
+        type: string
     secrets:
       REDDIT_CLIENT_SECRET:
         description: Reddit OAuth client secret for app-only API access.
@@ -138,6 +173,21 @@ on:
       sbomSha256:
         description: Exact SBOM digest.
         value: ${{ jobs.deploy.outputs.sbomSha256 }}
+      guardState:
+        description: Lock-time production guard result.
+        value: ${{ jobs.deploy.outputs.guardState || jobs.preflight.outputs.guardState }}
+      supersededBy:
+        description: Current protected-main SHA when production promotion became stale inside the lock.
+        value: ${{ jobs.deploy.outputs.supersededBy || jobs.preflight.outputs.supersededBy }}
+      mutationState:
+        description: Observed production mutation state after the deployment attempt.
+        value: ${{ jobs.deploy.outputs.mutationState }}
+      configurationUncertain:
+        description: Whether configuration may have changed and package recovery cannot certify reversal.
+        value: ${{ jobs.deploy.outputs.configurationUncertain }}
+      mutationArtifactName:
+        description: Durable mutation intent and observation artifact name.
+        value: ${{ jobs.deploy.outputs.mutationArtifactName }}
 
 permissions:
   contents: read
@@ -145,8 +195,48 @@ permissions:
   actions: read
 
 jobs:
+  preflight:
+    name: pre-OIDC production generation guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      proceed: ${{ steps.guard.outputs.proceed }}
+      guardState: ${{ steps.guard.outputs.guard_state }}
+      supersededBy: ${{ steps.guard.outputs.superseded_by }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Reread protected main before production environment and OIDC
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.environmentName }}" != "prod" ] || [ "${{ inputs.allowRollback }}" = "true" ]; then
+            {
+              echo "proceed=true"
+              echo "guard_state=not-applicable"
+              echo "superseded_by="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [ "$current_main" != "${{ inputs.sourceRef }}" ]; then
+            {
+              echo "proceed=false"
+              echo "guard_state=superseded"
+              echo "superseded_by=$current_main"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "proceed=true"
+            echo "guard_state=pre-oidc-current-main"
+            echo "superseded_by="
+          } >> "$GITHUB_OUTPUT"
   deploy:
     name: deploy ${{ inputs.environmentName }}
+    needs: preflight
+    if: ${{ needs.preflight.outputs.proceed == 'true' }}
     timeout-minutes: 90
     runs-on: ubuntu-latest
     environment:
@@ -161,6 +251,11 @@ jobs:
       sourceFrontendArtifactSha256: ${{ steps.artifacts.outputs.source_frontend_artifact_sha256 }}
       frontendArtifactSha256: ${{ steps.frontend.outputs.frontend_artifact_sha256 || steps.artifacts.outputs.source_frontend_artifact_sha256 }}
       sbomSha256: ${{ steps.artifacts.outputs.sbom_sha256 }}
+      guardState: ${{ steps.production_guard.outputs.guard_state }}
+      supersededBy: ${{ steps.production_guard.outputs.superseded_by }}
+      mutationState: ${{ steps.observe_mutation.outputs.mutation_state }}
+      configurationUncertain: ${{ steps.observe_mutation.outputs.configuration_uncertain || steps.production_guard.outputs.configuration_uncertain }}
+      mutationArtifactName: ${{ steps.mutation_intent.outputs.artifact_name }}
     env:
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
@@ -178,6 +273,11 @@ jobs:
       CI_DELIVERY_CORRELATION: ${{ format('build-{0}-{1}', github.run_id, github.run_attempt) }}
       ROLLBACK_RELEASE_RUN_ID: ${{ inputs.rollbackReleaseRunId }}
       ROLLBACK_RELEASE_CORRELATION: ${{ inputs.rollbackReleaseCorrelation }}
+      ACCEPTED_SOURCE_REF: ${{ inputs.acceptedSourceRef }}
+      ACCEPTED_RELEASE_RUN_ID: ${{ inputs.acceptedReleaseRunId }}
+      ACCEPTED_RELEASE_CORRELATION: ${{ inputs.acceptedReleaseCorrelation }}
+      ACCEPTED_LEDGER_RUN_ID: ${{ inputs.acceptedLedgerRunId }}
+      ACCEPTED_LEDGER_CORRELATION: ${{ inputs.acceptedLedgerCorrelation }}
       AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
       AZURE_STATIC_WEB_STORAGE_ACCOUNT: ${{ vars.AZURE_STATIC_WEB_STORAGE_ACCOUNT }}
       PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
@@ -260,15 +360,50 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Validate accepted production baseline coordinates
+        if: ${{ inputs.environmentName == 'prod' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! [[ "${{ inputs.acceptedSourceRef }}" =~ ^[0-9a-f]{40}$ ]] ||
+             ! [[ "${{ inputs.acceptedReleaseRunId }}" =~ ^[1-9][0-9]*$ ]] ||
+             ! [[ "${{ inputs.acceptedReleaseCorrelation }}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]] ||
+             ! [[ "${{ inputs.acceptedLedgerRunId }}" =~ ^[1-9][0-9]*$ ]] ||
+             ! [[ "${{ inputs.acceptedLedgerCorrelation }}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]] ||
+             [ -z "${{ inputs.acceptedBaselineArtifact }}" ]; then
+            echo "A fully verified accepted production baseline is required before production mutation." >&2
+            exit 1
+          fi
+      - name: Download fully verified accepted baseline identity
+        if: ${{ inputs.environmentName == 'prod' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        with:
+          name: ${{ inputs.acceptedBaselineArtifact }}
+          path: ${{ runner.temp }}/accepted-baseline
       - name: Download exact accepted production release ledger
+        if: ${{ inputs.environmentName == 'prod' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        with:
+          name: release-ledger-prod-${{ inputs.acceptedSourceRef }}-${{ inputs.acceptedLedgerCorrelation }}
+          path: ${{ runner.temp }}/accepted-ledger
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.acceptedLedgerRunId }}
+      - name: Download exact accepted rendered production release
+        if: ${{ inputs.environmentName == 'prod' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        with:
+          name: production-release-${{ inputs.acceptedSourceRef }}-${{ inputs.acceptedReleaseCorrelation }}
+          path: ${{ runner.temp }}/accepted-release
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.acceptedReleaseRunId }}
+      - name: Download failed production mutation record
         if: ${{ inputs.environmentName == 'prod' && inputs.allowRollback }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
         with:
-          name: release-ledger-prod-${{ inputs.sourceRef }}-${{ inputs.rollbackReleaseCorrelation }}
-          path: ${{ runner.temp }}/rollback-ledger
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.rollbackReleaseRunId }}
+          name: ${{ inputs.failedMutationArtifact }}
+          path: ${{ runner.temp }}/failed-mutation
       - name: Validate protected-main source and immutable identity
         id: source
         shell: bash
@@ -305,16 +440,16 @@ jobs:
               echo "Rollback identity is invalid or ambiguous." >&2
               exit 1
             fi
-            rollback_ledger="$RUNNER_TEMP/rollback-ledger/release-ledger-prod.json"
+            rollback_ledger="$RUNNER_TEMP/accepted-ledger/release-ledger-prod.json"
             if [ ! -f "$rollback_ledger" ] || [ -L "$rollback_ledger" ] ||
-               [ "$(find "$RUNNER_TEMP/rollback-ledger" -mindepth 1 -maxdepth 1 -printf '%P\n')" != "release-ledger-prod.json" ]; then
+               [ "$(find "$RUNNER_TEMP/accepted-ledger" -mindepth 1 -maxdepth 1 -printf '%P\n')" != "release-ledger-prod.json" ]; then
               echo "Rollback evidence must contain exactly one regular production ledger." >&2
               exit 1
             fi
             if ! jq -e \
               --arg source_ref "$deployment_ref" \
-              --arg run_id "$ROLLBACK_RELEASE_RUN_ID" \
-              --arg correlation "$ROLLBACK_RELEASE_CORRELATION" \
+              --arg run_id "$ACCEPTED_LEDGER_RUN_ID" \
+              --arg correlation "$ACCEPTED_LEDGER_CORRELATION" \
               '.environment == "prod"
                 and .sourceRef == $source_ref
                 and .deployedCommit == $source_ref
@@ -525,8 +660,150 @@ jobs:
             echo "Release artifacts do not match the exact protected-main build or rollback evidence." >&2
             exit 1
           fi
+      - name: Verify complete recovery bundle before production mutation
+        id: recovery_ready
+        if: ${{ inputs.environmentName == 'prod' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline_file="$RUNNER_TEMP/accepted-baseline/accepted-baseline.json"
+          ledger_file="$RUNNER_TEMP/accepted-ledger/release-ledger-prod.json"
+          if [ ! -f "$baseline_file" ] || [ -L "$baseline_file" ] ||
+             [ "$(find "$RUNNER_TEMP/accepted-baseline" -mindepth 1 -maxdepth 1 -printf '%P\n')" != "accepted-baseline.json" ]; then
+            echo "Accepted baseline evidence must contain exactly one regular identity document." >&2
+            exit 1
+          fi
+          if [ ! -f "$ledger_file" ] || [ -L "$ledger_file" ] ||
+             [ "$(find "$RUNNER_TEMP/accepted-ledger" -mindepth 1 -maxdepth 1 -printf '%P\n')" != "release-ledger-prod.json" ]; then
+            echo "Accepted baseline evidence must contain exactly one regular production ledger." >&2
+            exit 1
+          fi
+          node scripts/verify-release-artifacts.mjs \
+            "$RUNNER_TEMP/accepted-release" \
+            "$ACCEPTED_SOURCE_REF" >/dev/null
+          tar -tzf "$RUNNER_TEMP/accepted-release/frontend.tar.gz" \
+            | awk 'BEGIN { ok=1 } /(^|\/)\.\.($|\/)|^\// { ok=0 } END { exit ok ? 0 : 1 }'
+          tar -tvzf "$RUNNER_TEMP/accepted-release/frontend.tar.gz" \
+            | awk 'substr($1,1,1) != "-" && substr($1,1,1) != "d" { bad=1 } END { exit bad ? 1 : 0 }'
+          mkdir -p "$RUNNER_TEMP/accepted-frontend"
+          tar --no-same-owner --no-same-permissions \
+            -xzf "$RUNNER_TEMP/accepted-release/frontend.tar.gz" \
+            -C "$RUNNER_TEMP/accepted-frontend"
+          jq '{ok:true,state:"coherent",errors:[],identity:.identity}' \
+            "$baseline_file" > "$RUNNER_TEMP/accepted-observation.json"
+          jq '.identity.resource' "$baseline_file" > "$RUNNER_TEMP/accepted-resource.json"
+          node scripts/verify-production-baseline.mjs \
+            --observation "$RUNNER_TEMP/accepted-observation.json" \
+            --ledger "$ledger_file" \
+            --source "$ACCEPTED_SOURCE_REF" \
+            --run-id "$ACCEPTED_RELEASE_RUN_ID" \
+            --correlation "$ACCEPTED_RELEASE_CORRELATION" \
+            --acceptance-run-id "$ACCEPTED_LEDGER_RUN_ID" \
+            --acceptance-correlation "$ACCEPTED_LEDGER_CORRELATION" \
+            --acceptance-kind "$(jq -r '.acceptanceKind' "$baseline_file")" \
+            --release-artifact "production-release-$ACCEPTED_SOURCE_REF-$ACCEPTED_RELEASE_CORRELATION" \
+            --ledger-artifact "release-ledger-prod-$ACCEPTED_SOURCE_REF-$ACCEPTED_LEDGER_CORRELATION" \
+            --release-dir "$RUNNER_TEMP/accepted-release" \
+            --accepted-frontend-dir "$RUNNER_TEMP/accepted-frontend" \
+            --expected-resource "$RUNNER_TEMP/accepted-resource.json"
+          echo "recovery_ready=true" >> "$GITHUB_OUTPUT"
+      - name: Capture production state inside mutation lock
+        id: production_observed
+        if: ${{ inputs.environmentName == 'prod' }}
+        shell: bash
+        run: bash scripts/capture-production-state.sh "$RUNNER_TEMP/lock-production" true
+      - name: Decide production mutation inside lock
+        id: production_guard
+        if: ${{ inputs.environmentName == 'prod' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [ "$ALLOW_ROLLBACK" = "true" ]; then
+            failed_intent="$RUNNER_TEMP/failed-mutation/intent.json"
+            [ -f "$failed_intent" ] || { echo "Failed production mutation intent is unavailable." >&2; exit 1; }
+            node scripts/production-state.mjs rollback-decision \
+              --accepted "$RUNNER_TEMP/accepted-baseline/accepted-baseline.json" \
+              --observed "$RUNNER_TEMP/lock-production/observation.json" \
+              --intent "$failed_intent" \
+              --rollback-attempted false \
+              --current-main "$current_main" \
+              --failed-controller "$GITHUB_SHA" \
+              --json-output "$RUNNER_TEMP/production-guard.json" \
+              --output "$GITHUB_OUTPUT"
+          else
+            node scripts/production-state.mjs promotion-decision \
+              --accepted "$RUNNER_TEMP/accepted-baseline/accepted-baseline.json" \
+              --observed "$RUNNER_TEMP/lock-production/observation.json" \
+              --candidate-source "${SOURCE_REF:-${GITHUB_SHA}}" \
+              --current-main "$current_main" \
+              --recovery-ready "${{ steps.recovery_ready.outputs.recovery_ready }}" \
+              --json-output "$RUNNER_TEMP/production-guard.json" \
+              --output "$GITHUB_OUTPUT"
+          fi
+          mutation_allowed="$(jq -r '.mutate' "$RUNNER_TEMP/production-guard.json")"
+          guard_state="$(jq -r '.state' "$RUNNER_TEMP/production-guard.json")"
+          if [ "$mutation_allowed" != "true" ] && [ "$guard_state" != "superseded" ]; then
+            echo "Production mutation blocked inside lock: $(jq -r '.reason' "$RUNNER_TEMP/production-guard.json")" >&2
+            exit 1
+          fi
+      - name: Persist production mutation intent before first write
+        id: mutation_intent
+        if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/production-mutation"
+          bundle_run_id="$GITHUB_RUN_ID"
+          bundle_correlation="$DELIVERY_CORRELATION"
+          mutation_kind="promotion"
+          if [ "$ALLOW_ROLLBACK" = "true" ]; then
+            bundle_run_id="$ACCEPTED_RELEASE_RUN_ID"
+            bundle_correlation="$ACCEPTED_RELEASE_CORRELATION"
+            mutation_kind="recovery"
+          fi
+          jq -n \
+            --arg sourceRef "${SOURCE_REF:-${GITHUB_SHA}}" \
+            --arg runId "$bundle_run_id" \
+            --arg correlation "$bundle_correlation" \
+            --arg mutationRunId "$GITHUB_RUN_ID" \
+            --arg mutationCorrelation "$DELIVERY_CORRELATION" \
+            --arg mutationControllerRef "$GITHUB_SHA" \
+            --arg mutationKind "$mutation_kind" \
+            --arg functionDigest "$FUNCTION_ARTIFACT_SHA256" \
+            --arg renderedFrontendDigest "$FRONTEND_ARTIFACT_SHA256" \
+            --arg sbomDigest "$SBOM_SHA256" \
+            --argjson configurationMayChange '${{ !inputs.allowRollback }}' \
+            '{schemaVersion:1,phase:"intent-recorded",persistedBeforeWrite:true,configurationMayChange:$configurationMayChange,rollbackAttempted:false,expectedIdentity:{function:{sourceRef:$sourceRef,runId:$runId,deliveryCorrelation:$correlation,digests:{function:$functionDigest,renderedFrontend:$renderedFrontendDigest,sbom:$sbomDigest},package:null},frontend:{sourceRef:$sourceRef,runId:$runId,deliveryCorrelation:$correlation,metadataSha256:null,inventorySha256:null},mutationReceipt:{recorded:true,runId:$mutationRunId,correlation:$mutationCorrelation,controllerRef:$mutationControllerRef,kind:$mutationKind}}}' \
+            > "$RUNNER_TEMP/production-mutation/intent.json"
+          echo "artifact_name=production-mutation-${DELIVERY_CORRELATION}" >> "$GITHUB_OUTPUT"
+      - name: Upload pre-write production mutation intent
+        if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
+        with:
+          name: production-mutation-intent-${{ inputs.deliveryCorrelation }}
+          path: ${{ runner.temp }}/production-mutation/intent.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Record production mutation receipt before infrastructure or application writes
+        if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mutation_kind="promotion"
+          if [ "$ALLOW_ROLLBACK" = "true" ]; then mutation_kind="recovery"; fi
+          if [ "$ALLOW_ROLLBACK" != "true" ]; then node scripts/assert-current-main.mjs; fi
+          az functionapp config appsettings set \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_FUNCTIONAPP_NAME" \
+            --settings \
+              "DELIVERY_MUTATION_RUN_ID=$GITHUB_RUN_ID" \
+              "DELIVERY_MUTATION_CORRELATION=$DELIVERY_CORRELATION" \
+              "DELIVERY_MUTATION_CONTROLLER_SHA=$GITHUB_SHA" \
+              "DELIVERY_MUTATION_KIND=$mutation_kind" \
+            -o none
       - name: Deploy Bicep infrastructure
-        if: ${{ !inputs.allowRollback }}
+        if: ${{ !inputs.allowRollback && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         id: infra
         shell: bash
         env:
@@ -583,7 +860,7 @@ jobs:
               --resource-id "$budget_resource_id" \
               --current-month "$(date -u +%Y-%m-01T00:00:00Z)")"
 
-            node scripts/assert-current-main.mjs
+            if [ "$ALLOW_ROLLBACK" != "true" ]; then node scripts/assert-current-main.mjs; fi
             deployment_outputs=$(az deployment group create \
               --name "main-${ENVIRONMENT_NAME}" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -658,7 +935,7 @@ jobs:
             echo "No infra/main.bicep found; skipping infrastructure deployment."
           fi
       - name: Remove retired scheduled-query alerts
-        if: ${{ !inputs.allowRollback }}
+        if: ${{ !inputs.allowRollback && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -690,6 +967,7 @@ jobs:
           fi
       - name: Resolve runtime settings
         id: resolve
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
         shell: bash
         env:
           INFRA_FUNCTION_APP_NAME: ${{ steps.infra.outputs.function_app_name }}
@@ -762,11 +1040,7 @@ jobs:
             discovered_static_storage="$(resolve_storage_by_purpose public-static-site)"
             effective_private_storage="$(resolve_storage_by_purpose private-integration-state)"
             effective_host_storage="$(resolve_storage_by_purpose function-host)"
-            effective_static_storage="${AZURE_STATIC_WEB_STORAGE_ACCOUNT:-$discovered_static_storage}"
-            if [ "$effective_static_storage" != "$discovered_static_storage" ]; then
-              echo "Configured production static account does not match the uniquely tagged deployed resource." >&2
-              exit 1
-            fi
+            effective_static_storage="$discovered_static_storage"
             effective_base_url=""
             : "${effective_functionapp_name:?AZURE_FUNCTIONAPP_NAME is required for package-only rollback}"
             az functionapp show \
@@ -858,7 +1132,7 @@ jobs:
             echo "- Frontend URL: ${effective_frontend_url:-<not resolved>}"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Verify complete deployed runtime safety policy
-        if: ${{ inputs.deployFunctions }}
+        if: ${{ inputs.deployFunctions && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -930,7 +1204,7 @@ jobs:
               YOUTUBE_TRANSCRIPT_ENABLED="${YOUTUBE_TRANSCRIPT_ENABLED:-false}" \
               node scripts/validate-deployed-runtime-settings.mjs --arm-response
       - name: Verify private WLH reference data is present
-        if: ${{ inputs.deployFunctions }}
+        if: ${{ inputs.deployFunctions && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -949,7 +1223,7 @@ jobs:
           fi
       - name: Prepare exact deployable frontend bundle
         id: frontend
-        if: ${{ inputs.deployFrontend }}
+        if: ${{ inputs.deployFrontend && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -970,6 +1244,15 @@ jobs:
               echo "Accepted rollback frontend metadata does not match the selected production release." >&2
               exit 1
             fi
+            node scripts/frontend-inventory.mjs create \
+              "$validation_dir" \
+              "$RUNNER_TEMP/rollback-frontend-inventory.json"
+            rollback_metadata_digest="$(sha256sum "$validation_dir/assets/build-info.json" | awk '{print $1}')"
+            rollback_inventory_digest="$(INVENTORY_PATH="$RUNNER_TEMP/rollback-frontend-inventory.json" node --input-type=module --eval 'import {readFileSync} from "node:fs"; import {hashFrontendInventory} from "./scripts/lib/production-state.mjs"; process.stdout.write(hashFrontendInventory(JSON.parse(readFileSync(process.env.INVENTORY_PATH,"utf8"))))')"
+            {
+              echo "FRONTEND_METADATA_SHA256=$rollback_metadata_digest"
+              echo "FRONTEND_INVENTORY_SHA256=$rollback_inventory_digest"
+            } >> "$GITHUB_ENV"
             echo "Rollback preserves the previously accepted production frontend archive byte-for-byte."
             echo "frontend_artifact_sha256=$FRONTEND_ARTIFACT_SHA256" >> "$GITHUB_OUTPUT"
             exit 0
@@ -991,8 +1274,8 @@ jobs:
           export EFFECTIVE_WEB_REDIRECT_URI="$effective_web_redirect_uri"
           export EFFECTIVE_DEPLOYED_AT_UTC="${DEPLOYED_AT_UTC:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
           echo "EFFECTIVE_DEPLOYED_AT_UTC=$EFFECTIVE_DEPLOYED_AT_UTC" >> "$GITHUB_ENV"
-          node --input-type=module --eval "const config={authEnabled:process.env.WEB_AUTH_ENABLED==='true',authClientId:process.env.WEB_AUTH_CLIENT_ID||'',authAuthority:process.env.WEB_AUTH_AUTHORITY||'',authRedirectUri:process.env.EFFECTIVE_WEB_REDIRECT_URI||'',authApiScope:process.env.WEB_AUTH_API_SCOPE||'',apiBaseUrl:process.env.EFFECTIVE_WEB_API_BASE_URL||'',deployedCommitSha:(process.env.SOURCE_REF||process.env.GITHUB_SHA||'').toLowerCase(),environmentName:process.env.ENVIRONMENT_NAME||'unknown',deploymentRunId:process.env.GITHUB_RUN_ID||'unknown',deployedAtUtc:process.env.EFFECTIVE_DEPLOYED_AT_UTC||'unknown'}; process.stdout.write('window.API_CATALOGUE_CONFIG = '+JSON.stringify(config)+';\\n');" > "$output_dir/assets/config.js"
-          jq -n --arg deployedCommitSha "${SOURCE_REF:-${GITHUB_SHA}}" --arg environmentName "$ENVIRONMENT_NAME" --arg deploymentRunId "$GITHUB_RUN_ID" --arg deployedAtUtc "$EFFECTIVE_DEPLOYED_AT_UTC" '{service:"api-catalogue-web", deployedCommitSha:($deployedCommitSha|ascii_downcase), environmentName:$environmentName, deploymentRunId:$deploymentRunId, deployedAtUtc:$deployedAtUtc}' > "$output_dir/assets/build-info.json"
+          node --input-type=module --eval "const config={authEnabled:process.env.WEB_AUTH_ENABLED==='true',authClientId:process.env.WEB_AUTH_CLIENT_ID||'',authAuthority:process.env.WEB_AUTH_AUTHORITY||'',authRedirectUri:process.env.EFFECTIVE_WEB_REDIRECT_URI||'',authApiScope:process.env.WEB_AUTH_API_SCOPE||'',apiBaseUrl:process.env.EFFECTIVE_WEB_API_BASE_URL||'',deployedCommitSha:(process.env.SOURCE_REF||process.env.GITHUB_SHA||'').toLowerCase(),environmentName:process.env.ENVIRONMENT_NAME||'unknown',deploymentRunId:process.env.GITHUB_RUN_ID||'unknown',deliveryCorrelation:process.env.DELIVERY_CORRELATION||'',deployedAtUtc:process.env.EFFECTIVE_DEPLOYED_AT_UTC||'unknown'}; process.stdout.write('window.API_CATALOGUE_CONFIG = '+JSON.stringify(config)+';\\n');" > "$output_dir/assets/config.js"
+          jq -n --arg deployedCommitSha "${SOURCE_REF:-${GITHUB_SHA}}" --arg environmentName "$ENVIRONMENT_NAME" --arg deploymentRunId "$GITHUB_RUN_ID" --arg deliveryCorrelation "$DELIVERY_CORRELATION" --arg deployedAtUtc "$EFFECTIVE_DEPLOYED_AT_UTC" '{service:"api-catalogue-web", deployedCommitSha:($deployedCommitSha|ascii_downcase), environmentName:$environmentName, deploymentRunId:$deploymentRunId, deliveryCorrelation:$deliveryCorrelation, deployedAtUtc:$deployedAtUtc}' > "$output_dir/assets/build-info.json"
 
           rendered_archive="$RUNNER_TEMP/frontend-rendered.tar.gz"
           tar \
@@ -1017,8 +1300,39 @@ jobs:
           node scripts/verify-release-artifacts.mjs "$release_dir" "${SOURCE_REF:-${GITHUB_SHA}}" > "$RUNNER_TEMP/release-manifest-rendered.json"
           echo "FRONTEND_ARTIFACT_SHA256=$frontend_digest" >> "$GITHUB_ENV"
           echo "frontend_artifact_sha256=$frontend_digest" >> "$GITHUB_OUTPUT"
-      - name: Package and deploy Azure Functions
-        if: ${{ inputs.deployFunctions }}
+      - name: Bind rendered frontend identity before application writes
+        if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          planned_frontend="$RUNNER_TEMP/planned-frontend"
+          mkdir -p "$planned_frontend"
+          tar --no-same-owner --no-same-permissions \
+            -xzf "$RUNNER_TEMP/release/frontend.tar.gz" \
+            -C "$planned_frontend"
+          node scripts/frontend-inventory.mjs create \
+            "$planned_frontend" \
+            "$RUNNER_TEMP/planned-frontend-inventory.json"
+          metadata_digest="$(sha256sum "$planned_frontend/assets/build-info.json" | awk '{print $1}')"
+          inventory_digest="$(INVENTORY_PATH="$RUNNER_TEMP/planned-frontend-inventory.json" node --input-type=module --eval 'import {readFileSync} from "node:fs"; import {hashFrontendInventory} from "./scripts/lib/production-state.mjs"; process.stdout.write(hashFrontendInventory(JSON.parse(readFileSync(process.env.INVENTORY_PATH,"utf8"))))')"
+          {
+            echo "FRONTEND_METADATA_SHA256=$metadata_digest"
+            echo "FRONTEND_INVENTORY_SHA256=$inventory_digest"
+          } >> "$GITHUB_ENV"
+          intent_tmp="$(mktemp "$RUNNER_TEMP/production-intent.XXXXXX")"
+          jq \
+            --arg metadataDigest "$metadata_digest" \
+            --arg inventoryDigest "$inventory_digest" \
+            --arg renderedFrontendDigest "$FRONTEND_ARTIFACT_SHA256" \
+            --slurpfile inventory "$RUNNER_TEMP/planned-frontend-inventory.json" \
+            '.expectedIdentity.frontend.metadataSha256=$metadataDigest
+             | .expectedIdentity.frontend.inventorySha256=$inventoryDigest
+             | .expectedIdentity.frontend.inventory=$inventory[0]
+             | .expectedIdentity.function.digests.renderedFrontend=$renderedFrontendDigest' \
+            "$RUNNER_TEMP/production-mutation/intent.json" > "$intent_tmp"
+          mv "$intent_tmp" "$RUNNER_TEMP/production-mutation/intent.json"
+      - name: Prepare immutable Azure Functions package
+        if: ${{ inputs.deployFunctions && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1091,13 +1405,66 @@ jobs:
             encoded_release_version_id="$(node --input-type=module --eval 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$release_version_id")"
             package_url="https://$EFFECTIVE_RELEASE_STORAGE_ACCOUNT.blob.core.windows.net/$release_container/$release_blob?versionid=$encoded_release_version_id"
             deployed_at_utc="${EFFECTIVE_DEPLOYED_AT_UTC:-${DEPLOYED_AT_UTC:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}}"
+            if [ "$ENVIRONMENT_NAME" = "prod" ]; then
+              intent_tmp="$(mktemp "$RUNNER_TEMP/production-intent.XXXXXX")"
+              jq \
+                --arg storageAccountName "$EFFECTIVE_RELEASE_STORAGE_ACCOUNT" \
+                --arg containerName "$release_container" \
+                --arg blobName "$release_blob" \
+                --arg versionId "$release_version_id" \
+                --arg functionDigest "$FUNCTION_ARTIFACT_SHA256" \
+                '.phase="application-ready"
+                 | .expectedIdentity.function.package={storageAccountName:$storageAccountName,containerName:$containerName,blobName:$blobName,versionId:$versionId,functionDigest:$functionDigest,contentSha256:$functionDigest}' \
+                "$RUNNER_TEMP/production-mutation/intent.json" > "$intent_tmp"
+              mv "$intent_tmp" "$RUNNER_TEMP/production-mutation/intent.json"
+            fi
+            bundle_run_id="$GITHUB_RUN_ID"
+            bundle_correlation="$DELIVERY_CORRELATION"
+            if [ "$ALLOW_ROLLBACK" = "true" ]; then
+              bundle_run_id="$ACCEPTED_RELEASE_RUN_ID"
+              bundle_correlation="$ACCEPTED_RELEASE_CORRELATION"
+            fi
+            {
+              echo "RELEASE_PACKAGE_STORAGE_ACCOUNT=$EFFECTIVE_RELEASE_STORAGE_ACCOUNT"
+              echo "RELEASE_PACKAGE_CONTAINER=$release_container"
+              echo "RELEASE_PACKAGE_BLOB=$release_blob"
+              echo "RELEASE_PACKAGE_VERSION_ID=$release_version_id"
+              echo "RELEASE_PACKAGE_URL=$package_url"
+              echo "EFFECTIVE_DEPLOYED_AT_UTC=$deployed_at_utc"
+              echo "BUNDLE_RELEASE_RUN_ID=$bundle_run_id"
+              echo "BUNDLE_RELEASE_CORRELATION=$bundle_correlation"
+              echo "INSTALLED_RELEASE_RUN_ID=$GITHUB_RUN_ID"
+              echo "INSTALLED_RELEASE_CORRELATION=$DELIVERY_CORRELATION"
+            } >> "$GITHUB_ENV"
+          else
+            echo "No Azure Functions host.json found; skipping Functions deployment."
+          fi
+      - name: Upload application-ready production mutation checkpoint
+        if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
+        with:
+          name: production-mutation-prepared-${{ inputs.deliveryCorrelation }}
+          path: ${{ runner.temp }}/production-mutation/intent.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Install immutable Azure Functions package
+        if: ${{ inputs.deployFunctions && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/release/functionapp.zip" ]; then
             package_settings=(
-              "WEBSITE_RUN_FROM_PACKAGE=$package_url"
+              "WEBSITE_RUN_FROM_PACKAGE=$RELEASE_PACKAGE_URL"
               "WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID=SystemAssigned"
               "DEPLOYED_COMMIT_SHA=${SOURCE_REF:-${GITHUB_SHA}}"
               "DEPLOYED_SOURCE_REF=${SOURCE_REF:-${GITHUB_SHA}}"
-              "DEPLOYMENT_RUN_ID=$GITHUB_RUN_ID"
-              "DEPLOYED_AT_UTC=$deployed_at_utc"
+              "DEPLOYMENT_RUN_ID=$BUNDLE_RELEASE_RUN_ID"
+              "DELIVERY_CORRELATION=$BUNDLE_RELEASE_CORRELATION"
+              "DELIVERY_MUTATION_RUN_ID=$GITHUB_RUN_ID"
+              "DELIVERY_MUTATION_CORRELATION=$DELIVERY_CORRELATION"
+              "DELIVERY_MUTATION_CONTROLLER_SHA=$GITHUB_SHA"
+              "DELIVERY_MUTATION_KIND=$([ "$ALLOW_ROLLBACK" = "true" ] && echo recovery || echo promotion)"
+              "DEPLOYED_AT_UTC=$EFFECTIVE_DEPLOYED_AT_UTC"
               "BUILD_TIMESTAMP_UTC=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
               "RELEASE_FUNCTION_SHA256=$FUNCTION_ARTIFACT_SHA256"
               "RELEASE_FRONTEND_SHA256=$FRONTEND_ARTIFACT_SHA256"
@@ -1107,7 +1474,7 @@ jobs:
               package_settings+=("DEPLOYED_ENVIRONMENT_NAME=$ENVIRONMENT_NAME")
             fi
 
-            node scripts/assert-current-main.mjs
+            if [ "$ALLOW_ROLLBACK" != "true" ]; then node scripts/assert-current-main.mjs; fi
             az functionapp config appsettings set \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --name "$EFFECTIVE_FUNCTIONAPP_NAME" \
@@ -1120,21 +1487,21 @@ jobs:
               --body '{}' \
               --output json \
               | jq -e \
-                --arg package_url "$package_url" \
+                --arg package_url "$RELEASE_PACKAGE_URL" \
                 '.properties.WEBSITE_RUN_FROM_PACKAGE == $package_url and .properties.WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID == "SystemAssigned"' \
                 >/dev/null; then
               echo "Function App did not retain the exact immutable package-version pointer." >&2
               exit 1
             fi
             function_app_id="/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$EFFECTIVE_FUNCTIONAPP_NAME"
-            node scripts/assert-current-main.mjs
+            if [ "$ALLOW_ROLLBACK" != "true" ]; then node scripts/assert-current-main.mjs; fi
             az rest \
               --method post \
               --url "https://management.azure.com${function_app_id}/restart?api-version=2023-12-01" \
               --body '{}' \
               -o none
             for attempt in {1..12}; do
-              node scripts/assert-current-main.mjs
+              if [ "$ALLOW_ROLLBACK" != "true" ]; then node scripts/assert-current-main.mjs; fi
               if az rest \
                 --method post \
                 --url "https://management.azure.com${function_app_id}/syncfunctiontriggers?api-version=2023-12-01" \
@@ -1154,7 +1521,7 @@ jobs:
             echo "No Azure Functions host.json found; skipping Functions deployment."
           fi
       - name: Deploy Angular static site with Azure OIDC
-        if: ${{ inputs.deployFrontend }}
+        if: ${{ inputs.deployFrontend && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1216,7 +1583,7 @@ jobs:
             entrypoint_file="$RUNNER_TEMP/frontend-entrypoint.html"
             mv "$output_dir/index.html" "$entrypoint_file"
             node scripts/frontend-inventory.mjs create "$output_dir" "$non_entrypoint_inventory"
-            node scripts/assert-current-main.mjs
+            if [ "$ALLOW_ROLLBACK" != "true" ]; then node scripts/assert-current-main.mjs; fi
             # shellcheck disable=SC2016
             az storage blob upload-batch \
               --auth-mode login \
@@ -1265,7 +1632,7 @@ jobs:
               "$stale_blob_plan"
             jq -r '.[]' "$stale_blob_plan" > "$stale_blob_lines"
             while IFS= read -r stale_blob; do
-              node scripts/assert-current-main.mjs
+              if [ "$ALLOW_ROLLBACK" != "true" ]; then node scripts/assert-current-main.mjs; fi
               # shellcheck disable=SC2016
               az storage blob delete \
                 --auth-mode login \
@@ -1306,10 +1673,55 @@ jobs:
           else
             echo "No angular.json found; skipping Angular static site deployment."
           fi
-      - name: Verify current generation before runtime acceptance
+      - name: Observe production after mutation attempt
+        id: observe_mutation
+        if: ${{ always() && inputs.environmentName == 'prod' && steps.mutation_intent.outputs.artifact_name != '' }}
         shell: bash
-        run: node scripts/assert-current-main.mjs
+        run: |
+          set -euo pipefail
+          observed_dir="$RUNNER_TEMP/post-mutation-production"
+          if ! bash scripts/capture-production-state.sh "$observed_dir" true; then
+            mkdir -p "$observed_dir"
+            jq -n '{ok:false,state:"invalid",errors:["post-mutation production observation failed"],identity:{}}' \
+              > "$observed_dir/observation.json"
+          fi
+          cp "$observed_dir/observation.json" "$RUNNER_TEMP/production-mutation/observation.json"
+          decision_intent="$RUNNER_TEMP/production-mutation/intent.json"
+          if [ "$ALLOW_ROLLBACK" = "true" ]; then
+            decision_intent="$RUNNER_TEMP/failed-mutation/intent.json"
+          fi
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          node scripts/production-state.mjs rollback-decision \
+            --accepted "$RUNNER_TEMP/accepted-baseline/accepted-baseline.json" \
+            --observed "$observed_dir/observation.json" \
+            --intent "$decision_intent" \
+            --rollback-attempted false \
+            --current-main "$current_main" \
+            --failed-controller "$GITHUB_SHA" \
+            --json-output "$RUNNER_TEMP/production-mutation/decision.json"
+          mutation_state="$(jq -r '.state' "$RUNNER_TEMP/production-mutation/decision.json")"
+          if [ "$ALLOW_ROLLBACK" != "true" ] && [ "$mutation_state" = "failed-release-observed" ]; then
+            mutation_state="candidate-observed"
+          fi
+          {
+            echo "mutation_state=$mutation_state"
+            echo "configuration_uncertain=$(jq -r '.configurationUncertain // false' "$RUNNER_TEMP/production-mutation/decision.json")"
+          } >> "$GITHUB_OUTPUT"
+      - name: Upload production mutation observation
+        if: ${{ always() && inputs.environmentName == 'prod' && steps.mutation_intent.outputs.artifact_name != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
+        with:
+          name: ${{ steps.mutation_intent.outputs.artifact_name }}
+          path: ${{ runner.temp }}/production-mutation
+          if-no-files-found: error
+          retention-days: 30
+      - name: Verify current generation before runtime acceptance
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
+        shell: bash
+        run: |
+          if [ "$ALLOW_ROLLBACK" != "true" ]; then node scripts/assert-current-main.mjs; fi
       - name: Run runtime smoke tests
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1369,6 +1781,7 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Mint authenticated smoke token with GitHub OIDC
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1376,6 +1789,7 @@ jobs:
           export REQUIRE_AUTH_SMOKE=true
           node scripts/mint-smoke-token.mjs
       - name: Run authenticated smoke tests
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
         shell: bash
         env:
           REDDIT_SHARE_URL_SMOKE_REQUESTED: ${{ inputs.redditShareUrlSmokeEnabled && 'true' || 'false' }}
@@ -1396,6 +1810,7 @@ jobs:
           node scripts/smoke-auth.mjs | tee "$smoke_dir/auth-smoke.json"
           echo "AUTH_SMOKE_RESULTS_PATH=$smoke_dir/auth-smoke.json" >> "$GITHUB_ENV"
       - name: Run telemetry gate
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1412,11 +1827,13 @@ jobs:
           node scripts/check-telemetry.mjs
           echo "TELEMETRY_RESULTS_PATH=$smoke_dir/telemetry.json" >> "$GITHUB_ENV"
       - name: Verify current generation before evidence publication
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
         shell: bash
-        run: node scripts/assert-current-main.mjs
+        run: |
+          if [ "$ALLOW_ROLLBACK" != "true" ]; then node scripts/assert-current-main.mjs; fi
       - name: Write release ledger
         shell: bash
-        if: ${{ always() }}
+        if: ${{ always() && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         run: |
           set -euo pipefail
           smoke_dir="${RUNNER_TEMP:-.}/smoke"
@@ -1430,13 +1847,27 @@ jobs:
           export RELEASE_FUNCTION_SHA256="$FUNCTION_ARTIFACT_SHA256"
           export RELEASE_FRONTEND_SHA256="$FRONTEND_ARTIFACT_SHA256"
           export RELEASE_SBOM_SHA256="$SBOM_SHA256"
+          export RELEASE_PACKAGE_STORAGE_ACCOUNT="${RELEASE_PACKAGE_STORAGE_ACCOUNT:-}"
+          export RELEASE_PACKAGE_CONTAINER="${RELEASE_PACKAGE_CONTAINER:-}"
+          export RELEASE_PACKAGE_BLOB="${RELEASE_PACKAGE_BLOB:-}"
+          export RELEASE_PACKAGE_VERSION_ID="${RELEASE_PACKAGE_VERSION_ID:-}"
+          export FRONTEND_METADATA_SHA256="${FRONTEND_METADATA_SHA256:-}"
+          export FRONTEND_INVENTORY_SHA256="${FRONTEND_INVENTORY_SHA256:-}"
+          export INSTALLED_RELEASE_RUN_ID="${INSTALLED_RELEASE_RUN_ID:-$GITHUB_RUN_ID}"
+          export INSTALLED_RELEASE_CORRELATION="${INSTALLED_RELEASE_CORRELATION:-$DELIVERY_CORRELATION}"
+          if [ "$ALLOW_ROLLBACK" = "true" ]; then
+            export RECOVERY_ORIGINAL_SOURCE_REF="$ACCEPTED_SOURCE_REF"
+            export RECOVERY_ORIGINAL_RUN_ID="$ACCEPTED_RELEASE_RUN_ID"
+            export RECOVERY_ORIGINAL_CORRELATION="$ACCEPTED_RELEASE_CORRELATION"
+            export RECOVERY_CONFIGURATION_UNCERTAIN='${{ steps.observe_mutation.outputs.configuration_uncertain }}'
+          fi
           export SMOKE_RUN_ID="${SMOKE_RUN_ID:-smoke-${ENVIRONMENT_NAME}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}}"
           export RELEASE_LEDGER_PATH="$smoke_dir/release-ledger-${ENVIRONMENT_NAME}.json"
           node scripts/write-release-ledger.mjs "$RELEASE_LEDGER_PATH"
           EXPECTED_DELIVERY_CORRELATION="$DELIVERY_CORRELATION" node scripts/validate-release-ledger.mjs "$RELEASE_LEDGER_PATH"
           echo "RELEASE_LEDGER_PATH=$RELEASE_LEDGER_PATH" >> "$GITHUB_ENV"
       - name: Upload release ledger
-        if: ${{ always() }}
+        if: ${{ always() && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: release-ledger-${{ inputs.environmentName }}-${{ inputs.sourceRef || github.sha }}-${{ inputs.deliveryCorrelation }}
@@ -1444,7 +1875,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - name: Preserve exact accepted production release bundle
-        if: ${{ inputs.environmentName == 'prod' && !inputs.allowRollback && success() }}
+        if: ${{ inputs.environmentName == 'prod' && !inputs.allowRollback && steps.production_guard.outputs.mutation_allowed == 'true' && success() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: production-release-${{ inputs.sourceRef || github.sha }}-${{ inputs.deliveryCorrelation }}
@@ -1452,7 +1883,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - name: Report production deployment values after smoke tests
-        if: ${{ inputs.updateProductionVariables }}
+        if: ${{ inputs.updateProductionVariables && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         shell: bash
         run: |
           set -euo pipefail

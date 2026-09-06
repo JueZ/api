@@ -53,6 +53,41 @@ export function validateReleaseLedger(ledger, { expectedDeliveryCorrelation = ''
       errors.push(`artifacts.${key} must be a lowercase SHA-256 digest`);
     }
   }
+  if (ledger?.installation !== undefined) {
+    if (!/^[1-9][0-9]*$/.test(String(ledger.installation?.runId ?? ''))) {
+      errors.push('installation.runId must be a positive integer');
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/.test(String(ledger.installation?.correlation ?? ''))) {
+      errors.push('installation.correlation must be an opaque 8-128 character identifier');
+    }
+    for (const key of ['storageAccountName', 'containerName', 'blobName', 'versionId']) {
+      if (!String(ledger.installation?.functionPackage?.[key] ?? '')) {
+        errors.push(`installation.functionPackage.${key} is required`);
+      }
+    }
+    for (const key of ['metadataSha256', 'inventorySha256']) {
+      if (!/^[0-9a-f]{64}$/.test(String(ledger.installation?.frontend?.[key] ?? ''))) {
+        errors.push(`installation.frontend.${key} must be a lowercase SHA-256 digest`);
+      }
+    }
+  }
+  if (ledger?.recovery !== undefined) {
+    if (!['verified', 'incomplete'].includes(ledger.recovery?.status)) {
+      errors.push('recovery.status must be verified or incomplete');
+    }
+    if (typeof ledger.recovery?.configurationUncertain !== 'boolean') {
+      errors.push('recovery.configurationUncertain must be boolean');
+    }
+    if (!/^[0-9a-f]{40}$/.test(String(ledger.recovery?.originalBundle?.sourceRef ?? ''))) {
+      errors.push('recovery.originalBundle.sourceRef must be a lowercase 40-character SHA');
+    }
+    if (!/^[1-9][0-9]*$/.test(String(ledger.recovery?.originalBundle?.runId ?? ''))) {
+      errors.push('recovery.originalBundle.runId must be a positive integer');
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/.test(String(ledger.recovery?.originalBundle?.correlation ?? ''))) {
+      errors.push('recovery.originalBundle.correlation must be an opaque 8-128 character identifier');
+    }
+  }
   for (const key of ['apiBaseUrl']) {
     try {
       new URL(ledger?.[key]);

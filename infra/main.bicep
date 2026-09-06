@@ -641,6 +641,21 @@ var preservedFunctionReleaseSettings = union(
   contains(existingFunctionAppSettings, 'DEPLOYMENT_RUN_ID')
     ? { DEPLOYMENT_RUN_ID: existingFunctionAppSettings.DEPLOYMENT_RUN_ID }
     : {},
+  contains(existingFunctionAppSettings, 'DELIVERY_CORRELATION')
+    ? { DELIVERY_CORRELATION: existingFunctionAppSettings.DELIVERY_CORRELATION }
+    : {},
+  contains(existingFunctionAppSettings, 'DELIVERY_MUTATION_RUN_ID')
+    ? { DELIVERY_MUTATION_RUN_ID: existingFunctionAppSettings.DELIVERY_MUTATION_RUN_ID }
+    : {},
+  contains(existingFunctionAppSettings, 'DELIVERY_MUTATION_CORRELATION')
+    ? { DELIVERY_MUTATION_CORRELATION: existingFunctionAppSettings.DELIVERY_MUTATION_CORRELATION }
+    : {},
+  contains(existingFunctionAppSettings, 'DELIVERY_MUTATION_CONTROLLER_SHA')
+    ? { DELIVERY_MUTATION_CONTROLLER_SHA: existingFunctionAppSettings.DELIVERY_MUTATION_CONTROLLER_SHA }
+    : {},
+  contains(existingFunctionAppSettings, 'DELIVERY_MUTATION_KIND')
+    ? { DELIVERY_MUTATION_KIND: existingFunctionAppSettings.DELIVERY_MUTATION_KIND }
+    : {},
   contains(existingFunctionAppSettings, 'DEPLOYED_AT_UTC')
     ? { DEPLOYED_AT_UTC: existingFunctionAppSettings.DEPLOYED_AT_UTC }
     : {},

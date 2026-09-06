@@ -2,15 +2,18 @@ version: 2
 id: runtime-neutral-delivery-classification
 fingerprint: delivery.runtime-neutral-change-unnecessary-environment-promotion
 severity: medium
-invariant: Only a complete exact-main diff classified entirely by the runtime-neutral allowlist may skip release construction and environment deployment; ambiguity fails closed to delivery.
+invariant: Only a proven empty or runtime-neutral cumulative diff from the accepted production release to current main may skip deployment; a neutral successor inherits pending runtime impact, and missing accepted evidence cannot become completion.
 scope:
   - .github/workflows/delivery-v2.yml
   - scripts/classify-deployment-impact.mjs
   - scripts/lib/deployment-impact.mjs
+  - scripts/verify-production-baseline.mjs
 prevention:
   - kind: regression-test
     path: scripts/test/deployment-impact.test.mjs
   - kind: regression-test
     path: scripts/test/delivery-v2-workflow.test.mjs
+  - kind: regression-test
+    path: scripts/test/production-baseline.test.mjs
 recurrenceCount: 2
 status: active

@@ -840,6 +840,44 @@ test('delivery summary v2 is accepted only with bounded terminal and supersessio
   );
 });
 
+test('lock-time supersession preserves raw job success without claiming production verification', () => {
+  const noMutation = deliverySummary({
+    rawJobs: { test: 'success', production: 'success' },
+    mutation: { guard: 'superseded', started: false, artifact: null, configurationUncertain: false },
+  });
+  assert.equal(isAcceptedDeliverySummary(noMutation, HEAD_SHA), true);
+  assert.equal(
+    validateSourceRun({
+      run: run({
+        path: '.github/workflows/delivery-v2.yml',
+        event: 'push',
+        head_branch: 'main',
+        conclusion: 'success',
+      }),
+      deliverySummary: noMutation,
+    }).accepted,
+    true,
+  );
+  for (const mutation of [
+    undefined,
+    {},
+    { ...noMutation.mutation, started: true },
+    { ...noMutation.mutation, guard: 'proceed' },
+    { ...noMutation.mutation, artifact: 'mutation-record' },
+    { ...noMutation.mutation, configurationUncertain: true },
+  ]) {
+    assert.equal(isAcceptedDeliverySummary({ ...noMutation, mutation }, HEAD_SHA), false);
+  }
+  assert.equal(isAcceptedDeliverySummary({ ...noMutation, supersededBy: HEAD_SHA }, HEAD_SHA), false);
+  assert.equal(
+    isAcceptedDeliverySummary(
+      { ...noMutation, terminalOutcome: 'verified', superseded: false, supersededBy: null, production: 'passed' },
+      HEAD_SHA,
+    ),
+    false,
+  );
+});
+
 test('same exact head and fingerprint deduplicates without another callback or issue', () => {
   const value = incident();
   const issue = {
