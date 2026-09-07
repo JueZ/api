@@ -57,6 +57,7 @@ function fixture() {
     redditClientSecret: { value: LOW_ENTROPY_SECRET },
     bringPassword: { value: SUPPLIED_PASSWORD },
     budgetAmount: { value: 15 },
+    budgetStartDate: { value: '2026-08-01' },
     releaseRetentionPolicy: { value: retentionPolicy },
   };
   const observed = {
@@ -73,16 +74,33 @@ function fixture() {
         sku: { name: 'Y1', tier: 'Dynamic' },
       },
     },
-    web: { alwaysOn: true, linuxFxVersion: 'NODE|22', minimumElasticInstanceCount: 1 },
+    web: {
+      linuxFxVersion: 'NODE|22',
+      minimumElasticInstanceCount: 1,
+      netFrameworkVersion: 'v4.0',
+      localMySqlEnabled: false,
+      cors: { allowedOrigins: ['https://app.example.test'], supportCredentials: false },
+      ftpsState: 'Disabled',
+      minTlsVersion: '1.2',
+    },
     managedSettings: {
       BRING_PASSWORD: `@Microsoft.KeyVault(SecretUri=${secretVersion})`,
       FEATURE_MODE: 'production',
     },
     secrets: [{ name: 'bring-password', versionUri: secretVersion, attributes: { enabled: true } }],
     roles: {
-      [roleId.toLowerCase()]: { principalId: '10000000-0000-0000-0000-000000000001' },
+      [roleId.toLowerCase()]: {
+        principalId: '10000000-0000-0000-0000-000000000001',
+        principalType: 'ServicePrincipal',
+      },
     },
     retentionPolicy,
+    resourceSettings: {
+      [budgetId.toLowerCase()]: {
+        type: 'Microsoft.Consumption/budgets',
+        properties: { timePeriod: { startDate: '2026-08-01T00:00:00Z', endDate: '2036-08-01T00:00:00Z' } },
+      },
+    },
   };
   const inventory = [
     { id: functionAppId, type: 'Microsoft.Web/sites' },
@@ -139,6 +157,7 @@ function modify(resourceId, path, extra = {}) {
 function decide(state, overrides = {}) {
   return decideApplicationOnly({
     record: state.record,
+    inventory: state.record.inventory,
     parameters: state.parameters,
     compiledTemplate: state.compiledTemplate,
     toolchain: state.toolchain,
@@ -154,6 +173,378 @@ function assertFull(decision, message) {
   assert.equal(decision.mode, 'full', message);
   assert.ok(decision.reasons.length > 0, 'full reconciliation must carry a reason');
 }
+
+// Response kinds and values from the protected Azure shadow run. Resource names,
+// identities and app-setting expression contents are synthetic; no cloud payload
+// or secret values are retained in the fixture.
+function azureDefaultsFixture() {
+  const state = fixture();
+  const scope = state.ids.storageId.split('/providers/')[0] + '/providers/';
+  const extras = [
+    [
+      'insights',
+      `${scope}Microsoft.Insights/components/api-prod`,
+      'Microsoft.Insights/components',
+      { Flow_Type: null, Request_Source: null },
+    ],
+    [
+      'vault',
+      `${scope}Microsoft.KeyVault/vaults/api-vault`,
+      'Microsoft.KeyVault/vaults',
+      { networkAcls: null, publicNetworkAccess: 'Enabled' },
+    ],
+    [
+      'blobs',
+      `${state.ids.storageId}/blobServices/default`,
+      'Microsoft.Storage/storageAccounts/blobServices',
+      { deleteRetentionPolicy: { enabled: true, days: 30, allowPermanentDelete: false } },
+    ],
+    [
+      'container',
+      `${state.ids.storageId}/blobServices/default/containers/function-releases`,
+      'Microsoft.Storage/storageAccounts/blobServices/containers',
+      { defaultEncryptionScope: '$account-encryption-key', denyEncryptionScopeOverride: false },
+    ],
+  ];
+  for (const [key, id, type, properties] of extras) {
+    state.ids[key] = id;
+    state.record.inventory.push({ id, type });
+    state.observed.resourceSettings[id.toLowerCase()] = { type, properties };
+  }
+  const delta = (path, propertyChangeType, before, after) => ({
+    path,
+    propertyChangeType,
+    before,
+    after,
+    children: null,
+  });
+  const changes = [
+    [state.ids.budgetId, [delta('properties.timePeriod.endDate', 'Delete', '2036-08-01T00:00:00Z', null)]],
+    [
+      state.ids.insights,
+      [
+        delta('properties.Flow_Type', 'Create', null, 'Bluefield'),
+        delta('properties.Request_Source', 'Create', null, 'rest'),
+      ],
+    ],
+    [
+      state.ids.vault,
+      [delta('properties.networkAcls', 'Create', null, { bypass: 'AzureServices', defaultAction: 'Allow' })],
+    ],
+    [state.ids.blobs, [delta('properties.deleteRetentionPolicy.allowPermanentDelete', 'Delete', false, null)]],
+    [
+      state.ids.container,
+      [
+        delta('properties.defaultEncryptionScope', 'Delete', '$account-encryption-key', null),
+        delta('properties.denyEncryptionScopeOverride', 'Delete', false, null),
+      ],
+    ],
+    [
+      state.ids.roleId,
+      [
+        delta(
+          'properties.principalId',
+          'Modify',
+          state.observed.site.identity.principalId,
+          `[reference('${state.ids.functionAppId}', '2023-12-01', 'full').identity.principalId]`,
+        ),
+        delta('properties.principalType', 'NoEffect', null, 'ServicePrincipal'),
+      ],
+    ],
+    [
+      state.ids.functionAppId,
+      [
+        delta('properties.siteConfig.minimumElasticInstanceCount', 'Modify', 1, 0),
+        ...['cors', 'ftpsState', 'localMySqlEnabled', 'minTlsVersion'].map((key) =>
+          delta(`properties.siteConfig.${key}`, 'Create', null, state.observed.web[key]),
+        ),
+        delta('properties.siteConfig.netFrameworkVersion', 'Create', null, 'v4.6'),
+      ],
+    ],
+    [
+      state.ids.appSettingsId,
+      [
+        delta(
+          'properties',
+          'Create',
+          null,
+          "[union(variables('retainedReleaseIdentity'),variables('managedSettings'))]",
+        ),
+      ],
+    ],
+  ].map(([resourceId, entries]) => ({ resourceId, changeType: 'Modify', delta: entries }));
+  state.whatIf = completeWhatIf(state.record, new Map(changes.map((entry) => [entry.resourceId.toLowerCase(), entry])));
+  state.whatIf.changes.push({
+    resourceId: `${scope}Microsoft.Storage/storageAccounts/retiredaccount`,
+    changeType: 'Ignore',
+  });
+  state.whatIf.changes.find((change) => change.resourceId === state.ids.planId).delta = [
+    delta('sku.tier', 'NoEffect', null, 'Dynamic'),
+  ];
+  return state;
+}
+
+test('NoChange permits only independently verified NoEffect role or hosting-plan metadata', () => {
+  const state = azureDefaultsFixture();
+  const role = state.whatIf.changes.find((change) => change.resourceId === state.ids.roleId);
+  role.changeType = 'NoChange';
+  role.delta = role.delta.filter((delta) => delta.path === 'properties.principalType');
+  assert.equal(decide(state, { whatIf: state.whatIf }).mode, 'application-only');
+  role.delta[0].path = 'properties.condition';
+  assertFull(decide(state, { whatIf: state.whatIf }));
+  const wrongPlan = azureDefaultsFixture();
+  wrongPlan.whatIf.changes.find((change) => change.resourceId === wrongPlan.ids.planId).delta[0].after = 'Premium';
+  assertFull(decide(wrongPlan, { whatIf: wrongPlan.whatIf }));
+});
+
+test('null child lists are leaf properties while malformed or empty nested lists remain incomplete', () => {
+  for (const children of [{}, 'unknown', []]) {
+    const state = azureDefaultsFixture();
+    state.whatIf.changes.find((change) => change.resourceId === state.ids.budgetId).delta[0].children = children;
+    assertFull(decide(state, { whatIf: state.whatIf }));
+  }
+});
+
+test('Azure omitted defaults and reference substitutions qualify only with complete accepted current state', () => {
+  const state = azureDefaultsFixture();
+  assert.deepEqual(decide(state, { whatIf: state.whatIf }), { mode: 'application-only', reasons: [] });
+});
+
+test('each Azure default exception rejects a different provider value or change kind', async (t) => {
+  const initial = azureDefaultsFixture();
+  for (const [changeIndex, change] of initial.whatIf.changes.entries()) {
+    for (const [deltaIndex, delta] of (change.delta ?? []).entries()) {
+      if (delta.path === 'properties.principalId') continue; // Existing reference substitution has independent identity coverage.
+      await t.test(`${changeIndex}:${delta.path}`, () => {
+        const state = azureDefaultsFixture();
+        const altered = state.whatIf.changes[changeIndex].delta[deltaIndex];
+        altered.propertyChangeType = 'Array';
+        assertFull(decide(state, { whatIf: state.whatIf }));
+        altered.propertyChangeType = delta.propertyChangeType;
+        altered.after = 'unrecognized-provider-value';
+        assertFull(decide(state, { whatIf: state.whatIf }));
+      });
+    }
+  }
+});
+
+test('actual out-of-band defaults and policy changes cannot be relabeled as unchanged Azure noise', async (t) => {
+  const mutations = [
+    [
+      'budget expiry',
+      (s) => {
+        s.observed.resourceSettings[s.ids.budgetId.toLowerCase()].properties.timePeriod.endDate =
+          '2027-08-01T00:00:00Z';
+      },
+    ],
+    [
+      'vault access',
+      (s) => {
+        s.observed.resourceSettings[s.ids.vault.toLowerCase()].properties.networkAcls = { defaultAction: 'Deny' };
+      },
+    ],
+    [
+      'insights metadata',
+      (s) => {
+        s.observed.resourceSettings[s.ids.insights.toLowerCase()].properties.Request_Source = 'changed';
+      },
+    ],
+    [
+      'permanent deletion',
+      (s) => {
+        s.observed.resourceSettings[s.ids.blobs.toLowerCase()].properties.deleteRetentionPolicy.allowPermanentDelete =
+          true;
+      },
+    ],
+    [
+      'encryption scope',
+      (s) => {
+        s.observed.resourceSettings[s.ids.container.toLowerCase()].properties.defaultEncryptionScope = 'foreign-scope';
+      },
+    ],
+    [
+      'web setting',
+      (s) => {
+        s.observed.web.localMySqlEnabled = true;
+      },
+    ],
+  ];
+  for (const [name, mutate] of mutations)
+    await t.test(name, () => {
+      const state = azureDefaultsFixture();
+      state.observed = structuredClone(state.observed);
+      mutate(state);
+      assertFull(decide(state, { whatIf: state.whatIf }));
+    });
+});
+
+test('ignored unrelated resources never replace managed coverage or permit foreign, duplicate, or changing resources', async (t) => {
+  const cases = [
+    [
+      'foreign ignore',
+      (s) => {
+        s.whatIf.changes.at(-1).resourceId = s.whatIf.changes.at(-1).resourceId.replace('rg-api-prod', 'rg-foreign');
+      },
+    ],
+    [
+      'duplicate ignore',
+      (s) => {
+        s.whatIf.changes.push(structuredClone(s.whatIf.changes.at(-1)));
+      },
+    ],
+    [
+      'managed ignore',
+      (s) => {
+        s.whatIf.changes.find((c) => c.resourceId === s.ids.container).changeType = 'Ignore';
+      },
+    ],
+    [
+      'unmanaged modification',
+      (s) => {
+        s.whatIf.changes.at(-1).changeType = 'Modify';
+      },
+    ],
+    [
+      'ignored delta',
+      (s) => {
+        s.whatIf.changes.at(-1).delta = [{ path: 'properties.enabled', propertyChangeType: 'Delete' }];
+      },
+    ],
+    [
+      'missing managed child',
+      (s) => {
+        s.whatIf.changes = s.whatIf.changes.filter((c) => c.resourceId !== s.ids.appSettingsId);
+      },
+    ],
+    [
+      'missing captured default',
+      (s) => {
+        s.observed = structuredClone(s.observed);
+        delete s.observed.resourceSettings[s.ids.blobs.toLowerCase()];
+      },
+    ],
+  ];
+  for (const [name, mutate] of cases)
+    await t.test(name, () => {
+      const state = azureDefaultsFixture();
+      mutate(state);
+      assertFull(decide(state, { whatIf: state.whatIf }));
+    });
+});
+
+test('accepted Azure defaults cannot hide an unrelated changed property or expired budget', () => {
+  const state = azureDefaultsFixture();
+  state.whatIf.changes
+    .find((c) => c.resourceId === state.ids.vault)
+    .delta.push({
+      path: 'properties.enableRbacAuthorization',
+      propertyChangeType: 'Modify',
+      before: true,
+      after: false,
+    });
+  assertFull(decide(state, { whatIf: state.whatIf }));
+  const expired = azureDefaultsFixture();
+  assertFull(decide(expired, { whatIf: expired.whatIf, now: Date.UTC(2036, 8, 7) }));
+});
+
+test('a matching but incorrect accepted default is not permission to skip its repair', async (t) => {
+  const cases = [
+    [
+      'wrong budget interval',
+      (s) => {
+        s.observed.resourceSettings[s.ids.budgetId.toLowerCase()].properties.timePeriod.endDate =
+          '2027-08-01T00:00:00Z';
+        s.whatIf.changes.find((c) => c.resourceId === s.ids.budgetId).delta[0].before = '2027-08-01T00:00:00Z';
+      },
+    ],
+    [
+      'vault denial',
+      (s) => {
+        s.observed.resourceSettings[s.ids.vault.toLowerCase()].properties.networkAcls = { defaultAction: 'Deny' };
+      },
+    ],
+    [
+      'permanent deletion',
+      (s) => {
+        s.observed.resourceSettings[s.ids.blobs.toLowerCase()].properties.deleteRetentionPolicy.allowPermanentDelete =
+          true;
+      },
+    ],
+    [
+      'custom encryption',
+      (s) => {
+        s.observed.resourceSettings[s.ids.container.toLowerCase()].properties.defaultEncryptionScope = 'custom-scope';
+      },
+    ],
+    [
+      'wrong role type',
+      (s) => {
+        s.observed.roles[s.ids.roleId.toLowerCase()].principalType = 'User';
+      },
+    ],
+    [
+      'foreign framework',
+      (s) => {
+        s.observed.web.netFrameworkVersion = 'unrecognized';
+      },
+    ],
+  ];
+  for (const [name, mutate] of cases)
+    await t.test(name, () => {
+      const state = azureDefaultsFixture();
+      mutate(state);
+      // This fixture deliberately shares record.observed and live observed.
+      assert.equal(state.record.observed, state.observed);
+      assertFull(decide(state, { whatIf: state.whatIf }));
+    });
+});
+
+test('Succeeded and exact ID coverage cannot conceal short-circuited analysis', async (t) => {
+  const cases = [
+    [
+      'root diagnostic',
+      (s) => {
+        s.whatIf.diagnostics = [{ code: 'ShortCircuit' }];
+      },
+    ],
+    [
+      'potential change',
+      (s) => {
+        s.whatIf.potentialChanges = [{ resourceId: 'unresolved' }];
+      },
+    ],
+    [
+      'managed unsupported reason',
+      (s) => {
+        s.whatIf.changes[0].unsupportedReason = 'NotAnalyzed';
+      },
+    ],
+    [
+      'ignored unsupported reason',
+      (s) => {
+        s.whatIf.changes.at(-1).unsupportedReason = 'NestedLimit';
+      },
+    ],
+    [
+      'child diagnostic',
+      (s) => {
+        s.whatIf.changes[0].diagnostics = ['incomplete'];
+      },
+    ],
+    [
+      'malformed diagnostic',
+      (s) => {
+        s.whatIf.diagnostics = {};
+      },
+    ],
+  ];
+  for (const [name, mutate] of cases)
+    await t.test(name, () => {
+      const state = azureDefaultsFixture();
+      mutate(state);
+      assertFull(decide(state, { whatIf: state.whatIf }));
+    });
+});
 
 test('private accepted record commits inputs without retaining supplied secret or password values', () => {
   const state = fixture();
@@ -242,6 +633,23 @@ test('foreign storage, foreign origin, and changed bytes cannot reuse a trusted 
 
 test('exact unchanged inputs, accepted live observations, and complete NoChange evidence qualify', () => {
   assert.deepEqual(decide(fixture()), { mode: 'application-only', reasons: [] });
+});
+
+test('legacy accepted configuration requires a new full deployment before using expanded resource evidence', () => {
+  const state = fixture();
+  const record = { ...state.record, schemaVersion: 1 };
+  delete record.observed.resourceSettings;
+  assertFull(decide(state, { record }));
+});
+
+test('a different deployment inventory cannot reuse an otherwise matching accepted configuration', () => {
+  const state = fixture();
+  assertFull(decide(state, { inventory: undefined }));
+  assertFull(decide(state, { inventory: state.record.inventory.slice(1) }));
+  const changed = structuredClone(state.record.inventory);
+  changed[0].id += '-replacement';
+  assertFull(decide(state, { inventory: changed }));
+  assert.equal(decide(state, { inventory: [...state.record.inventory].reverse() }).mode, 'application-only');
 });
 
 test('a changed low-entropy secret input selects full reconciliation even when the live vault is unchanged', () => {
