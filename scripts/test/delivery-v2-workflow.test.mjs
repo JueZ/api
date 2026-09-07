@@ -16,6 +16,37 @@ function needs(job) {
   return Array.isArray(job.needs) ? job.needs : job.needs ? [job.needs] : [];
 }
 
+test('approved package authorization preflight precedes mutation and post-deployment smoke remains required', () => {
+  const steps = environmentWorkflow.jobs.deploy.steps;
+  const index = (name) => steps.findIndex((step) => step.name === name);
+  const verified = index('Verify immutable release bundle');
+  const mint = index('Mint smoke identity before environment mutation');
+  const preflight = index('Verify smoke identity against the approved package before mutation');
+  const intent = index('Persist production mutation intent before first write');
+  const firstWrite = index('Record production mutation receipt before infrastructure or application writes');
+  const infra = index('Deploy Bicep infrastructure');
+  const smokeMint = index('Mint authenticated smoke token with GitHub OIDC');
+  const smoke = index('Run authenticated smoke tests');
+  assert.ok(
+    verified >= 0 &&
+      mint > verified &&
+      preflight > mint &&
+      intent > preflight &&
+      firstWrite > intent &&
+      infra > firstWrite,
+  );
+  assert.ok(smokeMint > infra && smoke > smokeMint);
+  assert.match(steps[preflight].run, /release\/functionapp\.zip/);
+  assert.match(steps[preflight].run, /--auth-module.*dist\/shared\/security\/auth\.js/);
+  assert.match(steps[preflight].run, /ALLOW_ROLLBACK.*true.*reconcileConfiguration/);
+  assert.match(steps[preflight].run, /az rest --method post.*\| node scripts\/verify-smoke-identity\.mjs/s);
+  assert.match(steps[preflight].run, /--installed-settings-stdin/);
+  for (const flag of ['WEATHER_SMOKE_ENABLED', 'YOUTUBE_TRANSCRIPT_SMOKE_ENABLED']) {
+    assert.equal(steps[preflight].env[flag], steps[smoke].env[flag]);
+  }
+  assert.equal(steps[preflight].if, steps[smoke].if);
+});
+
 test('delivery v2 is a protected-main push DAG with a guarded manual cutover surface', () => {
   assert.deepEqual(workflow.on.push.branches, ['main']);
   assert.ok(workflow.on.workflow_dispatch.inputs.mode.options.includes('dry-run'));
