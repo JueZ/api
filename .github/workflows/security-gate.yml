@@ -70,7 +70,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Scan for secrets
@@ -90,7 +90,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
@@ -130,7 +130,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Initialize CodeQL
         uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # tag=v4
@@ -156,7 +156,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Initialize CodeQL
         uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # tag=v4
@@ -180,7 +180,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Scan relevant workspace
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # tag=v0.36.0
@@ -209,14 +209,51 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          path: .candidate
+          persist-credentials: false
+      - name: Checkout protected base aggregate
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .trusted-base
           persist-credentials: false
       - name: Verify explicit Security Gate dependencies
+        shell: bash
         env:
-          EXACT_SHA: ${{ needs.classify.outputs.head_sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CANDIDATE_ROOT: ${{ github.workspace }}/.candidate
+          EVENT_NAME: ${{ github.event_name }}
+          EXACT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           FLAGS_JSON: ${{ needs.classify.outputs.flags_json }}
           GATE: security
           NEEDS_JSON: ${{ toJson(needs) }}
           PROFILE: ${{ needs.classify.outputs.profile }}
           STARTED_AT_EPOCH: ${{ needs.classify.outputs.started_at_epoch }}
-        run: node scripts/verify-gate-results.mjs
+          TRUSTED_ROOT: ${{ github.workspace }}/.trusted-base
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != 'pull_request' ]; then
+            (
+              cd "$CANDIDATE_ROOT"
+              node scripts/verify-gate-results.mjs
+            )
+            exit 0
+          fi
+
+          test "$(git -C "$CANDIDATE_ROOT" rev-parse HEAD)" = "$EXACT_SHA"
+          test "$(git -C "$TRUSTED_ROOT" rev-parse HEAD)" = "$BASE_SHA"
+          trusted_output="$RUNNER_TEMP/security-gate-trusted-classification"
+          rm -f "$trusted_output"
+          (
+            cd "$CANDIDATE_ROOT"
+            node "$TRUSTED_ROOT/scripts/classify-pr-paths.mjs" \
+              --base "$BASE_SHA" \
+              --head "$EXACT_SHA" \
+              --output "$trusted_output" >/dev/null
+          )
+          trusted_flags_json="$(sed -n 's/^flags_json=//p' "$trusted_output")"
+          test -n "$trusted_flags_json"
+          FLAGS_JSON="$trusted_flags_json" node "$TRUSTED_ROOT/scripts/verify-gate-results.mjs"

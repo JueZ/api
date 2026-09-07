@@ -86,16 +86,96 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+          path: .candidate
+          persist-credentials: false
+      - name: Checkout protected base policy
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .trusted-base
           persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: package-lock.json
+      - name: Install protected base policy dependencies
+        if: github.event_name == 'pull_request'
+        working-directory: .trusted-base
+        run: npm ci --ignore-scripts --workspaces=false
+      - name: Verify candidate with protected base policy
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CANDIDATE_CLASSIFIER_OUTPUTS: ${{ toJson(needs.classify.outputs) }}
+          CANDIDATE_FLAGS_JSON: ${{ needs.classify.outputs.flags_json }}
+          CANDIDATE_ROOT: ${{ github.workspace }}/.candidate
+          CLASSIFIED_BASE_SHA: ${{ needs.classify.outputs.base_sha }}
+          CLASSIFIED_HEAD_SHA: ${{ needs.classify.outputs.head_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TRUSTED_ROOT: ${{ github.workspace }}/.trusted-base
+        run: |
+          set -euo pipefail
+          test "$(git -C "$CANDIDATE_ROOT" rev-parse HEAD)" = "$HEAD_SHA"
+          test "$(git -C "$TRUSTED_ROOT" rev-parse HEAD)" = "$BASE_SHA"
+          test "$CLASSIFIED_BASE_SHA" = "$BASE_SHA"
+          test "$CLASSIFIED_HEAD_SHA" = "$HEAD_SHA"
+
+          (
+            cd "$CANDIDATE_ROOT"
+            REPOSITORY_ROOT="$CANDIDATE_ROOT" \
+              POLICY_ROOT="$TRUSTED_ROOT" \
+              BASE_REF="$BASE_SHA" \
+              node "$TRUSTED_ROOT/scripts/policy-guardrails.mjs"
+          )
+
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { join } from 'node:path';
+          import { pathToFileURL } from 'node:url';
+
+          const candidateRoot = process.env.CANDIDATE_ROOT;
+          const trustedRoot = process.env.TRUSTED_ROOT;
+          const trustedModule = (path) => import(pathToFileURL(join(trustedRoot, path)));
+          const { classifyGitRange } = await trustedModule('scripts/classify-pr-paths.mjs');
+          const { loadAutonomousPolicy } = await trustedModule('scripts/lib/autonomous-policy.mjs');
+          const { workflowPolicyFindings } = await trustedModule('scripts/lib/workflow-policy.mjs');
+
+          const trustedClassification = classifyGitRange(process.env.BASE_SHA, process.env.HEAD_SHA, candidateRoot);
+          const candidateOutputs = JSON.parse(process.env.CANDIDATE_CLASSIFIER_OUTPUTS);
+          assert.deepEqual(
+            JSON.parse(process.env.CANDIDATE_FLAGS_JSON),
+            trustedClassification.flags,
+            'candidate classifier diverged from protected base',
+          );
+          const consumedFlags = [
+            'backend',
+            'frontend',
+            'contracts',
+            'dependencies',
+            'infrastructure',
+            'workflow',
+            'learning',
+            'privileged',
+            'operations',
+            'agentEnvironment',
+          ];
+          for (const flag of consumedFlags) {
+            const expected = trustedClassification.flags[flag];
+            const output = flag.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`);
+            assert.equal(candidateOutputs[output], String(expected), `candidate classifier output ${output} diverged`);
+          }
+          loadAutonomousPolicy(join(candidateRoot, '.github/autonomous-policy.yml'));
+          const baselinePolicy = loadAutonomousPolicy(join(trustedRoot, '.github/autonomous-policy.yml'));
+          const findings = await workflowPolicyFindings(join(candidateRoot, '.github/workflows'), baselinePolicy);
+          assert.deepEqual(findings, [], `candidate workflow policy findings:\n${findings.join('\n')}`);
+          NODE
       - name: Install policy and formatting dependencies
+        working-directory: .candidate
         run: npm ci --ignore-scripts
       - name: Check exact diff and changed-file formatting
+        working-directory: .candidate
         shell: bash
         env:
           BASE_SHA: ${{ needs.classify.outputs.base_sha }}
@@ -115,6 +195,7 @@ jobs:
             ./node_modules/.bin/prettier --check "${format_files[@]}"
           fi
       - name: Validate deterministic repository policy
+        working-directory: .candidate
         shell: bash
         env:
           BASE_REF: ${{ needs.classify.outputs.base_sha }}
@@ -144,6 +225,7 @@ jobs:
               scripts/test/agent-learning-triage.test.mjs
           fi
       - name: Enforce cost and dependency policy when applicable
+        working-directory: .candidate
         shell: bash
         env:
           BASE_SHA: ${{ needs.classify.outputs.base_sha }}
@@ -390,13 +472,50 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          path: .candidate
+          persist-credentials: false
+      - name: Checkout protected base aggregate
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .trusted-base
           persist-credentials: false
       - name: Verify explicit PR Gate dependencies
+        shell: bash
         env:
-          EXACT_SHA: ${{ needs.classify.outputs.head_sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CANDIDATE_ROOT: ${{ github.workspace }}/.candidate
+          EVENT_NAME: ${{ github.event_name }}
+          EXACT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           FLAGS_JSON: ${{ needs.classify.outputs.flags_json }}
           GATE: pr
           NEEDS_JSON: ${{ toJson(needs) }}
           PROFILE: ${{ needs.classify.outputs.profile }}
           STARTED_AT_EPOCH: ${{ needs.classify.outputs.started_at_epoch }}
-        run: node scripts/verify-gate-results.mjs
+          TRUSTED_ROOT: ${{ github.workspace }}/.trusted-base
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != 'pull_request' ]; then
+            (
+              cd "$CANDIDATE_ROOT"
+              node scripts/verify-gate-results.mjs
+            )
+            exit 0
+          fi
+
+          test "$(git -C "$CANDIDATE_ROOT" rev-parse HEAD)" = "$EXACT_SHA"
+          test "$(git -C "$TRUSTED_ROOT" rev-parse HEAD)" = "$BASE_SHA"
+          trusted_output="$RUNNER_TEMP/pr-gate-trusted-classification"
+          rm -f "$trusted_output"
+          (
+            cd "$CANDIDATE_ROOT"
+            node "$TRUSTED_ROOT/scripts/classify-pr-paths.mjs" \
+              --base "$BASE_SHA" \
+              --head "$EXACT_SHA" \
+              --output "$trusted_output" >/dev/null
+          )
+          trusted_flags_json="$(sed -n 's/^flags_json=//p' "$trusted_output")"
+          test -n "$trusted_flags_json"
+          FLAGS_JSON="$trusted_flags_json" node "$TRUSTED_ROOT/scripts/verify-gate-results.mjs"

@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { validateReleaseLedger } from '../validate-release-ledger.mjs';
-import { forbiddenDiffFindings, highRiskPaths, learningControlPlaneFindings } from '../policy-guardrails.mjs';
+import {
+  forbiddenDiffFindings,
+  highRiskPaths,
+  learningControlPlaneFindings,
+  untrackedFileDiff,
+} from '../policy-guardrails.mjs';
 import {
   DEFAULT_SMOKE_FETCH_TIMEOUT_MS,
   fetchJson,
@@ -17,6 +22,10 @@ import {
   sanitizeTokenEndpointErrorCode,
   selectServiceAuthConfig,
 } from '../mint-smoke-token.mjs';
+
+function gitPatch(path, ...lines) {
+  return [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, '@@ -1 +1 @@', ...lines].join('\n');
+}
 
 test('release ledger validation accepts required runtime truth fields', () => {
   const ledger = {
@@ -54,6 +63,123 @@ test('release ledger validation accepts required runtime truth fields', () => {
 test('policy guardrails detect high-risk paths and removed telemetry', () => {
   assert.deepEqual(highRiskPaths(['scripts/check-telemetry.mjs', 'README.md']), ['scripts/check-telemetry.mjs']);
   assert.ok(forbiddenDiffFindings('- npm run ops:check-telemetry').includes('telemetry-verification-removed'));
+});
+
+test('policy guardrails do not accept inert text as replacement evidence', () => {
+  const diff = [
+    gitPatch(
+      '.github/workflows/delivery.yml',
+      '-      run: node scripts/check-telemetry.mjs',
+      '+      name: check-telemetry',
+      '+      run: echo telemetry skipped # node scripts/check-telemetry.mjs',
+    ),
+    gitPatch('docs/operations.md', '-Old guidance', '+Run node scripts/check-telemetry.mjs'),
+    gitPatch(
+      'scripts/test/guardrail.test.mjs',
+      "-test('old', () => {});",
+      "+test('telemetry', () => run('node scripts/check-telemetry.mjs'));",
+    ),
+    untrackedFileDiff(
+      'scripts/test/new-guardrail.test.mjs',
+      "test('telemetry', () => run('node scripts/check-telemetry.mjs'));",
+    ),
+    gitPatch('scripts/policy-guardrails.mjs', '-const oldRule = true;', '+const scannerExample = /check-telemetry/;'),
+  ].join('\n');
+
+  assert.ok(forbiddenDiffFindings(diff).includes('telemetry-verification-removed'));
+});
+
+test('policy guardrails accept an executable safeguard move', () => {
+  const diff = [
+    gitPatch(
+      '.github/workflows/delivery.yml',
+      '-      run: node scripts/check-telemetry.mjs',
+      '+      run: node scripts/verify-telemetry.mjs',
+    ),
+    untrackedFileDiff('scripts/verify-telemetry.mjs', "await run('node scripts/check-telemetry.mjs');"),
+  ].join('\n');
+
+  assert.ok(!forbiddenDiffFindings(diff).includes('telemetry-verification-removed'));
+});
+
+test('policy guardrails ignore prose-only safeguard edits', () => {
+  const diff = gitPatch(
+    'docs/operations.md',
+    '-Run npm run ops:check-telemetry before release.',
+    '+Run the telemetry verifier before release.',
+  );
+
+  assert.ok(!forbiddenDiffFindings(diff).includes('telemetry-verification-removed'));
+});
+
+test('policy guardrails do not treat changed block-comment text as executable', () => {
+  const commentOnlyRemoval = gitPatch(
+    'scripts/verify.mjs',
+    ' /*',
+    "-await run('node scripts/check-telemetry.mjs');",
+    '+Telemetry example removed.',
+    ' */',
+  );
+  assert.ok(!forbiddenDiffFindings(commentOnlyRemoval).includes('telemetry-verification-removed'));
+
+  const commentOnlyReplacement = gitPatch(
+    'scripts/verify.mjs',
+    "-await run('node scripts/check-telemetry.mjs');",
+    ' /*',
+    "+await run('node scripts/check-telemetry.mjs');",
+    ' */',
+  );
+  assert.ok(forbiddenDiffFindings(commentOnlyReplacement).includes('telemetry-verification-removed'));
+});
+
+test('policy guardrails detect indented fail-closed shell downgrades but ignore comments', () => {
+  for (const diff of [
+    gitPatch('.github/workflows/delivery.yml', '      run: |', '-            exit 1', '+            exit 0'),
+    gitPatch('scripts/deploy.sh', '-            exit 1', '+            exit 0'),
+  ]) {
+    assert.ok(forbiddenDiffFindings(diff).includes('fail-closed-removed'));
+  }
+
+  for (const diff of [
+    gitPatch('.github/workflows/delivery.yml', '-            # exit 1', '+            # exit 0'),
+    gitPatch('scripts/deploy.sh', '-            # exit 1', '+            # exit 0'),
+  ]) {
+    assert.ok(!forbiddenDiffFindings(diff).includes('fail-closed-removed'));
+  }
+});
+
+test('policy guardrails require executable API auth replacement evidence', () => {
+  const removedAuth = [
+    gitPatch(
+      'apps/api/src/shared/security/auth.ts',
+      '-const claims = await jwtVerify(token, jwks);',
+      '+const claims = decodeJwt(token); // jwtVerify(token, jwks)',
+    ),
+    gitPatch(
+      'apps/api/test/auth.test.mjs',
+      "-test('old auth', () => {});",
+      "+test('JWT verification', () => jwtVerify(token, jwks));",
+    ),
+    untrackedFileDiff(
+      'apps/api/src/shared/security/auth.spec.ts',
+      "test('co-located JWT verification', () => jwtVerify(token, jwks));",
+    ),
+  ].join('\n');
+  assert.ok(forbiddenDiffFindings(removedAuth).includes('jwt-validation-removed'));
+
+  const movedAuth = [
+    gitPatch(
+      'apps/api/src/shared/security/auth.ts',
+      '-const claims = await jwtVerify(token, jwks);',
+      "+import { verifyToken } from './verify-token.js';",
+      '+const claims = await verifyToken(token, jwks);',
+    ),
+    untrackedFileDiff(
+      'apps/api/src/shared/security/verify-token.ts',
+      'export const verifyToken = (token, jwks) => jwtVerify(token, jwks);',
+    ),
+  ].join('\n');
+  assert.ok(!forbiddenDiffFindings(movedAuth).includes('jwt-validation-removed'));
 });
 
 test('policy guardrails reject a second learning control plane', () => {
