@@ -86,6 +86,74 @@ function project(value, keys) {
   return result;
 }
 
+const resourceSettingsVersions = new Map([
+  ['Microsoft.Consumption/budgets', '2024-08-01'],
+  ['Microsoft.Insights/components', '2020-02-02'],
+  ['Microsoft.KeyVault/vaults', '2023-07-01'],
+  ['Microsoft.Storage/storageAccounts/blobServices', '2023-05-01'],
+  ['Microsoft.Storage/storageAccounts/blobServices/containers', '2023-05-01'],
+]);
+const nonemptyString = (value) => typeof value === 'string' && value.trim().length > 0;
+
+async function inspectInBatches(items, inspect) {
+  const results = [];
+  for (let offset = 0; offset < items.length; offset += 5)
+    results.push(...(await Promise.all(items.slice(offset, offset + 5).map(inspect))));
+  return results;
+}
+
+function projectResourceSettings(id, type, response) {
+  if (
+    !response ||
+    response.error ||
+    (Object.hasOwn(response, 'id') &&
+      (typeof response.id !== 'string' || response.id.toLowerCase() !== id.toLowerCase())) ||
+    (Object.hasOwn(response, 'type') &&
+      (typeof response.type !== 'string' || response.type.toLowerCase() !== type.toLowerCase()))
+  )
+    throw new Error('Managed resource response identity is unavailable.');
+  const properties = response.properties;
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties))
+    throw new Error('Managed resource properties are unavailable.');
+  switch (type) {
+    case 'Microsoft.Consumption/budgets': {
+      const timePeriod = project(properties.timePeriod, ['startDate', 'endDate']);
+      if (!Object.values(timePeriod).every(nonemptyString))
+        throw new Error('Managed budget time period is unavailable.');
+      return { timePeriod };
+    }
+    case 'Microsoft.Insights/components':
+      return { Flow_Type: properties.Flow_Type ?? null, Request_Source: properties.Request_Source ?? null };
+    case 'Microsoft.KeyVault/vaults': {
+      const { publicNetworkAccess } = project(properties, ['publicNetworkAccess']);
+      if (!nonemptyString(publicNetworkAccess)) throw new Error('Managed vault network policy is unavailable.');
+      return { networkAcls: properties.networkAcls ?? null, publicNetworkAccess };
+    }
+    case 'Microsoft.Storage/storageAccounts/blobServices': {
+      const deleteRetentionPolicy = project(properties.deleteRetentionPolicy, [
+        'enabled',
+        'days',
+        'allowPermanentDelete',
+      ]);
+      if (
+        typeof deleteRetentionPolicy.enabled !== 'boolean' ||
+        !Number.isInteger(deleteRetentionPolicy.days) ||
+        typeof deleteRetentionPolicy.allowPermanentDelete !== 'boolean'
+      )
+        throw new Error('Managed blob retention policy is unavailable.');
+      return { deleteRetentionPolicy };
+    }
+    case 'Microsoft.Storage/storageAccounts/blobServices/containers': {
+      const settings = project(properties, ['defaultEncryptionScope', 'denyEncryptionScopeOverride']);
+      if (!nonemptyString(settings.defaultEncryptionScope) || typeof settings.denyEncryptionScopeOverride !== 'boolean')
+        throw new Error('Managed container encryption policy is unavailable.');
+      return settings;
+    }
+    default:
+      throw new Error('Unsupported managed resource settings.');
+  }
+}
+
 export async function captureDeploymentConfiguration({ env, readArm }) {
   if (
     env.ENVIRONMENT_NAME !== 'prod' ||
@@ -94,13 +162,33 @@ export async function captureDeploymentConfiguration({ env, readArm }) {
   )
     throw new Error('Exact production configuration scope is required.');
   const scope = `/subscriptions/${env.AZURE_SUBSCRIPTION_ID}/resourceGroups/${env.AZURE_RESOURCE_GROUP}/providers`;
-  const deployment = await readArm(`${scope}/Microsoft.Resources/deployments/main-prod`, '2025-04-01');
+  const inspect = async (id, apiVersion, method = 'GET', body) => {
+    try {
+      const response = await readArm(id, apiVersion, method, body);
+      if (!response || typeof response !== 'object' || Array.isArray(response) || response.error)
+        throw new Error('Unusable control-plane response.');
+      return response;
+    } catch {
+      throw new Error('Required configuration control-plane inspection failed.');
+    }
+  };
+  const deployment = await inspect(`${scope}/Microsoft.Resources/deployments/main-prod`, '2025-04-01');
   if (
     deployment.properties?.provisioningState !== 'Succeeded' ||
     deployment.properties?.mode !== 'Incremental' ||
-    !Array.isArray(deployment.properties?.outputResources)
+    !Array.isArray(deployment.properties?.outputResources) ||
+    deployment.properties.outputResources.length < 1 ||
+    deployment.properties.outputResources.length > 200
   )
     throw new Error('Accepted deployment inventory is unavailable.');
+  const inventoryIds = new Set();
+  const inventory = deployment.properties.outputResources.map((item) => {
+    const id = typeof item?.id === 'string' ? item.id.toLowerCase() : '';
+    if (!id.startsWith(`${scope.toLowerCase()}/`) || inventoryIds.has(id) || typeof item?.resourceType !== 'string')
+      throw new Error('Accepted deployment inventory is invalid.');
+    inventoryIds.add(id);
+    return { id: item.id, type: item.resourceType };
+  });
   const outputs = deployment.properties.outputs;
   const output = (name) => {
     const value = outputs?.[name]?.value;
@@ -118,16 +206,15 @@ export async function captureDeploymentConfiguration({ env, readArm }) {
     functionAppId: `${scope}/Microsoft.Web/sites/${functionName}`,
     releaseStorageAccount: output('releaseStorageAccountResourceName'),
   };
-  const inventory = deployment.properties.outputResources.map((item) => ({ id: item.id, type: item.resourceType }));
   const appInsightsId = `${scope}/Microsoft.Insights/components/${output('applicationInsightsResourceName')}`;
   const vaultId = `${scope}/Microsoft.KeyVault/vaults/${output('keyVaultResourceName')}`;
   const retentionId = `${scope}/Microsoft.Storage/storageAccounts/${target.releaseStorageAccount}/managementPolicies/default`;
   const [site, web, settings, insights, retention] = await Promise.all([
-    readArm(target.functionAppId, '2023-12-01'),
-    readArm(`${target.functionAppId}/config/web`, '2023-12-01'),
-    readArm(`${target.functionAppId}/config/appsettings/list`, '2023-12-01', 'POST', {}),
-    readArm(appInsightsId, '2020-02-02'),
-    readArm(retentionId, '2023-05-01'),
+    inspect(target.functionAppId, '2023-12-01'),
+    inspect(`${target.functionAppId}/config/web`, '2023-12-01'),
+    inspect(`${target.functionAppId}/config/appsettings/list`, '2023-12-01', 'POST', {}),
+    inspect(appInsightsId, '2020-02-02'),
+    inspect(retentionId, '2023-05-01'),
   ]);
   const expectedEnv = {
     ...env,
@@ -136,21 +223,19 @@ export async function captureDeploymentConfiguration({ env, readArm }) {
     EXPECTED_APPLICATIONINSIGHTS_CONNECTION_STRING: insights.properties?.ConnectionString,
   };
   const requiredSecrets = secretReferences.filter(([, , flag]) => !flag || env[flag] === 'true');
-  const secrets = await Promise.all(
-    requiredSecrets.map(async ([name, variable]) => {
-      const secret = await readArm(`${vaultId}/secrets/${name}`, '2023-07-01');
-      const versionUri = secret.properties?.secretUriWithVersion;
-      expectedEnv[variable] = `@Microsoft.KeyVault(SecretUri=${versionUri})`;
-      const attributes = secret.properties?.attributes;
-      if (!attributes || typeof attributes.enabled !== 'boolean')
-        throw new Error('Secret validity metadata is unavailable.');
-      return {
-        name,
-        versionUri,
-        attributes: { enabled: attributes.enabled, nbf: attributes.nbf ?? null, exp: attributes.exp ?? null },
-      };
-    }),
-  );
+  const secrets = await inspectInBatches(requiredSecrets, async ([name, variable]) => {
+    const secret = await inspect(`${vaultId}/secrets/${name}`, '2023-07-01');
+    const versionUri = secret.properties?.secretUriWithVersion;
+    expectedEnv[variable] = `@Microsoft.KeyVault(SecretUri=${versionUri})`;
+    const attributes = secret.properties?.attributes;
+    if (!attributes || typeof attributes.enabled !== 'boolean')
+      throw new Error('Secret validity metadata is unavailable.');
+    return {
+      name,
+      versionUri,
+      attributes: { enabled: attributes.enabled, nbf: attributes.nbf ?? null, exp: attributes.exp ?? null },
+    };
+  });
   const policyErrors = validateArmRuntimeSettingsResponse(settings, expectedEnv);
   if (policyErrors.length) throw new Error('Complete installed runtime policy differs from intended configuration.');
   const roles = {};
@@ -160,7 +245,7 @@ export async function captureDeploymentConfiguration({ env, readArm }) {
   for (let offset = 0; offset < assignments.length; offset += 5) {
     await Promise.all(
       assignments.slice(offset, offset + 5).map(async ({ id }) => {
-        const role = await readArm(id, '2022-04-01');
+        const role = await inspect(id, '2022-04-01');
         roles[id.toLowerCase()] = {
           ...project(role.properties, ['scope', 'roleDefinitionId', 'principalId', 'principalType']),
           condition: role.properties.condition ?? null,
@@ -170,6 +255,24 @@ export async function captureDeploymentConfiguration({ env, readArm }) {
       }),
     );
   }
+  const staticBlobServiceId =
+    `${scope}/Microsoft.Storage/storageAccounts/${outputs?.staticWebStorageAccountResourceName?.value}/blobServices/default`.toLowerCase();
+  const resourceSettings = Object.fromEntries(
+    await inspectInBatches(
+      inventory.filter(({ type }) => resourceSettingsVersions.has(type)),
+      async ({ id, type }) => {
+        const apiVersion =
+          type === 'Microsoft.Storage/storageAccounts/blobServices' && id.toLowerCase() === staticBlobServiceId
+            ? '2025-08-01'
+            : resourceSettingsVersions.get(type);
+        const response =
+          type === 'Microsoft.Insights/components' && id.toLowerCase() === appInsightsId.toLowerCase()
+            ? insights
+            : await inspect(id, apiVersion);
+        return [id.toLowerCase(), { type, properties: projectResourceSettings(id, type, response) }];
+      },
+    ),
+  );
   const observed = {
     site: {
       ...project(site, ['id', 'kind', 'location']),
@@ -183,15 +286,18 @@ export async function captureDeploymentConfiguration({ env, readArm }) {
       'http20Enabled',
       'minimumElasticInstanceCount',
       'cors',
+      'localMySqlEnabled',
+      'netFrameworkVersion',
     ]),
     managedSettings: buildExpectedRuntimeSettings(expectedEnv),
     secrets: secrets.sort((a, b) => a.name.localeCompare(b.name)),
     roles,
+    resourceSettings,
     retentionPolicy: retention.properties?.policy,
   };
   const plan = inventory.filter((item) => item.type === 'Microsoft.Web/serverfarms');
   if (plan.length !== 1) throw new Error('The managed hosting plan is ambiguous.');
-  const hostingPlan = await readArm(plan[0].id, '2023-12-01');
+  const hostingPlan = await inspect(plan[0].id, '2023-12-01');
   observed.site.hostingPlan = {
     ...project(hostingPlan, ['id', 'kind', 'location']),
     sku: project(hostingPlan.sku, ['name', 'tier']),
@@ -207,6 +313,8 @@ export async function captureDeploymentConfiguration({ env, readArm }) {
     observed.web.minTlsVersion !== '1.2' ||
     observed.web.ftpsState !== 'Disabled' ||
     observed.web.http20Enabled !== true ||
+    typeof observed.web.localMySqlEnabled !== 'boolean' ||
+    !nonemptyString(observed.web.netFrameworkVersion) ||
     // Azure documents this property as inapplicable to Y1/Dynamic. Preserve the
     // observed value for later drift comparison, without treating it as paid
     // Elastic capacity. Any other hosting plan is ineligible for this fast path.
@@ -399,6 +507,7 @@ async function main() {
         compiledTemplate,
         toolchain: toolchain(),
         target: observation.target,
+        inventory: observation.inventory,
         observed: observation.observed,
         reconcileConfiguration: process.env.RECONCILE_CONFIGURATION === 'true',
       };

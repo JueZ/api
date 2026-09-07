@@ -138,6 +138,7 @@ function acceptedRecordFixture() {
     managedSettings: { BRING_PASSWORD: `@Microsoft.KeyVault(SecretUri=${secretVersion})` },
     secrets: [{ name: 'bring-password', versionUri: secretVersion, attributes: { enabled: true } }],
     roles: {},
+    resourceSettings: {},
     retentionPolicy,
   };
   const record = createDeploymentConfiguration({
@@ -274,6 +275,20 @@ function captureFixture(mutate = () => {}) {
   const vaultId = `${scope}/Microsoft.KeyVault/vaults/api-vault`;
   const retentionId = `${scope}/Microsoft.Storage/storageAccounts/releaseaccount/managementPolicies/default`;
   const applicationInsightsId = `${scope}/Microsoft.Insights/components/api-prod-insights`;
+  const budgetId = `${scope}/Microsoft.Consumption/budgets/budget-api-prod`;
+  const blobServiceId = `${scope}/Microsoft.Storage/storageAccounts/releaseaccount/blobServices/default`;
+  const staticBlobServiceId = `${scope}/Microsoft.Storage/storageAccounts/staticstore/blobServices/default`;
+  const containerId = `${blobServiceId}/containers/function-releases`;
+  const ids = {
+    roleId,
+    retentionId,
+    applicationInsightsId,
+    vaultId,
+    budgetId,
+    blobServiceId,
+    staticBlobServiceId,
+    containerId,
+  };
   const secretUris = Object.fromEntries(
     secretSpecs.map(([name], index) => [
       name,
@@ -324,6 +339,7 @@ function captureFixture(mutate = () => {}) {
           keyVaultResourceName: { value: 'api-vault' },
           hostStorageAccountResourceName: { value: 'hoststore' },
           privateStorageAccountResourceName: { value: 'privatestore' },
+          staticWebStorageAccountResourceName: { value: 'staticstore' },
         },
         outputResources: [
           { id: functionAppId, resourceType: 'Microsoft.Web/sites' },
@@ -331,6 +347,12 @@ function captureFixture(mutate = () => {}) {
           { id: `${functionAppId}/config/appsettings`, resourceType: 'Microsoft.Web/sites/config' },
           { id: roleId, resourceType: 'Microsoft.Authorization/roleAssignments' },
           { id: retentionId, resourceType: 'Microsoft.Storage/storageAccounts/managementPolicies' },
+          { id: budgetId, resourceType: 'Microsoft.Consumption/budgets' },
+          { id: applicationInsightsId, resourceType: 'Microsoft.Insights/components' },
+          { id: vaultId, resourceType: 'Microsoft.KeyVault/vaults' },
+          { id: blobServiceId, resourceType: 'Microsoft.Storage/storageAccounts/blobServices' },
+          { id: staticBlobServiceId, resourceType: 'Microsoft.Storage/storageAccounts/blobServices' },
+          { id: containerId, resourceType: 'Microsoft.Storage/storageAccounts/blobServices/containers' },
         ],
       },
     },
@@ -358,11 +380,56 @@ function captureFixture(mutate = () => {}) {
         ftpsState: 'Disabled',
         http20Enabled: true,
         minimumElasticInstanceCount: 1,
+        localMySqlEnabled: false,
+        netFrameworkVersion: 'v4.0',
         cors: { supportCredentials: false, allowedOrigins: ['https://app.example.test'] },
       },
     },
     settings: { properties: buildExpectedRuntimeSettings(settingsEnv) },
-    insights: { properties: { ConnectionString: settingsEnv.EXPECTED_APPLICATIONINSIGHTS_CONNECTION_STRING } },
+    insights: {
+      id: applicationInsightsId,
+      type: 'Microsoft.Insights/components',
+      properties: { ConnectionString: settingsEnv.EXPECTED_APPLICATIONINSIGHTS_CONNECTION_STRING },
+    },
+    // Sanitized control-plane shapes: no raw provider fixture or secret values.
+    vault: {
+      id: vaultId,
+      type: 'Microsoft.KeyVault/vaults',
+      properties: { networkAcls: null, publicNetworkAccess: 'Enabled' },
+    },
+    budget: {
+      id: budgetId,
+      type: 'Microsoft.Consumption/budgets',
+      properties: {
+        amount: 15,
+        timePeriod: { startDate: '2026-08-01T00:00:00Z', endDate: '2036-08-01T00:00:00Z' },
+      },
+    },
+    blobService: {
+      id: blobServiceId,
+      type: 'Microsoft.Storage/storageAccounts/blobServices',
+      properties: {
+        deleteRetentionPolicy: { enabled: true, days: 14, allowPermanentDelete: false },
+        isVersioningEnabled: true,
+      },
+    },
+    staticBlobService: {
+      id: staticBlobServiceId,
+      type: 'Microsoft.Storage/storageAccounts/blobServices',
+      properties: {
+        deleteRetentionPolicy: { enabled: true, days: 7, allowPermanentDelete: false },
+        staticWebsite: { enabled: true, indexDocument: 'index.html' },
+      },
+    },
+    container: {
+      id: containerId,
+      type: 'Microsoft.Storage/storageAccounts/blobServices/containers',
+      properties: {
+        defaultEncryptionScope: '$account-encryption-key',
+        denyEncryptionScopeOverride: false,
+        publicAccess: 'None',
+      },
+    },
     retention: {
       properties: {
         policy: {
@@ -395,27 +462,34 @@ function captureFixture(mutate = () => {}) {
       ]),
     ),
   };
-  mutate({ env, resources, ids: { roleId, retentionId }, secretUris });
+  mutate({ env, resources, ids, secretUris });
 
-  const routes = new Map([
-    [`GET ${scope}/Microsoft.Resources/deployments/main-prod`, resources.deployment],
-    [`GET ${functionAppId}`, resources.site],
-    [`GET ${planId}`, resources.plan],
-    [`GET ${functionAppId}/config/web`, resources.web],
-    [`POST ${functionAppId}/config/appsettings/list`, resources.settings],
-    [`GET ${applicationInsightsId}`, resources.insights],
-    [`GET ${retentionId}`, resources.retention],
-    [`GET ${roleId}`, resources.role],
-    ...secretSpecs.map(([name]) => [`GET ${vaultId}/secrets/${name}`, resources.secrets[name]]),
-  ]);
+  const routes = new Map(
+    [
+      [`GET ${scope}/Microsoft.Resources/deployments/main-prod`, resources.deployment],
+      [`GET ${functionAppId}`, resources.site],
+      [`GET ${planId}`, resources.plan],
+      [`GET ${functionAppId}/config/web`, resources.web],
+      [`POST ${functionAppId}/config/appsettings/list`, resources.settings],
+      [`GET ${applicationInsightsId}`, resources.insights],
+      [`GET ${vaultId}`, resources.vault],
+      [`GET ${budgetId}`, resources.budget],
+      [`GET ${blobServiceId}`, resources.blobService],
+      [`GET ${staticBlobServiceId}`, resources.staticBlobService],
+      [`GET ${containerId}`, resources.container],
+      [`GET ${retentionId}`, resources.retention],
+      [`GET ${roleId}`, resources.role],
+      ...secretSpecs.map(([name]) => [`GET ${vaultId}/secrets/${name}`, resources.secrets[name]]),
+    ].map(([route, response]) => [route.toLowerCase(), response]),
+  );
   const calls = [];
   const readArm = async (id, apiVersion, method = 'GET', body) => {
     calls.push({ id, apiVersion, method, body });
-    const response = routes.get(`${method} ${id}`);
+    const response = routes.get(`${method} ${id}`.toLowerCase());
     if (!response) throw new Error(`Unexpected ARM fixture read: ${method} ${id}`);
     return structuredClone(response);
   };
-  return { env, readArm, calls, resources, ids: { roleId, retentionId }, secretUris };
+  return { env, readArm, calls, resources, ids, secretUris };
 }
 
 test('capture records complete policy, identity, expected roles, and secret metadata without Azure access', async () => {
@@ -458,6 +532,331 @@ test('capture records complete policy, identity, expected roles, and secret meta
   );
 });
 
+test('capture projects only the inventory comparison fields and preserves provider defaults', async () => {
+  const current = captureFixture();
+  const captured = await captureDeploymentConfiguration(current);
+  const { budgetId, applicationInsightsId, vaultId, blobServiceId, staticBlobServiceId, containerId } = current.ids;
+
+  assert.deepEqual(captured.observed.resourceSettings, {
+    [budgetId.toLowerCase()]: {
+      type: 'Microsoft.Consumption/budgets',
+      properties: { timePeriod: { startDate: '2026-08-01T00:00:00Z', endDate: '2036-08-01T00:00:00Z' } },
+    },
+    [applicationInsightsId.toLowerCase()]: {
+      type: 'Microsoft.Insights/components',
+      properties: { Flow_Type: null, Request_Source: null },
+    },
+    [vaultId.toLowerCase()]: {
+      type: 'Microsoft.KeyVault/vaults',
+      properties: { networkAcls: null, publicNetworkAccess: 'Enabled' },
+    },
+    [blobServiceId.toLowerCase()]: {
+      type: 'Microsoft.Storage/storageAccounts/blobServices',
+      properties: { deleteRetentionPolicy: { enabled: true, days: 14, allowPermanentDelete: false } },
+    },
+    [staticBlobServiceId.toLowerCase()]: {
+      type: 'Microsoft.Storage/storageAccounts/blobServices',
+      properties: { deleteRetentionPolicy: { enabled: true, days: 7, allowPermanentDelete: false } },
+    },
+    [containerId.toLowerCase()]: {
+      type: 'Microsoft.Storage/storageAccounts/blobServices/containers',
+      properties: { defaultEncryptionScope: '$account-encryption-key', denyEncryptionScopeOverride: false },
+    },
+  });
+  assert.equal(captured.observed.web.localMySqlEnabled, false);
+  assert.equal(captured.observed.web.netFrameworkVersion, 'v4.0');
+  for (const [id, apiVersion] of [
+    [budgetId, '2024-08-01'],
+    [applicationInsightsId, '2020-02-02'],
+    [vaultId, '2023-07-01'],
+    [blobServiceId, '2023-05-01'],
+    [staticBlobServiceId, '2025-08-01'],
+    [containerId, '2023-05-01'],
+  ]) {
+    assert.deepEqual(
+      current.calls.filter((call) => call.id.toLowerCase() === id.toLowerCase()),
+      [{ id, apiVersion, method: 'GET', body: undefined }],
+    );
+  }
+});
+
+test('optional AI and vault omissions normalize only within a successful properties response', async () => {
+  const original = await captureDeploymentConfiguration(captureFixture());
+  const normalized = await captureDeploymentConfiguration(
+    captureFixture(({ resources }) => {
+      resources.insights.properties.Flow_Type = null;
+      resources.insights.properties.Request_Source = null;
+      delete resources.vault.properties.networkAcls;
+      delete resources.insights.id;
+      delete resources.insights.type;
+      delete resources.vault.id;
+      delete resources.vault.type;
+    }),
+  );
+  assert.deepEqual(normalized.observed.resourceSettings, original.observed.resourceSettings);
+});
+
+test('Azure resource identity matching preserves case-insensitive provider namespaces', async () => {
+  const ordinary = await captureDeploymentConfiguration(captureFixture());
+  const actualAzureCasing = await captureDeploymentConfiguration(
+    captureFixture(({ resources }) => {
+      resources.insights.type = resources.insights.type.toLowerCase();
+      resources.insights.id = resources.insights.id.toLowerCase();
+    }),
+  );
+  assert.deepEqual(actualAzureCasing.observed.resourceSettings, ordinary.observed.resourceSettings);
+});
+
+test('capture never treats a failed, incomplete, or foreign AI or vault GET as omitted defaults', async (t) => {
+  const cases = [
+    ['no response', () => undefined],
+    [
+      'missing properties',
+      (response) => {
+        const incomplete = { ...response };
+        delete incomplete.properties;
+        return incomplete;
+      },
+    ],
+    ['null properties', (response) => ({ ...response, properties: null })],
+    ['array properties', (response) => ({ ...response, properties: [] })],
+    ['foreign ID', (response) => ({ ...response, id: `${response.id}-foreign` })],
+    ['foreign type', (response) => ({ ...response, type: 'Microsoft.Web/sites' })],
+    ['error envelope', (response) => ({ ...response, error: { message: 'private-error-marker' } })],
+    [
+      'rejected read',
+      () => {
+        throw new Error('private-error-marker');
+      },
+    ],
+  ];
+  for (const resource of ['insights', 'vault']) {
+    for (const [name, replacement] of cases) {
+      await t.test(`${resource}: ${name}`, async () => {
+        const current = captureFixture();
+        const resourceId = current.resources[resource].id.toLowerCase();
+        await assert.rejects(
+          captureDeploymentConfiguration({
+            env: current.env,
+            readArm: async (...args) =>
+              args[0].toLowerCase() === resourceId
+                ? replacement(current.resources[resource])
+                : current.readArm(...args),
+          }),
+          (error) => {
+            assert.doesNotMatch(error.message, /private-error-marker/);
+            assert.equal(error.cause, undefined);
+            return true;
+          },
+        );
+      });
+    }
+  }
+});
+
+test('capture requires complete typed resource and web fields while retaining false booleans', async (t) => {
+  for (const path of [
+    'budget.properties.timePeriod',
+    'budget.properties.timePeriod.startDate',
+    'budget.properties.timePeriod.endDate',
+    'vault.properties.publicNetworkAccess',
+    'blobService.properties.deleteRetentionPolicy.enabled',
+    'blobService.properties.deleteRetentionPolicy.days',
+    'blobService.properties.deleteRetentionPolicy.allowPermanentDelete',
+    'container.properties.defaultEncryptionScope',
+    'container.properties.denyEncryptionScopeOverride',
+    'web.properties.localMySqlEnabled',
+    'web.properties.netFrameworkVersion',
+  ]) {
+    await t.test(`missing ${path}`, async () => {
+      const current = captureFixture(({ resources }) => {
+        const parts = path.split('.');
+        const key = parts.pop();
+        delete parts.reduce((value, part) => value[part], resources)[key];
+      });
+      await assert.rejects(captureDeploymentConfiguration(current));
+    });
+  }
+  for (const [path, invalid] of [
+    ['budget.properties.timePeriod.startDate', ' '],
+    ['budget.properties.timePeriod.endDate', null],
+    ['vault.properties.publicNetworkAccess', ''],
+    ['blobService.properties.deleteRetentionPolicy.enabled', 'true'],
+    ['blobService.properties.deleteRetentionPolicy.days', '14'],
+    ['blobService.properties.deleteRetentionPolicy.allowPermanentDelete', null],
+    ['container.properties.defaultEncryptionScope', null],
+    ['container.properties.denyEncryptionScopeOverride', 'false'],
+    ['web.properties.localMySqlEnabled', 'false'],
+    ['web.properties.netFrameworkVersion', ''],
+  ]) {
+    await t.test(`invalid ${path}`, async () => {
+      const current = captureFixture(({ resources }) => {
+        const parts = path.split('.');
+        const key = parts.pop();
+        parts.reduce((value, part) => value[part], resources)[key] = invalid;
+      });
+      await assert.rejects(captureDeploymentConfiguration(current));
+    });
+  }
+});
+
+test('captured changes remain visible to exact accepted-state comparison', async (t) => {
+  const accepted = await captureDeploymentConfiguration(captureFixture());
+  const parameters = {
+    budgetStartDate: { value: '2026-08-01T00:00:00Z' },
+    releaseRetentionPolicy: { value: accepted.observed.retentionPolicy },
+  };
+  const compiledTemplate = Buffer.from('{"template":"compiled"}\n');
+  const toolchain = { nodeMajor: 22, azureCli: '2.76.0', bicep: '0.38.5' };
+  const record = createDeploymentConfiguration({ ...accepted, origin, parameters, compiledTemplate, toolchain });
+  const comparison = {
+    record,
+    parameters,
+    compiledTemplate,
+    toolchain,
+    target: accepted.target,
+    inventory: accepted.inventory,
+    whatIf: {
+      status: 'Succeeded',
+      changes: record.inventory.map(({ id }) => ({ resourceId: id, changeType: 'NoChange' })),
+    },
+  };
+  assert.equal(decideApplicationOnly({ ...comparison, observed: accepted.observed }).mode, 'application-only');
+  for (const [path, changed] of [
+    ['budget.properties.timePeriod.endDate', '2037-08-01T00:00:00Z'],
+    ['insights.properties.Flow_Type', 'Bluefield'],
+    ['insights.properties.Request_Source', 'rest'],
+    ['vault.properties.networkAcls', { defaultAction: 'Deny', bypass: 'AzureServices' }],
+    ['vault.properties.publicNetworkAccess', 'Disabled'],
+    ['blobService.properties.deleteRetentionPolicy.days', 30],
+    ['blobService.properties.deleteRetentionPolicy.allowPermanentDelete', true],
+    ['container.properties.defaultEncryptionScope', 'custom-encryption-scope'],
+    ['container.properties.denyEncryptionScopeOverride', true],
+    ['web.properties.localMySqlEnabled', true],
+    ['web.properties.netFrameworkVersion', 'v2.0'],
+  ]) {
+    await t.test(path, async () => {
+      const live = await captureDeploymentConfiguration(
+        captureFixture(({ resources }) => {
+          const parts = path.split('.');
+          const key = parts.pop();
+          parts.reduce((value, part) => value[part], resources)[key] = changed;
+        }),
+      );
+      assert.notDeepEqual(live.observed, accepted.observed);
+      const decision = decideApplicationOnly({ ...comparison, inventory: live.inventory, observed: live.observed });
+      assert.equal(decision.mode, 'full');
+      assert.ok(decision.reasons.includes('Installed configuration or identity drifted from accepted state.'));
+    });
+  }
+});
+
+test('resource settings include only exact supported inventory members with lowercase IDs', async () => {
+  const current = captureFixture(({ resources, ids }) => {
+    resources.deployment.properties.outputResources = resources.deployment.properties.outputResources.filter(
+      ({ id }) =>
+        ![ids.budgetId, ids.vaultId, ids.blobServiceId, ids.staticBlobServiceId, ids.containerId].includes(id),
+    );
+    const insightsEntry = resources.deployment.properties.outputResources.find(
+      ({ id }) => id === ids.applicationInsightsId,
+    );
+    insightsEntry.id = insightsEntry.id.toUpperCase();
+    resources.deployment.properties.outputResources.push({
+      id: `${scope}/Microsoft.Consumption/budgets/not-a-matched-type`,
+      resourceType: 'Microsoft.Consumption/budgets/extensions',
+    });
+  });
+  const captured = await captureDeploymentConfiguration(current);
+  assert.deepEqual(Object.keys(captured.observed.resourceSettings), [current.ids.applicationInsightsId.toLowerCase()]);
+  const excluded = [
+    current.ids.budgetId,
+    current.ids.vaultId,
+    current.ids.blobServiceId,
+    current.ids.staticBlobServiceId,
+    current.ids.containerId,
+  ];
+  assert.equal(
+    current.calls.some(({ id }) => excluded.includes(id) || id.endsWith('/not-a-matched-type')),
+    false,
+  );
+});
+
+test('capture accepts at most 200 inventory entries and limits every read phase to five concurrent GETs', async () => {
+  const current = captureFixture();
+  const inventory = current.resources.deployment.properties.outputResources;
+  const extraIds = new Set();
+  for (let index = inventory.length; index < 200; index += 1) {
+    const id = `${current.ids.blobServiceId}/containers/fixture-${index}`;
+    extraIds.add(id);
+    inventory.push({ id, resourceType: 'Microsoft.Storage/storageAccounts/blobServices/containers' });
+  }
+  const reads = [];
+  let active = 0;
+  let peak = 0;
+  const captured = await captureDeploymentConfiguration({
+    env: current.env,
+    readArm: async (...args) => {
+      reads.push(args);
+      peak = Math.max(peak, ++active);
+      try {
+        await new Promise((resolve) => setImmediate(resolve));
+        return extraIds.has(args[0]) ? { ...current.resources.container, id: args[0] } : await current.readArm(...args);
+      } finally {
+        active -= 1;
+      }
+    },
+  });
+  assert.ok(peak > 1 && peak <= 5, `maximum simultaneous reads: ${peak}`);
+  assert.equal(active, 0);
+  assert.equal(captured.inventory.length, 200);
+  for (const id of extraIds) {
+    assert.ok(captured.observed.resourceSettings[id.toLowerCase()]);
+    assert.deepEqual(
+      reads.filter(([readId]) => readId === id),
+      [[id, '2023-05-01', 'GET', undefined]],
+    );
+  }
+  assert.ok(
+    reads.every(
+      ([id, , method]) => method === 'GET' || (method === 'POST' && id === `${functionAppId}/config/appsettings/list`),
+    ),
+  );
+});
+
+test('capture rejects oversized, duplicated, or foreign inventory before resource reads', async (t) => {
+  for (const [name, mutate] of [
+    [
+      '201 entries',
+      (inventory) => {
+        while (inventory.length < 201)
+          inventory.push({
+            id: `${scope}/Microsoft.Consumption/budgets/budget-${inventory.length}`,
+            resourceType: 'Microsoft.Consumption/budgets',
+          });
+      },
+    ],
+    [
+      'duplicate ID ignoring case',
+      (inventory) => inventory.push({ ...inventory[0], id: inventory[0].id.toUpperCase() }),
+    ],
+    [
+      'foreign subscription',
+      (inventory) => {
+        inventory[0].id = inventory[0].id.replace(subscriptionId, '99999999-2222-3333-4444-555555555555');
+      },
+    ],
+  ]) {
+    await t.test(name, async () => {
+      const current = captureFixture(({ resources }) => mutate(resources.deployment.properties.outputResources));
+      await assert.rejects(captureDeploymentConfiguration(current), /Accepted deployment inventory/);
+      assert.deepEqual(
+        current.calls.map(({ id }) => id),
+        [`${scope}/Microsoft.Resources/deployments/main-prod`],
+      );
+    });
+  }
+});
+
 test('strict Dynamic Y1 capture preserves either observed minimum-elastic raw value', async (t) => {
   for (const minimumElasticInstanceCount of [0, 1]) {
     await t.test(String(minimumElasticInstanceCount), async () => {
@@ -478,7 +877,10 @@ test('minimum-elastic raw observation changes still select full reconciliation a
     }),
   );
   const live = await captureDeploymentConfiguration(captureFixture());
-  const parameters = { releaseRetentionPolicy: { value: accepted.observed.retentionPolicy } };
+  const parameters = {
+    budgetStartDate: { value: '2026-08-01T00:00:00Z' },
+    releaseRetentionPolicy: { value: accepted.observed.retentionPolicy },
+  };
   const compiledTemplate = Buffer.from('{"template":"compiled"}\n');
   const toolchain = { nodeMajor: 22, azureCli: '2.76.0', bicep: '0.38.5' };
   const record = createDeploymentConfiguration({
@@ -501,6 +903,7 @@ test('minimum-elastic raw observation changes still select full reconciliation a
     compiledTemplate,
     toolchain,
     target: live.target,
+    inventory: live.inventory,
     observed: live.observed,
     whatIf,
   });
