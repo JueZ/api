@@ -1,0 +1,13 @@
+version: 2
+id: exact-release-readiness
+fingerprint: delivery.health.old-worker-after-package-activation
+severity: medium
+invariant: Runtime readiness may retry an older healthy worker within its existing bounded startup budget, but only the expected environment and exact release SHA can pass; permanent stale identity and unauthorized public access remain failures.
+scope:
+  - scripts/smoke-runtime.mjs
+prevention:
+  - kind: regression-test
+    path: scripts/test/runtime-release-readiness.test.mjs
+broken: 3a89f963f8a807eab152c853df79a670cf35cb64
+recurrenceCount: 1
+status: active
