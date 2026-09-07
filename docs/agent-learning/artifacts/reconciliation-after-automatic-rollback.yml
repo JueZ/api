@@ -1,0 +1,13 @@
+version: 2
+id: reconciliation-after-automatic-rollback
+fingerprint: delivery.recovery.accepted-bytes-with-exact-automatic-rollback-receipt
+severity: high
+invariant: Explicit configuration recovery may finish the exact failed run's automatic rollback only when all installed components match accepted evidence and the canonical first-attempt recovery receipt belongs to the trusted original promotion; later or partial mutation state remains blocked.
+scope:
+  - scripts/lib/production-state.mjs
+prevention:
+  - kind: regression-test
+    path: scripts/test/production-state.test.mjs
+broken: 5ac3dd8c899dac22f2a76df02e18aed13e1c189f
+recurrenceCount: 1
+status: active
