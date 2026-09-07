@@ -9,6 +9,9 @@ const result = (value) => ({ result: value });
 test('portability runtime executes candidate code without saving a shared dependency cache', () => {
   const workflow = parse(readFileSync(new URL('../../.github/workflows/pr-gate.yml', import.meta.url), 'utf8'));
   const job = workflow.jobs.portability;
+  assert.equal(job.if, "needs.classify.outputs.agent_environment == 'true'");
+  assert.equal(workflow.jobs.classify.outputs.agent_environment, '${{ steps.classify.outputs.agent_environment }}');
+  assert.equal(workflow.jobs.classify.outputs.operations, '${{ steps.classify.outputs.operations }}');
   assert.deepEqual(job.strategy.matrix.os, ['ubuntu-latest', 'windows-latest']);
   const nodeSetup = job.steps.find((step) => step.uses?.startsWith('actions/setup-node@'));
   assert.ok(nodeSetup);
@@ -26,14 +29,32 @@ test('portability runtime executes candidate code without saving a shared depend
     false,
   );
   assert.equal(job.steps.find((step) => step.run === 'npm run agent:env:stop').if, 'always()');
+
+  const operations = workflow.jobs.operations;
+  assert.equal(operations.if, "needs.classify.outputs.operations == 'true'");
+  const commands = operations.steps.find(
+    (step) => step.name === 'Compile API prerequisites once and validate repository operations',
+  ).run;
+  assert.match(commands, /typescript\/bin\/tsc -p apps\/api\/tsconfig.json/);
+  assert.match(commands, /node scripts\/run-tests.mjs scripts\/test/);
+  assert.ok(workflow.jobs.aggregate.needs.includes('operations'));
 });
 
 test('PR aggregate accepts only classifier-authorized documentation skips', () => {
-  const flags = { backend: false, contracts: false, frontend: false, infrastructure: false, workflow: false };
+  const flags = {
+    backend: false,
+    contracts: false,
+    operations: false,
+    frontend: false,
+    agentEnvironment: false,
+    infrastructure: false,
+    workflow: false,
+  };
   const needs = {
     classify: result('success'),
     policy: result('success'),
     backend: result('skipped'),
+    operations: result('skipped'),
     frontend: result('skipped'),
     portability: result('skipped'),
     infrastructure: result('skipped'),
@@ -42,17 +63,26 @@ test('PR aggregate accepts only classifier-authorized documentation skips', () =
   assert.deepEqual(verifyGateAggregate('pr', flags, needs), {
     passed: true,
     applicable: ['classify', 'policy'],
-    skipped: ['backend', 'frontend', 'portability', 'infrastructure', 'workflow'],
+    skipped: ['backend', 'operations', 'frontend', 'portability', 'infrastructure', 'workflow'],
     failures: [],
   });
 });
 
 test('PR aggregate rejects a failed applicable job and an unexplained skip', () => {
-  const flags = { backend: true, contracts: false, frontend: false, infrastructure: false, workflow: false };
+  const flags = {
+    backend: true,
+    contracts: false,
+    operations: false,
+    frontend: false,
+    agentEnvironment: false,
+    infrastructure: false,
+    workflow: false,
+  };
   const needs = {
     classify: result('success'),
     policy: result('success'),
     backend: result('failure'),
+    operations: result('skipped'),
     frontend: result('success'),
     portability: result('skipped'),
     infrastructure: result('skipped'),
@@ -79,12 +109,21 @@ test('Security aggregate enforces Gitleaks and each path-selected scan', () => {
   assert.equal(verifyGateAggregate('security', flags, needs).passed, false);
 });
 
-test('PR aggregate requires successful portability coverage for privileged changes', () => {
-  const flags = { privileged: true };
+test('PR aggregate requires successful portability coverage for agent environment changes', () => {
+  const flags = {
+    backend: false,
+    contracts: false,
+    operations: false,
+    frontend: false,
+    agentEnvironment: true,
+    infrastructure: false,
+    workflow: false,
+  };
   const needs = {
     classify: result('success'),
     policy: result('success'),
     backend: result('skipped'),
+    operations: result('skipped'),
     frontend: result('skipped'),
     portability: result('success'),
     infrastructure: result('skipped'),
@@ -99,12 +138,72 @@ test('PR aggregate requires successful portability coverage for privileged chang
   }
 });
 
-test('aggregate rejects missing and undeclared dependencies', () => {
-  const flags = { backend: false, contracts: false, frontend: false, infrastructure: false, workflow: false };
+test('PR aggregate separates sensitive policy scrutiny from operations and environment work', () => {
+  const flags = {
+    backend: false,
+    contracts: false,
+    operations: false,
+    frontend: false,
+    agentEnvironment: false,
+    infrastructure: false,
+    workflow: false,
+  };
   const needs = {
     classify: result('success'),
     policy: result('success'),
     backend: result('skipped'),
+    operations: result('skipped'),
+    frontend: result('skipped'),
+    portability: result('skipped'),
+    infrastructure: result('skipped'),
+    workflow: result('skipped'),
+  };
+  assert.equal(verifyGateAggregate('pr', flags, needs).passed, true);
+
+  needs.operations = result('success');
+  assert.match(verifyGateAggregate('pr', flags, needs).failures.join('\n'), /operations expected skipped/);
+});
+
+test('PR aggregate requires successful operations coverage for executable scripts', () => {
+  const flags = {
+    backend: false,
+    contracts: false,
+    operations: true,
+    frontend: false,
+    agentEnvironment: false,
+    infrastructure: false,
+    workflow: false,
+  };
+  const needs = {
+    classify: result('success'),
+    policy: result('success'),
+    backend: result('skipped'),
+    operations: result('success'),
+    frontend: result('skipped'),
+    portability: result('skipped'),
+    infrastructure: result('skipped'),
+    workflow: result('skipped'),
+  };
+  assert.equal(verifyGateAggregate('pr', flags, needs).passed, true);
+  needs.operations = result('skipped');
+  assert.match(verifyGateAggregate('pr', flags, needs).failures.join('\n'), /operations expected success/);
+});
+
+test('aggregate rejects missing and undeclared dependencies', () => {
+  const flags = {
+    backend: false,
+    contracts: false,
+    operations: false,
+    frontend: false,
+    agentEnvironment: false,
+    infrastructure: false,
+    workflow: false,
+  };
+  const needs = {
+    classify: result('success'),
+    policy: result('success'),
+    backend: result('skipped'),
+    operations: result('skipped'),
     frontend: result('skipped'),
     portability: result('skipped'),
     infrastructure: result('skipped'),
@@ -114,4 +213,29 @@ test('aggregate rejects missing and undeclared dependencies', () => {
   const aggregate = verifyGateAggregate('pr', flags, needs);
   assert.equal(aggregate.passed, false);
   assert.match(aggregate.failures.join('\n'), /unexpected aggregate dependencies/);
+});
+
+test('aggregate fails closed when a conditional applicability flag is missing or malformed', () => {
+  const flags = {
+    backend: false,
+    contracts: false,
+    operations: false,
+    frontend: false,
+    agentEnvironment: false,
+    infrastructure: false,
+    workflow: 'false',
+  };
+  const needs = {
+    classify: result('success'),
+    policy: result('success'),
+    backend: result('skipped'),
+    operations: result('skipped'),
+    frontend: result('skipped'),
+    portability: result('skipped'),
+    infrastructure: result('skipped'),
+    workflow: result('skipped'),
+  };
+  assert.match(verifyGateAggregate('pr', flags, needs).failures.join('\n'), /workflow applicability flag/);
+  delete flags.operations;
+  assert.match(verifyGateAggregate('pr', flags, needs).failures.join('\n'), /operations applicability flag/);
 });

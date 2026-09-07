@@ -3,8 +3,9 @@ const GATE_RULES = Object.freeze({
     classify: 'always',
     policy: 'always',
     backend: 'backendOrContracts',
+    operations: 'operations',
     frontend: 'frontend',
-    portability: 'privileged',
+    portability: 'agentEnvironment',
     infrastructure: 'infrastructure',
     workflow: 'workflow',
   }),
@@ -26,6 +27,9 @@ export function verifyGateAggregate(gate, flags, needs) {
   const applicable = [];
   const skipped = [];
   const failures = [];
+  for (const flag of requiredFlags(rules)) {
+    if (typeof flags[flag] !== 'boolean') failures.push(`${flag} applicability flag must be boolean`);
+  }
   for (const [job, condition] of Object.entries(rules)) {
     const expected = condition === 'always' || conditionApplies(condition, flags);
     const result = needs[job]?.result;
@@ -41,6 +45,20 @@ export function verifyGateAggregate(gate, flags, needs) {
   if (unexpected.length > 0) failures.push(`unexpected aggregate dependencies: ${unexpected.join(', ')}`);
 
   return { passed: failures.length === 0, applicable, skipped, failures };
+}
+
+function requiredFlags(rules) {
+  const flags = new Set();
+  for (const condition of Object.values(rules)) {
+    if (condition === 'always') continue;
+    if (condition === 'backendOrContracts') {
+      flags.add('backend');
+      flags.add('contracts');
+    } else {
+      flags.add(condition);
+    }
+  }
+  return flags;
 }
 
 function conditionApplies(condition, flags) {

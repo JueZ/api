@@ -1,0 +1,2 @@
+# Bash scripts must remain executable under Git Bash as well as Linux.
+*.sh text eol=lf

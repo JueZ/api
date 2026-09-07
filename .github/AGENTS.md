@@ -1,7 +1,7 @@
 # GitHub automation scope
 
 - Protected `main` requires exactly `PR Gate` and `Security Gate`, both from the expected GitHub Actions App.
-- `PR Gate` uses the deterministic changed-path classifier, explicit internal dependencies, and `if: always()`. A skipped job is valid only when the classifier marked it non-applicable; malformed or unknown classification runs the privileged profile.
+- `PR Gate` uses the deterministic changed-path classifier, explicit internal dependencies, and `if: always()`. Security sensitivity is separate from application, operations, and agent-environment impact. A skipped job is valid only when the classifier marked it non-applicable; malformed or unknown classification runs the broad profile.
 - `Security Gate` always runs Gitleaks and selects dependency audit, CodeQL, and Trivy only for relevant paths, with scheduled complete coverage.
 - Pull-request jobs use the exact PR head with read-only credentials. Pin third-party actions to full commit SHAs, declare explicit least-privilege permissions, never use `secrets: inherit`, and never execute untrusted code with write credentials.
 - Pull requests do not build release artifacts. Backend/contracts compile once in their combined job; frontend performs one production build; Bicep and workflow/ShellCheck validation run only when applicable.

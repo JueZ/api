@@ -188,13 +188,14 @@ test('Codex environment scripts sanitize inherited LLVM sources without weakenin
   const setupSource = (await readFile(setupScript, 'utf8')).replace(/\r\n/g, '\n');
   const maintainSource = (await readFile(maintainScript, 'utf8')).replace(/\r\n/g, '\n');
 
-  assert.equal(
-    extractShellFunction(setupSource, 'remove_inherited_llvm_apt_source'),
-    extractShellFunction(maintainSource, 'remove_inherited_llvm_apt_source'),
+  assert.match(maintainSource, /source .*setup-codex-env\.sh/);
+  assert.doesNotMatch(maintainSource, /install_tools\(\)|apt-get/);
+  assert.match(
+    setupSource,
+    /install_tools\(\) \{[\s\S]*?remove_inherited_llvm_apt_source \/etc\/apt\n\s+apt-get update/,
   );
 
   for (const source of [setupSource, maintainSource]) {
-    assert.match(source, /install_tools\(\) \{[\s\S]*?remove_inherited_llvm_apt_source \/etc\/apt\n\s+apt-get update/);
     assert.doesNotMatch(
       source,
       /trusted=yes|allow-unauthenticated|AllowInsecureRepositories|AllowDowngradeToInsecureRepositories/,
@@ -206,8 +207,8 @@ test('Codex environment scripts never print an existing Git remote URL', async (
   for (const path of [setupScript, maintainScript]) {
     const source = await readFile(path, 'utf8');
     assert.doesNotMatch(source, /echo[^\n]*remote get-url origin/);
-    assert.match(source, /Git remote 'origin' is already configured\./);
   }
+  assert.match(await readFile(setupScript, 'utf8'), /Git remote 'origin' is already configured\./);
 });
 
 async function captureAzureLogin(directory, managedIdentityClientId) {
@@ -242,10 +243,4 @@ async function captureAzureLogin(directory, managedIdentityClientId) {
   });
   assert.equal(completed.status, 0, completed.stderr);
   return (await readFile(capturePath, 'utf8')).trim().split('\n');
-}
-
-function extractShellFunction(source, name) {
-  const match = source.match(new RegExp(`${name}\\(\\) \\{[\\s\\S]*?\\n\\}`));
-  assert.ok(match, `Expected ${name} function`);
-  return match[0];
 }

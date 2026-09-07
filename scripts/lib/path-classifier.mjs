@@ -10,6 +10,8 @@ export const VALIDATION_FLAGS = Object.freeze([
   'dependencies',
   'learning',
   'privileged',
+  'operations',
+  'agentEnvironment',
   'codeqlJavascript',
   'codeqlActions',
   'trivy',
@@ -49,7 +51,7 @@ export function classifyChangedFiles(files) {
   }
 
   if (unknownPaths.length > 0) {
-    applyPrivileged(flags, profiles);
+    applyBroadValidation(flags, profiles);
   }
   deriveSecurityFlags(flags);
 
@@ -91,6 +93,12 @@ export function parseGitNameStatus(buffer) {
 }
 
 function classifyPath(path, flags, profiles) {
+  if (isAgentInstructionPath(path)) {
+    flags.documentation = true;
+    profiles.add('documentation-only');
+    applyPrivileged(flags, profiles);
+    return true;
+  }
   if (isLearningPath(path)) {
     flags.learning = true;
     profiles.add('learning-governance');
@@ -101,45 +109,86 @@ function classifyPath(path, flags, profiles) {
     }
     return true;
   }
+  if (isReadmePath(path)) {
+    flags.documentation = true;
+    profiles.add('documentation-only');
+    if (isPrivilegedPath(path)) applyPrivileged(flags, profiles);
+    return true;
+  }
+
+  let matched = false;
   if (isPrivilegedPath(path)) {
     applyPrivileged(flags, profiles);
-    if (isWorkflowPath(path)) flags.workflow = true;
-    if (isDependencyPath(path)) flags.dependencies = true;
-    if (isBackendPath(path)) flags.backend = true;
-    if (isFrontendPath(path)) flags.frontend = true;
-    return true;
+    matched = true;
   }
   if (isDocumentationPath(path)) {
     flags.documentation = true;
     profiles.add('documentation-only');
-    return true;
+    matched = true;
   }
   if (isBackendPath(path)) {
     flags.backend = true;
     profiles.add('api-backend');
-    return true;
+    matched = true;
   }
   if (isFrontendPath(path)) {
     flags.frontend = true;
     profiles.add('frontend');
-    return true;
+    matched = true;
   }
   if (path.startsWith('contracts/')) {
     flags.contracts = true;
     profiles.add('contracts-integrations');
-    return true;
+    matched = true;
   }
   if (path.startsWith('infra/') || path === 'bicepconfig.json') {
     flags.infrastructure = true;
     profiles.add('infrastructure-delivery');
-    return true;
+    matched = true;
   }
   if (isWorkflowPath(path)) {
     flags.workflow = true;
     profiles.add('infrastructure-delivery');
-    return true;
+    matched = true;
   }
-  return false;
+  if (isDependencyPath(path)) {
+    flags.dependencies = true;
+    matched = true;
+    if (path === 'package.json' || path === 'package-lock.json') {
+      flags.backend = true;
+      flags.frontend = true;
+      flags.operations = true;
+      profiles.add('api-backend');
+      profiles.add('frontend');
+      profiles.add('operations');
+    } else if (path === 'apps/api/package.json' || path === 'apps/api/package-lock.json') {
+      flags.backend = true;
+      profiles.add('api-backend');
+    }
+  }
+  if (path.startsWith('scripts/')) {
+    flags.operations = true;
+    profiles.add('operations');
+    matched = true;
+  }
+  if (isAgentEnvironmentPath(path)) {
+    flags.agentEnvironment = true;
+    profiles.add('agent-environment');
+    matched = true;
+  }
+  if (path === 'angular.json') {
+    flags.frontend = true;
+    profiles.add('frontend');
+    matched = true;
+  }
+  if (path === 'eslint.config.js' || path === 'tsconfig.json') {
+    flags.backend = true;
+    flags.frontend = true;
+    profiles.add('api-backend');
+    profiles.add('frontend');
+    matched = true;
+  }
+  return matched;
 }
 
 function isPrivilegedPath(path) {
@@ -154,6 +203,9 @@ function isPrivilegedPath(path) {
     path === '.github/dependabot.yml' ||
     path.startsWith('apps/api/src/shared/security/') ||
     path.startsWith('apps/api/src/shared/config/') ||
+    path.startsWith('apps/api/src/application/authorization/') ||
+    path.startsWith('apps/api/src/application/auditing/') ||
+    path.startsWith('apps/api/src/application/idempotency/') ||
     path.startsWith('docs/security/') ||
     path.startsWith('docs/cost/') ||
     path.startsWith('scripts/') ||
@@ -163,7 +215,22 @@ function isPrivilegedPath(path) {
 }
 
 function isDocumentationPath(path) {
-  return path === 'README.md' || path.startsWith('docs/') || /^\.github\/.*\.md$/i.test(path);
+  return (
+    isReadmePath(path) ||
+    isAgentInstructionPath(path) ||
+    path === 'SECURITY.md' ||
+    path.startsWith('docs/') ||
+    /^\.github\/.*\.md$/i.test(path) ||
+    /^\.agents\/.*\.md$/i.test(path)
+  );
+}
+
+function isAgentInstructionPath(path) {
+  return path === 'AGENTS.md' || path.endsWith('/AGENTS.md') || /^\.agents\/.*\.md$/i.test(path);
+}
+
+function isReadmePath(path) {
+  return path === 'README.md' || path.endsWith('/README.md');
 }
 
 function isLearningPath(path) {
@@ -192,15 +259,38 @@ function isDependencyPath(path) {
   );
 }
 
+function isAgentEnvironmentPath(path) {
+  return (
+    path.startsWith('scripts/agent-env/') ||
+    path === 'scripts/setup-codex-env.sh' ||
+    path === 'scripts/maintain-codex-env.sh' ||
+    path === 'scripts/run-tests.mjs' ||
+    path === 'scripts/test/setup-codex-env.test.mjs' ||
+    path === 'scripts/test/maintain-codex-env.test.mjs' ||
+    path === 'scripts/test/run-tests.test.mjs' ||
+    path === 'package.json' ||
+    path === 'package-lock.json' ||
+    path === 'angular.json' ||
+    path === 'tsconfig.json' ||
+    path === '.github/workflows/pr-gate.yml'
+  );
+}
+
 function applyPrivileged(flags, profiles) {
+  flags.privileged = true;
+  profiles.add('privileged');
+}
+
+function applyBroadValidation(flags, profiles) {
   flags.backend = true;
   flags.frontend = true;
   flags.contracts = true;
   flags.infrastructure = true;
   flags.workflow = true;
   flags.dependencies = true;
-  flags.privileged = true;
-  profiles.add('privileged');
+  flags.operations = true;
+  flags.agentEnvironment = true;
+  applyPrivileged(flags, profiles);
 }
 
 function deriveSecurityFlags(flags) {
@@ -212,7 +302,7 @@ function deriveSecurityFlags(flags) {
 function broadFallback(reason) {
   const flags = emptyFlags();
   const profiles = new Set();
-  applyPrivileged(flags, profiles);
+  applyBroadValidation(flags, profiles);
   deriveSecurityFlags(flags);
   return {
     valid: false,
@@ -238,6 +328,8 @@ function orderedProfiles(profiles) {
     'contracts-integrations',
     'infrastructure-delivery',
     'learning-governance',
+    'operations',
+    'agent-environment',
     'privileged',
   ];
   return order.filter((profile) => profiles.has(profile));
