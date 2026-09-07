@@ -160,6 +160,9 @@ param bringPassword string
 @description('SHA-256 fingerprint of the expected Bring account email.')
 param bringExpectedAccountFingerprint string
 
+@description('Explicit principal-to-operator connection grants. This policy is independent of the login allowlists.')
+param bringConnectionGrants string = ''
+
 @description('Optional default readable Bring list UUID.')
 param bringDefaultListUuid string = ''
 
@@ -240,6 +243,9 @@ var validatedBringWritableLists = (validatedBringAddEnabled || validatedBringDes
 var validatedBringFingerprint = bringEnabled && empty(bringExpectedAccountFingerprint)
   ? fail('Enabled Bring integration requires an expected account fingerprint.')
   : bringExpectedAccountFingerprint
+var validatedBringConnectionGrants = bringEnabled && empty(bringConnectionGrants)
+  ? fail('Enabled Bring integration requires explicit principal connection grants.')
+  : bringConnectionGrants
 var validatedBudgetAmount = ((environmentName == 'test' && monthlyBudgetEur == 10) || (environmentName == 'prod' && monthlyBudgetEur == 15))
   ? monthlyBudgetEur
   : fail('Budget split must remain EUR 10 for test and EUR 15 for production.')
@@ -736,6 +742,7 @@ module functionAppSettings './modules/function-app-settings.bicep' = {
       BRING_EMAIL: '@Microsoft.KeyVault(SecretUri=${bringEmailSecret.properties.secretUriWithVersion})'
       BRING_PASSWORD: '@Microsoft.KeyVault(SecretUri=${bringPasswordSecret.properties.secretUriWithVersion})'
       BRING_EXPECTED_ACCOUNT_FINGERPRINT: validatedBringFingerprint
+      BRING_CONNECTION_GRANTS: validatedBringConnectionGrants
       BRING_DEFAULT_LIST_UUID: bringDefaultListUuid
       BRING_READABLE_LIST_UUIDS: validatedBringReadableLists
       BRING_WRITABLE_LIST_UUIDS: validatedBringWritableLists

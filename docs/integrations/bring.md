@@ -5,6 +5,7 @@ Bring! has no supported public API for this use case. The integration therefore 
 ## Safety model
 
 - The existing Bring technical account remains in use.
+- Every read, mutation and mutation lookup requires an explicit `BRING_CONNECTION_GRANTS` entry for the authenticated principal. Login allowlists and operation permissions remain separate prerequisites.
 - `test` may read the same account but cannot add, complete, or remove items.
 - Production reads require `BRING_READABLE_LIST_UUIDS`.
 - Production writes require an explicit UUID in the comma-separated `BRING_WRITABLE_LIST_UUIDS`; one UUID remains a valid backwards-compatible configuration and duplicates/case are normalized.
@@ -13,6 +14,32 @@ Bring! has no supported public API for this use case. The integration therefore 
 - `BRING_EXPECTED_ACCOUNT_FINGERPRINT` binds the deployment to the intended technical account without storing its email in state or audit records.
 
 The granular permissions are `bring.read`, `bring.write`, `bring.complete`, and `bring.remove`. Service tokens may read and add when explicitly granted but cannot complete or remove. Destructive operations require a delegated user token.
+
+## Provider connection policy
+
+The server currently exposes one connection, `operator`, backed by the existing credential references and private storage. Set `BRING_CONNECTION_GRANTS` as a repository or environment variable with this shape:
+
+```json
+{
+  "version": 1,
+  "grants": [
+    {
+      "connectionId": "operator",
+      "principal": {
+        "tokenType": "user",
+        "tenantId": "11111111-1111-4111-8111-111111111111",
+        "objectId": "22222222-2222-4222-8222-222222222222"
+      }
+    }
+  ]
+}
+```
+
+Use exactly one `objectId` or `subject`. Service grants additionally require the exact `clientId`. Tenant and object/client identifiers accept the canonical GUID representation, including Microsoft personal-account object identifiers. Wildcards, duplicate selectors, unknown fields and unknown connections are rejected. Missing grants deny access before provider calls or private-state reads. Adding a login to an OIDC allowlist does not grant the Bring account.
+
+Promotion validates the policy with the actual release package before mutation, then verifies the exact deployed setting. Bounded rollback can restore an older accepted package that predates this connection policy; its existing authentication, package provenance and runtime verification remain required.
+
+The initial operator mapping retains the existing private paths under the ownership descriptor `legacy-operator-v1`. It does not create separate accounts or move stored data. Before onboarding another user or connection, partition session caches, private snapshots, mutation/idempotency state and audit ownership by the appropriate principal and connection. A second connection must have separate credentials and private namespaces. Shared operator access requires an explicit service policy; it is never a fallback for an unknown principal.
 
 ## Mutation contract
 

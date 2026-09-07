@@ -13,12 +13,23 @@ import {
   BringMutationOutcomeUnknownError,
 } from '../dist/application/operations/bring/mutations.js';
 import { BringMutationSecurity } from '../dist/application/operations/bring/mutationSecurity.js';
+import { BringApplication } from '../dist/application/operations/bring/application.js';
+import {
+  BringConnectionAccessError,
+  ConfiguredBringConnectionResolver,
+  LEGACY_BRING_CONNECTION_ID,
+  LEGACY_BRING_CREDENTIAL_REFERENCE,
+  LEGACY_BRING_STORAGE_NAMESPACE,
+  createLegacyBringConnection,
+  parseBringConnectionGrants,
+} from '../dist/application/providerConnections/bring.js';
 import { getOperationDefinition, OPERATION_IDS } from '../dist/application/operations/registry.js';
 import {
   AzureBlobBringMutationStore,
   parseBringMutationRecord,
 } from '../dist/infrastructure/azure/bringMutationStore.js';
 import { createBringHandler } from '../dist/functions/bring.js';
+import { createBringApplication } from '../dist/infrastructure/composition/bring.js';
 import { BringClient, BringUpstreamError } from '../dist/shared/bring/client.js';
 import { BringConfigError, fingerprintBringAccount, readBringConfig } from '../dist/shared/bring/config.js';
 import { BringInputError, BringPolicyError, BringService, validateItems } from '../dist/shared/bring/service.js';
@@ -100,6 +111,19 @@ test('Bring configuration fails closed and test remains read-only for the same a
     /HTTPS/,
   );
 
+  const connectionGrantsJson = JSON.stringify({
+    version: 1,
+    grants: [
+      {
+        connectionId: LEGACY_BRING_CONNECTION_ID,
+        principal: {
+          tokenType: 'user',
+          tenantId: '44444444-4444-4444-8444-444444444444',
+          subject: 'configured-user',
+        },
+      },
+    ],
+  });
   const readOnlyTest = readBringConfig({
     DEPLOYED_ENVIRONMENT_NAME: 'test',
     BRING_ENABLED: 'true',
@@ -113,10 +137,12 @@ test('Bring configuration fails closed and test remains read-only for the same a
     BRING_EXPECTED_ACCOUNT_FINGERPRINT: cfg.accountFingerprint,
     BRING_READABLE_LIST_UUIDS: listUuid,
     BRING_DEFAULT_LIST_UUID: listUuid,
+    BRING_CONNECTION_GRANTS: connectionGrantsJson,
   });
   assert.equal(readOnlyTest.accountFingerprint, cfg.accountFingerprint);
   assert.equal(readOnlyTest.addEnabled, false);
   assert.equal(readOnlyTest.destructiveEnabled, false);
+  assert.equal(readOnlyTest.connectionGrantsJson, connectionGrantsJson);
   assert.deepEqual(readOnlyTest.writableSharedListUuids, []);
 
   assert.throws(
@@ -205,6 +231,238 @@ test('Bring writable-list configuration accepts an explicit normalized set witho
       BringConfigError,
     );
   }
+});
+
+test('Bring connection grants require exact tenant-bound user and service identities without wildcards', () => {
+  const tenantId = '44444444-4444-4444-8444-444444444444';
+  const userObjectId = '55555555-5555-4555-8555-555555555555';
+  const msaObjectId = '00000000-0000-0000-1234-abcdefabcdef';
+  const serviceClientId = '66666666-6666-4666-8666-666666666666';
+  const serviceObjectId = '77777777-7777-4777-8777-777777777777';
+  const grants = parseBringConnectionGrants(
+    JSON.stringify({
+      version: 1,
+      grants: [
+        {
+          connectionId: LEGACY_BRING_CONNECTION_ID,
+          principal: { tokenType: 'user', tenantId, objectId: userObjectId },
+        },
+        {
+          connectionId: LEGACY_BRING_CONNECTION_ID,
+          principal: { tokenType: 'user', tenantId, objectId: msaObjectId },
+        },
+        {
+          connectionId: LEGACY_BRING_CONNECTION_ID,
+          principal: {
+            tokenType: 'service',
+            tenantId,
+            clientId: serviceClientId,
+            objectId: serviceObjectId,
+          },
+        },
+      ],
+    }),
+  );
+  assert.equal(grants.length, 3);
+  assert.deepEqual(grants[2].principal, {
+    tokenType: 'service',
+    tenantId,
+    clientId: serviceClientId,
+    objectId: serviceObjectId,
+  });
+  const connection = createLegacyBringConnection(cfg);
+  const resolver = new ConfiguredBringConnectionResolver([connection], JSON.stringify({ version: 1, grants }));
+  assert.equal(
+    resolver.resolve({
+      subject: 'msa-subject',
+      objectId: msaObjectId.toUpperCase(),
+      tenantId,
+      tokenType: 'user',
+      scopes: ['bring.read'],
+      roles: [],
+    }),
+    connection,
+  );
+  assert.equal(
+    resolver.resolve({
+      subject: 'service-subject',
+      objectId: serviceObjectId,
+      tenantId,
+      clientId: serviceClientId,
+      tokenType: 'service',
+      scopes: [],
+      roles: ['bring.read'],
+    }),
+    connection,
+  );
+  assert.throws(
+    () =>
+      resolver.resolve({
+        subject: 'service-subject',
+        objectId: serviceObjectId,
+        tenantId,
+        clientId: '99999999-9999-4999-8999-999999999999',
+        tokenType: 'service',
+        scopes: [],
+        roles: ['bring.read'],
+      }),
+    BringConnectionAccessError,
+  );
+
+  for (const invalid of [
+    { version: 1, grants: [] },
+    {
+      version: 1,
+      grants: [{ connectionId: '*', principal: { tokenType: 'user', tenantId, objectId: userObjectId } }],
+    },
+    {
+      version: 1,
+      grants: [{ connectionId: LEGACY_BRING_CONNECTION_ID, principal: { tokenType: 'user', tenantId, subject: '*' } }],
+    },
+    {
+      version: 1,
+      grants: [
+        {
+          connectionId: LEGACY_BRING_CONNECTION_ID,
+          principal: { tokenType: 'service', tenantId, objectId: serviceObjectId },
+        },
+      ],
+    },
+    {
+      version: 1,
+      grants: [
+        {
+          connectionId: LEGACY_BRING_CONNECTION_ID,
+          principal: { tokenType: 'user', tenantId, objectId: userObjectId, credentialReference: 'candidate' },
+        },
+      ],
+    },
+    {
+      version: 1,
+      grants: [
+        {
+          connectionId: LEGACY_BRING_CONNECTION_ID,
+          principal: { tokenType: 'user', tenantId, objectId: '00000000-0000-0000-1234-abcdefabcdeg' },
+        },
+      ],
+    },
+    {
+      version: 1,
+      grants: [
+        {
+          connectionId: LEGACY_BRING_CONNECTION_ID,
+          principal: { tokenType: 'user', tenantId, objectId: '000000000000-0000-1234-abcdefabcdef' },
+        },
+      ],
+    },
+  ]) {
+    assert.throws(() => parseBringConnectionGrants(JSON.stringify(invalid)), BringConfigError);
+  }
+});
+
+test('Bring application denies ungranted principals before every provider and private-state boundary', async () => {
+  const tenantId = '44444444-4444-4444-8444-444444444444';
+  const grantedObjectId = '55555555-5555-4555-8555-555555555555';
+  const connection = createLegacyBringConnection(cfg);
+  assert.equal(connection.credentialReference, LEGACY_BRING_CREDENTIAL_REFERENCE);
+  assert.equal(connection.storage.namespace, LEGACY_BRING_STORAGE_NAMESPACE);
+  assert.equal(connection.storage.sessionCacheContainer, cfg.sessionCacheContainer);
+  assert.equal(connection.storage.sessionCacheBlob, cfg.sessionCacheBlob);
+
+  let providerOrSessionAccesses = 0;
+  let mutationStoreOrAuditAccesses = 0;
+  const service = {
+    listLists: async () => {
+      providerOrSessionAccesses += 1;
+      return { source: 'bring', lists: [] };
+    },
+    getList: async () => {
+      providerOrSessionAccesses += 1;
+      return { uuid: listUuid, version: '0'.repeat(64), items: [] };
+    },
+  };
+  const coordinator = {
+    addItems: async () => {
+      mutationStoreOrAuditAccesses += 1;
+    },
+    prepare: async () => {
+      mutationStoreOrAuditAccesses += 1;
+    },
+    apply: async () => {
+      mutationStoreOrAuditAccesses += 1;
+    },
+    getMutationOperation: async () => {
+      mutationStoreOrAuditAccesses += 1;
+    },
+  };
+  const grantsJson = JSON.stringify({
+    version: 1,
+    grants: [
+      {
+        connectionId: LEGACY_BRING_CONNECTION_ID,
+        principal: { tokenType: 'user', tenantId, objectId: grantedObjectId },
+      },
+    ],
+  });
+  const resolver = new ConfiguredBringConnectionResolver([connection], grantsJson);
+  const application = new BringApplication(service, coordinator, resolver, connection);
+  const ungranted = {
+    subject: 'newly-allowed-login',
+    objectId: '88888888-8888-4888-8888-888888888888',
+    tenantId,
+    tokenType: 'user',
+    scopes: ['bring.read', 'bring.write', 'bring.complete', 'bring.remove'],
+    roles: [],
+  };
+  const deniedActions = [
+    () => application.listLists(ungranted),
+    () => application.getList(ungranted, listUuid),
+    () => application.addItems(ungranted, { operationId, listUuid, items: [{ name: 'Milk' }] }, 'trace-add'),
+    () =>
+      application.prepareMutation(
+        ungranted,
+        { operationId, listUuid, operation: 'remove', items: [{ name: 'Milk' }] },
+        'trace-prepare',
+      ),
+    () =>
+      application.applyMutation(ungranted, { operationId, listUuid, confirmationToken: 'safe.token' }, 'trace-apply'),
+    () => application.getMutationOperation(ungranted, operationId),
+  ];
+  for (const action of deniedActions) {
+    await assert.rejects(async () => action(), BringConnectionAccessError);
+  }
+  assert.equal(providerOrSessionAccesses, 0);
+  assert.equal(mutationStoreOrAuditAccesses, 0);
+
+  const granted = { ...ungranted, objectId: grantedObjectId };
+  assert.deepEqual(await application.listLists(granted), { source: 'bring', lists: [] });
+  assert.equal(providerOrSessionAccesses, 1);
+
+  const renamedResolver = new ConfiguredBringConnectionResolver(
+    [connection],
+    grantsJson.replace(`"${LEGACY_BRING_CONNECTION_ID}"`, '"renamed-operator"'),
+  );
+  const renamedApplication = new BringApplication(service, coordinator, renamedResolver, connection);
+  await assert.rejects(async () => renamedApplication.listLists(granted), BringConfigError);
+  assert.equal(providerOrSessionAccesses, 1);
+  assert.equal(mutationStoreOrAuditAccesses, 0);
+});
+
+test('Bring connection grants are parsed lazily so disabled composition can coexist with absent grants', async () => {
+  const disabledConfig = {
+    ...cfg,
+    enabled: false,
+    addEnabled: false,
+    destructiveEnabled: false,
+    connectionGrantsJson: '{invalid',
+  };
+  const application = createBringApplication({ config: disabledConfig });
+  await assert.rejects(async () => application.listLists(principal), BringConfigError);
+
+  const connection = createLegacyBringConnection(disabledConfig);
+  const absentResolver = new ConfiguredBringConnectionResolver([connection], undefined);
+  const absentApplication = new BringApplication({}, null, absentResolver, connection);
+  await assert.rejects(async () => absentApplication.listLists(principal), BringConnectionAccessError);
 });
 
 test('login form-encodes private values and normalizes the session', async () => {
@@ -589,7 +847,8 @@ test('Bring Function warning telemetry rejects unapproved upstream diagnostic fi
   const warnings = [];
   const privateProviderText = 'Family medication item; api_key=alternate-secret; private@example.test';
   const application = {
-    listLists: async () => {
+    listLists: async (authenticatedPrincipal) => {
+      assert.equal(authenticatedPrincipal.subject, 'local-dev-placeholder');
       throw new BringUpstreamError('Bring dependency request failed.', 502, 'upstream', {
         operation: 'list_lists',
         method: 'GET',
@@ -1618,11 +1877,14 @@ test('HTTP handler uses the breaking add/prepare/apply contract through one appl
   const calls = [];
   const application = {
     listLists: async () => ({ source: 'bring', lists: [] }),
-    getList: async (selectedListUuid) => ({
-      uuid: selectedListUuid,
-      version: '0'.repeat(64),
-      items: [],
-    }),
+    getList: async (authenticatedPrincipal, selectedListUuid) => {
+      assert.equal(authenticatedPrincipal.subject, 'local-dev-placeholder');
+      return {
+        uuid: selectedListUuid,
+        version: '0'.repeat(64),
+        items: [],
+      };
+    },
     addItems: async (_principal, command, correlationId) => {
       calls.push(['add', command, correlationId]);
       return mutationResult(command, 'add');
@@ -1729,8 +1991,9 @@ test('HTTP apply authorizes only a current durable operation and safely rejects 
   let applies = 0;
   const handler = createBringHandler({
     getApplication: () => ({
-      getMutationOperation: async (selectedOperationId) => {
+      getMutationOperation: async (authenticatedPrincipal, selectedOperationId) => {
         lookups += 1;
+        assert.equal(authenticatedPrincipal.subject, 'local-dev-placeholder');
         assert.equal(selectedOperationId, secondOperationId);
         return undefined;
       },
@@ -1790,7 +2053,7 @@ test('HTTP apply maps exact confirmation expiry to 403 without provider work', a
   now = new Date(prepared.expiresAt);
   const handler = createBringHandler({
     getApplication: () => ({
-      getMutationOperation: (selectedOperationId) => coordinator.getMutationOperation(selectedOperationId),
+      getMutationOperation: (...args) => coordinator.getMutationOperation(args[1]),
       applyMutation: (authenticatedPrincipal, command, correlationId) =>
         coordinator.apply(authenticatedPrincipal, command, correlationId),
     }),

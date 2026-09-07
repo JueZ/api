@@ -69,6 +69,9 @@ export function readBringConfig(env: NodeJS.ProcessEnv = process.env): BringConf
     enabled,
     addEnabled,
     destructiveEnabled,
+    ...(optional(env, 'BRING_CONNECTION_GRANTS')
+      ? { connectionGrantsJson: optional(env, 'BRING_CONNECTION_GRANTS') }
+      : {}),
     baseUrl: parsedBaseUrl.toString(),
     clientApiKey: required(env, 'BRING_CLIENT_API_KEY'),
     country,
