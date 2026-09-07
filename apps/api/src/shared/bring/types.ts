@@ -5,6 +5,7 @@ export interface BringConfig {
   enabled: boolean;
   addEnabled: boolean;
   destructiveEnabled: boolean;
+  connectionGrantsJson?: string;
   baseUrl: string;
   clientApiKey: string;
   country: string;

@@ -67,7 +67,10 @@ export function createBringHandler(
         const auth = await authorizeRequestForOperation(request, context, route.authOperationId);
         if (!auth.ok) return withCors(auth.response, cors);
         const application = getApplication(context);
-        const body = route.kind === 'list' ? await application.listLists() : await application.getList(route.listUuid);
+        const body =
+          route.kind === 'list'
+            ? await application.listLists(auth.user)
+            : await application.getList(auth.user, route.listUuid);
         return { status: 200, headers: cors, jsonBody: body };
       }
 
@@ -98,7 +101,7 @@ export function createBringHandler(
 
       const command = parseApplyCommand(rawBody, route.listUuid);
       const application = getApplication(context);
-      const operation = await application.getMutationOperation(command.operationId);
+      const operation = await application.getMutationOperation(authentication.user, command.operationId);
       if (!operation) {
         throw new BringInputError('operationId does not identify a current prepared mutation.', 'operationId');
       }

@@ -158,6 +158,69 @@ test('disabled weather requires an empty app setting rather than a secret refere
   assert.equal(settings.GOOGLE_WEATHER_API_KEY, '');
 });
 
+test('Bring connection grants are an exact managed policy independent of login allowlists', () => {
+  const grants = JSON.stringify({
+    version: 1,
+    grants: [
+      {
+        connectionId: 'operator',
+        principal: {
+          tokenType: 'user',
+          tenantId: '11111111-1111-4111-8111-111111111111',
+          objectId: '22222222-2222-4222-8222-222222222222',
+        },
+      },
+    ],
+  });
+  const env = { ...runtimeSettingsEnv, BRING_ENABLED: 'true', BRING_CONNECTION_GRANTS: grants };
+  const settings = buildExpectedRuntimeSettings(env);
+  const names = Object.keys(settings);
+  assert.equal(settings.BRING_CONNECTION_GRANTS, env.BRING_CONNECTION_GRANTS);
+  assert.deepEqual(validateDeployedRuntimeSettings(settings, names, env), []);
+  const altered = { ...settings, BRING_CONNECTION_GRANTS: '' };
+  assert.ok(
+    validateDeployedRuntimeSettings(altered, names, env).some((error) => error.endsWith('BRING_CONNECTION_GRANTS')),
+  );
+  const missing = names.filter((name) => name !== 'BRING_CONNECTION_GRANTS');
+  assert.ok(
+    validateDeployedRuntimeSettings(settings, missing, env).some((error) => error.endsWith('BRING_CONNECTION_GRANTS')),
+  );
+  assert.throws(
+    () => buildExpectedRuntimeSettings({ ...env, BRING_CONNECTION_GRANTS: '' }),
+    /BRING_CONNECTION_GRANTS is required/,
+  );
+});
+
+test('accepted legacy rollback permits only an absent legacy grant setting and preserves all other policy checks', () => {
+  const env = { ...runtimeSettingsEnv, BRING_ENABLED: 'true', BRING_CONNECTION_GRANTS: '{"version":1,"grants":[]}' };
+  const settings = buildExpectedRuntimeSettings(env);
+  delete settings.BRING_CONNECTION_GRANTS;
+  const response = { properties: settings };
+  const compatibility = { allowLegacyBringPolicy: true };
+  assert.deepEqual(validateArmRuntimeSettingsResponse(response, env, compatibility), []);
+  assert.ok(
+    validateArmRuntimeSettingsResponse(response, env).some((error) => error.endsWith('BRING_CONNECTION_GRANTS')),
+  );
+  assert.ok(
+    validateArmRuntimeSettingsResponse({ properties: { ...settings, AUTH_ENABLED: 'false' } }, env, compatibility).some(
+      (error) => error.endsWith('AUTH_ENABLED'),
+    ),
+  );
+  assert.ok(
+    validateArmRuntimeSettingsResponse(
+      { properties: { ...settings, BRING_CONNECTION_GRANTS: 'changed' } },
+      env,
+      compatibility,
+    ).some((error) => error.endsWith('BRING_CONNECTION_GRANTS')),
+  );
+  const missingConfiguredGrants = { ...env, BRING_CONNECTION_GRANTS: '' };
+  assert.deepEqual(validateArmRuntimeSettingsResponse(response, missingConfiguredGrants, compatibility), []);
+  assert.throws(
+    () => validateArmRuntimeSettingsResponse(response, missingConfiguredGrants),
+    /BRING_CONNECTION_GRANTS is required/,
+  );
+});
+
 test('telemetry KQL sanitizes smoke run IDs', () => {
   assert.equal(sanitizeTelemetrySmokeRunId("smoke-prod'; drop table"), 'smoke-prod-drop-table');
   const query = buildTelemetryQuery({ timespanMinutes: 45, smokeRunId: "smoke-prod'; drop" });

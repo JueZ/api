@@ -54,6 +54,7 @@ export const requiredManagedSettingNames = [
   'BRING_EMAIL',
   'BRING_PASSWORD',
   'BRING_EXPECTED_ACCOUNT_FINGERPRINT',
+  'BRING_CONNECTION_GRANTS',
   'BRING_DEFAULT_LIST_UUID',
   'BRING_READABLE_LIST_UUIDS',
   'BRING_WRITABLE_LIST_UUIDS',
@@ -110,7 +111,7 @@ function exactOrigin(raw, name) {
   }
 }
 
-export function buildExpectedRuntimeSettings(env = process.env) {
+export function buildExpectedRuntimeSettings(env = process.env, { omitLegacyBringGrants = false } = {}) {
   const environmentName = value(env, 'ENVIRONMENT_NAME');
   if (!['test', 'prod'].includes(environmentName)) throw new Error('ENVIRONMENT_NAME must be test or prod.');
   const hostStorage = value(env, 'EFFECTIVE_HOST_STORAGE_ACCOUNT');
@@ -183,6 +184,14 @@ export function buildExpectedRuntimeSettings(env = process.env) {
     BRING_EMAIL: requiredValue(env, 'EXPECTED_BRING_EMAIL_REFERENCE'),
     BRING_PASSWORD: requiredValue(env, 'EXPECTED_BRING_PASSWORD_REFERENCE'),
     BRING_EXPECTED_ACCOUNT_FINGERPRINT: value(env, 'BRING_EXPECTED_ACCOUNT_FINGERPRINT'),
+    ...(omitLegacyBringGrants
+      ? {}
+      : {
+          BRING_CONNECTION_GRANTS:
+            value(env, 'BRING_ENABLED', 'false') === 'true'
+              ? requiredValue(env, 'BRING_CONNECTION_GRANTS')
+              : value(env, 'BRING_CONNECTION_GRANTS'),
+        }),
     BRING_DEFAULT_LIST_UUID: value(env, 'BRING_DEFAULT_LIST_UUID'),
     BRING_READABLE_LIST_UUIDS: value(env, 'BRING_READABLE_LIST_UUIDS'),
     BRING_WRITABLE_LIST_UUIDS: value(env, 'BRING_WRITABLE_LIST_UUIDS'),
@@ -201,14 +210,16 @@ export function buildExpectedRuntimeSettings(env = process.env) {
   };
 }
 
-export function validateDeployedRuntimeSettings(settings, settingNames, env = process.env) {
+export function validateDeployedRuntimeSettings(settings, settingNames, env = process.env, options = {}) {
   const errors = [];
-  const expected = buildExpectedRuntimeSettings(env);
   const names = Array.isArray(settingNames) ? settingNames : [];
   const nameSet = new Set(names);
+  const omitLegacyBringGrants = options.allowLegacyBringPolicy === true && !nameSet.has('BRING_CONNECTION_GRANTS');
+  const expected = buildExpectedRuntimeSettings(env, { omitLegacyBringGrants });
   const allowedNames = new Set([...requiredManagedSettingNames, ...optionalReleaseSettingNames]);
 
   for (const name of requiredManagedSettingNames) {
+    if (omitLegacyBringGrants && name === 'BRING_CONNECTION_GRANTS') continue;
     if (!nameSet.has(name)) errors.push(`required managed setting is missing: ${name}`);
   }
   for (const name of names) {
@@ -227,14 +238,16 @@ export function validateDeployedRuntimeSettings(settings, settingNames, env = pr
   return errors;
 }
 
-export function validateArmRuntimeSettingsResponse(response, env = process.env) {
+export function validateArmRuntimeSettingsResponse(response, env = process.env, options = {}) {
   const properties = response?.properties;
   if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
     return ['Azure app-settings response is missing its properties object'];
   }
-  const expectedNames = Object.keys(buildExpectedRuntimeSettings(env));
+  const omitLegacyBringGrants =
+    options.allowLegacyBringPolicy === true && !Object.hasOwn(properties, 'BRING_CONNECTION_GRANTS');
+  const expectedNames = Object.keys(buildExpectedRuntimeSettings(env, { omitLegacyBringGrants }));
   const policySettings = Object.fromEntries(expectedNames.map((name) => [name, properties[name]]));
-  return validateDeployedRuntimeSettings(policySettings, Object.keys(properties), env);
+  return validateDeployedRuntimeSettings(policySettings, Object.keys(properties), env, options);
 }
 
 async function readStandardInput() {
@@ -245,14 +258,20 @@ async function readStandardInput() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (process.argv[2] !== '--arm-response') {
+  if (
+    process.argv[2] !== '--arm-response' ||
+    process.argv.length > 4 ||
+    (process.argv[3] && process.argv[3] !== '--allow-legacy-bring-policy')
+  ) {
     console.error(
       'Usage: az rest ... --output json | node scripts/validate-deployed-runtime-settings.mjs --arm-response',
     );
     process.exit(2);
   }
   const response = JSON.parse(await readStandardInput());
-  const errors = validateArmRuntimeSettingsResponse(response);
+  const errors = validateArmRuntimeSettingsResponse(response, process.env, {
+    allowLegacyBringPolicy: process.argv[3] === '--allow-legacy-bring-policy',
+  });
   if (errors.length > 0) {
     console.error(errors.join('\n'));
     process.exit(1);

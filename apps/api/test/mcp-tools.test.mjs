@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createPrivateMcpServer, handleMcpHttpRequest } from '../dist/mcp/server.js';
+import { BringApplication } from '../dist/application/operations/bring/application.js';
+import { createLegacyBringConnection } from '../dist/application/providerConnections/bring.js';
 import { BringUpstreamError } from '../dist/shared/bring/client.js';
 import { BringService } from '../dist/shared/bring/service.js';
+import { resetCategoryStoreForTesting } from '../dist/shared/wlh/categoryStore.js';
 
 const bringProviderFixture = JSON.parse(
   await readFile(new URL('./fixtures/bring/provider-v2026-07-26.json', import.meta.url), 'utf8'),
@@ -23,6 +28,53 @@ const bringListUuid = '22222222-2222-4222-8222-222222222222';
 const bringAddOperationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const bringRemoveOperationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const bringItemUuid = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+test('default MCP composition serves another provider while disabled Bring has no credentials or storage', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'mcp-disabled-bring-'));
+  const categories = join(directory, 'categories.json');
+  await writeFile(
+    categories,
+    JSON.stringify({
+      categories: [
+        { id: '0', label: 'Root', children: ['1'] },
+        { id: '1', label: 'Bicycles', path: '/bicycles', parent_id: '0', children: [] },
+      ],
+    }),
+  );
+  try {
+    resetCategoryStoreForTesting();
+    await withEnv(
+      {
+        ...authEnv,
+        BRING_ENABLED: 'false',
+        BRING_EMAIL: undefined,
+        BRING_PASSWORD: undefined,
+        BRING_BASE_URL: undefined,
+        BRING_CLIENT_API_KEY: undefined,
+        BRING_CONNECTION_GRANTS: undefined,
+        BRING_STORAGE_ACCOUNT_NAME: undefined,
+        BRING_SESSION_CACHE_ENABLED: undefined,
+        REDDIT_STORAGE_ACCOUNT_NAME: undefined,
+        YOUTUBE_TRANSCRIPT_STORAGE_ACCOUNT_NAME: undefined,
+        WLH_BASE_URL: 'https://wlh.example.test',
+        WLH_STORAGE_ACCOUNT_NAME: undefined,
+        WLH_CATEGORY_FILE: categories,
+      },
+      async () => {
+        // No injected services: this exercises the same composition as production.
+        await withMcpSdkClient(undefined, async (client) => {
+          assert.ok((await client.listTools()).tools.some((tool) => tool.name === 'wlh_categories_top'));
+          const result = await client.callTool({ name: 'wlh_categories_top', arguments: {} });
+          assert.notEqual(result.isError, true);
+          assert.match(JSON.stringify(result.structuredContent), /Bicycles/);
+        });
+      },
+    );
+  } finally {
+    resetCategoryStoreForTesting();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('MCP initialize and tools/list expose reads and controlled Bring additions', async () => {
   await withEnv(authEnv, async () => {
@@ -121,7 +173,7 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
 test('MCP SDK exposes fixture-grounded Bring schemas and normalized read outcomes', async () => {
   const providerRequests = [];
   const services = stubServices();
-  services.bring = fixtureBackedBringService(providerRequests);
+  services.bring = authorizedFixtureBringApplication(fixtureBackedBringService(providerRequests));
   const fixtureDigest = createHash('sha256').update(JSON.stringify(bringProviderFixture.responses)).digest('hex');
   const fixtureLists = bringProviderFixture.responses.lists.lists;
   const selectedListUuid = fixtureLists.find((list) => list.isShared === true).listUuid;
@@ -898,6 +950,17 @@ function fixtureBackedBringService(providerRequests) {
   });
 }
 
+function authorizedFixtureBringApplication(service) {
+  const connection = createLegacyBringConnection(service.getConfig());
+  const resolver = {
+    resolve(principal) {
+      assert.equal(principal.subject, 'local-dev-placeholder');
+      return connection;
+    },
+  };
+  return new BringApplication(service, null, resolver, connection);
+}
+
 function fixtureJson(value) {
   return new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
 }
@@ -1105,8 +1168,8 @@ function stubServices(calls = []) {
           },
         ],
       }),
-      getList: async (listUuid) => ({
-        uuid: listUuid ?? '11111111-1111-4111-8111-111111111111',
+      getList: async (...args) => ({
+        uuid: args[1] ?? '11111111-1111-4111-8111-111111111111',
         version: '0'.repeat(64),
         items: [{ name: 'Milch', status: 'active' }],
       }),

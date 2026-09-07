@@ -136,7 +136,7 @@ export function registerBringTools(server: McpServer, options: BringToolRegistra
       const principal = await options.requirePrincipal(OPERATION_IDS.bringListLists);
       if (isToolResult(principal)) return principal;
       return options.run(OPERATION_IDS.bringListLists, async () => {
-        const result = await options.bring.listLists();
+        const result = await options.bring.listLists(principal);
         return textResult(result, `Found ${result.lists.length} readable Bring shopping lists.`);
       });
     },
@@ -157,7 +157,7 @@ export function registerBringTools(server: McpServer, options: BringToolRegistra
       const principal = await options.requirePrincipal(OPERATION_IDS.bringGetItems);
       if (isToolResult(principal)) return principal;
       return options.run(OPERATION_IDS.bringGetItems, async () => {
-        const result = await options.bring.getList(listUuid);
+        const result = await options.bring.getList(principal, listUuid);
         return textResult(result, `Loaded ${result.items.length} Bring items.`);
       });
     },
