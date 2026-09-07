@@ -4,7 +4,7 @@ import { BringPolicyError } from '../../shared/bring/service.js';
 import type { BringConfig } from '../../shared/bring/types.js';
 
 export const LEGACY_BRING_CONNECTION_ID = 'operator';
-export const LEGACY_BRING_CREDENTIAL_REFERENCE = 'legacy-environment-v1';
+export const LEGACY_BRING_CREDENTIAL_REFERENCE = 'env-v1';
 export const LEGACY_BRING_STORAGE_NAMESPACE = 'legacy-operator-v1';
 
 export type BringPrincipalSelector = {

@@ -23,7 +23,13 @@ Deterministic policy validation enforces:
 - no `secrets: inherit`, dynamic secret lookup, or unapproved provider secret;
 - `OPENAI_API_KEY` restricted to the deployed repairable-error runtime path.
 
-Workflow files, policy, dependencies, scripts, agent instructions, authentication, and configuration are privileged changes and receive broad application plus security coverage.
+For pull requests, the required `PR Gate` policy job also checks out the immutable event base SHA into an isolated directory and installs that base's dependencies without lifecycle scripts. It runs the protected-base guardrail and classifier against the candidate Git range and validates the candidate policy and workflow YAML through protected-base modules. Both required aggregate jobs recompute applicability with the protected-base classifier and evaluate job results with the protected-base aggregate helper. Candidate files and Git metadata are inputs to these checks; the protected verifier does not import candidate modules or use candidate dependencies. Changing only the candidate validator, classifier, or aggregate helper therefore cannot suppress the protected-base result.
+
+The removed-safeguard scan is a bounded change-shape heuristic. It excludes comments, tests, documentation, and the scanner itself as replacement evidence, while allowing a safeguard signal to move between relevant executable files. A matching signal does not establish reachability, failure propagation, or equivalent runtime behavior, so same-boundary dead code and semantically weaker moved checks remain possible. Negative contract, workflow, and runtime checks provide the stronger evidence where those guarantees matter.
+
+Workflow files, policy, dependencies, scripts, agent instructions, authentication, and configuration are classified by their security sensitivity. Security checks follow the applicable policy profiles, while application and build coverage follows actual validation impact; privileged classification alone does not imply broad application coverage.
+
+This repository is owned by a personal user account and cannot use organization required-workflow rules. The candidate can still edit the workflow that defines `PR Gate` or `Security Gate`, including removing this protected-base job. Required check names, GitHub Actions provenance, and enforced administrator protection do not make those workflow definitions immutable. Closing that platform trust gap requires a separately trusted workflow-enforcement mechanism outside the editable candidate workflow.
 
 ## Runtime and supply chain
 
