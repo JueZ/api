@@ -328,6 +328,92 @@ test('explicit configuration reconciliation requires the exact failed receipt ev
   );
 });
 
+test('explicit reconciliation can finish the exact automatic rollback but cannot replace later or partial state', () => {
+  const accepted = observation().identity;
+  const promotionReceipt = {
+    recorded: true,
+    runId: '456',
+    correlation: 'prod-456-1',
+    controllerRef: failedSha,
+    kind: 'promotion',
+  };
+  const rollbackReceipt = { ...promotionReceipt, correlation: 'rollback-456-1', kind: 'recovery' };
+  const failed = observation({
+    functionSource: failedSha,
+    functionRun: '456',
+    correlation: 'prod-456-1',
+    mutationReceipt: promotionReceipt,
+  }).identity;
+  const options = {
+    acceptedIdentity: accepted,
+    failedIntent: {
+      phase: 'application-ready',
+      persistedBeforeWrite: true,
+      configurationMayChange: true,
+      expectedIdentity: failed,
+    },
+    observed: observation({ mutationReceipt: rollbackReceipt }),
+    reconcileConfiguration: true,
+    currentMainRef: newerSha,
+    failedControllerRef: failedSha,
+  };
+  for (const health of ['available', 'unavailable']) {
+    const result = decideRollbackGuard({
+      ...options,
+      observed: observation({ health, mutationReceipt: rollbackReceipt }),
+    });
+    assert.equal(result.mutate, true);
+    assert.equal(result.reason, 'explicit-reconciliation-after-exact-automatic-rollback');
+    assert.equal(result.configurationUncertain, true);
+  }
+  assert.equal(decideRollbackGuard({ ...options, reconcileConfiguration: false }).mutate, false);
+  assert.equal(decideRollbackGuard({ ...options, rollbackAlreadyAttempted: true }).mutate, false);
+  assert.equal(
+    decideRollbackGuard({ ...options, observed: { ...options.observed, state: 'partial', ok: false } }).mutate,
+    false,
+  );
+  for (const receipt of [
+    { ...rollbackReceipt, runId: '789', correlation: 'rollback-789-1' },
+    { ...rollbackReceipt, runId: '789', correlation: 'prod-789-1', kind: 'promotion' },
+    { ...rollbackReceipt, correlation: 'rollback-456-2' },
+    { ...rollbackReceipt, controllerRef: newerSha },
+    { ...rollbackReceipt, kind: 'promotion' },
+    { ...rollbackReceipt, recorded: false },
+  ]) {
+    const observed = observation({ mutationReceipt: receipt });
+    observed.identity.mutationReceipt.recorded = receipt.recorded;
+    assert.equal(decideRollbackGuard({ ...options, observed }).mutate, false, JSON.stringify(receipt));
+  }
+  for (const receipt of [
+    { ...promotionReceipt, recorded: false },
+    { ...promotionReceipt, runId: '0456' },
+    { ...promotionReceipt, runId: '9007199254740992' },
+    { ...promotionReceipt, correlation: 'prod-456-2' },
+    { ...promotionReceipt, controllerRef: newerSha },
+    { ...promotionReceipt, kind: 'recovery' },
+  ]) {
+    const failedIntent = { ...options.failedIntent, expectedIdentity: { ...failed, mutationReceipt: receipt } };
+    assert.equal(decideRollbackGuard({ ...options, failedIntent }).mutate, false, JSON.stringify(receipt));
+  }
+  for (const overrides of [
+    { functionSource: newerSha, frontendSource: newerSha, functionRun: '789' },
+    { functionSource: failedSha, functionRun: '456' },
+    { frontendSource: failedSha, frontendRun: '456' },
+    { packageDigest: '9'.repeat(64) },
+  ]) {
+    const observed = observation({ ...overrides, mutationReceipt: rollbackReceipt });
+    assert.equal(decideRollbackGuard({ ...options, observed }).mutate, false, JSON.stringify(overrides));
+  }
+  for (const intentChange of [
+    { persistedBeforeWrite: false },
+    { phase: 'unknown' },
+    { configurationMayChange: false },
+  ]) {
+    const failedIntent = { ...options.failedIntent, ...intentChange };
+    assert.equal(decideRollbackGuard({ ...options, failedIntent }).mutate, false);
+  }
+});
+
 test('invalid observation cannot pass component comparisons', () => {
   const accepted = observation().identity;
   const invalid = observation({ packageDigest: '9'.repeat(64) });
