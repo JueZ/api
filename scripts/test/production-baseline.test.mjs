@@ -187,6 +187,7 @@ test('legacy installed state without correlation resolves only through its uniqu
       {
         id: current.selected.runId,
         repository: { full_name: 'JueZ/api' },
+        status: 'completed',
         conclusion: 'success',
         head_branch: 'main',
         head_sha: sourceRef,

@@ -67,6 +67,9 @@ param mcpAllowedOrigins string
 @description('Object ID of the environment-specific GitHub Actions OIDC deployment service principal.')
 param deploymentPrincipalObjectId string
 
+@description('Validated lifecycle prefix policy protecting the candidate and accepted rollback target, including immutable versions. Supplied by the protected delivery controller.')
+param releaseRetentionPolicy object
+
 @description('Operator email for Azure Monitor and budget notifications.')
 param operatorAlertEmail string
 
@@ -437,40 +440,9 @@ resource releaseLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@
   parent: releaseStorage
   name: 'default'
   properties: {
-    policy: {
-      rules: [
-        {
-          name: 'expire-old-release-packages'
-          enabled: true
-          type: 'Lifecycle'
-          definition: {
-            actions: {
-              baseBlob: {
-                delete: {
-                  daysAfterModificationGreaterThan: 180
-                }
-              }
-              version: {
-                delete: {
-                  daysAfterCreationGreaterThan: 30
-                }
-              }
-            }
-            filters: {
-              blobTypes: [
-                'blockBlob'
-              ]
-              prefixMatch: [
-                'function-releases/'
-              ]
-            }
-          }
-        }
-      ]
-    }
+    policy: releaseRetentionPolicy
   }
 }
-
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: keyVaultName
   location: location
