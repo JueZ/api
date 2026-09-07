@@ -35,16 +35,6 @@ on:
         description: GitHub Environment name used for deployment history and approvals.
         required: true
         type: string
-      deployFrontend:
-        description: Deploy Angular static files when present.
-        required: false
-        default: true
-        type: boolean
-      deployFunctions:
-        description: Deploy Azure Functions package when present.
-        required: false
-        default: true
-        type: boolean
       sourceRef:
         description: Immutable 40-character commit SHA from main to deploy.
         required: false
@@ -55,11 +45,6 @@ on:
         required: false
         default: ''
         type: string
-      updateProductionVariables:
-        description: Report resolved production values after successful smoke tests.
-        required: false
-        default: false
-        type: boolean
       redditShareUrlSmokeEnabled:
         description: Run the optional authenticated Reddit share URL smoke against the configured /s/ URL.
         required: false
@@ -514,8 +499,6 @@ jobs:
       AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID: ${{ vars.AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID }}
       AZURE_RESOURCE_GROUP: ${{ inputs.azureResourceGroup }}
       ENVIRONMENT_NAME: ${{ inputs.environmentName }}
-      DEPLOY_FRONTEND: ${{ inputs.deployFrontend }}
-      DEPLOY_FUNCTIONS: ${{ inputs.deployFunctions }}
       SOURCE_REF: ${{ inputs.sourceRef }}
       DEPLOYMENT_CONTROL_REF: ${{ github.sha }}
       CURRENT_MAIN_CONFIRMED_REF: ${{ inputs.currentMainConfirmedRef }}
@@ -1448,7 +1431,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Verify complete deployed runtime safety policy
         id: runtime_policy
-        if: ${{ inputs.deployFunctions && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1525,7 +1508,7 @@ jobs:
               YOUTUBE_TRANSCRIPT_ENABLED="${YOUTUBE_TRANSCRIPT_ENABLED:-false}" \
               node scripts/validate-deployed-runtime-settings.mjs "${runtime_policy_args[@]}"
       - name: Verify private WLH reference data is present
-        if: ${{ inputs.deployFunctions && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1544,7 +1527,7 @@ jobs:
           fi
       - name: Prepare exact deployable frontend bundle
         id: frontend
-        if: ${{ inputs.deployFrontend && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1653,7 +1636,7 @@ jobs:
             "$RUNNER_TEMP/production-mutation/intent.json" > "$intent_tmp"
           mv "$intent_tmp" "$RUNNER_TEMP/production-mutation/intent.json"
       - name: Prepare immutable Azure Functions package
-        if: ${{ inputs.deployFunctions && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1769,7 +1752,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Install immutable Azure Functions package
-        if: ${{ inputs.deployFunctions && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1842,7 +1825,7 @@ jobs:
             echo "No Azure Functions host.json found; skipping Functions deployment."
           fi
       - name: Deploy Angular static site with Azure OIDC
-        if: ${{ inputs.deployFrontend && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -2058,7 +2041,6 @@ jobs:
           export RUNTIME_HEALTH_RETRY_DELAY_MS="${RUNTIME_HEALTH_RETRY_DELAY_MS:-5000}"
           export SMOKE_RUN_ID="$smoke_run_id"
           export AUTH_ENABLED
-          if [ "${DEPLOY_FRONTEND:-false}" = "true" ] && [ -n "${FRONTEND_BASE_URL:-}" ]; then export FRONTEND_BASE_URL; fi
           node scripts/smoke-runtime.mjs | tee "$smoke_dir/runtime-smoke.json"
           echo "SMOKE_RESULTS_PATH=$smoke_dir/runtime-smoke.json" >> "$GITHUB_ENV"
 
@@ -2249,7 +2231,7 @@ jobs:
             --bundle "$ARCHIVE_ATTESTATION_BUNDLE" \
             --verification-dir "$RUNNER_TEMP/archive-publication-verification"
       - name: Report production deployment values after smoke tests
-        if: ${{ inputs.updateProductionVariables && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
+        if: ${{ inputs.environmentName == 'prod' && !inputs.allowRollback && steps.production_guard.outputs.mutation_allowed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail

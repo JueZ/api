@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { parse as parseYaml } from 'yaml';
 import { loadAutonomousPolicy } from '../lib/autonomous-policy.mjs';
 
@@ -19,6 +20,83 @@ const environmentWorkflow = parseYaml(environmentSource);
 function needs(job) {
   return Array.isArray(job.needs) ? job.needs : job.needs ? [job.needs] : [];
 }
+
+test('supported delivery operations select both applications and retain production mutation guards', () => {
+  const steps = environmentWorkflow.jobs.deploy.steps;
+  const componentSteps = [
+    'Verify complete deployed runtime safety policy',
+    'Verify private WLH reference data is present',
+    'Prepare exact deployable frontend bundle',
+    'Prepare immutable Azure Functions package',
+    'Install immutable Azure Functions package',
+    'Deploy Angular static site with Azure OIDC',
+  ].map((name) => {
+    const step = steps.find((entry) => entry.name === name);
+    assert.ok(step, name);
+    return step;
+  });
+  const report = steps.find((entry) => entry.name === 'Report production deployment values after smoke tests');
+  const selected = (step, inputs, mutationAllowed) => {
+    // These step guards use only boolean operators and exact string comparisons.
+    // Evaluate that shared subset for successful preceding steps, not an Actions runner emulator.
+    const match = step.if.match(/^\$\{\{ (.*) \}\}$/);
+    assert.ok(match, step.name);
+    return runInNewContext(
+      match[1],
+      { inputs, steps: { production_guard: { outputs: { mutation_allowed: mutationAllowed } } } },
+      { timeout: 100 },
+    );
+  };
+  for (const id of ['deploy-test', 'promote-production', 'rollback-production', 'reconcile-production']) {
+    const inputs = workflow.jobs[id].with;
+    assert.ok(['test', 'prod'].includes(inputs.environmentName), id);
+    for (const mutationAllowed of ['true', 'false', '', undefined]) {
+      const expected = inputs.environmentName === 'test' || mutationAllowed === 'true';
+      for (const step of componentSteps)
+        assert.equal(selected(step, inputs, mutationAllowed), expected, `${id}: ${step.name}: ${mutationAllowed}`);
+      assert.equal(
+        selected(report, inputs, mutationAllowed),
+        id === 'promote-production' && mutationAllowed === 'true',
+        `${id}: production reporting: ${mutationAllowed}`,
+      );
+    }
+  }
+});
+
+test('runtime smoke receives the resolved frontend URL without a component switch', () => {
+  const root = mkdtempSync(join(tmpdir(), 'paired-runtime-smoke-'));
+  const step = environmentWorkflow.jobs.deploy.steps.find((entry) => entry.name === 'Run runtime smoke tests');
+  try {
+    const result = spawnSync('bash', ['--noprofile', '--norc'], {
+      cwd: fileURLToPath(new URL('../..', import.meta.url)),
+      encoding: 'utf8',
+      timeout: 15000,
+      input: `node() { [ "$1" = 'scripts/smoke-runtime.mjs' ] || return 1; "$TEST_NODE_EXEC" --input-type=module --eval 'import assert from "node:assert/strict"; assert.equal(process.env.FRONTEND_BASE_URL, "https://frontend.example.test"); assert.equal(process.env.EXPECTED_DEPLOYED_COMMIT_SHA, "a".repeat(40)); console.log("frontend-smoke-invoked");'; }\n${step.run}`,
+      env: {
+        ...process.env,
+        TEST_NODE_EXEC: process.execPath.replaceAll('\\', '/'),
+        RUNNER_TEMP: root.replaceAll('\\', '/'),
+        GITHUB_ENV: join(root, 'environment').replaceAll('\\', '/'),
+        GITHUB_STEP_SUMMARY: join(root, 'summary').replaceAll('\\', '/'),
+        ENVIRONMENT_NAME: 'prod',
+        GITHUB_RUN_ID: '123',
+        GITHUB_RUN_ATTEMPT: '1',
+        EFFECTIVE_BASE_URL: 'https://api.example.test',
+        FRONTEND_BASE_URL: 'https://frontend.example.test',
+        SOURCE_REF: 'a'.repeat(40),
+        AUTH_ENABLED: 'true',
+        WEB_AUTH_REDIRECT_URI: '',
+        TEST_WEB_AUTH_REDIRECT_URI: '',
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), 'frontend-smoke-invoked');
+  } finally {
+    assert.equal(dirname(root), resolve(tmpdir()));
+    assert.ok(basename(root).startsWith('paired-runtime-smoke-'));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('the actual classification step honors explicit full delivery without forcing neutral pushes or stale main', () => {
   const cwd = fileURLToPath(new URL('../..', import.meta.url));
