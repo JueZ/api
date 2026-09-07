@@ -131,6 +131,12 @@ jobs:
               --head "$HEAD_SHA" \
               --full accepted-production-baseline-unavailable \
               --output "$classification_output"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$run_mode" = "full" ]; then
+            node scripts/classify-deployment-impact.mjs \
+              --base "$base_sha" \
+              --head "$HEAD_SHA" \
+              --full explicit-protected-main-full-delivery \
+              --output "$classification_output"
           else
             node scripts/classify-deployment-impact.mjs \
               --base "$base_sha" \

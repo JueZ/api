@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { parse as parseYaml } from 'yaml';
 import { loadAutonomousPolicy } from '../lib/autonomous-policy.mjs';
@@ -15,6 +19,79 @@ const environmentWorkflow = parseYaml(environmentSource);
 function needs(job) {
   return Array.isArray(job.needs) ? job.needs : job.needs ? [job.needs] : [];
 }
+
+test('the actual classification step honors explicit full delivery without forcing neutral pushes or stale main', () => {
+  const cwd = fileURLToPath(new URL('../..', import.meta.url));
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).stdout.trim();
+  assert.match(head, /^[0-9a-f]{40}$/);
+  const step = workflow.jobs.classify.steps.find((entry) => entry.id === 'classify').run;
+  const root = mkdtempSync(join(tmpdir(), 'manual-full-classification-'));
+  const run = (name, overrides = {}) => {
+    const directory = mkdtempSync(join(root, `${name}-`));
+    const output = join(directory, 'github-output');
+    // Execute the actual checked-in shell and classifier. Git reads the checkout;
+    // the only GitHub call is replaced by a fixed current-main response.
+    const result = spawnSync('bash', ['--noprofile', '--norc'], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 15000,
+      input: `gh() { printf '%s\\n' "$TEST_CURRENT_MAIN"; }\nnode() { "$TEST_NODE_EXEC" "$@"; }\n${step}`,
+      env: {
+        ...process.env,
+        GH_TOKEN: '',
+        GITHUB_TOKEN: '',
+        TEST_CURRENT_MAIN: head,
+        TEST_NODE_EXEC: process.execPath.replaceAll('\\', '/'),
+        GITHUB_REPOSITORY: 'JueZ/api',
+        GITHUB_REF: 'refs/heads/main',
+        HEAD_SHA: head,
+        RUNNER_TEMP: directory.replaceAll('\\', '/'),
+        GITHUB_OUTPUT: output.replaceAll('\\', '/'),
+        EVENT_NAME: 'workflow_dispatch',
+        REQUESTED_MODE: 'full',
+        DELIVERY_V2_ENABLED: 'true',
+        BASELINE_RESULT: 'success',
+        BASELINE_STATUS: 'accepted',
+        ACCEPTED_BASE_SHA: head,
+        ...overrides,
+      },
+    });
+    const contents = existsSync(output) ? readFileSync(output, 'utf8') : '';
+    if (result.status === 0) {
+      assert.equal((contents.match(/^deployment_required=/gm) ?? []).length, 1);
+      assert.equal((contents.match(/^should_deploy=/gm) ?? []).length, 1);
+    }
+    return { ...result, output: contents };
+  };
+  try {
+    const explicit = run('explicit');
+    assert.equal(explicit.status, 0, explicit.stderr);
+    assert.match(explicit.output, /^reason=explicit-protected-main-full-delivery$/m);
+    assert.match(explicit.output, /^deployment_required=true$/m);
+    assert.match(explicit.output, /^should_deploy=true$/m);
+    for (const [name, env] of [
+      ['push', { EVENT_NAME: 'push' }],
+      ['dry-run', { REQUESTED_MODE: 'dry-run' }],
+    ]) {
+      const neutral = run(name, env);
+      assert.equal(neutral.status, 0, neutral.stderr);
+      assert.match(neutral.output, /^deployment_required=false$/m);
+      assert.match(neutral.output, /^should_deploy=false$/m);
+    }
+    for (const [name, env] of [
+      ['stale', { TEST_CURRENT_MAIN: 'f'.repeat(40) }],
+      ['non-main', { GITHUB_REF: 'refs/heads/codex/example' }],
+    ]) {
+      const denied = run(name, env);
+      assert.notEqual(denied.status, 0);
+      assert.equal(denied.output, '');
+    }
+  } finally {
+    assert.equal(dirname(root), resolve(tmpdir()));
+    assert.ok(basename(root).startsWith('manual-full-classification-'));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('actual archive verifier and signing identity are proven before any production write', () => {
   const steps = environmentWorkflow.jobs.deploy.steps;
