@@ -243,6 +243,7 @@ permissions:
   contents: read
   id-token: write
   actions: read
+  attestations: write
 
 jobs:
   baseline:
@@ -305,6 +306,8 @@ jobs:
           : "${AZURE_SUBSCRIPTION_ID:?AZURE_SUBSCRIPTION_ID is required}"
           : "${AZURE_FUNCTIONAPP_NAME:?AZURE_FUNCTIONAPP_NAME is required}"
           : "${PRODUCTION_BASE_URL:?PRODUCTION_BASE_URL is required}"
+      - name: Install archive verification dependencies
+        run: npm ci --ignore-scripts
       - name: Confirm exact current protected main before production OIDC
         shell: bash
         run: |
@@ -335,8 +338,10 @@ jobs:
             --artifacts "$RUNNER_TEMP/production-artifacts.json" \
             --repository "$GITHUB_REPOSITORY" \
             --current-run "$GITHUB_RUN_ID" \
-            --output "$GITHUB_OUTPUT"
+            --allow-archive true \
+            --output "$GITHUB_OUTPUT" > "$RUNNER_TEMP/accepted-selection.json"
       - name: Download selected accepted production ledger
+        if: ${{ steps.select.outputs.baseline_artifact_source == 'github' }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
         with:
           name: ${{ steps.select.outputs.baseline_ledger_artifact }}
@@ -345,6 +350,7 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ steps.select.outputs.baseline_acceptance_run_id }}
       - name: Download selected accepted rendered release
+        if: ${{ steps.select.outputs.baseline_artifact_source == 'github' }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
         with:
           name: ${{ steps.select.outputs.baseline_release_artifact }}
@@ -352,6 +358,18 @@ jobs:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ steps.select.outputs.baseline_run_id }}
+      - name: Restore cryptographically verified accepted archive
+        if: ${{ steps.select.outputs.baseline_artifact_source == 'archive' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/accepted-release-store.mjs restore \
+            --selection "$RUNNER_TEMP/accepted-selection.json" \
+            --observation "$RUNNER_TEMP/installed-production/observation.json" \
+            --resource "$RUNNER_TEMP/installed-production/resource.json" \
+            --verification-dir "$RUNNER_TEMP/archive-verification" \
+            --release-dir "$RUNNER_TEMP/accepted-release" \
+            --ledger-dir "$RUNNER_TEMP/accepted-ledger"
       - name: Fully verify accepted baseline
         id: verify
         shell: bash
@@ -396,11 +414,21 @@ jobs:
             echo "- Health corroboration: $(jq -r '.identity.health.status' "$RUNNER_TEMP/accepted-baseline.json")"
             echo "- Immutable package bytes and complete rendered frontend inventory: verified"
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Preserve accepted baseline identity for lock-time checks
+      - name: Prepare verified baseline transfer with recovery bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/accepted-transfer/release" "$RUNNER_TEMP/accepted-transfer/ledger"
+          cp "$RUNNER_TEMP/accepted-baseline.json" "$RUNNER_TEMP/accepted-transfer/accepted-baseline.json"
+          for file in functionapp.zip frontend.tar.gz sbom.cdx.json release-manifest.json; do
+            cp "$RUNNER_TEMP/accepted-release/$file" "$RUNNER_TEMP/accepted-transfer/release/$file"
+          done
+          cp "$RUNNER_TEMP/accepted-ledger/release-ledger-prod.json" "$RUNNER_TEMP/accepted-transfer/ledger/"
+      - name: Preserve accepted baseline identity and bytes for lock-time checks
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: accepted-production-baseline-${{ github.sha }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/accepted-baseline.json
+          path: ${{ runner.temp }}/accepted-transfer
           if-no-files-found: error
           retention-days: 30
 
@@ -409,6 +437,8 @@ jobs:
     name: pre-OIDC production generation guard
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     outputs:
       proceed: ${{ steps.guard.outputs.proceed }}
       guardState: ${{ steps.guard.outputs.guard_state }}
@@ -601,12 +631,22 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
         with:
           name: ${{ inputs.acceptedBaselineArtifact }}
-          path: ${{ runner.temp }}/accepted-baseline
+          path: ${{ runner.temp }}/accepted-transfer
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ inputs.evidenceRunId || github.run_id }}
-      - name: Download exact accepted production release ledger
+      - name: Materialize verified baseline transfer
+        id: baseline_transfer
         if: ${{ inputs.environmentName == 'prod' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/materialize-accepted-baseline.mjs \
+            --transfer "$RUNNER_TEMP/accepted-transfer" \
+            --output "$RUNNER_TEMP" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Download exact accepted production release ledger
+        if: ${{ inputs.environmentName == 'prod' && steps.baseline_transfer.outputs.bundled != 'true' }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
         with:
           name: release-ledger-prod-${{ inputs.acceptedSourceRef }}-${{ inputs.acceptedLedgerCorrelation }}
@@ -615,7 +655,7 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.acceptedLedgerRunId }}
       - name: Download exact accepted rendered production release
-        if: ${{ inputs.environmentName == 'prod' }}
+        if: ${{ inputs.environmentName == 'prod' && steps.baseline_transfer.outputs.bundled != 'true' }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
         with:
           name: production-release-${{ inputs.acceptedSourceRef }}-${{ inputs.acceptedReleaseCorrelation }}
@@ -842,15 +882,15 @@ jobs:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ github.run_id }}
-      - name: Download exact accepted production release bundle
+      - name: Use verified accepted production bundle for rollback
         if: ${{ inputs.allowRollback }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
-        with:
-          name: production-release-${{ inputs.sourceRef }}-${{ inputs.rollbackReleaseCorrelation }}
-          path: ${{ runner.temp }}/release
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.rollbackReleaseRunId }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/release"
+          for file in functionapp.zip frontend.tar.gz sbom.cdx.json release-manifest.json; do
+            cp "$RUNNER_TEMP/accepted-release/$file" "$RUNNER_TEMP/release/$file"
+          done
       - name: Verify immutable release bundle
         id: artifacts
         shell: bash
@@ -1024,6 +1064,27 @@ jobs:
              [ ! -f "$auth_dir/dist/application/providerConnections/bring.js" ]; then
             echo "legacy_bring_policy=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Verify retention readiness before changing protected resources
+        if: ${{ (!inputs.allowRollback || inputs.reconcileConfiguration) && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          retention_account="$(az deployment group show --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "main-$ENVIRONMENT_NAME" --query properties.outputs.releaseStorageAccountResourceName.value -o tsv)"
+          : "${retention_account:?Installed release storage identity is required for retention planning}"
+          az storage account management-policy show --resource-group "$AZURE_RESOURCE_GROUP" \
+            --account-name "$retention_account" \
+            --query '{properties:{policy:policy,lastModifiedTime:lastModifiedTime}}' -o json \
+            > "$RUNNER_TEMP/installed-release-retention.json"
+          az storage blob exists --auth-mode login --account-name "$retention_account" \
+            --container-name function-releases --name "functionapp-$FUNCTION_ARTIFACT_SHA256.zip" -o json \
+            > "$RUNNER_TEMP/candidate-package-version.json"
+          if jq -e '.exists == true' "$RUNNER_TEMP/candidate-package-version.json" >/dev/null; then
+            az storage blob show --auth-mode login --account-name "$retention_account" \
+              --container-name function-releases --name "functionapp-$FUNCTION_ARTIFACT_SHA256.zip" \
+              --query '{exists:`true`,versionId:versionId}' -o json > "$RUNNER_TEMP/candidate-package-version.json"
+          fi
+          node scripts/release-retention-policy.mjs
       - name: Persist production mutation intent before first write
         id: mutation_intent
         if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' }}
@@ -1142,7 +1203,7 @@ jobs:
               --name "main-${ENVIRONMENT_NAME}" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --template-file infra/main.bicep \
-              --parameters environmentName="$ENVIRONMENT_NAME" \
+              --parameters "@$RUNNER_TEMP/release-retention-parameters.json" environmentName="$ENVIRONMENT_NAME" \
                 authEnabled="$AUTH_ENABLED" \
                 oidcIssuer="${OIDC_ISSUER:-}" \
                 oidcAudience="${OIDC_AUDIENCE:-}" \
@@ -2173,6 +2234,32 @@ jobs:
           path: ${{ runner.temp }}/release
           if-no-files-found: error
           retention-days: 90
+      - name: Prepare immutable accepted production archive
+        if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/accepted-release-store.mjs prepare \
+            --release-dir "$RUNNER_TEMP/release" \
+            --ledger "$RUNNER_TEMP/smoke/release-ledger-prod.json" \
+            --output-dir "$RUNNER_TEMP/accepted-archive"
+      - name: Attest accepted production archive
+        id: archive_attestation
+        if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' && success() }}
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # tag=v2
+        with:
+          subject-path: ${{ runner.temp }}/accepted-archive/accepted-release-manifest.json
+      - name: Verify and publish accepted production archive
+        if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' && success() }}
+        shell: bash
+        env:
+          ARCHIVE_ATTESTATION_BUNDLE: ${{ steps.archive_attestation.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          node scripts/accepted-release-store.mjs publish \
+            --prepared-dir "$RUNNER_TEMP/accepted-archive" \
+            --bundle "$ARCHIVE_ATTESTATION_BUNDLE" \
+            --verification-dir "$RUNNER_TEMP/archive-publication-verification"
       - name: Report production deployment values after smoke tests
         if: ${{ inputs.updateProductionVariables && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         shell: bash

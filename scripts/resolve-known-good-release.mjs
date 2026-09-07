@@ -107,12 +107,15 @@ export function selectInstalledAcceptedRelease({
   repository,
   installedIdentity,
   currentRunId,
+  allowArchive = false,
 }) {
   if (!Array.isArray(artifacts)) throw new Error('artifacts must be an array');
   if (!Array.isArray(runs)) throw new Error('runs must be an array');
   if (!REPOSITORY_PATTERN.test(repository ?? '')) throw new Error('repository must use owner/name format');
+  if (typeof allowArchive !== 'boolean') throw new Error('allowArchive must be boolean');
   const sourceRef = installedIdentity?.sourceRef;
   const bundleRunId = positiveInteger(installedIdentity?.runId, 'installedIdentity.runId');
+  const hasExplicitBundleCorrelation = Boolean(installedIdentity?.deliveryCorrelation);
   let bundleCorrelation = String(installedIdentity?.deliveryCorrelation ?? '');
   assertSha(sourceRef, 'installedIdentity.sourceRef');
   if (!bundleCorrelation) {
@@ -174,7 +177,11 @@ export function selectInstalledAcceptedRelease({
       identity.correlation === acceptanceCorrelation
     );
   });
-  if (releaseArtifacts.length !== 1 || ledgerArtifacts.length !== 1) {
+  if (releaseArtifacts.length > 1 || ledgerArtifacts.length > 1) {
+    throw new Error(`Installed production identity has ambiguous duplicate release artifact evidence.`);
+  }
+  const hasGitHubArtifactPair = releaseArtifacts.length === 1 && ledgerArtifacts.length === 1;
+  if (!hasGitHubArtifactPair && !allowArchive) {
     throw new Error(`Installed production identity lacks one exact release and acceptance-ledger artifact pair.`);
   }
 
@@ -205,18 +212,35 @@ export function selectInstalledAcceptedRelease({
     throw new Error('Installed promotion receipt disagrees with the original accepted bundle identity.');
   }
 
-  return {
+  const identity = {
     sourceRef,
     correlation: bundleCorrelation,
     runId: bundleRunId,
     acceptanceCorrelation,
     acceptanceRunId,
     acceptanceKind: recovery ? 'recovery' : 'promotion',
+    releaseArtifactName: `production-release-${sourceRef}-${bundleCorrelation}`,
+    ledgerArtifactName: `release-ledger-prod-${sourceRef}-${acceptanceCorrelation}`,
+    workflowPath: bundleRun.path,
+  };
+
+  if (!hasGitHubArtifactPair) {
+    if (
+      !hasExplicitBundleCorrelation ||
+      observedReceipt?.recorded !== true ||
+      !['promotion', 'recovery'].includes(observedReceipt.kind)
+    ) {
+      throw new Error('Archive selection requires an explicit correlation and recorded production mutation receipt.');
+    }
+    // Selection does not establish archive attestation, bytes, ledger, or installed-identity acceptance.
+    return { ...identity, artifactSource: 'archive' };
+  }
+
+  return {
+    ...identity,
+    artifactSource: 'github',
     releaseArtifactId: releaseArtifacts[0].id,
     ledgerArtifactId: ledgerArtifacts[0].id,
-    releaseArtifactName: releaseArtifacts[0].name,
-    ledgerArtifactName: ledgerArtifacts[0].name,
-    workflowPath: bundleRun.path,
   };
 }
 
@@ -253,6 +277,7 @@ function isTrustedDeliveryRun(run, repository, controllerRef) {
     run === null ||
     typeof run !== 'object' ||
     run.repository?.full_name !== repository ||
+    run.status !== 'completed' ||
     run.head_branch !== 'main' ||
     run.head_sha !== controllerRef ||
     run.run_attempt !== 1 ||
@@ -296,6 +321,7 @@ export async function resolveInstalledFromGitHub({
   repository,
   installedIdentity,
   currentRunId,
+  allowArchive = false,
   run = execFileAsync,
 }) {
   const runIds = [...new Set([installedIdentity?.runId, installedIdentity?.mutationReceipt?.runId])].map((value) =>
@@ -335,6 +361,7 @@ export async function resolveInstalledFromGitHub({
     repository,
     installedIdentity,
     currentRunId,
+    allowArchive,
   });
 }
 
@@ -370,6 +397,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     args.set(process.argv[index], process.argv[index + 1]);
   }
   if (args.has('--installed-state')) {
+    const allowArchiveValue = args.get('--allow-archive');
+    if (allowArchiveValue !== undefined && !['true', 'false'].includes(allowArchiveValue)) {
+      throw new Error('--allow-archive must be true or false');
+    }
     const observed = JSON.parse(await readFile(args.get('--installed-state'), 'utf8'));
     if (!observed.ok || observed.state !== 'coherent') {
       throw new Error(`Installed production identity is not coherent: ${(observed.errors ?? []).join('; ')}`);
@@ -380,6 +411,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       repository: args.get('--repository'),
       installedIdentity: observed.identity,
       currentRunId: args.get('--current-run'),
+      allowArchive: allowArchiveValue === 'true',
     });
     writeOutputs(
       {
@@ -390,6 +422,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         baseline_acceptance_run_id: selected.acceptanceRunId,
         baseline_acceptance_correlation: selected.acceptanceCorrelation,
         baseline_acceptance_kind: selected.acceptanceKind,
+        baseline_artifact_source: selected.artifactSource,
         baseline_release_artifact: selected.releaseArtifactName,
         baseline_ledger_artifact: selected.ledgerArtifactName,
       },

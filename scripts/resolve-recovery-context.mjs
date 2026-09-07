@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { execFile } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
-import { lstat, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { readAcceptedTransfer } from './materialize-accepted-baseline.mjs';
 
 const execFileAsync = promisify(execFile);
 const workflowPath = '.github/workflows/delivery-v2.yml';
@@ -183,16 +184,7 @@ async function defaultDownloadBaseline({ repository, runId, artifactName }) {
       ['run', 'download', String(runId), '--repo', repository, '--name', artifactName, '--dir', directory],
       commandOptions(),
     );
-    const entries = await readdir(directory, { withFileTypes: true });
-    if (entries.length !== 1 || entries[0].name !== 'accepted-baseline.json' || !entries[0].isFile()) {
-      throw new Error('Downloaded baseline artifact must contain exactly accepted-baseline.json');
-    }
-    const path = join(directory, entries[0].name);
-    const stats = await lstat(path);
-    if (stats.isSymbolicLink() || !stats.isFile()) {
-      throw new Error('Downloaded baseline document must be a regular file');
-    }
-    return JSON.parse(await readFile(path, 'utf8'));
+    return (await readAcceptedTransfer(directory)).baseline;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -117,10 +117,27 @@ test('reusable deployment permissions fit every direct caller and centralize iss
     contents: 'read',
     'id-token': 'write',
     actions: 'read',
+    attestations: 'write',
   });
-  for (const jobName of ['deploy-test', 'promote-production', 'rollback-production']) {
+  for (const jobName of [
+    'baseline',
+    'deploy-test',
+    'promote-production',
+    'rollback-production',
+    'reconcile-production',
+  ]) {
     assert.deepEqual(workflow.jobs[jobName].permissions, environmentWorkflow.permissions, jobName);
   }
+  assert.deepEqual(environmentWorkflow.jobs.baseline.permissions, {
+    actions: 'read',
+    contents: 'read',
+    'id-token': 'write',
+  });
+  assert.deepEqual(environmentWorkflow.jobs.preflight.permissions, { contents: 'read' });
+  const attestation = environmentWorkflow.jobs.deploy.steps.find((step) => step.id === 'archive_attestation');
+  assert.match(attestation.if, /inputs.environmentName == 'prod'/);
+  assert.match(attestation.if, /mutation_allowed == 'true'/);
+  assert.match(attestation.if, /success\(\)/);
   assert.doesNotMatch(environmentSource, /issues:\s*write/);
   assert.doesNotMatch(source, /issues:\s*write/);
 });
