@@ -1,143 +1,87 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Reinstall/verify Codex CLI tooling and cached CLI authentication.
-# This script is deployment-free and must never print tokens, client secrets, or other secrets.
+# Cached startup is a health check. Package upgrades are an explicit operation.
+# Source the single signed-repository installer without running setup or login.
+# shellcheck source=scripts/setup-codex-env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/setup-codex-env.sh"
 
-
-configure_git_remote() {
-  local repository="${CODEX_GITHUB_REPOSITORY:-JueZ/api}"
-  local remote_url="https://github.com/${repository}.git"
-  local worktree
-
-  if ! worktree="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-    echo "Skipping git remote configuration because the current directory is not a git worktree."
-    return 0
-  fi
-
-  if git -C "${worktree}" remote get-url origin >/dev/null 2>&1; then
-    echo "Git remote 'origin' is already configured."
-    return 0
-  fi
-
-  echo "Configuring git remote 'origin' for ${repository}."
-  git -C "${worktree}" remote add origin "${remote_url}"
+azure_tool_healthy() {
+  local version
+  version="$(az version --query '"azure-cli"' --output tsv 2>/dev/null)" || return 1
+  [[ "$version" =~ ^2\.[0-9]+\.[0-9]+$ ]] || return 1
+  az account get-access-token --help >/dev/null 2>&1 && az rest --help >/dev/null 2>&1
 }
 
-remove_inherited_llvm_apt_source() {
-  local apt_directory="${1:-/etc/apt}"
-  local source
-  local temporary_source
-
-  if [[ -f "${apt_directory}/sources.list" ]]; then
-    sed -i '\|apt\.llvm\.org|d' "${apt_directory}/sources.list"
-  fi
-
-  if [[ ! -d "${apt_directory}/sources.list.d" ]]; then
-    return
-  fi
-
-  while IFS= read -r -d '' source; do
-    if ! grep -Fq 'apt.llvm.org' "${source}"; then
-      continue
-    fi
-
-    case "${source}" in
-      *.sources)
-        temporary_source="$(mktemp "${source}.XXXXXX")"
-        awk 'BEGIN { RS = ""; ORS = "\n\n" } index($0, "apt.llvm.org") == 0 { print }' \
-          "${source}" > "${temporary_source}"
-        chmod --reference="${source}" "${temporary_source}"
-        mv "${temporary_source}" "${source}"
-        ;;
-      *)
-        sed -i '\|apt\.llvm\.org|d' "${source}"
-        ;;
-    esac
-  done < <(
-    find "${apt_directory}/sources.list.d" -maxdepth 1 -type f \
-      \( -name '*.list' -o -name '*.sources' \) -print0
-  )
+github_tool_healthy() {
+  local version merge_help
+  version="$(gh --version 2>/dev/null)" || return 1
+  [[ "$version" =~ ^gh\ version\ 2\.[0-9]+\.[0-9]+ ]] || return 1
+  merge_help="$(gh pr merge --help 2>/dev/null)" || return 1
+  [[ "$merge_help" == *--match-head-commit* && "$merge_help" == *--auto* && "$merge_help" == *--squash* ]] &&
+    gh run view --help >/dev/null 2>&1
 }
 
-install_tools() {
-  if [[ "${EUID}" -ne 0 ]]; then
-    echo "This maintenance script must run as root so it can refresh apt packages." >&2
-    exit 1
-  fi
-
-  if [[ -r /etc/os-release ]]; then
-    # shellcheck source=/dev/null
-    source /etc/os-release
-  else
-    echo "Unsupported OS: /etc/os-release not found." >&2
-    exit 1
-  fi
-
-  if [[ "${ID:-}" != "ubuntu" && "${ID_LIKE:-}" != *"debian"* ]]; then
-    echo "Unsupported OS: this maintenance script expects Ubuntu/Debian with apt." >&2
-    exit 1
-  fi
-
-  export DEBIAN_FRONTEND=noninteractive
-
-  # Some Codex base images inherit apt.llvm.org even though this repository does
-  # not require LLVM. Remove only that source before refreshing signed indexes.
-  remove_inherited_llvm_apt_source /etc/apt
-  apt-get update
-  apt-get install -y ca-certificates curl apt-transport-https lsb-release gnupg git
-
-  install -m 0755 -d /etc/apt/keyrings
-
-  curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
-    | gpg --dearmor > /etc/apt/keyrings/microsoft.gpg
-  chmod go+r /etc/apt/keyrings/microsoft.gpg
-
-  local architecture
-  architecture="$(dpkg --print-architecture)"
-  local azure_suite
-  azure_suite="$(lsb_release -cs)"
-  cat > /etc/apt/sources.list.d/azure-cli.sources <<AZURE_SOURCES
-Types: deb
-URIs: https://packages.microsoft.com/repos/azure-cli/
-Suites: ${azure_suite}
-Components: main
-Architectures: ${architecture}
-Signed-By: /etc/apt/keyrings/microsoft.gpg
-AZURE_SOURCES
-
-  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    > /etc/apt/keyrings/githubcli-archive-keyring.gpg
-  chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-
-  cat > /etc/apt/sources.list.d/github-cli.sources <<GITHUB_CLI_SOURCES
-Types: deb
-URIs: https://cli.github.com/packages
-Suites: stable
-Components: main
-Architectures: ${architecture}
-Signed-By: /etc/apt/keyrings/githubcli-archive-keyring.gpg
-GITHUB_CLI_SOURCES
-
-  apt-get update
-  apt-get install -y --reinstall azure-cli gh
+verify_local_runtime() {
+  local version
+  version="$(node --version 2>/dev/null)" || { echo 'Node.js 22 is required in the host configuration.' >&2; return 1; }
+  [[ "$version" == v22.* ]] || { echo 'Select Node.js 22 in the host configuration.' >&2; return 1; }
+  npm --version
+  git --version
 }
 
 verify_cached_auth() {
-  echo "Verifying cached Azure CLI authentication."
+  echo 'Verifying cached Azure CLI authentication.'
   az account show --query '{name:name, id:id, tenantId:tenantId}' --output table
-
-  echo "Verifying cached GitHub CLI authentication."
-  # Ensure this check uses the persisted gh credential cache, not environment tokens.
-  unset GH_TOKEN
-  unset GITHUB_TOKEN
+  echo 'Verifying cached GitHub CLI authentication.'
+  # Do not let environment tokens mask a missing persisted credential.
+  unset GH_TOKEN GITHUB_TOKEN
   gh auth status
 }
 
-install_tools
-az version --output table
-gh --version
-verify_cached_auth
-configure_git_remote
+verify_repository() {
+  local repository="${CODEX_GITHUB_REPOSITORY:-JueZ/api}" origin
+  [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || {
+    echo 'Invalid CODEX_GITHUB_REPOSITORY.' >&2; return 1;
+  }
+  configure_git_remote
+  if ! git rev-parse --show-toplevel >/dev/null 2>&1; then return 0; fi
+  origin="$(git remote get-url origin)"
+  case "${origin%.git}" in
+    "https://github.com/${repository}"|"git@github.com:${repository}"|"ssh://git@github.com/${repository}") ;;
+    *) echo 'Existing origin does not match CODEX_GITHUB_REPOSITORY; it was preserved.' >&2; return 1 ;;
+  esac
+}
 
-echo "Codex environment maintenance complete."
+maintain() {
+  local mode="${1:-check}" packages=()
+  [[ "$#" -le 1 && ( "$mode" == check || "$mode" == --upgrade-tools ) ]] || {
+    echo 'Usage: maintain-codex-env.sh [--upgrade-tools]' >&2; return 1;
+  }
+  verify_local_runtime
+  if [[ "$mode" == --upgrade-tools ]]; then
+    install_tools azure-cli gh
+    if ! azure_tool_healthy || ! github_tool_healthy; then
+      echo 'CLI capability verification failed after upgrade.' >&2; return 1
+    fi
+  else
+    if ! azure_tool_healthy; then packages+=(azure-cli); fi
+    if ! github_tool_healthy; then packages+=(gh); fi
+    if [[ "${#packages[@]}" -gt 0 ]]; then
+      echo "Repairing unavailable or incompatible CLI packages: ${packages[*]}"
+      install_tools --reinstall "${packages[@]}"
+      if ! azure_tool_healthy || ! github_tool_healthy; then
+        echo 'CLI capability verification failed after repair.' >&2; return 1
+      fi
+    else
+      echo 'CLI tools are healthy; no package indexes, keys, or installations changed.'
+    fi
+  fi
+  verify_cached_auth
+  verify_repository
+  echo 'Codex environment maintenance complete.'
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  maintain "$@"
+fi

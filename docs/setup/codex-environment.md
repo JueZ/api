@@ -1,10 +1,10 @@
 # Codex environment setup and maintenance
 
-Use `scripts/setup-codex-env.sh` once per fresh Codex host to install required CLIs, cache authentication for Azure CLI and GitHub CLI, and ensure the checkout has a GitHub `origin` remote. Use `scripts/maintain-codex-env.sh` later to refresh the tools, verify that cached authentication still works, and repair a missing `origin` remote.
+Use `scripts/setup-codex-env.sh` once per fresh Codex host to install required CLIs, cache authentication for Azure CLI and GitHub CLI, and ensure the checkout has a GitHub `origin` remote. Use `scripts/maintain-codex-env.sh` on cached startup to check the tools, verify cached authentication, and repair a missing `origin` remote.
 
 Both scripts are deployment-free. They install or verify tooling only and must not deploy infrastructure or application code.
 
-Codex base images can include an `apt.llvm.org` source that is unreachable through the environment's egress proxy. This repository does not require LLVM or Clang, so setup and maintenance remove only `apt.llvm.org` entries from inherited APT source files before updating package indexes. Ubuntu and the explicitly configured Microsoft and GitHub signed repositories remain enabled; APT signature verification is never disabled.
+Codex base images can include an `apt.llvm.org` source that is unreachable through the environment's egress proxy. This repository does not require LLVM or Clang, so the shared installer removes only those entries before updating package indexes. Healthy cached startup does not touch APT sources, keys, or indexes. Ubuntu and the explicitly configured Microsoft and GitHub signed repositories remain enabled; APT signature verification is never disabled.
 
 For the repository instruction baseline and fresh-session trial checklist, see [Sol-to-Astra agent migration](astra-agent-migration.md).
 
@@ -98,20 +98,26 @@ The setup script:
 
 ## Maintenance
 
-Run maintenance as root when the environment starts or on a regular cadence:
+Run maintenance as the user whose CLI credentials were cached. The healthy path needs no root privileges:
 
 ```bash
-sudo scripts/maintain-codex-env.sh
+bash scripts/maintain-codex-env.sh
 ```
 
 The maintenance script:
 
-1. Removes an inherited `apt.llvm.org` source that the repository does not use.
-2. Reinstalls `azure-cli` and `gh` from their signed apt repositories.
-3. Prints CLI versions.
-4. Verifies cached Azure CLI authentication with `az account show`.
-5. Unsets `GH_TOKEN` and `GITHUB_TOKEN`.
-6. Verifies cached GitHub CLI authentication with `gh auth status`.
-7. Adds a missing git `origin` remote for the repository so hosted PR URLs can be resolved after commits.
+1. Verifies the host's Node.js 22, npm, and Git are available.
+2. Checks Azure CLI 2.x and GitHub CLI 2.x and the required token, REST, run-inspection, and exact-head auto-merge capabilities without making cloud changes.
+3. Repairs only missing, broken, or incompatible CLI packages using the setup script's signed installer, then repeats their capability checks. This exceptional path requires root; a failed check does not silently elevate privileges.
+4. Verifies cached Azure authentication with `az account show`, clears `GH_TOKEN` and `GITHUB_TOKEN`, and verifies persisted GitHub authentication with `gh auth status`.
+5. Adds a missing `origin` and checks it matches the selected repository. A mismatched remote is preserved and rejected without printing its potentially sensitive URL.
+
+Ordinary startup does not seek newer versions of healthy tools. To upgrade both CLIs deliberately on the Ubuntu/Debian host, use the same user/cache context with root privileges:
+
+```bash
+bash scripts/maintain-codex-env.sh --upgrade-tools
+```
+
+The upgrade option updates the selected packages without unconditional reinstallation. Node.js selection belongs to the host configuration; maintenance never replaces it with the distribution's default Node version. Neither maintenance mode logs in, rotates credentials, installs application dependencies, or deploys an environment.
 
 Maintenance must fail if cached authentication has expired or is missing. Re-run setup using the host's documented authentication mode. Rotate the Codex Cloud service-principal credential before its configured expiry and update both the secret and `CODEX_AZURE_CLIENT_SECRET_EXPIRES_ON` together.

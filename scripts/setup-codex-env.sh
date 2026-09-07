@@ -125,6 +125,13 @@ remove_inherited_llvm_apt_source() {
 }
 
 install_tools() {
+  local packages=("$@")
+  # Initial setup installs both tools; maintenance selects only failed tools.
+  if [[ "$#" -eq 0 ]]; then packages=(azure-cli gh); fi
+  local package
+  for package in "${packages[@]}"; do
+    case "$package" in azure-cli|gh|--reinstall) ;; *) echo 'Unsupported CLI package selection.' >&2; return 1 ;; esac
+  done
   if [[ "${EUID}" -ne 0 ]]; then
     echo "This setup script must run as root so it can configure apt repositories." >&2
     exit 1
@@ -153,15 +160,15 @@ install_tools() {
 
   install -m 0755 -d /etc/apt/keyrings
 
-  curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
-    | gpg --dearmor > /etc/apt/keyrings/microsoft.gpg
-  chmod go+r /etc/apt/keyrings/microsoft.gpg
-
   local architecture
   architecture="$(dpkg --print-architecture)"
-  local azure_suite
-  azure_suite="$(lsb_release -cs)"
-  cat > /etc/apt/sources.list.d/azure-cli.sources <<AZURE_SOURCES
+  if [[ " ${packages[*]} " == *' azure-cli '* ]]; then
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+      | gpg --dearmor > /etc/apt/keyrings/microsoft.gpg
+    chmod go+r /etc/apt/keyrings/microsoft.gpg
+    local azure_suite
+    azure_suite="$(lsb_release -cs)"
+    cat > /etc/apt/sources.list.d/azure-cli.sources <<AZURE_SOURCES
 Types: deb
 URIs: https://packages.microsoft.com/repos/azure-cli/
 Suites: ${azure_suite}
@@ -169,12 +176,14 @@ Components: main
 Architectures: ${architecture}
 Signed-By: /etc/apt/keyrings/microsoft.gpg
 AZURE_SOURCES
+  fi
 
-  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    > /etc/apt/keyrings/githubcli-archive-keyring.gpg
-  chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  if [[ " ${packages[*]} " == *' gh '* ]]; then
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      > /etc/apt/keyrings/githubcli-archive-keyring.gpg
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
 
-  cat > /etc/apt/sources.list.d/github-cli.sources <<GITHUB_CLI_SOURCES
+    cat > /etc/apt/sources.list.d/github-cli.sources <<GITHUB_CLI_SOURCES
 Types: deb
 URIs: https://cli.github.com/packages
 Suites: stable
@@ -182,9 +191,10 @@ Components: main
 Architectures: ${architecture}
 Signed-By: /etc/apt/keyrings/githubcli-archive-keyring.gpg
 GITHUB_CLI_SOURCES
+  fi
 
   apt-get update
-  apt-get install -y azure-cli gh
+  apt-get install -y "${packages[@]}"
 }
 
 login_azure() {
@@ -249,7 +259,7 @@ login_github() {
 }
 
 main() {
-  install_tools
+  install_tools azure-cli gh
   az version --output table
   gh --version
   login_azure

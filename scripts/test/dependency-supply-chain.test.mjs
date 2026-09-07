@@ -1,11 +1,67 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { parse as parseYaml } from 'yaml';
-import { DEPENDENCY_PROJECTS, dependencyCoChangeFindings, inspectDependencyFiles } from '../check-lockfile-policy.mjs';
+import {
+  DEPENDENCY_PROJECTS,
+  dependencyCoChangeFindings,
+  inspectDependencyFiles,
+  inspectDependencyChanges,
+} from '../check-lockfile-policy.mjs';
 import { functionSbomFindings } from '../verify-function-sbom.mjs';
 
 const repositoryFile = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
+
+test('local dependency co-change policy examines staged and unstaged manifests, retaining scripts-only edits', (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), 'dependency-worktree-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => {
+    const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  git('init', '-q');
+  git('config', 'user.name', 'Fixture');
+  git('config', 'user.email', 'fixture@example.test');
+  mkdirSync(join(cwd, 'apps/api'), { recursive: true });
+  const manifest = { name: 'fixture', dependencies: { example: '1.0.0' }, scripts: { test: 'node test.mjs' } };
+  for (const project of DEPENDENCY_PROJECTS) {
+    writeFileSync(join(cwd, project.packagePath), JSON.stringify(manifest));
+    writeFileSync(join(cwd, project.lockfilePath), JSON.stringify({ lockfileVersion: 3, packages: {} }));
+  }
+  git('add', '.');
+  git('commit', '-qm', 'fixture');
+  for (const project of DEPENDENCY_PROJECTS) {
+    const changed = { ...manifest, dependencies: { example: '2.0.0' } };
+    writeFileSync(join(cwd, project.packagePath), JSON.stringify(changed));
+    assert.ok(
+      inspectDependencyChanges('HEAD', { cwd, includeWorktree: true }).some((finding) =>
+        finding.includes(project.lockfilePath),
+      ),
+    );
+    assert.deepEqual(inspectDependencyChanges('HEAD', { cwd }), []);
+    git('add', project.packagePath);
+    // An unstaged revert must not erase a staged manifest-only violation.
+    writeFileSync(join(cwd, project.packagePath), JSON.stringify(manifest));
+    assert.ok(
+      inspectDependencyChanges('HEAD', { cwd, includeWorktree: true }).some((finding) =>
+        finding.includes(project.lockfilePath),
+      ),
+    );
+    git('reset', '-q', 'HEAD', '--', project.packagePath);
+    writeFileSync(
+      join(cwd, project.packagePath),
+      JSON.stringify({ ...manifest, scripts: { test: 'node other-test.mjs' } }),
+    );
+    assert.deepEqual(inspectDependencyChanges('HEAD', { cwd, includeWorktree: true }), []);
+    git('add', project.packagePath);
+    assert.deepEqual(inspectDependencyChanges('HEAD', { cwd, includeWorktree: true }), []);
+    git('reset', '-q', 'HEAD', '--', project.packagePath);
+    writeFileSync(join(cwd, project.packagePath), JSON.stringify(manifest));
+  }
+});
 
 test('dependency policy covers the root and deployed Function projects independently', () => {
   assert.deepEqual(DEPENDENCY_PROJECTS, [

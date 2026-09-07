@@ -63,40 +63,64 @@ export function dependencyCoChangeFindings(changedFiles, lockRelevantPackageChan
   return findings;
 }
 
-function changedFiles(baseRef) {
-  const completed = spawnSync('git', ['diff', '--name-only', baseRef, 'HEAD'], {
-    cwd: repositoryRoot,
-    encoding: 'utf8',
-  });
+function changedFiles(baseRef, cwd, target) {
+  const completed = spawnSync(
+    'git',
+    [
+      'diff',
+      '--name-only',
+      '-z',
+      ...(target === 'index' ? ['--cached'] : []),
+      baseRef,
+      ...(target === 'head' ? ['HEAD'] : []),
+      '--',
+    ],
+    {
+      cwd,
+      encoding: 'utf8',
+    },
+  );
   if (completed.status !== 0) throw new Error(completed.stderr.trim());
-  return completed.stdout.trim().split('\n').filter(Boolean);
+  return completed.stdout.split('\0').filter(Boolean);
 }
 
-function readBasePackageJson(baseRef, packagePath) {
+function readRevisionPackageJson(baseRef, packagePath, cwd) {
   const completed = spawnSync('git', ['show', `${baseRef}:${packagePath}`], {
-    cwd: repositoryRoot,
+    cwd,
     encoding: 'utf8',
   });
   if (completed.status !== 0) throw new Error(completed.stderr.trim());
   return JSON.parse(completed.stdout);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const baseRef = process.env.BASE_REF || process.argv[2];
-  if (baseRef) {
-    const changed = new Set(changedFiles(baseRef));
+export function inspectDependencyChanges(baseRef, { cwd = repositoryRoot, includeWorktree = false } = {}) {
+  const findings = [];
+  // Check the index and final worktree independently. A staged bad dependency
+  // cannot hide behind an unstaged revert or an unrelated lockfile edit.
+  for (const target of includeWorktree ? ['index', 'worktree'] : ['head']) {
+    const changed = new Set(changedFiles(baseRef, cwd, target));
     const lockRelevantPackageChanges = new Map();
     for (const project of DEPENDENCY_PROJECTS) {
       if (changed.has(project.packagePath) && !changed.has(project.lockfilePath)) {
-        const basePackageJson = readBasePackageJson(baseRef, project.packagePath);
-        const currentPackageJson = JSON.parse(readFileSync(resolve(repositoryRoot, project.packagePath), 'utf8'));
-        lockRelevantPackageChanges.set(
-          project.packagePath,
-          packageChangeRequiresLockfile(basePackageJson, currentPackageJson),
-        );
+        const basePackage = readRevisionPackageJson(baseRef, project.packagePath, cwd);
+        const candidate =
+          target === 'worktree'
+            ? JSON.parse(readFileSync(resolve(cwd, project.packagePath), 'utf8'))
+            : readRevisionPackageJson(target === 'index' ? '' : 'HEAD', project.packagePath, cwd);
+        lockRelevantPackageChanges.set(project.packagePath, packageChangeRequiresLockfile(basePackage, candidate));
       }
     }
-    const coChangeFindings = dependencyCoChangeFindings(changed, lockRelevantPackageChanges);
+    findings.push(...dependencyCoChangeFindings(changed, lockRelevantPackageChanges));
+  }
+  return [...new Set(findings)];
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const baseRef = process.env.BASE_REF || process.argv[2];
+  if (baseRef) {
+    const coChangeFindings = inspectDependencyChanges(baseRef, {
+      includeWorktree: process.env.INCLUDE_WORKTREE === 'true',
+    });
     if (coChangeFindings.length > 0) {
       console.error(coChangeFindings.join('\n'));
       process.exit(1);
