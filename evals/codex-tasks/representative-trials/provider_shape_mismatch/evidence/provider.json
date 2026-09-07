@@ -1,0 +1,9 @@
+{
+  "data": {
+    "items": [
+      { "sku": "item-a", "stock": { "available": "3" } },
+      { "sku": "item-b", "stock": { "available": "0" } }
+    ],
+    "nextCursor": "page-2"
+  }
+}
