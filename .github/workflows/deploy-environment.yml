@@ -987,6 +987,33 @@ jobs:
             echo "Production mutation blocked inside lock: $(jq -r '.reason' "$RUNNER_TEMP/production-guard.json")" >&2
             exit 1
           fi
+      - name: Mint smoke identity before environment mutation
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQUIRE_AUTH_SMOKE=true node scripts/mint-smoke-token.mjs
+      - name: Verify smoke identity against the approved package before mutation
+        id: identity_preflight
+        if: ${{ inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true' }}
+        shell: bash
+        env:
+          DEPLOYED_ENVIRONMENT_NAME: ${{ inputs.environmentName }}
+          WEATHER_SMOKE_ENABLED: ${{ vars.WEATHER_ENABLED || 'true' }}
+          YOUTUBE_TRANSCRIPT_SMOKE_ENABLED: ${{ vars.YOUTUBE_TRANSCRIPT_SMOKE_ENABLED || 'false' }}
+        run: |
+          set -euo pipefail
+          auth_dir="$(mktemp -d "$RUNNER_TEMP/package-identity-preflight.XXXXXX")"
+          unzip -q "$RUNNER_TEMP/release/functionapp.zip" -d "$auth_dir"
+          if [ "$ALLOW_ROLLBACK" = "true" ] && [ '${{ inputs.reconcileConfiguration }}' != 'true' ]; then
+            settings_url="https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_RESOURCE_GROUP/providers/Microsoft.Web/sites/$AZURE_FUNCTIONAPP_NAME/config/appsettings/list?api-version=2023-12-01"
+            az rest --method post --url "$settings_url" --body '{}' --output json \
+              | node scripts/verify-smoke-identity.mjs \
+                  --auth-module "$auth_dir/dist/shared/security/auth.js" --installed-settings-stdin
+          else
+            node scripts/verify-smoke-identity.mjs \
+              --auth-module "$auth_dir/dist/shared/security/auth.js"
+          fi
       - name: Persist production mutation intent before first write
         id: mutation_intent
         if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' }}
