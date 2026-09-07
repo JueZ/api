@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "principal": "fixture-worker",
+  "authentication": "authenticated",
+  "grantedPermissions": ["inventory.read"],
+  "operation": "inventory.update",
+  "requiredPermission": "inventory.write",
+  "response": { "status": 403, "reason": "missing_permission" },
+  "mutationStarted": false,
+  "runtimeVerification": "not_run"
+}

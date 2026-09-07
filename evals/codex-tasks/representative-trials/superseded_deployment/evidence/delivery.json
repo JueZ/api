@@ -1,0 +1,43 @@
+{
+  "synthetic": true,
+  "requestedRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "requestedChange": "catalog-tag-filter",
+  "currentMain": "cccccccccccccccccccccccccccccccccccccccc",
+  "revisions": [
+    { "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "parent": null, "changes": ["catalog-tag-filter"] },
+    {
+      "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "parent": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "changes": ["docs-cleanup"]
+    },
+    {
+      "sha": "cccccccccccccccccccccccccccccccccccccccc",
+      "parent": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "changes": ["health-check-fix"]
+    }
+  ],
+  "runs": [
+    {
+      "id": "run-a",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "superseded",
+      "replacement": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "production": "not_started"
+    },
+    {
+      "id": "run-b",
+      "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "status": "superseded",
+      "replacement": "cccccccccccccccccccccccccccccccccccccccc",
+      "production": "not_started"
+    },
+    {
+      "id": "run-c",
+      "sha": "cccccccccccccccccccccccccccccccccccccccc",
+      "status": "in_progress",
+      "checks": "passed",
+      "test": "verified",
+      "production": "pending"
+    }
+  ]
+}

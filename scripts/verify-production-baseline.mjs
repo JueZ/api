@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { compareFrontendInventories, createFrontendInventory } from './frontend-inventory.mjs';
 import { validateReleaseLedger } from './validate-release-ledger.mjs';
 import { verifyReleaseArtifacts } from './verify-release-artifacts.mjs';
+import { validateConfigurationPointer } from './deployment-configuration.mjs';
 
 export async function verifyProductionBaseline({
   observation,
@@ -137,6 +138,14 @@ export async function verifyProductionBaseline({
   } else if (ledger?.recovery !== undefined) {
     errors.push('Normal accepted release ledger must not claim recovery evidence');
   }
+  if (ledger?.configurationBaseline !== undefined) {
+    errors.push(
+      ...validateConfigurationPointer(ledger.configurationBaseline, {
+        target: { releaseStorageAccount: expectedResource?.releaseStorageAccountName },
+        origin: { controllerRef: mutationReceipt.controllerRef, runId: expectedAcceptanceRunId },
+      }),
+    );
+  }
 
   let acceptedInventory;
   let deployedInventory;
@@ -178,6 +187,7 @@ export async function verifyProductionBaseline({
           ledgerArtifactName: selected.ledgerArtifactName,
           digests: ledgerDigests,
           identity,
+          ...(ledger.configurationBaseline ? { configurationBaseline: ledger.configurationBaseline } : {}),
           frontendInventory: acceptedInventory,
         }
       : null,

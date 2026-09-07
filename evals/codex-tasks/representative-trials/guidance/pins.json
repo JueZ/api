@@ -1,0 +1,12 @@
+{
+  "baseline": {
+    "sourceRevision": "48be239a67fc8cd8f5fde49a6dfb1c8f81ae0ad7",
+    "sourceBlob": "8e93ce4f3f6b33e4e14712c8f735291e53ad40ed",
+    "sha256": "e917f6c8fd836a0713c105b3ed1309d9d2330d43635564120796196d79c5525f"
+  },
+  "revised": {
+    "sourceRevision": "efba946f57f5f4f844da27807f22bc65fcec926d",
+    "sourceBlob": "bf7ac5d59f43c826d1d4922076210614bb95900f",
+    "sha256": "702d55dcb11051d69fb908eb117b2f2d6d14368e61cd124a4ba4368cb7864c3e"
+  }
+}

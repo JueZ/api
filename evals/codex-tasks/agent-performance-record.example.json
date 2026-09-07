@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "trialId": "example-ordinary-feature-baseline-01",
+  "comparisonId": "example-ordinary-feature-01",
+  "variant": "baseline",
+  "taskType": "ordinary_feature",
+  "instructionRevision": "example-baseline-instructions",
+  "sourceRevision": "0000000000000000000000000000000000000000",
+  "validations": [],
+  "repairAttempts": 0,
+  "finalDeliveryOutcome": "incomplete"
+}

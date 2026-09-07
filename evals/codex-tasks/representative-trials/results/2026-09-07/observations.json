@@ -1,0 +1,156 @@
+{
+  "sourceRevision": "639882f83c07bf0ac3ad045a74241642af1c2154",
+  "scope": "synthetic local fixtures in fresh subagents on a shared host; instruction scoped, not sandboxed",
+  "executionOrder": [
+    {
+      "order": 1,
+      "taskType": "ordinary_feature",
+      "variant": "baseline",
+      "fixtureDigest": "9aed1679c9b0c61390e3b782b6f6780e927f31df4d25c3bc3e35686eb9763570",
+      "reportedWallTimeMs": 37868,
+      "reportedCachedInputTokens": 87296,
+      "controllerVerification": {
+        "status": "passed",
+        "taskType": "ordinary_feature",
+        "evidenceLevel": "local_fixture",
+        "durationMs": 4
+      },
+      "toolCalls": 3
+    },
+    {
+      "order": 2,
+      "taskType": "small_fix",
+      "variant": "revised",
+      "fixtureDigest": "dbf04172a2721cf61183969ec4217a7fc9ac1da1ed072f72242c612e2500468b",
+      "reportedWallTimeMs": 38526,
+      "reportedCachedInputTokens": 113152,
+      "controllerVerification": {
+        "status": "passed",
+        "taskType": "small_fix",
+        "evidenceLevel": "local_fixture",
+        "durationMs": 3
+      },
+      "toolCalls": 3
+    },
+    {
+      "order": 3,
+      "taskType": "provider_shape_mismatch",
+      "variant": "baseline",
+      "fixtureDigest": "6223bc113defe6299bfcf50ac884b283a22b1280b36e04e15a97a92dd32f7b8e",
+      "reportedWallTimeMs": 70701,
+      "reportedCachedInputTokens": 83456,
+      "controllerVerification": {
+        "status": "passed",
+        "taskType": "provider_shape_mismatch",
+        "evidenceLevel": "local_fixture",
+        "durationMs": 5
+      },
+      "toolCalls": 2
+    },
+    {
+      "order": 4,
+      "taskType": "permissions_blocker",
+      "variant": "revised",
+      "fixtureDigest": "ff0341dcc467eb4d05c0c0644f0d32ebfbd5e89fe9ecc2ada083fe76ce0ffd1a",
+      "reportedWallTimeMs": 36017,
+      "reportedCachedInputTokens": 113536,
+      "controllerVerification": {
+        "status": "passed",
+        "taskType": "permissions_blocker",
+        "evidenceLevel": "local_fixture",
+        "durationMs": 2
+      },
+      "toolCalls": 3
+    },
+    {
+      "order": 5,
+      "taskType": "superseded_deployment",
+      "variant": "baseline",
+      "fixtureDigest": "ba9ebbf24accb3e9035e09fbf0b143f9ed985270a47986a5479dca8a8579bfd2",
+      "reportedWallTimeMs": 43521,
+      "reportedCachedInputTokens": 113280,
+      "controllerVerification": {
+        "status": "passed",
+        "taskType": "superseded_deployment",
+        "evidenceLevel": "local_fixture",
+        "durationMs": 2
+      },
+      "toolCalls": 3
+    },
+    {
+      "order": 6,
+      "taskType": "ordinary_feature",
+      "variant": "revised",
+      "fixtureDigest": "9aed1679c9b0c61390e3b782b6f6780e927f31df4d25c3bc3e35686eb9763570",
+      "reportedWallTimeMs": 31361,
+      "reportedCachedInputTokens": 83200,
+      "controllerVerification": {
+        "status": "passed",
+        "taskType": "ordinary_feature",
+        "evidenceLevel": "local_fixture",
+        "durationMs": 4
+      },
+      "toolCalls": 2
+    },
+    {
+      "order": 7,
+      "taskType": "small_fix",
+      "variant": "baseline",
+      "fixtureDigest": "dbf04172a2721cf61183969ec4217a7fc9ac1da1ed072f72242c612e2500468b",
+      "reportedWallTimeMs": 45541,
+      "reportedCachedInputTokens": 113152,
+      "controllerVerification": {
+        "status": "passed",
+        "taskType": "small_fix",
+        "evidenceLevel": "local_fixture",
+        "durationMs": 3
+      },
+      "toolCalls": 3
+    },
+    {
+      "order": 8,
+      "taskType": "provider_shape_mismatch",
+      "variant": "revised",
+      "fixtureDigest": "6223bc113defe6299bfcf50ac884b283a22b1280b36e04e15a97a92dd32f7b8e",
+      "reportedWallTimeMs": 67033,
+      "reportedCachedInputTokens": 83968,
+      "controllerVerification": {
+        "status": "passed",
+        "taskType": "provider_shape_mismatch",
+        "evidenceLevel": "local_fixture",
+        "durationMs": 5
+      },
+      "toolCalls": 3
+    },
+    {
+      "order": 9,
+      "taskType": "permissions_blocker",
+      "variant": "baseline",
+      "fixtureDigest": "ff0341dcc467eb4d05c0c0644f0d32ebfbd5e89fe9ecc2ada083fe76ce0ffd1a",
+      "reportedWallTimeMs": 32716,
+      "reportedCachedInputTokens": 112896,
+      "controllerVerification": {
+        "status": "passed",
+        "taskType": "permissions_blocker",
+        "evidenceLevel": "local_fixture",
+        "durationMs": 2
+      },
+      "toolCalls": 3
+    },
+    {
+      "order": 10,
+      "taskType": "superseded_deployment",
+      "variant": "revised",
+      "fixtureDigest": "ba9ebbf24accb3e9035e09fbf0b143f9ed985270a47986a5479dca8a8579bfd2",
+      "reportedWallTimeMs": 47520,
+      "reportedCachedInputTokens": 114048,
+      "controllerVerification": {
+        "status": "passed",
+        "taskType": "superseded_deployment",
+        "evidenceLevel": "local_fixture",
+        "durationMs": 2
+      },
+      "toolCalls": 3
+    }
+  ]
+}

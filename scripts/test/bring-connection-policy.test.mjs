@@ -69,6 +69,9 @@ test('delivery validates the candidate connection policy before its first mutati
   assert.match(runtime, /--allow-legacy-bring-policy/);
   assert.match(
     job.steps.find((step) => step.id === 'infra').run,
-    /bringConnectionGrants="\$\{BRING_CONNECTION_GRANTS:-\}"/,
+    /--parameters "@\$RUNNER_TEMP\/deployment-parameters\.json"/,
   );
+  const parameters = job.steps.findIndex((step) => step.name === 'Prepare one private deployment parameter set');
+  assert.ok(parameters > preflight && parameters < firstWrite);
+  assert.match(job.steps[parameters].run, /prepare-deployment-parameters\.mjs/);
 });

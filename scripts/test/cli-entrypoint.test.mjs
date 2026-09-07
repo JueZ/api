@@ -11,6 +11,10 @@ test('CLI entry guard handles native paths and URL characters without executing 
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const script = join(directory, 'validate-release-ledger.mjs');
   copyFileSync(new URL('../validate-release-ledger.mjs', import.meta.url), script);
+  copyFileSync(
+    new URL('../deployment-configuration.mjs', import.meta.url),
+    join(directory, 'deployment-configuration.mjs'),
+  );
 
   for (const entry of [script, './validate-release-ledger.mjs']) {
     const result = spawnSync(process.execPath, [entry], {

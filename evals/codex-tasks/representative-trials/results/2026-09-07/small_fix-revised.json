@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "trialId": "20260907-small-fix-revised",
+  "comparisonId": "20260907-small-fix",
+  "variant": "revised",
+  "taskType": "small_fix",
+  "instructionRevision": "efba946f57f5f4f844da27807f22bc65fcec926d:702d55dcb11051d69fb908eb117b2f2d6d14368e61cd124a4ba4368cb7864c3e",
+  "sourceRevision": "639882f83c07bf0ac3ad045a74241642af1c2154",
+  "actualModel": "gpt-6-astra",
+  "actualEffort": "medium",
+  "tokens": {
+    "input": 118600,
+    "output": 754,
+    "reasoning": 0,
+    "total": 119354
+  },
+  "validations": [
+    {
+      "name": "checks.mjs --plan",
+      "outcome": "passed",
+      "repeated": false
+    },
+    {
+      "name": "checks.mjs",
+      "outcome": "passed",
+      "repeated": false
+    },
+    {
+      "name": "additional inline retry assertions",
+      "outcome": "passed",
+      "repeated": false
+    }
+  ],
+  "repairAttempts": 0,
+  "finalDeliveryOutcome": "local_validation_passed"
+}
