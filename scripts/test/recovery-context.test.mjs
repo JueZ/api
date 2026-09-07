@@ -104,10 +104,6 @@ test('resolves only the exact failed run baseline and highest-priority mutation 
   );
   assert.deepEqual(result, {
     acceptedSourceRef: acceptedSha,
-    acceptedReleaseRunId: '34040400398',
-    acceptedReleaseCorrelation: 'prod-34040400398-1',
-    acceptedLedgerRunId: '34040400398',
-    acceptedLedgerCorrelation: 'prod-34040400398-1',
     acceptedBaselineArtifact: baselineName,
     failedMutationArtifact: `production-mutation-${failedCorrelation}`,
     evidenceRunId: String(failedRun),

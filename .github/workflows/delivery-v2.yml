@@ -379,11 +379,6 @@ jobs:
       expectedFrontendDigest: ${{ needs.build.outputs.frontend_digest }}
       expectedSbomDigest: ${{ needs.build.outputs.sbom_digest }}
       deliveryCorrelation: prod-${{ github.run_id }}-${{ github.run_attempt }}
-      acceptedSourceRef: ${{ needs.baseline.outputs.source_ref }}
-      acceptedReleaseRunId: ${{ needs.baseline.outputs.run_id }}
-      acceptedReleaseCorrelation: ${{ needs.baseline.outputs.correlation }}
-      acceptedLedgerRunId: ${{ needs.baseline.outputs.acceptance_run_id }}
-      acceptedLedgerCorrelation: ${{ needs.baseline.outputs.acceptance_correlation }}
       acceptedBaselineArtifact: ${{ needs.baseline.outputs.baseline_artifact }}
     secrets:
       REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
@@ -481,13 +476,6 @@ jobs:
       currentMainConfirmedRef: ${{ needs.current-main.outputs.confirmed_sha }}
       allowRollback: true
       deliveryCorrelation: rollback-${{ github.run_id }}-${{ github.run_attempt }}
-      rollbackReleaseRunId: ${{ needs.resolve-rollback.outputs.rollback_run_id }}
-      rollbackReleaseCorrelation: ${{ needs.resolve-rollback.outputs.rollback_correlation }}
-      acceptedSourceRef: ${{ needs.baseline.outputs.source_ref }}
-      acceptedReleaseRunId: ${{ needs.baseline.outputs.run_id }}
-      acceptedReleaseCorrelation: ${{ needs.baseline.outputs.correlation }}
-      acceptedLedgerRunId: ${{ needs.baseline.outputs.acceptance_run_id }}
-      acceptedLedgerCorrelation: ${{ needs.baseline.outputs.acceptance_correlation }}
       acceptedBaselineArtifact: ${{ needs.baseline.outputs.baseline_artifact }}
       failedMutationArtifact: ${{ needs.resolve-rollback.outputs.mutation_artifact }}
     secrets:
@@ -513,10 +501,6 @@ jobs:
       contents: read
     outputs:
       acceptedSourceRef: ${{ steps.resolve.outputs.acceptedSourceRef }}
-      acceptedReleaseRunId: ${{ steps.resolve.outputs.acceptedReleaseRunId }}
-      acceptedReleaseCorrelation: ${{ steps.resolve.outputs.acceptedReleaseCorrelation }}
-      acceptedLedgerRunId: ${{ steps.resolve.outputs.acceptedLedgerRunId }}
-      acceptedLedgerCorrelation: ${{ steps.resolve.outputs.acceptedLedgerCorrelation }}
       acceptedBaselineArtifact: ${{ steps.resolve.outputs.acceptedBaselineArtifact }}
       failedMutationArtifact: ${{ steps.resolve.outputs.failedMutationArtifact }}
       evidenceRunId: ${{ steps.resolve.outputs.evidenceRunId }}
@@ -565,13 +549,6 @@ jobs:
       allowRollback: true
       reconcileConfiguration: true
       deliveryCorrelation: rollback-${{ github.run_id }}-${{ github.run_attempt }}
-      rollbackReleaseRunId: ${{ needs.recovery-context.outputs.acceptedReleaseRunId }}
-      rollbackReleaseCorrelation: ${{ needs.recovery-context.outputs.acceptedReleaseCorrelation }}
-      acceptedSourceRef: ${{ needs.recovery-context.outputs.acceptedSourceRef }}
-      acceptedReleaseRunId: ${{ needs.recovery-context.outputs.acceptedReleaseRunId }}
-      acceptedReleaseCorrelation: ${{ needs.recovery-context.outputs.acceptedReleaseCorrelation }}
-      acceptedLedgerRunId: ${{ needs.recovery-context.outputs.acceptedLedgerRunId }}
-      acceptedLedgerCorrelation: ${{ needs.recovery-context.outputs.acceptedLedgerCorrelation }}
       acceptedBaselineArtifact: ${{ needs.recovery-context.outputs.acceptedBaselineArtifact }}
       failedMutationArtifact: ${{ needs.recovery-context.outputs.failedMutationArtifact }}
       evidenceRunId: ${{ needs.recovery-context.outputs.evidenceRunId }}

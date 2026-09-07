@@ -5,6 +5,50 @@ import { pathToFileURL } from 'node:url';
 
 const releaseFiles = ['frontend.tar.gz', 'functionapp.zip', 'release-manifest.json', 'sbom.cdx.json'];
 
+export function validateAcceptedBaseline(value) {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    value.schemaVersion !== 1 ||
+    value.status !== 'accepted'
+  )
+    throw new Error('Downloaded baseline must identify a schema-v1 accepted release');
+  for (const name of ['sourceRef', 'runId', 'correlation', 'acceptanceRunId', 'acceptanceCorrelation']) {
+    if (typeof value[name] === 'string' && value[name] !== value[name].trim())
+      throw new Error(`baseline.${name} must not contain surrounding whitespace`);
+  }
+  if (typeof value.sourceRef !== 'string' || !/^[0-9a-f]{40}$/.test(value.sourceRef))
+    throw new Error('baseline.sourceRef must be a full lowercase commit SHA');
+  const [runId, acceptanceRunId] = ['runId', 'acceptanceRunId'].map((name) => {
+    const run = value[name];
+    if (
+      !['string', 'number'].includes(typeof run) ||
+      !/^[1-9][0-9]*$/.test(String(run)) ||
+      !Number.isSafeInteger(Number(run))
+    )
+      throw new Error(`baseline.${name} must be a positive integer`);
+    return String(run);
+  });
+  for (const name of ['correlation', 'acceptanceCorrelation']) {
+    if (typeof value[name] !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/.test(value[name]))
+      throw new Error(`baseline.${name} must be an opaque 8-128 character identifier`);
+  }
+  if (!['promotion', 'recovery'].includes(value.acceptanceKind))
+    throw new Error('baseline.acceptanceKind must be promotion or recovery');
+  if (value.releaseArtifactName !== `production-release-${value.sourceRef}-${value.correlation}`)
+    throw new Error('baseline.releaseArtifactName does not match the accepted bundle identity');
+  if (value.ledgerArtifactName !== `release-ledger-prod-${value.sourceRef}-${value.acceptanceCorrelation}`)
+    throw new Error('baseline.ledgerArtifactName does not match the accepted ledger identity');
+  return {
+    sourceRef: value.sourceRef,
+    runId,
+    correlation: value.correlation,
+    acceptanceRunId,
+    acceptanceCorrelation: value.acceptanceCorrelation,
+  };
+}
+
 async function regularBytes(path) {
   const info = await lstat(path);
   if (!info.isFile() || info.isSymbolicLink() || info.size <= 0 || info.size > 512 * 1024 * 1024) {
@@ -46,9 +90,10 @@ export async function readAcceptedTransfer(directory) {
 }
 
 export async function materializeAcceptedBaseline({ transferDirectory, outputDirectory }) {
-  // The transfer is an immutable, current-run GitHub artifact. Content/identity is
+  // The transfer is an immutable GitHub artifact from the current or exact failed run. Content/identity is
   // verified again against the accepted ledger and current production under the lock.
   const transfer = await readAcceptedTransfer(transferDirectory);
+  const coordinates = validateAcceptedBaseline(transfer.baseline);
   await mkdir(resolve(outputDirectory, 'accepted-baseline'));
   if (transfer.bundled) {
     await mkdir(resolve(outputDirectory, 'accepted-release'));
@@ -59,24 +104,45 @@ export async function materializeAcceptedBaseline({ transferDirectory, outputDir
   });
   for (const [name, bytes] of Object.entries(transfer.files))
     await writeFile(resolve(outputDirectory, name), bytes, { flag: 'wx' });
-  return { bundled: transfer.bundled };
+  return { bundled: transfer.bundled, ...coordinates };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const values = process.argv.slice(2);
+    const environmentPath = process.env.GITHUB_ENV;
     if (
       values.length !== 6 ||
       values[0] !== '--transfer' ||
       values[2] !== '--output' ||
       values[4] !== '--github-output' ||
       !process.env.RUNNER_TEMP ||
+      !environmentPath ||
       resolve(values[3]) !== resolve(process.env.RUNNER_TEMP) ||
       resolve(values[1]) !== resolve(process.env.RUNNER_TEMP, 'accepted-transfer')
     )
       throw new Error('Invalid baseline staging arguments.');
     const result = await materializeAcceptedBaseline({ transferDirectory: values[1], outputDirectory: values[3] });
-    await appendFile(values[5], `bundled=${result.bundled}\n`);
+    const coordinates = {
+      ACCEPTED_SOURCE_REF: result.sourceRef,
+      ACCEPTED_RELEASE_RUN_ID: result.runId,
+      ACCEPTED_RELEASE_CORRELATION: result.correlation,
+      ACCEPTED_LEDGER_RUN_ID: result.acceptanceRunId,
+      ACCEPTED_LEDGER_CORRELATION: result.acceptanceCorrelation,
+    };
+    await appendFile(
+      values[5],
+      `bundled=${result.bundled}\n` +
+        Object.entries(coordinates)
+          .map(([name, value]) => `${name.toLowerCase()}=${value}\n`)
+          .join(''),
+    );
+    await appendFile(
+      environmentPath,
+      Object.entries(coordinates)
+        .map(([name, value]) => `${name}=${value}\n`)
+        .join(''),
+    );
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
