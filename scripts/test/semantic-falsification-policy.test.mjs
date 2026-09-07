@@ -10,8 +10,8 @@ test('substantial semantic changes invoke an autonomous proportional falsificati
   const critic = source('.agents/skills/semantic-falsification/SKILL.md');
 
   assert.match(root, /Never derive a stronger user-visible completion guarantee/i);
-  assert.match(delivery, /use `semantic-falsification` before committing/i);
-  assert.match(delivery, /not an additional required check or human approval/i);
+  assert.match(delivery, /`semantic-falsification` independent critic[\s\S]*?before the final local validation set/i);
+  assert.match(delivery, /without an additional required check or human approval/i);
   assert.match(critic, /derive 3–8 falsifiable correctness invariants/i);
   assert.match(critic, /all\s+current tests pass but the requested outcome does not/i);
   assert.match(critic, /provider\/service boundary/i);

@@ -291,8 +291,6 @@ jobs:
       environmentName: test
       azureResourceGroup: rg-api-test
       githubEnvironment: test
-      deployFrontend: true
-      deployFunctions: true
       sourceRef: ${{ github.sha }}
       expectedFunctionDigest: ${{ needs.build.outputs.function_digest }}
       expectedFrontendDigest: ${{ needs.build.outputs.frontend_digest }}
@@ -375,11 +373,8 @@ jobs:
       environmentName: prod
       azureResourceGroup: rg-api-prod
       githubEnvironment: production
-      deployFrontend: true
-      deployFunctions: true
       sourceRef: ${{ github.sha }}
       currentMainConfirmedRef: ${{ needs.current-main.outputs.confirmed_sha }}
-      updateProductionVariables: true
       expectedFunctionDigest: ${{ needs.build.outputs.function_digest }}
       expectedFrontendDigest: ${{ needs.build.outputs.frontend_digest }}
       expectedSbomDigest: ${{ needs.build.outputs.sbom_digest }}
@@ -482,8 +477,6 @@ jobs:
       environmentName: prod
       azureResourceGroup: rg-api-prod
       githubEnvironment: production
-      deployFrontend: true
-      deployFunctions: true
       sourceRef: ${{ needs.resolve-rollback.outputs.rollback_source_ref }}
       currentMainConfirmedRef: ${{ needs.current-main.outputs.confirmed_sha }}
       allowRollback: true
@@ -567,8 +560,6 @@ jobs:
       environmentName: prod
       azureResourceGroup: rg-api-prod
       githubEnvironment: production
-      deployFrontend: true
-      deployFunctions: true
       sourceRef: ${{ needs.recovery-context.outputs.acceptedSourceRef }}
       currentMainConfirmedRef: ${{ github.sha }}
       allowRollback: true
