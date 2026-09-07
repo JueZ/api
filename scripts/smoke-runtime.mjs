@@ -44,6 +44,17 @@ export async function runRuntimeSmoke({ env = process.env, fetchImpl = fetchWith
         if (health.response.status === 404 || health.response.status === 502 || health.response.status === 503) {
           throw new Error(`/health transient status ${health.response.status}`);
         }
+        // Azure can briefly serve the previous healthy worker after package activation.
+        // Wait within the existing readiness budget; a stale SHA is never passing evidence.
+        if (
+          health.response.status === 200 &&
+          health.json?.status === 'ok' &&
+          (!environmentName || health.json?.environmentName === environmentName) &&
+          /^[0-9a-f]{40}$/.test(health.json?.deployedCommitSha ?? '') &&
+          expectedSha
+        ) {
+          assertEqual('/health deployedCommitSha', health.json.deployedCommitSha, expectedSha.toLowerCase());
+        }
         return health;
       } catch (error) {
         lastError = error;
