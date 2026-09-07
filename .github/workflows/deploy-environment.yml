@@ -273,13 +273,13 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout trusted baseline resolver
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
       - name: Validate production identity inputs
@@ -327,7 +327,7 @@ jobs:
             --output "$GITHUB_OUTPUT" > "$RUNNER_TEMP/accepted-selection.json"
       - name: Download selected accepted production ledger
         if: ${{ steps.select.outputs.baseline_artifact_source == 'github' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # tag=v8.0.1
         with:
           name: ${{ steps.select.outputs.baseline_ledger_artifact }}
           path: ${{ runner.temp }}/accepted-ledger
@@ -336,7 +336,7 @@ jobs:
           run-id: ${{ steps.select.outputs.baseline_acceptance_run_id }}
       - name: Download selected accepted rendered release
         if: ${{ steps.select.outputs.baseline_artifact_source == 'github' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # tag=v8.0.1
         with:
           name: ${{ steps.select.outputs.baseline_release_artifact }}
           path: ${{ runner.temp }}/accepted-release
@@ -590,7 +590,7 @@ jobs:
       PROD_SERVICE_AUTH_SCOPE: ${{ vars.PROD_SERVICE_AUTH_SCOPE }}
     steps:
       - name: Checkout protected-main deployment controller
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -611,7 +611,7 @@ jobs:
           fi
       - name: Download fully verified accepted baseline identity
         if: ${{ inputs.environmentName == 'prod' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # tag=v8.0.1
         with:
           name: ${{ inputs.acceptedBaselineArtifact }}
           path: ${{ runner.temp }}/accepted-transfer
@@ -630,7 +630,7 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
       - name: Download exact accepted production release ledger
         if: ${{ inputs.environmentName == 'prod' && steps.baseline_transfer.outputs.bundled != 'true' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # tag=v8.0.1
         with:
           name: release-ledger-prod-${{ inputs.acceptedSourceRef }}-${{ inputs.acceptedLedgerCorrelation }}
           path: ${{ runner.temp }}/accepted-ledger
@@ -639,7 +639,7 @@ jobs:
           run-id: ${{ inputs.acceptedLedgerRunId }}
       - name: Download exact accepted rendered production release
         if: ${{ inputs.environmentName == 'prod' && steps.baseline_transfer.outputs.bundled != 'true' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # tag=v8.0.1
         with:
           name: production-release-${{ inputs.acceptedSourceRef }}-${{ inputs.acceptedReleaseCorrelation }}
           path: ${{ runner.temp }}/accepted-release
@@ -648,7 +648,7 @@ jobs:
           run-id: ${{ inputs.acceptedReleaseRunId }}
       - name: Download failed production mutation record
         if: ${{ inputs.environmentName == 'prod' && inputs.allowRollback }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # tag=v8.0.1
         with:
           name: ${{ inputs.failedMutationArtifact }}
           path: ${{ runner.temp }}/failed-mutation
@@ -740,7 +740,7 @@ jobs:
             echo "ci_run_id=$GITHUB_RUN_ID"
           } >> "$GITHUB_OUTPUT"
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
       - name: Validate deployment configuration
@@ -858,7 +858,7 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Download immutable CI release bundle
         if: ${{ !inputs.allowRollback }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # tag=v8.0.1
         with:
           name: release-${{ inputs.sourceRef || github.sha }}
           path: ${{ runner.temp }}/release
@@ -1080,7 +1080,7 @@ jobs:
       - name: Attest archive-verifier readiness probe
         id: archive_verifier_probe
         if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' }}
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # tag=v2
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # tag=v4.2.2
         with:
           subject-path: ${{ runner.temp }}/archive-verifier-probe.json
       - name: Verify actual archive signer and CLI before production mutation
@@ -2216,7 +2216,7 @@ jobs:
       - name: Attest accepted production archive
         id: archive_attestation
         if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' && success() }}
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # tag=v2
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # tag=v4.2.2
         with:
           subject-path: ${{ runner.temp }}/accepted-archive/accepted-release-manifest.json
       - name: Verify and publish accepted production archive
