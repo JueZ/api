@@ -39,7 +39,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Classify changed paths
@@ -84,7 +84,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Setup Node.js
@@ -174,7 +174,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
@@ -218,7 +218,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
@@ -243,7 +243,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
@@ -318,7 +318,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Azure CLI
         uses: azure/CLI@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # tag=v2
@@ -343,7 +343,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # tag=v6
@@ -389,7 +389,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Verify explicit PR Gate dependencies
         env:

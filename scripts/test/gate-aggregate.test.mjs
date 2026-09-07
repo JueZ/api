@@ -6,6 +6,20 @@ import { verifyGateAggregate } from '../lib/gate-aggregate.mjs';
 
 const result = (value) => ({ result: value });
 
+test('PR jobs take checkout identity from the immutable event rather than classifier output', () => {
+  const workflow = parse(readFileSync(new URL('../../.github/workflows/pr-gate.yml', import.meta.url), 'utf8'));
+  for (const [name, job] of Object.entries(workflow.jobs)) {
+    const checkout = job.steps.find((step) => step.uses?.startsWith('actions/checkout@'));
+    assert.ok(checkout, `${name} must check out an exact event commit`);
+    assert.doesNotMatch(checkout.with.ref, /needs\./, `${name} must not trust executable classifier output`);
+    assert.equal(
+      checkout.with.ref,
+      "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
+    );
+    assert.equal(checkout.with['persist-credentials'], false);
+  }
+});
+
 test('portability runtime executes candidate code without saving a shared dependency cache', () => {
   const workflow = parse(readFileSync(new URL('../../.github/workflows/pr-gate.yml', import.meta.url), 'utf8'));
   const job = workflow.jobs.portability;
