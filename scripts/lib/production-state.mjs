@@ -284,13 +284,23 @@ export function decideRollbackGuard({
     });
   }
   if (Object.values(componentStates).every((state) => state === 'accepted')) {
-    if (
-      configurationUncertain &&
-      reconcileConfiguration &&
-      mutationReceiptMatches(failedIntent.expectedIdentity?.mutationReceipt, observedIdentity?.mutationReceipt)
-    ) {
+    const exactFailedReceipt = mutationReceiptMatches(
+      failedIntent.expectedIdentity?.mutationReceipt,
+      observedIdentity?.mutationReceipt,
+    );
+    const exactAutomaticRollback =
+      observed.state === 'coherent' &&
+      observed.ok === true &&
+      automaticRollbackReceiptMatches(
+        failedIntent.expectedIdentity?.mutationReceipt,
+        observedIdentity?.mutationReceipt,
+        failedControllerRef,
+      );
+    if (configurationUncertain && reconcileConfiguration && (exactFailedReceipt || exactAutomaticRollback)) {
       return decision('configuration-reconciliation-required', true, {
-        reason: 'explicit-reconciliation-of-exact-failed-mutation',
+        reason: exactAutomaticRollback
+          ? 'explicit-reconciliation-after-exact-automatic-rollback'
+          : 'explicit-reconciliation-of-exact-failed-mutation',
         componentStates,
         configurationUncertain: true,
       });
@@ -339,6 +349,32 @@ export function decideRollbackGuard({
       configurationUncertain,
       mainAdvanced: currentMainRef !== failedControllerRef,
     },
+  );
+}
+
+// The trusted first-attempt failed run can leave its own automatic rollback receipt.
+// Only explicit reconciliation with all accepted component bytes may use this link;
+// a later run, even one restoring identical bytes, is a different mutation owner.
+function automaticRollbackReceiptMatches(promotion, observed, failedControllerRef) {
+  if (
+    promotion?.recorded !== true ||
+    promotion.kind !== 'promotion' ||
+    !/^[1-9][0-9]*$/.test(String(promotion.runId)) ||
+    !Number.isSafeInteger(Number(promotion.runId)) ||
+    promotion.correlation !== `prod-${promotion.runId}-1` ||
+    promotion.controllerRef !== failedControllerRef
+  ) {
+    return false;
+  }
+  return mutationReceiptMatches(
+    {
+      recorded: true,
+      runId: promotion.runId,
+      correlation: `rollback-${promotion.runId}-1`,
+      controllerRef: failedControllerRef,
+      kind: 'recovery',
+    },
+    observed,
   );
 }
 
