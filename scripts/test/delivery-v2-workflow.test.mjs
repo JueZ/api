@@ -47,7 +47,7 @@ test('approved package authorization preflight precedes mutation and post-deploy
   const preflight = index('Verify smoke identity against the approved package before mutation');
   const intent = index('Persist production mutation intent before first write');
   const firstWrite = index('Record production mutation receipt before infrastructure or application writes');
-  const infra = index('Deploy Bicep infrastructure');
+  const infra = steps.findIndex((step) => step.id === 'infra');
   const smokeMint = index('Mint authenticated smoke token with GitHub OIDC');
   const smoke = index('Run authenticated smoke tests');
   assert.ok(
@@ -68,6 +68,31 @@ test('approved package authorization preflight precedes mutation and post-deploy
     assert.equal(steps[preflight].env[flag], steps[smoke].env[flag]);
   }
   assert.equal(steps[preflight].if, steps[smoke].if);
+});
+
+test('application-only deployment keeps one parameter set, production proof, retention and runtime gates', () => {
+  const steps = environmentWorkflow.jobs.deploy.steps;
+  const index = (name) => steps.findIndex((step) => step.name === name);
+  const parameters = index('Prepare one private deployment parameter set');
+  const decide = steps.findIndex((step) => step.id === 'configuration_decision');
+  const intent = index('Persist production mutation intent before first write');
+  const infra = steps.findIndex((step) => step.id === 'infra');
+  const capture = index('Record private accepted production configuration');
+  const ledger = index('Write release ledger');
+  assert.ok(parameters >= 0 && parameters < decide && decide < intent && intent < infra);
+  assert.ok(capture > index('Run telemetry gate') && capture < ledger);
+  assert.match(steps[parameters].run, /az bicep build[\s\S]*prepare-deployment-parameters\.mjs/);
+  assert.match(steps[decide].if, /environmentName == 'prod'/);
+  assert.match(steps[decide].if, /production_guard.outputs.mutation_allowed == 'true'/);
+  assert.equal(
+    steps[decide].env.APPLICATION_ONLY_DEPLOYMENT_ENABLED,
+    "${{ vars.APPLICATION_ONLY_DEPLOYMENT_ENABLED || 'false' }}",
+  );
+  assert.match(steps[infra].run, /application-only[\s\S]*deployment-configuration-store\.mjs update-retention/);
+  assert.match(steps[infra].run, /deployment-template\.json[\s\S]*deployment-parameters\.json/);
+  assert.match(steps[capture].if, /!inputs.allowRollback/);
+  assert.match(steps[capture].run, /\[ -f .*deployment-configuration-pointer\.json/);
+  assert.equal(steps[capture]['continue-on-error'], undefined);
 });
 
 test('delivery v2 is a protected-main push DAG with a guarded manual cutover surface', () => {
@@ -267,7 +292,7 @@ test('production recovery is fully prepared and durably recorded before mutating
   const guard = index('Decide production mutation inside lock');
   const intent = index('Upload pre-write production mutation intent');
   const receipt = index('Record production mutation receipt before infrastructure or application writes');
-  const infra = index('Deploy Bicep infrastructure');
+  const infra = steps.findIndex((step) => step.id === 'infra');
   const frontendIdentity = index('Bind rendered frontend identity before application writes');
   const preparePackage = index('Prepare immutable Azure Functions package');
   const checkpoint = index('Upload application-ready production mutation checkpoint');

@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { getSmokeRunId } from './lib/smoke-utils.mjs';
+import { validateConfigurationPointer } from './deployment-configuration.mjs';
 
 async function readJson(path, fallback) {
   if (!path) return fallback;
@@ -15,6 +16,14 @@ async function readJson(path, fallback) {
 
 export async function writeReleaseLedger({ env = process.env, argv = process.argv.slice(2) } = {}) {
   const out = env.RELEASE_LEDGER_PATH || argv[0] || 'release-ledger.json';
+  const configurationBaseline = env.CONFIGURATION_BASELINE_POINTER_PATH
+    ? JSON.parse(await readFile(env.CONFIGURATION_BASELINE_POINTER_PATH, 'utf8'))
+    : null;
+  if (
+    configurationBaseline &&
+    (env.ENVIRONMENT_NAME !== 'prod' || validateConfigurationPointer(configurationBaseline).length)
+  )
+    throw new Error('Invalid public configuration pointer; no configuration payload may enter a release ledger.');
   const smokeRunId = getSmokeRunId(env.SMOKE_RUN_ID);
   const installationValues = [
     env.INSTALLED_RELEASE_RUN_ID,
@@ -90,6 +99,7 @@ export async function writeReleaseLedger({ env = process.env, argv = process.arg
     },
     ...(installation ? { installation } : {}),
     ...(recovery ? { recovery } : {}),
+    ...(configurationBaseline ? { configurationBaseline } : {}),
     smokeRunId,
     smokeResults,
     authenticatedSmokeResults,

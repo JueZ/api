@@ -16,6 +16,7 @@ import {
   isTimeoutError,
 } from '../lib/smoke-utils.mjs';
 import { runAuthenticatedSmoke } from '../smoke-auth.mjs';
+import { writeReleaseLedger } from '../write-release-ledger.mjs';
 import {
   missingServiceAuthFields,
   parseSmokeTokenFetchTimeoutMs,
@@ -58,6 +59,88 @@ test('release ledger validation accepts required runtime truth fields', () => {
       'deliveryCorrelation does not match the expected workflow dispatch',
     ),
   );
+});
+
+test('release ledger rejects a private configuration payload before creating the public ledger', async (t) => {
+  const { existsSync } = await import('node:fs');
+  const { mkdtemp, rm, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = await mkdtemp(join(tmpdir(), 'private-configuration-ledger-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const pointerPath = join(root, 'configuration.json');
+  const ledgerPath = join(root, 'public', 'release-ledger.json');
+  await writeFile(
+    pointerPath,
+    JSON.stringify({
+      account: 'releaseaccount',
+      container: 'function-releases',
+      blob: `accepted/${'b'.repeat(40)}/123/1/promotion/deployment-configuration.json`,
+      versionId: 'trusted-version',
+      sha256: 'c'.repeat(64),
+      size: 1024,
+      comparisonKey: 'private-comparison-key',
+      observed: { private: true },
+    }),
+  );
+
+  await assert.rejects(
+    writeReleaseLedger({
+      env: {
+        ENVIRONMENT_NAME: 'prod',
+        CONFIGURATION_BASELINE_POINTER_PATH: pointerPath,
+        RELEASE_LEDGER_PATH: ledgerPath,
+      },
+    }),
+    /Invalid public configuration pointer; no configuration payload may enter a release ledger/,
+  );
+  assert.equal(existsSync(ledgerPath), false);
+});
+
+test('release ledger validation propagates only the exact public configuration pointer', async (t) => {
+  const { mkdtemp, readFile: readTemporaryFile, rm, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = await mkdtemp(join(tmpdir(), 'configuration-pointer-ledger-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const pointerPath = join(root, 'configuration-pointer.json');
+  const ledgerPath = join(root, 'release-ledger.json');
+  const pointer = {
+    account: 'releaseaccount',
+    container: 'function-releases',
+    blob: `accepted/${'b'.repeat(40)}/123/1/promotion/deployment-configuration.json`,
+    versionId: 'trusted-version',
+    sha256: 'c'.repeat(64),
+    size: 1024,
+  };
+  await writeFile(pointerPath, JSON.stringify(pointer));
+
+  const { ledger } = await writeReleaseLedger({
+    env: {
+      ENVIRONMENT_NAME: 'prod',
+      CONFIGURATION_BASELINE_POINTER_PATH: pointerPath,
+      RELEASE_LEDGER_PATH: ledgerPath,
+      EXPECTED_DEPLOYED_COMMIT_SHA: 'a'.repeat(40),
+      DEPLOYED_SOURCE_REF: 'a'.repeat(40),
+      GITHUB_RUN_ID: '123',
+      DELIVERY_CORRELATION: 'delivery-12345678',
+      EFFECTIVE_FUNCTIONAPP_NAME: 'func-api',
+      API_BASE_URL: 'https://api.example.test',
+      RELEASE_FUNCTION_SHA256: 'd'.repeat(64),
+      RELEASE_FRONTEND_SHA256: 'e'.repeat(64),
+      RELEASE_SBOM_SHA256: 'f'.repeat(64),
+      SMOKE_RUN_ID: 'smoke-1',
+    },
+  });
+  const persisted = JSON.parse(await readTemporaryFile(ledgerPath, 'utf8'));
+
+  assert.deepEqual(validateReleaseLedger(ledger), []);
+  assert.deepEqual(ledger.configurationBaseline, pointer);
+  assert.deepEqual(persisted.configurationBaseline, pointer);
+  assert.deepEqual(Object.keys(ledger.configurationBaseline).sort(), Object.keys(pointer).sort());
+  assert.equal(JSON.stringify(persisted).includes('comparisonKey'), false);
+  assert.equal(JSON.stringify(persisted).includes('inputCommitment'), false);
+  assert.equal(JSON.stringify(persisted).includes('observed'), false);
 });
 
 test('policy guardrails detect high-risk paths and removed telemetry', () => {

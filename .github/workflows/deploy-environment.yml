@@ -1111,6 +1111,61 @@ jobs:
             --manifest "$RUNNER_TEMP/archive-verifier-probe.json" \
             --bundle "$ARCHIVE_PROBE_BUNDLE" \
             --verification-dir "$RUNNER_TEMP/archive-verifier-readiness"
+      - name: Prepare one private deployment parameter set
+        if: ${{ (!inputs.allowRollback || inputs.reconcileConfiguration) && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
+        shell: bash
+        env:
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_WEATHER_API_KEY: ${{ secrets.GOOGLE_WEATHER_API_KEY }}
+          BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
+          BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
+          BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
+          BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
+          BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
+          SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
+          YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY: ${{ secrets.YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY }}
+          YOUTUBE_TRANSCRIPT_ENABLED: ${{ vars.YOUTUBE_TRANSCRIPT_ENABLED || 'false' }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required}"
+          : "${BRING_EMAIL:?BRING_EMAIL environment secret is required}"
+          : "${BRING_PASSWORD:?BRING_PASSWORD environment secret is required}"
+          : "${BRING_CLIENT_API_KEY:?BRING_CLIENT_API_KEY environment secret is required}"
+          : "${BRING_CONFIRMATION_HMAC_KEY:?BRING_CONFIRMATION_HMAC_KEY environment secret is required}"
+          : "${BRING_MUTATION_ENCRYPTION_KEY:?BRING_MUTATION_ENCRYPTION_KEY environment secret is required}"
+          if [ "$WEATHER_ENABLED" = "true" ]; then : "${GOOGLE_WEATHER_API_KEY:?Weather key is required}"; fi
+          if [ "$YOUTUBE_TRANSCRIPT_ENABLED" = "true" ]; then
+            : "${SUPADATA_API_KEY:?Transcript key is required}"
+            : "${YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY:?Transcript cursor key is required}"
+          fi
+          if [ "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" = "true" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "OpenAI repository secret is required when Repairable Error LLM diagnostics are enabled." >&2
+            exit 1
+          fi
+          budget_resource_id="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Consumption/budgets/budget-api-catalogue-${ENVIRONMENT_NAME}"
+          budget_start_date="$(node scripts/resolve-budget-start-date.mjs --resource-id "$budget_resource_id" --current-month "$(date -u +%Y-%m-01T00:00:00Z)")"
+          PREPARED_BUDGET_START_DATE="$budget_start_date" node --input-type=module <<'NODE'
+          import {readFileSync, writeFileSync} from 'node:fs';
+          const env = process.env;
+          const config = {
+            budgetStartDate: env.PREPARED_BUDGET_START_DATE,
+            releaseRetentionPolicy: JSON.parse(readFileSync(`${env.RUNNER_TEMP}/release-retention-parameters.json`, 'utf8')).releaseRetentionPolicy.value,
+          };
+          writeFileSync(`${env.RUNNER_TEMP}/deployment-inputs.json`, JSON.stringify(config), {flag:'wx', mode:0o600});
+          NODE
+          az bicep build --file infra/main.bicep --outfile "$RUNNER_TEMP/deployment-template.json"
+          node scripts/prepare-deployment-parameters.mjs --config-json "$RUNNER_TEMP/deployment-inputs.json"
+      - name: Evaluate accepted production configuration before mutation
+        id: configuration_decision
+        if: ${{ inputs.environmentName == 'prod' && (!inputs.allowRollback || inputs.reconcileConfiguration) && steps.production_guard.outputs.mutation_allowed == 'true' }}
+        shell: bash
+        env:
+          APPLICATION_ONLY_DEPLOYMENT_ENABLED: ${{ vars.APPLICATION_ONLY_DEPLOYMENT_ENABLED || 'false' }}
+          APPLICATION_ONLY_SHADOW_MEASURE: ${{ vars.APPLICATION_ONLY_SHADOW_MEASURE || 'false' }}
+          RECONCILE_CONFIGURATION: ${{ inputs.reconcileConfiguration }}
+        run: node scripts/deployment-configuration-store.mjs decide
       - name: Persist production mutation intent before first write
         id: mutation_intent
         if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' }}
@@ -1166,139 +1221,34 @@ jobs:
               "DELIVERY_MUTATION_CONTROLLER_SHA=$GITHUB_SHA" \
               "DELIVERY_MUTATION_KIND=$mutation_kind" \
             -o none
-      - name: Deploy Bicep infrastructure
+      - name: Reconcile infrastructure or verified release retention
         if: ${{ (!inputs.allowRollback || inputs.reconcileConfiguration) && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         id: infra
         shell: bash
         env:
-          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GOOGLE_WEATHER_API_KEY: ${{ secrets.GOOGLE_WEATHER_API_KEY }}
-          BRING_EMAIL: ${{ secrets.BRING_EMAIL }}
-          BRING_PASSWORD: ${{ secrets.BRING_PASSWORD }}
-          BRING_CLIENT_API_KEY: ${{ secrets.BRING_CLIENT_API_KEY }}
-          BRING_CONFIRMATION_HMAC_KEY: ${{ secrets.BRING_CONFIRMATION_HMAC_KEY }}
-          BRING_MUTATION_ENCRYPTION_KEY: ${{ secrets.BRING_MUTATION_ENCRYPTION_KEY }}
-          SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
-          YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY: ${{ secrets.YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY }}
-          YOUTUBE_TRANSCRIPT_ENABLED: ${{ vars.YOUTUBE_TRANSCRIPT_ENABLED || 'false' }}
+          CONFIGURATION_MODE: ${{ steps.configuration_decision.outputs.mode || 'full' }}
         run: |
           set -euo pipefail
-          : "${REDDIT_CLIENT_SECRET:?REDDIT_CLIENT_SECRET environment secret is required for $ENVIRONMENT_NAME}"
-          if [ "${WEATHER_ENABLED:-false}" = "true" ]; then : "${GOOGLE_WEATHER_API_KEY:?GOOGLE_WEATHER_API_KEY is required when weather is enabled}"; fi
-          : "${BRING_EMAIL:?BRING_EMAIL environment secret is required for $ENVIRONMENT_NAME}"
-          : "${BRING_PASSWORD:?BRING_PASSWORD environment secret is required for $ENVIRONMENT_NAME}"
-          : "${BRING_CLIENT_API_KEY:?BRING_CLIENT_API_KEY environment secret is required for $ENVIRONMENT_NAME}"
-          : "${BRING_CONFIRMATION_HMAC_KEY:?BRING_CONFIRMATION_HMAC_KEY environment secret is required for $ENVIRONMENT_NAME}"
-          : "${BRING_MUTATION_ENCRYPTION_KEY:?BRING_MUTATION_ENCRYPTION_KEY environment secret is required for $ENVIRONMENT_NAME}"
-          if [ "$YOUTUBE_TRANSCRIPT_ENABLED" = "true" ]; then
-            : "${SUPADATA_API_KEY:?SUPADATA_API_KEY environment secret is required when YouTube transcripts are enabled}"
-            : "${YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY:?YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY environment secret is required when YouTube transcripts are enabled}"
-          fi
-          openai_secret_name='OPENAI_API_KEY'
-          openai_credential=""
-          if [ "${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" = "true" ]; then
-            if [ -z "${!openai_secret_name:-}" ]; then
-              echo "OpenAI repository secret is required when Repairable Error LLM diagnostics are enabled." >&2
-              exit 1
-            fi
-            openai_credential="${!openai_secret_name}"
-          fi
-          if [ -f infra/main.bicep ]; then
-            api_cors_redirect_uri=""
-            if [ "$ENVIRONMENT_NAME" = "prod" ]; then
-              api_cors_redirect_uri="${WEB_AUTH_REDIRECT_URI:-}"
-            else
-              api_cors_redirect_uri="${TEST_WEB_AUTH_REDIRECT_URI:-}"
-            fi
-            api_cors_allowed_origins=""
-            if [ -n "$api_cors_redirect_uri" ]; then
-              api_cors_allowed_origins="$(API_CORS_REDIRECT_URI="$api_cors_redirect_uri" node --input-type=module --eval "process.stdout.write(new URL(process.env.API_CORS_REDIRECT_URI).origin)")"
-            fi
-            monthly_budget_eur=10
-            if [ "$ENVIRONMENT_NAME" = "prod" ]; then
-              monthly_budget_eur=15
-            fi
-            budget_resource_id="/subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${AZURE_RESOURCE_GROUP}/providers/Microsoft.Consumption/budgets/budget-api-catalogue-${ENVIRONMENT_NAME}"
-            budget_start_date="$(node scripts/resolve-budget-start-date.mjs \
-              --resource-id "$budget_resource_id" \
-              --current-month "$(date -u +%Y-%m-01T00:00:00Z)")"
-
-            if [ "$ALLOW_ROLLBACK" != "true" ]; then node scripts/assert-current-main.mjs; fi
-            deployment_outputs=$(az deployment group create \
-              --name "main-${ENVIRONMENT_NAME}" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --template-file infra/main.bicep \
-              --parameters "@$RUNNER_TEMP/release-retention-parameters.json" environmentName="$ENVIRONMENT_NAME" \
-                authEnabled="$AUTH_ENABLED" \
-                oidcIssuer="${OIDC_ISSUER:-}" \
-                oidcAudience="${OIDC_AUDIENCE:-}" \
-                oidcJwksUri="${OIDC_JWKS_URI:-}" \
-                oidcRequiredScopes="${OIDC_REQUIRED_SCOPES:-catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove}" \
-                oidcAllowedObjectIds="${OIDC_ALLOWED_OBJECT_IDS:-}" \
-                oidcAllowedSubjects="${OIDC_ALLOWED_SUBJECTS:-}" \
-                oidcAllowedAppObjectIds="${OIDC_ALLOWED_APP_OBJECT_IDS:-}" \
-                oidcAllowedClientIds="${OIDC_ALLOWED_CLIENT_IDS:-}" \
-                oidcAllowedDelegatedClientIds="$OIDC_ALLOWED_DELEGATED_CLIENT_IDS" \
-                oidcAllowedTenants="${OIDC_ALLOWED_TENANTS:-}" \
-                authDebug="${AUTH_DEBUG:-false}" \
-                apiCorsAllowedOrigins="$api_cors_allowed_origins" \
-                mcpResourceOrigin="$MCP_RESOURCE_ORIGIN" \
-                mcpAllowedOrigins="$MCP_ALLOWED_ORIGINS" \
-                deploymentPrincipalObjectId="$AZURE_DEPLOYMENT_PRINCIPAL_OBJECT_ID" \
-                operatorAlertEmail="$OPERATOR_ALERT_EMAIL" \
-                monthlyBudgetEur="$monthly_budget_eur" \
-                budgetStartDate="$budget_start_date" \
-                redditClientId="${REDDIT_CLIENT_ID:-}" \
-                redditOAuthSecret="${REDDIT_CLIENT_SECRET:-}" \
-                redditUserAgent="${REDDIT_USER_AGENT:-}" \
-                weatherEnabled="${WEATHER_ENABLED:-false}" \
-                googleWeatherApiKey="${GOOGLE_WEATHER_API_KEY:-}" \
-                youtubeTranscriptEnabled="$YOUTUBE_TRANSCRIPT_ENABLED" \
-                supadataApiKey="${SUPADATA_API_KEY:-}" \
-                youtubeTranscriptCursorHmacKey="${YOUTUBE_TRANSCRIPT_CURSOR_HMAC_KEY:-}" \
-                bringBaseUrl="${BRING_BASE_URL:-https://api.getbring.com/rest/}" \
-                bringClientApiKey="$BRING_CLIENT_API_KEY" \
-                bringCountry="${BRING_COUNTRY:-AT}" \
-                bringEmail="$BRING_EMAIL" \
-                bringPassword="$BRING_PASSWORD" \
-                bringEnabled="$BRING_ENABLED" \
-                bringAddEnabled="$BRING_ADD_ENABLED" \
-                bringDestructiveEnabled="$BRING_DESTRUCTIVE_ENABLED" \
-                bringExpectedAccountFingerprint="${BRING_EXPECTED_ACCOUNT_FINGERPRINT:-}" \
-                bringConnectionGrants="${BRING_CONNECTION_GRANTS:-}" \
-                bringDefaultListUuid="${BRING_DEFAULT_LIST_UUID:-}" \
-                bringReadableListUuids="${BRING_READABLE_LIST_UUIDS:-}" \
-                bringWritableListUuids="${BRING_WRITABLE_LIST_UUIDS:-}" \
-                bringWritableSharedListUuids="${BRING_WRITABLE_SHARED_LIST_UUIDS:-}" \
-                bringSessionCacheEnabled="${BRING_SESSION_CACHE_ENABLED:-true}" \
-                bringSessionCacheContainer="${BRING_SESSION_CACHE_CONTAINER:-bring-private}" \
-                bringSessionCacheBlob="${BRING_SESSION_CACHE_BLOB:-session-v1.json}" \
-                bringMutationContainer="${BRING_MUTATION_CONTAINER:-bring-mutations}" \
-                bringAuditContainer="${BRING_AUDIT_CONTAINER:-bring-audit}" \
-                bringConfirmationHmacKey="$BRING_CONFIRMATION_HMAC_KEY" \
-                bringMutationEncryptionKey="$BRING_MUTATION_ENCRYPTION_KEY" \
-                wlhBaseUrl="${WLH_BASE_URL:-}" \
-                wlhCategoryBlobContainer="${WLH_CATEGORY_BLOB_CONTAINER:-wlh-reference}" \
-                wlhCategoryBlobName="${WLH_CATEGORY_BLOB_NAME:-categories-marketplace.v1.json.gz}" \
-                openAiCredential="$openai_credential" \
-                repairableErrorsLlmEnabled="${REPAIRABLE_ERRORS_LLM_ENABLED:-false}" \
-                repairableErrorsLlmModel="${REPAIRABLE_ERRORS_LLM_MODEL:-}" \
-              --query properties.outputs \
-              -o json)
-
-            {
-              echo "function_app_name=$(jq -r '.functionAppResourceName.value // empty' <<< "$deployment_outputs")"
-              echo "host_storage_account_name=$(jq -r '.hostStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
-              echo "release_storage_account_name=$(jq -r '.releaseStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
-              echo "static_storage_account_name=$(jq -r '.staticWebStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
-              echo "private_storage_account_name=$(jq -r '.privateStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
-              echo "application_insights_name=$(jq -r '.applicationInsightsResourceName.value // empty' <<< "$deployment_outputs")"
-              echo "key_vault_name=$(jq -r '.keyVaultResourceName.value // empty' <<< "$deployment_outputs")"
-            } >> "$GITHUB_OUTPUT"
+          if [ "$ALLOW_ROLLBACK" != "true" ]; then node scripts/assert-current-main.mjs; fi
+          if [ "$CONFIGURATION_MODE" = 'application-only' ]; then
+            node scripts/deployment-configuration-store.mjs update-retention
+            deployment_outputs="$(az deployment group show --name "main-${ENVIRONMENT_NAME}" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.outputs -o json)"
           else
-            echo "No infra/main.bicep found; skipping infrastructure deployment."
+            deployment_outputs="$(az deployment group create \
+              --name "main-${ENVIRONMENT_NAME}" --resource-group "$AZURE_RESOURCE_GROUP" \
+              --template-file "$RUNNER_TEMP/deployment-template.json" \
+              --parameters "@$RUNNER_TEMP/deployment-parameters.json" \
+              --query properties.outputs -o json)"
           fi
+          {
+            echo "function_app_name=$(jq -r '.functionAppResourceName.value // empty' <<< "$deployment_outputs")"
+            echo "host_storage_account_name=$(jq -r '.hostStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
+            echo "release_storage_account_name=$(jq -r '.releaseStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
+            echo "static_storage_account_name=$(jq -r '.staticWebStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
+            echo "private_storage_account_name=$(jq -r '.privateStorageAccountResourceName.value // empty' <<< "$deployment_outputs")"
+            echo "application_insights_name=$(jq -r '.applicationInsightsResourceName.value // empty' <<< "$deployment_outputs")"
+            echo "key_vault_name=$(jq -r '.keyVaultResourceName.value // empty' <<< "$deployment_outputs")"
+          } >> "$GITHUB_OUTPUT"
       - name: Remove retired scheduled-query alerts
         if: ${{ !inputs.allowRollback && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}
         shell: bash
@@ -2202,6 +2152,18 @@ jobs:
         shell: bash
         run: |
           if [ "$ALLOW_ROLLBACK" != "true" ]; then node scripts/assert-current-main.mjs; fi
+      - name: Record private accepted production configuration
+        if: ${{ success() && inputs.environmentName == 'prod' && !inputs.allowRollback && steps.production_guard.outputs.mutation_allowed == 'true' }}
+        shell: bash
+        env:
+          APPLICATION_ONLY_DEPLOYMENT_ENABLED: ${{ vars.APPLICATION_ONLY_DEPLOYMENT_ENABLED || 'false' }}
+          APPLICATION_ONLY_SHADOW_MEASURE: ${{ vars.APPLICATION_ONLY_SHADOW_MEASURE || 'false' }}
+        run: |
+          set -euo pipefail
+          node scripts/deployment-configuration-store.mjs accept
+          if [ -f "$RUNNER_TEMP/deployment-configuration-pointer.json" ] && [ ! -L "$RUNNER_TEMP/deployment-configuration-pointer.json" ]; then
+            echo "CONFIGURATION_BASELINE_POINTER_PATH=$RUNNER_TEMP/deployment-configuration-pointer.json" >> "$GITHUB_ENV"
+          fi
       - name: Write release ledger
         shell: bash
         if: ${{ always() && (inputs.environmentName != 'prod' || steps.production_guard.outputs.mutation_allowed == 'true') }}

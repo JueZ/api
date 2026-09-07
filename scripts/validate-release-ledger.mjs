@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
+import { validateConfigurationPointer } from './deployment-configuration.mjs';
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const ledgerPath = process.argv[2];
@@ -40,6 +41,11 @@ export function validateReleaseLedger(ledger, { expectedDeliveryCorrelation = ''
   for (const key of required)
     if (ledger?.[key] === undefined || ledger?.[key] === '') errors.push(`Missing required field: ${key}`);
   if (!['test', 'prod'].includes(ledger?.environment)) errors.push('environment must be test or prod');
+  if (ledger?.configurationBaseline !== undefined) {
+    errors.push(...validateConfigurationPointer(ledger.configurationBaseline));
+    if (ledger.environment !== 'prod' || ledger.recovery !== undefined)
+      errors.push('Configuration comparison pointers require a normal production acceptance.');
+  }
   for (const key of ['deployedCommit', 'sourceRef'])
     if (!/^[0-9a-f]{40}$/.test(String(ledger?.[key] ?? ''))) errors.push(`${key} must be a lowercase 40-character SHA`);
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/.test(String(ledger?.deliveryCorrelation ?? ''))) {

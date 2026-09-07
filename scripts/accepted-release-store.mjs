@@ -44,7 +44,7 @@ async function bytesAt(client, maxSize = MAX_FILE_BYTES) {
   return bytes;
 }
 
-async function uploadExact(container, name, bytes) {
+export async function uploadExact(container, name, bytes) {
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_FILE_BYTES) throw new Error('Archive upload size is invalid.');
   const client = container.getBlockBlobClient(name);
   let versionId;

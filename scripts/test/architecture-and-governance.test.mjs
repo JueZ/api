@@ -192,11 +192,14 @@ test('YouTube secret and feature flag remain consistent through deployment verif
     /SUPADATA_API_KEY: youtubeTranscriptEnabled \? '@Microsoft\.KeyVault\(SecretUri=\$\{supadataSecret!\.properties\.secretUriWithVersion\}\)' : ''/,
   );
   assert.doesNotMatch(deployment, /SUPADATA_API_KEY[^\n]*GITHUB_OUTPUT|echo[^\n]*SUPADATA_API_KEY/);
-  assert.equal((deployment.match(/oidcRequiredScopes=/g) ?? []).length, 1);
+  const parameterPreparation = readFileSync(new URL('../prepare-deployment-parameters.mjs', import.meta.url), 'utf8');
+  assert.equal((parameterPreparation.match(/oidcRequiredScopes:/g) ?? []).length, 1);
   assert.match(
-    deployment,
-    /oidcRequiredScopes="\$\{OIDC_REQUIRED_SCOPES:-catalogue\.read,reddit\.read,youtube\.read,wlh\.read,weather\.read,bring\.read,bring\.write,bring\.complete,bring\.remove\}"/,
+    parameterPreparation,
+    /catalogue\.read,reddit\.read,youtube\.read,wlh\.read,weather\.read,bring\.read,bring\.write,bring\.complete,bring\.remove/,
   );
+  assert.match(deployment, /node scripts\/prepare-deployment-parameters\.mjs/);
+  assert.match(deployment, /--parameters "@\$RUNNER_TEMP\/deployment-parameters\.json"/);
 });
 
 test('staged deployment Bicep preserves its required output contract', () => {
