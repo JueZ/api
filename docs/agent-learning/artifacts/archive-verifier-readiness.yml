@@ -1,0 +1,16 @@
+version: 2
+id: archive-verifier-readiness
+fingerprint: delivery.archive.mutually-exclusive-cli-identity-selectors
+severity: high
+invariant: Archive verification uses one exact CLI certificate identity selector with repository and source restrictions, and the actual signer and verifier must pass a readiness probe before any production write; the probe never substitutes for verified release acceptance.
+scope:
+  - scripts/accepted-release-store.mjs
+  - .github/workflows/deploy-environment.yml
+prevention:
+  - kind: regression-test
+    path: scripts/test/accepted-release-store.test.mjs
+  - kind: regression-test
+    path: scripts/test/delivery-v2-workflow.test.mjs
+broken: 2fc52bf56d1cee615a05e8f563b4d773c62bcbbf
+recurrenceCount: 1
+status: active

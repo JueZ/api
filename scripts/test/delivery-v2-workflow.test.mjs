@@ -16,6 +16,29 @@ function needs(job) {
   return Array.isArray(job.needs) ? job.needs : job.needs ? [job.needs] : [];
 }
 
+test('actual archive verifier and signing identity are proven before any production write', () => {
+  const steps = environmentWorkflow.jobs.deploy.steps;
+  const index = (name) => steps.findIndex((step) => step.name === name);
+  const probe = index('Prepare public archive-verifier readiness probe');
+  const attest = index('Attest archive-verifier readiness probe');
+  const verify = index('Verify actual archive signer and CLI before production mutation');
+  const intent = index('Persist production mutation intent before first write');
+  const write = index('Record production mutation receipt before infrastructure or application writes');
+  assert.ok(probe >= 0 && probe < attest && attest < verify && verify < intent && intent < write);
+  for (const position of [probe, attest, verify]) {
+    assert.match(steps[position].if, /environmentName == 'prod'/);
+    assert.match(steps[position].if, /production_guard.outputs.mutation_allowed == 'true'/);
+    assert.equal(steps[position]['continue-on-error'], undefined);
+  }
+  assert.match(steps[verify].run, /accepted-release-store\.mjs verify/);
+  assert.match(steps[verify].run, /archive-verifier-probe\.json/);
+  assert.match(
+    steps[index('Prepare immutable accepted production archive')].run,
+    /accepted-release-store\.mjs prepare/,
+  );
+  assert.ok(index('Verify and publish accepted production archive') > index('Run telemetry gate'));
+});
+
 test('approved package authorization preflight precedes mutation and post-deployment smoke remains required', () => {
   const steps = environmentWorkflow.jobs.deploy.steps;
   const index = (name) => steps.findIndex((step) => step.name === name);

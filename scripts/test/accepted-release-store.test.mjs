@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { ACCEPTED_RELEASE_ARCHIVE_FILES } from '../accepted-release-archive.mjs';
 import {
+  archiveAttestationVerifyArguments,
   expectedArchiveFromSelection,
   prepareAcceptedArchive,
   publishAcceptedArchive,
@@ -16,6 +17,27 @@ const sourceRef = 'a'.repeat(40);
 const otherSource = 'c'.repeat(40);
 const manifestName = 'accepted-release-manifest.json';
 const attestationName = 'accepted-release-attestation.json';
+
+test('archive verification uses one mutually exclusive CLI identity selector and retains exact provenance constraints', () => {
+  const args = archiveAttestationVerifyArguments('manifest.json', 'bundle.json', {
+    repository: 'JueZ/api',
+    acceptance: { controllerRef: sourceRef },
+  });
+  const selectors = ['--cert-identity', '--cert-identity-regex', '--signer-repo', '--signer-workflow'];
+  assert.deepEqual(
+    args.filter((argument) => selectors.includes(argument)),
+    ['--cert-identity'],
+  );
+  for (const [flag, value] of Object.entries({
+    '--repo': 'JueZ/api',
+    '--cert-identity': 'https://github.com/JueZ/api/.github/workflows/deploy-environment.yml@refs/heads/main',
+    '--source-ref': 'refs/heads/main',
+    '--source-digest': sourceRef,
+    '--signer-digest': sourceRef,
+  }))
+    assert.equal(args[args.indexOf(flag) + 1], value);
+  assert.ok(args.includes('--deny-self-hosted-runners'));
+});
 
 test('prepare rejects an incomplete accepted ledger before opening any upload', async (context) => {
   const fixture = await createFixture(context);
