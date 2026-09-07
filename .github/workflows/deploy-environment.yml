@@ -1082,7 +1082,8 @@ jobs:
           if jq -e '.exists == true' "$RUNNER_TEMP/candidate-package-version.json" >/dev/null; then
             az storage blob show --auth-mode login --account-name "$retention_account" \
               --container-name function-releases --name "functionapp-$FUNCTION_ARTIFACT_SHA256.zip" \
-              --query '{exists:`true`,versionId:versionId}' -o json > "$RUNNER_TEMP/candidate-package-version.json"
+              --query '{versionId:versionId}' -o json | jq '. + {exists: true}' \
+              > "$RUNNER_TEMP/candidate-package-version.json"
           fi
           node scripts/release-retention-policy.mjs
       - name: Persist production mutation intent before first write
