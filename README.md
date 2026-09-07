@@ -18,12 +18,14 @@ The backend exposes public `GET /health`. Protected operations use OAuth/OIDC JW
 Use Node.js 22.
 
 ```bash
-npm install
-npm run build
-npm test
+npm ci --ignore-scripts
+npm run validate:affected -- --plan
+npm run validate:affected
 ```
 
-Useful focused commands:
+`validate:affected` selects local checks from the worktree diff against `origin/main`, builds each needed application once, and records the candidate, base, toolchain, and results. Refresh the protected base before starting work. Review matching prior evidence with `--plan` before repeating checks; the command deliberately does not treat local records as protected CI results. See [local validation](docs/agent-environment/README.md).
+
+Useful focused commands for a specific diagnosis:
 
 ```bash
 npm run lint
@@ -53,7 +55,7 @@ Codex branch and focused validation
   -> one bounded rollback and repair issue when needed
 ```
 
-`main` requires exactly `PR Gate` and `Security Gate`. Release artifacts are never built on pull requests. Documentation-only changes skip application validation and environment deployment; unknown or privileged changes fail closed to broad validation.
+`main` requires exactly `PR Gate` and `Security Gate`. Release artifacts are never built on pull requests. Validation impact and security sensitivity are separate: instruction changes retain policy and security checks, while application and environment jobs follow affected behavior. Unknown changes receive broad validation. A documentation-only successor skips deployment only when its cumulative diff from accepted production has no pending runtime change.
 
 Delivery uses GitHub Actions OIDC, build provenance, SHA-256 release identity, public and authenticated smoke tests, telemetry correlation, and compact release ledgers. Test and production receive the same Function package, environment-neutral frontend bundle, and SBOM digests; only environment-specific frontend configuration is rendered separately.
 

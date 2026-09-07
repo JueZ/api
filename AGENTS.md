@@ -21,7 +21,7 @@ A superseded Delivery v2 generation is not task success. Confirm the requested c
 
 ## Validation and continuation
 
-Use Node.js 22 and one proportional local validation set selected from the protected-base diff. Repeat or broaden passing checks only for a changed diff, base, environment, or concrete concern; complete protected remote checks regardless.
+Use Node.js 22 and one proportional local validation set selected from the protected-base diff. `npm run validate:affected -- --plan` shows that set and compares prior local evidence; execute it with `npm run validate:affected`. Repeat or broaden passing checks only for a changed diff, base, environment, or concrete concern; complete protected remote checks regardless.
 
 Use `semantic-falsification` for substantial user-visible, provider, mutation, completeness, or deployment/runtime semantic changes. Preserve its independent critic and outcome-based contract verification; behavior-neutral edits do not require it. Never derive a stronger user-visible completion guarantee solely from internal queue exhaustion unless the external contract supports that equivalence.
 

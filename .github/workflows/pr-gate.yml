@@ -33,11 +33,13 @@ jobs:
       workflow: ${{ steps.classify.outputs.workflow }}
       learning: ${{ steps.classify.outputs.learning }}
       privileged: ${{ steps.classify.outputs.privileged }}
+      operations: ${{ steps.classify.outputs.operations }}
+      agent_environment: ${{ steps.classify.outputs.agent_environment }}
     steps:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Classify changed paths
@@ -82,7 +84,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Setup Node.js
@@ -172,7 +174,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
@@ -206,6 +208,31 @@ jobs:
           node scripts/check-openapi-route-drift.mjs
           node scripts/check-operation-contract-drift.mjs
 
+  operations:
+    name: operations validation
+    if: needs.classify.outputs.operations == 'true'
+    needs: classify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Compile API prerequisites once and validate repository operations
+        run: |
+          node node_modules/typescript/bin/tsc -p apps/api/tsconfig.json
+          node scripts/run-tests.mjs scripts/test
+
   frontend:
     name: frontend validation
     if: needs.classify.outputs.frontend == 'true'
@@ -216,7 +243,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
@@ -236,7 +263,7 @@ jobs:
 
   portability:
     name: local development (${{ matrix.os }})
-    if: needs.classify.outputs.privileged == 'true'
+    if: needs.classify.outputs.agent_environment == 'true'
     needs: classify
     strategy:
       fail-fast: false
@@ -262,7 +289,13 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
       - name: Verify local process management and frontend tests
-        run: node scripts/run-tests.mjs scripts/agent-env/test apps/web/test scripts/test/run-tests.test.mjs
+        run: >-
+          node scripts/run-tests.mjs
+          scripts/agent-env/test
+          apps/web/test
+          scripts/test/run-tests.test.mjs
+          scripts/test/setup-codex-env.test.mjs
+          scripts/test/maintain-codex-env.test.mjs
       - name: Install pinned Azure Functions Core Tools
         run: npm install --global azure-functions-core-tools@4.13.0
       - name: Start local environment
@@ -285,7 +318,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Azure CLI
         uses: azure/CLI@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # tag=v2
@@ -310,7 +343,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # tag=v6
@@ -345,6 +378,7 @@ jobs:
       - classify
       - policy
       - backend
+      - operations
       - frontend
       - portability
       - infrastructure
@@ -355,7 +389,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
         with:
-          ref: ${{ needs.classify.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Verify explicit PR Gate dependencies
         env:

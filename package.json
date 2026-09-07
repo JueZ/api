@@ -5,6 +5,7 @@
   "description": "v0 Hello World skeleton for the personal API catalogue platform.",
   "type": "module",
   "scripts": {
+    "validate:affected": "node scripts/validate-affected.mjs",
     "lint": "eslint apps scripts --max-warnings 0 && prettier --check .",
     "type-check": "tsc -p apps/api/tsconfig.json --noEmit && ng build --configuration development --no-progress",
     "test": "npm run build:api && node scripts/run-tests.mjs apps/api/test apps/web/test scripts/test",
