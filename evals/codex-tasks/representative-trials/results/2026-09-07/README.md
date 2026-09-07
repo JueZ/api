@@ -1,0 +1,19 @@
+# Fresh Astra fixture observations
+
+Ten fresh subagents completed the five paired local tasks on 2026-09-07. All ten passed the frozen controller's outcome checks. Both versions correctly retained blocked permissions and pending superseded delivery. No repeated passing command or repair following an unsuccessful implementation was observed. The two small-fix agents additionally ran overlapping retry assertions; the provider agents added contract tests.
+
+The fixture source was frozen at `639882f83c07bf0ac3ad045a74241642af1c2154`. Paired fixture digests match in [observations.json](observations.json); the pinned instruction digests and reported model/effort/token counts are in each adjacent advisory record. Session metadata confirms `gpt-6-astra`, medium effort, for all ten. Each had the same eight-minute limit, Node 22.23.2, local file/shell scope, and no inherited conversation history. Starts were counterbalanced as recorded, with up to four overlapping trials.
+
+| Task                    | Baseline / revised outcome                      | Baseline / revised reported total tokens | Baseline / revised elapsed seconds |
+| ----------------------- | ----------------------------------------------- | ---------------------------------------- | ---------------------------------- |
+| Ordinary feature        | Local validation passed / passed                | 118,461 / 88,175                         | 37.868 / 31.361                    |
+| Small fix               | Local validation passed / passed                | 119,213 / 119,354                        | 45.541 / 38.526                    |
+| Provider shape mismatch | Local validation passed / passed                | 91,312 / 127,109                         | 70.701 / 67.033                    |
+| Permissions blocker     | Blocked / blocked                               | 119,154 / 119,560                        | 32.716 / 36.017                    |
+| Superseded deployment   | Following current main / following current main | 119,254 / 120,499                        | 43.521 / 47.520                    |
+
+These observations do **not** establish a performance improvement from revised guidance. The only guidance delta is the validation-command hint, and the shared task also exposes those commands; this is a check of behavior under explicit task instructions, not an isolated test of command discovery. Both arms ran the planned check once. Token totals include repeatedly supplied context and cached input, whose counts differ between runs; they are not cost measurements. Reported task duration includes tool time and shared-host scheduling, so active-agent time and CI/deployment fields remain absent. `repairAttempts` counts additional causal repairs after a failed initial implementation, excluding the requested initial defect fix.
+
+These were fresh subagents on the same Windows host with shared client instructions and tools, not isolated standalone Codex environments. Tool traces were inspected: all commands used their assigned fixture directory, changes stayed within the allowed files, and no network, credentials, other agents, or external writes were used. Host-enforced isolation was unavailable. The parent independently checked immutable inputs, allowed changes, and outcomes with the frozen verifier, and read the assessment next actions and final claims. Raw session transcripts, credentials, and account-usage limits are not part of this report.
+
+Keep the current small-task and selective-delegation defaults. This sample supplies no evidence for another mandatory instruction or handoff. A later question about command discovery needs a task that makes commands discoverable without repeating the hint, more than one pair, and comparable cache/concurrency conditions. Live orchestration and deployment performance remain separate from these local fixtures.

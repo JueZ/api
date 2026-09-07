@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "trialId": "20260907-permissions-blocker-baseline",
+  "comparisonId": "20260907-permissions-blocker",
+  "variant": "baseline",
+  "taskType": "permissions_blocker",
+  "instructionRevision": "48be239a67fc8cd8f5fde49a6dfb1c8f81ae0ad7:e917f6c8fd836a0713c105b3ed1309d9d2330d43635564120796196d79c5525f",
+  "sourceRevision": "639882f83c07bf0ac3ad045a74241642af1c2154",
+  "actualModel": "gpt-6-astra",
+  "actualEffort": "medium",
+  "tokens": {
+    "input": 118517,
+    "output": 637,
+    "reasoning": 0,
+    "total": 119154
+  },
+  "validations": [
+    {
+      "name": "checks.mjs --plan",
+      "outcome": "passed",
+      "repeated": false
+    },
+    {
+      "name": "checks.mjs",
+      "outcome": "passed",
+      "repeated": false
+    }
+  ],
+  "repairAttempts": 0,
+  "finalDeliveryOutcome": "blocked_permissions"
+}
