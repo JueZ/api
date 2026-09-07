@@ -10,10 +10,9 @@ Use this skill for authorized implementation and routine repository delivery; pl
 ## Procedure
 
 1. Confirm protected `main`, branch, head, and working tree. Work only on a non-`main` `codex/...` branch.
-2. Implement one coherent change. Run one complete local set selected from the protected-base diff and affected risk surface. Do not repeat dependency installation, unchanged application builds, or an already passing check unless the diff, base, environment, or failure changed. Local proportionality never skips or weakens protected remote aggregates or applicable delivery/runtime proof.
-   For a substantial semantic change, use `semantic-falsification` before committing: perform its independent critic
-   phase, repair credible defects, and include its concise outcome/invariants/falsification/evidence result in the PR.
-   This is autonomous review, not an additional required check or human approval.
+2. Implement one coherent change. When correctness depends on a new or changed external CLI/API assumption, inspect actual tool behavior or representative sanitized responses before designing around it. Use existing evidence or authorized read-only probes; distinguish unavailable live evidence from mock coverage.
+   During implementation, resolve applicable focused regressions, formatting, and lint. For a substantial semantic change, complete the `semantic-falsification` independent critic and repair credible findings before the final local validation set; include its concise outcome/invariants/falsification/evidence result in the PR. Review remains autonomous, without an additional required check or human approval.
+   Then run `npm run validate:affected -- --base <protected-base-sha>` for the complete local set selected from the protected-base diff. Repeat or broaden passing checks only for changed inputs or a concrete failure concern; avoid repeating dependency installation or unchanged application builds. Local evidence never replaces protected remote aggregates or applicable delivery/runtime proof.
 3. Commit intentionally, verify the exact commit, confirm repository-scoped GitHub authentication, push, and create/update the PR.
 4. For high-risk or multi-phase work, lead progress updates with the active phase, its status, and the next exact slice.
 5. Monitor compactly with structured one-shot queries. Emit only state transitions and a final summary; do not use continuously repeating `--watch` output. For example:
