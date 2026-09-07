@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { handleMcpHttpRequest } from '../dist/mcp/server.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { createPrivateMcpServer, handleMcpHttpRequest } from '../dist/mcp/server.js';
 import { BringUpstreamError } from '../dist/shared/bring/client.js';
+import { BringService } from '../dist/shared/bring/service.js';
+
+const bringProviderFixture = JSON.parse(
+  await readFile(new URL('./fixtures/bring/provider-v2026-07-26.json', import.meta.url), 'utf8'),
+);
 
 const authEnv = {
   AUTH_ENABLED: 'false',
@@ -107,6 +116,82 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
       }
     }
   });
+});
+
+test('MCP SDK exposes fixture-grounded Bring schemas and normalized read outcomes', async () => {
+  const providerRequests = [];
+  const services = stubServices();
+  services.bring = fixtureBackedBringService(providerRequests);
+  const fixtureDigest = createHash('sha256').update(JSON.stringify(bringProviderFixture.responses)).digest('hex');
+  const fixtureLists = bringProviderFixture.responses.lists.lists;
+  const selectedListUuid = fixtureLists.find((list) => list.isShared === true).listUuid;
+
+  assert.equal(fixtureDigest, bringProviderFixture.provenance.responsesSha256);
+  assert.match(bringProviderFixture.provenance.origin, /Sanitized Bring v2 provider contract observation/);
+  assert.match(bringProviderFixture.provenance.sanitization, /synthetic/);
+
+  await withEnv(authEnv, async () => {
+    await withMcpSdkClient(services, async (client) => {
+      const { tools } = await client.listTools();
+      const bringTools = Object.fromEntries(
+        tools.filter((tool) => tool.name.startsWith('bring_')).map((tool) => [tool.name, tool]),
+      );
+
+      assert.deepEqual(Object.keys(bringTools).sort(), [
+        'bring_add_item',
+        'bring_complete_item',
+        'bring_get_items',
+        'bring_list_lists',
+        'bring_remove_item',
+      ]);
+      assertBringInputSchemas(bringTools);
+
+      const defaultListUuid = bringProviderFixture.responses.login.defaultListUuid;
+      const expectedLists = fixtureLists.map((list) => ({
+        uuid: list.listUuid,
+        name: list.name,
+        isDefault: list.listUuid === defaultListUuid,
+        shared: list.isShared === true,
+        writable: list.listUuid === defaultListUuid,
+      }));
+      const listsResult = await client.callTool({ name: 'bring_list_lists', arguments: {} });
+      assert.equal(listsResult.isError, undefined);
+      assert.deepEqual(listsResult.structuredContent, { source: 'bring', lists: expectedLists });
+      assert.deepEqual(listsResult.content, [{ type: 'text', text: 'Found 2 readable Bring shopping lists.' }]);
+
+      const providerItems = bringProviderFixture.responses.list.items;
+      const expectedItems = [
+        ...providerItems.purchase.map((item) => ({
+          name: item.itemId,
+          ...(item.specification ? { specification: item.specification } : {}),
+          status: 'active',
+        })),
+        ...providerItems.recently.map((item) => ({
+          name: item.itemId,
+          ...(item.specification ? { specification: item.specification } : {}),
+          status: 'completed',
+        })),
+      ];
+      const itemsResult = await client.callTool({
+        name: 'bring_get_items',
+        arguments: { listUuid: selectedListUuid },
+      });
+      assert.equal(itemsResult.isError, undefined);
+      assert.match(itemsResult.structuredContent.version, /^[0-9a-f]{64}$/);
+      assert.deepEqual(itemsResult.structuredContent, {
+        uuid: selectedListUuid,
+        version: itemsResult.structuredContent.version,
+        items: expectedItems,
+      });
+      assert.deepEqual(itemsResult.content, [{ type: 'text', text: 'Loaded 2 Bring items.' }]);
+    });
+  });
+
+  assert.deepEqual(providerRequests, [
+    { method: 'POST', path: '/rest/v2/bringauth' },
+    { method: 'GET', path: '/rest/bringusers/fixture-user/lists' },
+    { method: 'GET', path: `/rest/v2/bringlists/${selectedListUuid}` },
+  ]);
 });
 
 test('weather tool resolves current-location metadata, explicit override, locale, and location errors', async () => {
@@ -688,6 +773,134 @@ test('MCP Bring read errors preserve safe classifications and upstream status wi
     assert.doesNotMatch(JSON.stringify(response.jsonBody), /SHOULD_NOT_LEAK|responseExcerpt|password|token/i);
   });
 });
+
+function assertBringInputSchemas(bringTools) {
+  const listLists = bringTools.bring_list_lists.inputSchema;
+  assert.equal(listLists.type, 'object');
+  assert.deepEqual(Object.keys(listLists.properties ?? {}), []);
+
+  const getItems = bringTools.bring_get_items.inputSchema;
+  assert.deepEqual(Object.keys(getItems.properties ?? {}), ['listUuid']);
+  assert.equal(getItems.required, undefined);
+  assert.equal(getItems.properties.listUuid.type, 'string');
+  assert.equal(getItems.properties.listUuid.format, 'uuid');
+  assert.match(getItems.properties.listUuid.description, /Omit only for read operations/);
+
+  const add = bringTools.bring_add_item.inputSchema;
+  assert.deepEqual(Object.keys(add.properties).sort(), ['expectedListVersion', 'item', 'listUuid', 'operationId']);
+  assert.deepEqual(add.required.toSorted(), ['item', 'listUuid', 'operationId']);
+  assertUuidSchema(add.properties.operationId);
+  assertUuidSchema(add.properties.listUuid);
+  assert.equal(add.properties.expectedListVersion.pattern, '^[0-9a-f]{64}$');
+  assert.equal(add.properties.item.type, 'object');
+  assert.equal(add.properties.item.additionalProperties, false);
+  assert.deepEqual(add.properties.item.required, ['name']);
+  assert.deepEqual(Object.keys(add.properties.item.properties).sort(), ['name', 'specification', 'uuid']);
+  assert.equal(add.properties.item.properties.name.minLength, 1);
+  assert.equal(add.properties.item.properties.name.maxLength, 200);
+  assert.equal(add.properties.item.properties.specification.maxLength, 500);
+  assertUuidSchema(add.properties.item.properties.uuid);
+
+  for (const name of ['bring_complete_item', 'bring_remove_item']) {
+    const destructive = bringTools[name].inputSchema;
+    assert.deepEqual(Object.keys(destructive.properties).sort(), [
+      'confirmationToken',
+      'expectedListVersion',
+      'item',
+      'listUuid',
+      'operationId',
+    ]);
+    assert.deepEqual(destructive.required.toSorted(), ['item', 'listUuid', 'operationId']);
+    assertUuidSchema(destructive.properties.operationId);
+    assertUuidSchema(destructive.properties.listUuid);
+    assert.equal(destructive.properties.expectedListVersion.pattern, '^[0-9a-f]{64}$');
+    assert.equal(destructive.properties.confirmationToken.minLength, 1);
+    assert.equal(destructive.properties.confirmationToken.maxLength, 4096);
+    assert.equal(destructive.properties.item.type, 'object');
+    assert.equal(destructive.properties.item.additionalProperties, false);
+    assert.deepEqual(destructive.properties.item.required.toSorted(), ['name', 'uuid']);
+    assert.deepEqual(Object.keys(destructive.properties.item.properties).sort(), ['name', 'specification', 'uuid']);
+    assertUuidSchema(destructive.properties.item.properties.uuid);
+    assert.equal(destructive.properties.item.properties.name.maxLength, 200);
+    assert.equal(destructive.properties.item.properties.specification.maxLength, 500);
+  }
+}
+
+function assertUuidSchema(schema) {
+  assert.equal(schema.type, 'string');
+  assert.equal(schema.format, 'uuid');
+}
+
+async function withMcpSdkClient(services, action) {
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const server = createPrivateMcpServer({
+    authorizationHeader: 'Bearer local-dev-token',
+    context: { invocationId: 'mcp-sdk-contract-test', warn: () => undefined },
+    services,
+  });
+  const client = new Client({ name: 'api-catalogue-contract-test', version: '1.0.0' });
+
+  await server.connect(serverTransport);
+  try {
+    await client.connect(clientTransport);
+    return await action(client);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+}
+
+function fixtureBackedBringService(providerRequests) {
+  const defaultListUuid = bringProviderFixture.responses.login.defaultListUuid;
+  const readableListUuids = bringProviderFixture.responses.lists.lists.map((list) => list.listUuid);
+  return new BringService({
+    config: {
+      enabled: true,
+      addEnabled: false,
+      destructiveEnabled: false,
+      baseUrl: 'https://bring.fixture.test/rest/',
+      clientApiKey: 'fixture-client-key',
+      country: 'AT',
+      email: 'fixture@example.test',
+      password: 'fixture-password',
+      accountFingerprint: 'f'.repeat(64),
+      defaultListUuid,
+      readableListUuids,
+      writableListUuids: [defaultListUuid],
+      writableSharedListUuids: [],
+      sessionCacheEnabled: false,
+      sessionCacheContainer: 'fixture-session',
+      sessionCacheBlob: 'fixture-session.json',
+      mutationContainer: 'fixture-mutations',
+      auditContainer: 'fixture-audit',
+      storageAccountName: '',
+      confirmationHmacKey: 'fixture-confirmation-key-that-is-at-least-32-bytes',
+      mutationEncryptionKey: Buffer.alloc(32, 7).toString('base64'),
+      timeoutMs: 1_000,
+    },
+    sessionStore: null,
+    now: () => new Date('2026-07-26T12:00:00.000Z'),
+    fetchImpl: async (url, init = {}) => {
+      const requestUrl = new URL(url);
+      const method = init.method ?? 'GET';
+      providerRequests.push({ method, path: requestUrl.pathname });
+      if (requestUrl.pathname.endsWith('/v2/bringauth')) {
+        return fixtureJson(bringProviderFixture.responses.login);
+      }
+      if (requestUrl.pathname.includes('/bringusers/')) {
+        return fixtureJson(bringProviderFixture.responses.lists);
+      }
+      if (requestUrl.pathname.includes('/v2/bringlists/')) {
+        return fixtureJson(bringProviderFixture.responses.list);
+      }
+      throw new Error(`Unexpected fixture request: ${method} ${requestUrl.pathname}`);
+    },
+  });
+}
+
+function fixtureJson(value) {
+  return new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
+}
 
 async function mcpRequest(body, authorization = undefined, services = stubServices()) {
   const serializedBody = JSON.stringify(body);
