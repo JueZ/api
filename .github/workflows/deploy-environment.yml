@@ -1086,6 +1086,31 @@ jobs:
               > "$RUNNER_TEMP/candidate-package-version.json"
           fi
           node scripts/release-retention-policy.mjs
+      - name: Prepare public archive-verifier readiness probe
+        if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg controller "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" \
+            '{purpose:"archive-verifier-readiness-only",controller:$controller,run:$run}' \
+            > "$RUNNER_TEMP/archive-verifier-probe.json"
+      - name: Attest archive-verifier readiness probe
+        id: archive_verifier_probe
+        if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' }}
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # tag=v2
+        with:
+          subject-path: ${{ runner.temp }}/archive-verifier-probe.json
+      - name: Verify actual archive signer and CLI before production mutation
+        if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' }}
+        shell: bash
+        env:
+          ARCHIVE_PROBE_BUNDLE: ${{ steps.archive_verifier_probe.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          node scripts/accepted-release-store.mjs verify \
+            --manifest "$RUNNER_TEMP/archive-verifier-probe.json" \
+            --bundle "$ARCHIVE_PROBE_BUNDLE" \
+            --verification-dir "$RUNNER_TEMP/archive-verifier-readiness"
       - name: Persist production mutation intent before first write
         id: mutation_intent
         if: ${{ inputs.environmentName == 'prod' && steps.production_guard.outputs.mutation_allowed == 'true' }}

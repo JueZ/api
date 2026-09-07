@@ -201,6 +201,32 @@ async function newDirectory(path) {
   return target;
 }
 
+export function archiveAttestationVerifyArguments(manifestPath, bundlePath, expected) {
+  // GitHub CLI makes cert-identity, cert-identity-regex, signer-repo and
+  // signer-workflow mutually exclusive. The exact SAN includes the reusable
+  // workflow; repository, source, signer digest and certificate checks remain.
+  return [
+    'attestation',
+    'verify',
+    manifestPath,
+    '--bundle',
+    bundlePath,
+    '--repo',
+    expected.repository,
+    '--cert-identity',
+    'https://github.com/JueZ/api/.github/workflows/deploy-environment.yml@refs/heads/main',
+    '--source-ref',
+    'refs/heads/main',
+    '--source-digest',
+    expected.acceptance.controllerRef,
+    '--signer-digest',
+    expected.acceptance.controllerRef,
+    '--deny-self-hosted-runners',
+    '--format',
+    'json',
+  ];
+}
+
 async function signatureVerifier(directory) {
   const verifyDir = await newDirectory(directory);
   return async (manifestBytes, attestationBytes, expected) => {
@@ -208,34 +234,15 @@ async function signatureVerifier(directory) {
     const bundlePath = resolve(verifyDir, ATTESTATION);
     await writeFile(manifestPath, manifestBytes, { flag: 'wx' });
     await writeFile(bundlePath, attestationBytes, { flag: 'wx' });
-    const signer = 'JueZ/api/.github/workflows/deploy-environment.yml';
-    const result = spawnSync(
-      'gh',
-      [
-        'attestation',
-        'verify',
-        manifestPath,
-        '--bundle',
-        bundlePath,
-        '--repo',
-        expected.repository,
-        '--signer-workflow',
-        signer,
-        '--cert-identity',
-        `https://github.com/${signer}@refs/heads/main`,
-        '--source-ref',
-        'refs/heads/main',
-        '--source-digest',
-        expected.acceptance.controllerRef,
-        '--signer-digest',
-        expected.acceptance.controllerRef,
-        '--deny-self-hosted-runners',
-        '--format',
-        'json',
-      ],
-      { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 },
-    );
-    if (result.error || result.status !== 0) throw new Error('Archive cryptographic provenance verification failed.');
+    const result = spawnSync('gh', archiveAttestationVerifyArguments(manifestPath, bundlePath, expected), {
+      encoding: 'utf8',
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    if (result.error || result.status !== 0) {
+      const error = new Error('Archive cryptographic provenance verification failed.');
+      error.name = 'ArchiveSignatureVerificationError';
+      throw error;
+    }
     const validation = validateArchiveAttestationVerification({
       verification: JSON.parse(result.stdout),
       expected: {
@@ -245,13 +252,17 @@ async function signatureVerifier(directory) {
         attempt: expected.acceptance.attempt,
       },
     });
-    if (!validation.ok) throw new Error(validation.errors.join('\n'));
+    if (!validation.ok) {
+      const error = new Error(validation.errors.join('\n'));
+      error.name = 'ArchiveCertificateIdentityError';
+      throw error;
+    }
   };
 }
 
 async function runCli() {
   const [command, ...values] = process.argv.slice(2);
-  if (values.length % 2 || !['prepare', 'publish', 'restore'].includes(command))
+  if (values.length % 2 || !['prepare', 'publish', 'restore', 'verify'].includes(command))
     throw new Error('Invalid archive command.');
   const args = new Map();
   for (let index = 0; index < values.length; index += 2) {
@@ -289,6 +300,17 @@ async function runCli() {
     return { status: 'prepared', sourceRef: expected.sourceRef };
   }
   const verifyAttestation = await signatureVerifier(args.get('--verification-dir'));
+  if (command === 'verify') {
+    await verifyAttestation(await readFile(args.get('--manifest')), await readFile(args.get('--bundle')), {
+      repository: process.env.GITHUB_REPOSITORY,
+      acceptance: {
+        controllerRef: process.env.GITHUB_SHA,
+        runId: Number(process.env.GITHUB_RUN_ID),
+        attempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+      },
+    });
+    return { status: 'archive-verifier-ready' };
+  }
   if (command === 'publish') {
     const directory = temporaryPath(args.get('--prepared-dir'));
     const expected = await json(resolve(directory, 'expected.json'));

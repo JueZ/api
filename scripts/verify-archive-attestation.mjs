@@ -17,7 +17,7 @@ const shaPattern = /^[0-9a-f]{40}$/;
  *   { ok: boolean, errors: string[] }
  *
  * The caller must run `gh attestation verify` against the local archive manifest
- * with repository, signer workflow, certificate identity, source ref/digest,
+ * with repository, exact reusable-workflow certificate identity, source ref/digest,
  * signer digest, and hosted-runner restrictions. This helper does not verify a
  * signature and never uses attestation predicate or statement claims as proof.
  */
