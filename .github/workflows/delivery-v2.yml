@@ -39,6 +39,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      attestations: write
       id-token: write
     uses: ./.github/workflows/deploy-environment.yml
     with:
@@ -277,6 +278,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      attestations: write
       id-token: write
     uses: ./.github/workflows/deploy-environment.yml
     with:
@@ -360,6 +362,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      attestations: write
       id-token: write
     uses: ./.github/workflows/deploy-environment.yml
     with:
@@ -466,6 +469,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      attestations: write
       id-token: write
     uses: ./.github/workflows/deploy-environment.yml
     with:
@@ -550,6 +554,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      attestations: write
       id-token: write
     uses: ./.github/workflows/deploy-environment.yml
     with:
