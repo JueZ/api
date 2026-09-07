@@ -74,41 +74,6 @@ on:
         description: Unique value binding this deployment to one protected-main DAG run and release ledger.
         required: true
         type: string
-      rollbackReleaseRunId:
-        description: Exact prior successful Delivery v2 run containing the accepted rollback ledger.
-        required: false
-        default: ''
-        type: string
-      rollbackReleaseCorrelation:
-        description: Correlation from the accepted prior production release ledger.
-        required: false
-        default: ''
-        type: string
-      acceptedSourceRef:
-        description: Exact source of the accepted production release that must still be installed before mutation.
-        required: false
-        default: ''
-        type: string
-      acceptedReleaseRunId:
-        description: Original successful Delivery v2 run containing the accepted production bundle.
-        required: false
-        default: ''
-        type: string
-      acceptedReleaseCorrelation:
-        description: Correlation of the original accepted production bundle.
-        required: false
-        default: ''
-        type: string
-      acceptedLedgerRunId:
-        description: Trusted run containing the ledger that currently accepts the installed production state.
-        required: false
-        default: ''
-        type: string
-      acceptedLedgerCorrelation:
-        description: Correlation of the ledger that currently accepts the installed production state.
-        required: false
-        default: ''
-        type: string
       acceptedBaselineArtifact:
         description: Current-run artifact containing the fully verified accepted production identity.
         required: false
@@ -505,13 +470,6 @@ jobs:
       DELIVERY_CORRELATION: ${{ inputs.deliveryCorrelation }}
       CI_RUN_ID: ${{ github.run_id }}
       CI_DELIVERY_CORRELATION: ${{ format('build-{0}-{1}', github.run_id, github.run_attempt) }}
-      ROLLBACK_RELEASE_RUN_ID: ${{ inputs.rollbackReleaseRunId }}
-      ROLLBACK_RELEASE_CORRELATION: ${{ inputs.rollbackReleaseCorrelation }}
-      ACCEPTED_SOURCE_REF: ${{ inputs.acceptedSourceRef }}
-      ACCEPTED_RELEASE_RUN_ID: ${{ inputs.acceptedReleaseRunId }}
-      ACCEPTED_RELEASE_CORRELATION: ${{ inputs.acceptedReleaseCorrelation }}
-      ACCEPTED_LEDGER_RUN_ID: ${{ inputs.acceptedLedgerRunId }}
-      ACCEPTED_LEDGER_CORRELATION: ${{ inputs.acceptedLedgerCorrelation }}
       AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
       AZURE_STATIC_WEB_STORAGE_ACCOUNT: ${{ vars.AZURE_STATIC_WEB_STORAGE_ACCOUNT }}
       PRODUCTION_BASE_URL: ${{ vars.PRODUCTION_BASE_URL }}
@@ -595,18 +553,19 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Validate accepted production baseline coordinates
+      - name: Validate accepted baseline artifact coordinates
         if: ${{ inputs.environmentName == 'prod' }}
         shell: bash
+        env:
+          BASELINE_ARTIFACT: ${{ inputs.acceptedBaselineArtifact }}
+          BASELINE_CONTROLLER_REF: ${{ inputs.failedControllerRef || github.sha }}
+          BASELINE_EVIDENCE_RUN_ID: ${{ inputs.evidenceRunId || github.run_id }}
         run: |
           set -euo pipefail
-          if ! [[ "${{ inputs.acceptedSourceRef }}" =~ ^[0-9a-f]{40}$ ]] ||
-             ! [[ "${{ inputs.acceptedReleaseRunId }}" =~ ^[1-9][0-9]*$ ]] ||
-             ! [[ "${{ inputs.acceptedReleaseCorrelation }}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]] ||
-             ! [[ "${{ inputs.acceptedLedgerRunId }}" =~ ^[1-9][0-9]*$ ]] ||
-             ! [[ "${{ inputs.acceptedLedgerCorrelation }}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]] ||
-             [ -z "${{ inputs.acceptedBaselineArtifact }}" ]; then
-            echo "A fully verified accepted production baseline is required before production mutation." >&2
+          if ! [[ "$BASELINE_CONTROLLER_REF" =~ ^[0-9a-f]{40}$ ]] ||
+             ! [[ "$BASELINE_EVIDENCE_RUN_ID" =~ ^[1-9][0-9]*$ ]] ||
+             [ "$BASELINE_ARTIFACT" != "accepted-production-baseline-$BASELINE_CONTROLLER_REF-$BASELINE_EVIDENCE_RUN_ID" ]; then
+            echo "An exact current-run or failed-run baseline artifact is required." >&2
             exit 1
           fi
       - name: Download fully verified accepted baseline identity
@@ -632,20 +591,20 @@ jobs:
         if: ${{ inputs.environmentName == 'prod' && steps.baseline_transfer.outputs.bundled != 'true' }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
         with:
-          name: release-ledger-prod-${{ inputs.acceptedSourceRef }}-${{ inputs.acceptedLedgerCorrelation }}
+          name: release-ledger-prod-${{ steps.baseline_transfer.outputs.accepted_source_ref }}-${{ steps.baseline_transfer.outputs.accepted_ledger_correlation }}
           path: ${{ runner.temp }}/accepted-ledger
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.acceptedLedgerRunId }}
+          run-id: ${{ steps.baseline_transfer.outputs.accepted_ledger_run_id }}
       - name: Download exact accepted rendered production release
         if: ${{ inputs.environmentName == 'prod' && steps.baseline_transfer.outputs.bundled != 'true' }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
         with:
-          name: production-release-${{ inputs.acceptedSourceRef }}-${{ inputs.acceptedReleaseCorrelation }}
+          name: production-release-${{ steps.baseline_transfer.outputs.accepted_source_ref }}-${{ steps.baseline_transfer.outputs.accepted_release_correlation }}
           path: ${{ runner.temp }}/accepted-release
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.acceptedReleaseRunId }}
+          run-id: ${{ steps.baseline_transfer.outputs.accepted_release_run_id }}
       - name: Download failed production mutation record
         if: ${{ inputs.environmentName == 'prod' && inputs.allowRollback }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # tag=v4
@@ -686,8 +645,7 @@ jobs:
           if [ "$ROLLBACK_REQUESTED" = "true" ]; then
             if [ "$ALLOW_ROLLBACK" != "true" ] || [ "$ENVIRONMENT_NAME" != "prod" ] ||
                [ "$deployment_ref" = "$controller_ref" ] ||
-               ! [[ "$ROLLBACK_RELEASE_RUN_ID" =~ ^[0-9]+$ ]] ||
-               ! [[ "$ROLLBACK_RELEASE_CORRELATION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]; then
+               [ "$deployment_ref" != "$ACCEPTED_SOURCE_REF" ]; then
               echo "Rollback identity is invalid or ambiguous." >&2
               exit 1
             fi

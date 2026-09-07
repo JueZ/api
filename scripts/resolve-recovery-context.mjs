@@ -6,13 +6,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { readAcceptedTransfer } from './materialize-accepted-baseline.mjs';
+import { readAcceptedTransfer, validateAcceptedBaseline } from './materialize-accepted-baseline.mjs';
+export { validateAcceptedBaseline } from './materialize-accepted-baseline.mjs';
 
 const execFileAsync = promisify(execFile);
 const workflowPath = '.github/workflows/delivery-v2.yml';
 const shaPattern = /^[0-9a-f]{40}$/;
 const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-const correlationPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/;
 
 export async function resolveRecoveryContext(
   { failedRunId, repository, currentRunId, controllerRef },
@@ -46,10 +46,6 @@ export async function resolveRecoveryContext(
 
   return {
     acceptedSourceRef: accepted.sourceRef,
-    acceptedReleaseRunId: accepted.runId,
-    acceptedReleaseCorrelation: accepted.correlation,
-    acceptedLedgerRunId: accepted.acceptanceRunId,
-    acceptedLedgerCorrelation: accepted.acceptanceCorrelation,
     acceptedBaselineArtifact: selected.baselineArtifact,
     failedMutationArtifact: selected.failedMutationArtifact,
     evidenceRunId: String(failedRun),
@@ -101,35 +97,6 @@ export function selectRecoveryArtifacts({ artifacts, failedRun, failedController
     throw new Error('No non-expired failed production mutation artifact exists for the exact failed run');
   }
   return { baselineArtifact: baselineArtifact.name, failedMutationArtifact };
-}
-
-export function validateAcceptedBaseline(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || value.status !== 'accepted') {
-    throw new Error('Downloaded baseline status must be accepted');
-  }
-  assertSha(value.sourceRef, 'baseline.sourceRef');
-  const runId = positiveInteger(value.runId, 'baseline.runId');
-  const acceptanceRunId = positiveInteger(value.acceptanceRunId, 'baseline.acceptanceRunId');
-  assertCorrelation(value.correlation, 'baseline.correlation');
-  assertCorrelation(value.acceptanceCorrelation, 'baseline.acceptanceCorrelation');
-  if (!['promotion', 'recovery'].includes(value.acceptanceKind)) {
-    throw new Error('baseline.acceptanceKind must be promotion or recovery');
-  }
-  const expectedRelease = `production-release-${value.sourceRef}-${value.correlation}`;
-  const expectedLedger = `release-ledger-prod-${value.sourceRef}-${value.acceptanceCorrelation}`;
-  if (value.releaseArtifactName !== expectedRelease) {
-    throw new Error('baseline.releaseArtifactName does not match the accepted bundle identity');
-  }
-  if (value.ledgerArtifactName !== expectedLedger) {
-    throw new Error('baseline.ledgerArtifactName does not match the accepted ledger identity');
-  }
-  return {
-    sourceRef: value.sourceRef,
-    runId: String(runId),
-    correlation: value.correlation,
-    acceptanceRunId: String(acceptanceRunId),
-    acceptanceCorrelation: value.acceptanceCorrelation,
-  };
 }
 
 function uniqueAvailableArtifact(artifacts, name, runId) {
@@ -224,12 +191,6 @@ function positiveInteger(value, name) {
 
 function assertSha(value, name) {
   if (!shaPattern.test(value ?? '')) throw new Error(`${name} must be a full lowercase commit SHA`);
-}
-
-function assertCorrelation(value, name) {
-  if (!correlationPattern.test(value ?? '')) {
-    throw new Error(`${name} must be an opaque 8-128 character identifier`);
-  }
 }
 
 async function runCli() {

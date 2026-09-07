@@ -487,17 +487,67 @@ test('production capture resolves existing deployment resources instead of stale
 });
 
 test('baseline and rollback keep original bundle provenance separate from current acceptance evidence', () => {
-  assert.equal(workflow.jobs['promote-production'].with.acceptedReleaseRunId, '${{ needs.baseline.outputs.run_id }}');
+  const steps = environmentWorkflow.jobs.deploy.steps;
+  const transfer = steps.findIndex((step) => step.id === 'baseline_transfer');
+  const release = steps.find((step) => step.name === 'Download exact accepted rendered production release');
+  const ledger = steps.find((step) => step.name === 'Download exact accepted production release ledger');
+  assert.ok(transfer >= 0 && transfer < steps.indexOf(release) && transfer < steps.indexOf(ledger));
+  assert.ok(transfer < steps.findIndex((step) => step.name === 'Azure OIDC login'));
+  assert.equal(release.with['run-id'], '${{ steps.baseline_transfer.outputs.accepted_release_run_id }}');
+  assert.equal(ledger.with['run-id'], '${{ steps.baseline_transfer.outputs.accepted_ledger_run_id }}');
   assert.equal(
-    workflow.jobs['promote-production'].with.acceptedLedgerRunId,
-    '${{ needs.baseline.outputs.acceptance_run_id }}',
+    release.with.name,
+    'production-release-${{ steps.baseline_transfer.outputs.accepted_source_ref }}-${{ steps.baseline_transfer.outputs.accepted_release_correlation }}',
   );
   assert.equal(
-    workflow.jobs['rollback-production'].with.rollbackReleaseRunId,
-    '${{ needs.resolve-rollback.outputs.rollback_run_id }}',
+    ledger.with.name,
+    'release-ledger-prod-${{ steps.baseline_transfer.outputs.accepted_source_ref }}-${{ steps.baseline_transfer.outputs.accepted_ledger_correlation }}',
+  );
+  for (const id of ['promote-production', 'rollback-production'])
+    assert.equal(workflow.jobs[id].with.acceptedBaselineArtifact, '${{ needs.baseline.outputs.baseline_artifact }}');
+  assert.equal(
+    workflow.jobs['reconcile-production'].with.acceptedBaselineArtifact,
+    '${{ needs.recovery-context.outputs.acceptedBaselineArtifact }}',
   );
   assert.match(environmentSource, /RECOVERY_ORIGINAL_RUN_ID/);
   assert.match(environmentSource, /DELIVERY_MUTATION_RUN_ID/);
+});
+
+test('the baseline handoff rejects missing, mixed-run or malformed artifact coordinates before download', () => {
+  const steps = environmentWorkflow.jobs.deploy.steps;
+  const guard = steps.find((step) => step.name === 'Validate accepted baseline artifact coordinates');
+  assert.ok(
+    steps.indexOf(guard) <
+      steps.findIndex((step) => step.name === 'Download fully verified accepted baseline identity'),
+  );
+  assert.equal(guard.env.BASELINE_CONTROLLER_REF, '${{ inputs.failedControllerRef || github.sha }}');
+  assert.equal(guard.env.BASELINE_EVIDENCE_RUN_ID, '${{ inputs.evidenceRunId || github.run_id }}');
+  for (const [controller, run] of [
+    ['a'.repeat(40), '101'],
+    ['b'.repeat(40), '100'],
+  ]) {
+    const env = {
+      ...process.env,
+      BASELINE_CONTROLLER_REF: controller,
+      BASELINE_EVIDENCE_RUN_ID: run,
+      BASELINE_ARTIFACT: `accepted-production-baseline-${controller}-${run}`,
+    };
+    for (const [overrides, expected] of [
+      [{}, 0],
+      [{ BASELINE_ARTIFACT: '' }, 1],
+      [{ BASELINE_CONTROLLER_REF: 'c'.repeat(40) }, 1],
+      [{ BASELINE_EVIDENCE_RUN_ID: '102' }, 1],
+      [{ BASELINE_EVIDENCE_RUN_ID: `${run}\nOTHER=value` }, 1],
+    ]) {
+      const result = spawnSync('bash', ['--noprofile', '--norc'], {
+        input: guard.run,
+        env: { ...env, ...overrides },
+        encoding: 'utf8',
+        timeout: 10000,
+      });
+      assert.equal(result.status, expected, result.stderr);
+    }
+  }
 });
 
 test('explicit configuration recovery stays in the trusted controller and cannot bypass fresh state or policy proof', () => {
