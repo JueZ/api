@@ -1,47 +1,37 @@
 ---
 name: autonomous-pr-delivery
-description: Use this skill for every repository-changing task in JueZ/api to complete protected branch, commit, PR, checks, merge, and applicable delivery reporting.
+description: Use when implementing repository changes or resuming their protected PR delivery in JueZ/api.
 ---
 
 # Autonomous PR delivery
 
-Use this skill for authorized implementation and routine repository delivery; planning, analysis, and review remain read-only. Ordinary failure diagnosis and repair inherit the initiating implementation request’s authorization. Add `github-cli-devops` only for diagnostics, configuration, branch protection, or a failing/non-routine GitHub operation.
+Complete authorized changes through protected merge and applicable runtime verification. Planning, analysis, and review remain read-only. The root [operating contract](../../../AGENTS.md) defines authority and safety boundaries; ordinary delivery repair inherits the implementation request's authorization.
 
-## Procedure
+## Implement and publish
 
-1. Confirm protected `main`, branch, head, and working tree. Work only on a non-`main` `codex/...` branch.
-2. Implement one coherent change. When correctness depends on a new or changed external CLI/API assumption, inspect actual tool behavior or representative sanitized responses before designing around it. Use existing evidence or authorized read-only probes; distinguish unavailable live evidence from mock coverage.
-   During implementation, resolve applicable focused regressions, formatting, and lint. For a substantial semantic change, complete the `semantic-falsification` independent critic and repair credible findings before the final local validation set; include its concise outcome/invariants/falsification/evidence result in the PR. Review remains autonomous, without an additional required check or human approval.
-   Then run `npm run validate:affected -- --base <protected-base-sha>` for the complete local set selected from the protected-base diff. Repeat or broaden passing checks only for changed inputs or a concrete failure concern; avoid repeating dependency installation or unchanged application builds. Local evidence never replaces protected remote aggregates or applicable delivery/runtime proof.
-3. Commit intentionally, verify the exact commit, confirm repository-scoped GitHub authentication, push, and create/update the PR.
-4. For high-risk or multi-phase work, lead progress updates with the active phase, its status, and the next exact slice.
-5. Monitor compactly with structured one-shot queries. Emit only state transitions and a final summary; do not use continuously repeating `--watch` output. For example:
+Confirm the protected base, branch, head, and working tree; preserve user changes. Resolve focused regressions, formatting, and lint during implementation. When correctness depends on a changed external CLI/API assumption, inspect actual behavior or representative sanitized responses; distinguish unavailable live evidence from mock coverage.
 
-   ```bash
-   gh pr view <number> --repo JueZ/api \
-     --json url,state,mergeStateStatus,headRefOid,autoMergeRequest,statusCheckRollup
-   gh run list --repo JueZ/api --limit 20 \
-     --json databaseId,workflowName,event,status,conclusion,headSha,createdAt
-   ```
+For substantial semantics, complete the `semantic-falsification` independent critic and repair credible findings before the final local validation set, without an additional required check or human approval. Include the concise semantic result in the PR.
 
-6. Required PR evidence is exact-head `PR Gate` and `Security Gate`, followed by GitHub-native protected squash merge. Optional or advisory checks are reported but do not become undeclared merge requirements.
-7. After merge, monitor the protected-main `Delivery v2` DAG. Repository-level delivery variables and the trusted classifier determine applicability; routine deployment and production promotion require no per-task approval. A trusted runtime-neutral classification makes build and environment deployment not applicable. Deployment-impacting changes are incomplete until the one immutable artifact passes test and production exact-SHA/digest, public/authenticated smoke, telemetry, release-identity, and applicable rollback-safety gates. If a generation is superseded, verify the requested change is contained in the confirmed newer protected-main SHA and follow that SHA's Delivery v2 generation; the skipped promotion is not success.
-8. On failure, inspect only the failed job and minimum relevant logs, fingerprint the cause, and make the smallest safe repair. Use at most three meaningful attempts in one repair generation. Two ineffective attempts retire the unchanged action and require evidence-backed reconsideration; they do not disprove a supported diagnosis or end the task. Continue with a materially different repair mechanism or verified changed preconditions, retaining the diagnosis when evidence supports it. New labels, descriptions, or generation numbers do not reset an action's budget. Allow one unchanged rerun only for a demonstrated flaky or external failure. When the generation or current execution budget ends, persist the active continuation with attempted actions, evidence, next discriminating action, and resume trigger. Use the protected-main `Repair and Learning Queue` workflow-dispatch progress input bound to the exact source run; record only public-safe advisory state, set `dry_run=false` to persist it, and use an exact expected candidate SHA when handing a protected-main repair to its next generation.
+Run `npm run validate:affected -- --base <protected-base-sha>` once for the finished diff. Repeat passing checks only for changed inputs or a concrete concern. Commit intentionally, verify the exact commit and repository-scoped authentication, push, and create/update the PR. Enable the root contract's exact-head native squash auto-merge.
 
-Useful failed-run command:
+## Verify delivery
+
+Required evidence is exact-head `PR Gate` and `Security Gate`, then protected merge. Advisory checks create no extra merge requirement. Monitor with bounded structured queries, for example:
 
 ```bash
-gh run view <run-id> --repo JueZ/api --log-failed
+gh pr view <number> --repo JueZ/api \
+  --json url,state,mergeStateStatus,headRefOid,autoMergeRequest,statusCheckRollup
+gh run list --repo JueZ/api --workflow delivery-v2.yml --limit 10 \
+  --json databaseId,status,conclusion,headSha,createdAt
 ```
 
-Do not download or print full successful logs merely to prove success. PR/run metadata is the primary terminal evidence.
+Emit only state transitions and a final summary. PR/run metadata is terminal evidence; full successful logs and repeating watchers add no proof.
 
-## Guardrails
+After merge, follow protected-main `Delivery v2`. The trusted cumulative classification and repository variables determine applicability: only proven runtime-neutral work skips build/deployment. Applicable releases must promote one immutable artifact through test and production exact-SHA/digest, public/authenticated smoke, telemetry, release-identity, and rollback-safety gates. If superseded, verify the change is in the newer protected-main SHA and follow its generation; a skipped promotion is not success.
 
-Never push to `main`, bypass protection, force merge, weaken validation/auth/security/delivery, expose credentials, delete resources without explicit authorization, or claim completion when the PR/delivery is blocked. These are hard invariants. Other architectural conventions guide the default but may be challenged by stronger scoped evidence and a validated minimal deviation. A skipped or unavailable command is not passing evidence.
-
-Do not open a follow-up bookkeeping PR solely to transcribe terminal run IDs already linked from the merged PR.
+On a failed check, delivery, or resumed repair, read [bounded repair](references/repair.md) before retrying or changing the repair strategy. Add `github-cli-devops` only for non-routine GitHub diagnosis or configuration.
 
 ## Final report
 
-Lead with the outcome and PR link, exact head/merge identity, protected gate results, and applicable Delivery v2/runtime evidence. Summarize local validation and material memory changes. Include repair strategy/continuation details only when repairs occurred, and report remaining blockers or risks. Mark unexercised and non-applicable behavior explicitly; do not enumerate routine commands or manufacture runtime evidence for neutral work.
+Report the outcome, PR link, exact head/merge identity, local and protected checks, applicable Delivery v2/runtime evidence, and remaining blockers. Distinguish unexercised, unavailable, and non-applicable evidence. Update material project memory in the substantive PR; do not open a follow-up bookkeeping PR solely to copy terminal run IDs.

@@ -1,6 +1,6 @@
 ---
 name: production-rollback
-description: Use when inspecting, operating, or explaining JueZ/api's bounded automatic rollback inside Delivery v2 after a just-deployed production release fails verification.
+description: Use when investigating, explaining, or recovering a failed production promotion in JueZ/api Delivery v2.
 ---
 
 # Production rollback

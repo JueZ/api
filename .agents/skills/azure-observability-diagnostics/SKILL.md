@@ -1,6 +1,6 @@
 ---
 name: azure-observability-diagnostics
-description: Use for Azure runtime, deployment, smoke, telemetry, storage/package, or Entra/OIDC failure diagnosis in JueZ/api.
+description: Use when diagnosing a failed Azure deployment, runtime, smoke, telemetry, or authentication check in JueZ/api.
 ---
 
 # Azure failure diagnosis
