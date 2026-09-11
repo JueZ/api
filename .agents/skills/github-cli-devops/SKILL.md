@@ -1,6 +1,6 @@
 ---
 name: github-cli-devops
-description: Use for non-routine GitHub CLI diagnostics, failed Actions runs, repository configuration, labels, variables, branch protection, or delivery-controller investigation in JueZ/api.
+description: Use when diagnosing GitHub Actions or changing repository configuration in JueZ/api; routine PR delivery uses autonomous-pr-delivery.
 ---
 
 # GitHub CLI DevOps

@@ -1,6 +1,6 @@
 ---
 name: semantic-falsification
-description: Use for substantial behavior changes to test whether implementation success actually proves the requested user-visible outcome.
+description: Use when materially changing API/tool semantics, provider coverage, mutations, or delivery/runtime outcomes in JueZ/api.
 ---
 
 # Semantic falsification

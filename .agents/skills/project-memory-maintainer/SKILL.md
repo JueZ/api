@@ -1,6 +1,6 @@
 ---
 name: project-memory-maintainer
-description: Use when durable architecture, security, CI/CD, deployment, Azure/GitHub, incident, operational-state, known-risk, or next-step facts change in JueZ/api.
+description: Use when recording or correcting durable architecture, security, delivery, incident, or active-risk facts in JueZ/api.
 ---
 
 # Project memory maintainer
@@ -9,10 +9,7 @@ Project memory is concise durable context, not gate-by-gate narration or a secre
 
 ## Read routing
 
-1. Read `docs/project-memory/current-state.md` for current facts.
-2. Read `known-issues.md` or `next-steps.md` only when relevant.
-3. Read the focused ADR when architectural rationale is relevant.
-4. Query live GitHub/deployment/runtime sources before relying on a current-state claim. Unavailable evidence is blocked or uncertain, never passing.
+Read `docs/project-memory/current-state.md` when a task depends on architecture or operational state. Load `known-issues.md`, `next-steps.md`, or a focused ADR only for the relevant risk, action, or rationale. Query live GitHub/deployment/runtime sources before relying on a current-state claim. Unavailable evidence is blocked or uncertain, never passing.
 
 ## Write rules
 

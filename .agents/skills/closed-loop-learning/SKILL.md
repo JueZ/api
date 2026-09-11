@@ -1,6 +1,6 @@
 ---
 name: closed-loop-learning
-description: Convert a significant or recurring JueZ/api failure into the smallest protected regression prevention and concise learning invariant. Use for production rollback, deployment or security failures, repeated fingerprints, explicit reusable user corrections, repeated Codex task failures, or repairs needing more than one causal attempt.
+description: Use when preventing recurrence of a significant failure, repeated repair, or reusable user correction in JueZ/api.
 ---
 
 # Closed-loop learning

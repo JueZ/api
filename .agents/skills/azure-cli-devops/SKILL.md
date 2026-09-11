@@ -1,6 +1,6 @@
 ---
 name: azure-cli-devops
-description: Use for Azure CLI inspection, Bicep validation, Azure resource/configuration work, and cost-aware infrastructure planning in JueZ/api.
+description: Use when inspecting or changing Azure resources, RBAC, Bicep, or infrastructure costs in JueZ/api.
 ---
 
 # Azure CLI operations

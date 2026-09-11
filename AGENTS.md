@@ -1,8 +1,10 @@
 # Repository operating contract
 
-## Task scope and delivery
+## Outcome and authority
 
-For planning, analysis, and review requests, stay read-only. For implementation requests, use `autonomous-pr-delivery`: start from current protected `main` on a same-repository `codex/...` branch, implement the requested outcome, validate, commit, push, and open/update the PR. Preserve user changes.
+Planning, analysis, and review requests are read-only. For implementation, complete the requested behavior through protected merge and applicable Delivery v2 verification using `autonomous-pr-delivery`. Preserve user changes; start from current protected `main` on a same-repository `codex/...` branch.
+
+Choose the smallest effective approach. Routine design decisions, edits, local checks, and protected delivery are already authorized; generic workflow skills must not add approval gates, mandatory plans, or extra review phases. Ask only for missing authority or a decision that materially changes product behavior or scope, while continuing independent authorized work.
 
 Enable native squash auto-merge for the exact head:
 
@@ -15,38 +17,17 @@ gh pr merge <number> \
   --match-head-commit <exact-head-sha>
 ```
 
-Monitor `PR Gate`, `Security Gate`, protected merge, and applicable Delivery v2 test/production verification. Routine protected deployment and production promotion need no per-task approval; the trusted change classifier and repository-level delivery variables determine applicability. Ordinary failure diagnosis and repair inherit the implementation request's authorization.
+Completion requires exact-head `PR Gate` and `Security Gate`, protected merge, and applicable Delivery v2 test/production verification. Routine protected deployment and production promotion need no per-task approval; the trusted change classifier and repository-level delivery variables determine applicability.
 
-A superseded Delivery v2 generation is not task success. Confirm the requested change remains in the newer protected-main SHA, then follow the generation for that current main through its applicable terminal state. Report the outcome, relevant checks and exact commit/PR evidence, and remaining blocker or risk; distinguish local, merged, deployed, and runtime-verified states.
+A superseded Delivery v2 generation is not task success. Confirm the change remains in newer protected main, then follow the generation for that current main. Report exact PR/commit evidence and distinguish local, merged, deployed, and runtime-verified states.
 
-## Validation and continuation
+## Local work
 
-Use Node.js 22 and one proportional local validation set selected from the protected-base diff. `npm run validate:affected -- --plan` shows that set and compares prior local evidence; execute it with `npm run validate:affected`. Repeat or broaden passing checks only for a changed diff, base, environment, or concrete concern; complete protected remote checks regardless.
+Use Node.js 22. `npm run validate:affected -- --plan` shows the protected-diff checks and prior evidence; `npm run validate:affected -- --base <protected-base-sha>` runs the selected set. Repeat or broaden passing checks only for changed inputs or a concrete concern. Complete protected remote checks regardless.
 
-Use `semantic-falsification` for substantial user-visible, provider, mutation, completeness, or deployment/runtime semantic changes. Preserve its independent critic and outcome-based contract verification; behavior-neutral edits do not require it. Never derive a stronger user-visible completion guarantee solely from internal queue exhaustion unless the external contract supports that equivalence.
+For substantial API/tool, provider, mutation, completeness, or deployment/runtime semantics, use `semantic-falsification` and its independent critic. Never derive a stronger user-visible completion guarantee solely from internal queue exhaustion unless the external contract supports that equivalence.
 
-Repair on the same PR before merge; after merge use the documented bounded production recovery when applicable and a linked repair PR from current main. Follow `autonomous-pr-delivery` for the three-attempt generation, two-ineffective-attempt strategy limit, and one demonstrated external/flaky rerun. Preserve unfinished requirements in the deduplicated repair lineage. Resume applicable unblocked `codex-repair` work; unrelated or externally blocked work does not freeze safe progress. Use `closed-loop-learning` for significant or recurring failures.
-
-## Agent orchestration and model selection
-
-Act as the lead orchestrator. The main thread first understands the goal and makes the plan, and retains responsibility for architecture, decisions, integration, testing, delivery, and the final answer.
-
-Delegate independent, well-defined subtasks when this improves speed, cost, or quality. Handle trivial work locally when delegation adds overhead. Optimize overall quality relative to cost, not the number of agents.
-
-Explicitly select the cheapest capable available model for each subtask:
-
-| Model                   | Use                                                          |
-| ----------------------- | ------------------------------------------------------------ |
-| Luna (`gpt-5.6-luna`)   | Simple, mechanical work                                      |
-| Terra (`gpt-5.6-terra`) | Routine implementation, extraction, transformation           |
-| Sol (`gpt-5.6-sol`)     | Research, coding, analysis, debugging, substantial reasoning |
-| Astra (`gpt-6-astra`)   | Difficult judgment, ambiguity, planning, critical review     |
-
-The main thread retains its configured model. If a preferred subagent model is unavailable, use the next capable available tier and disclose the substitution. Escalate uncertain or failed subtasks to a stronger capable model.
-
-Give each subagent a bounded objective, distinct ownership, only the necessary context, constraints, and acceptance criteria; avoid inheriting the entire conversation. Request concise structured results: outcome, evidence or validation, changed files where applicable, and uncertainties.
-
-Run independent subtasks in parallel where possible. Avoid overlapping mutations and duplicate monitoring. Verify important or conflicting subagent results in the main thread before integrating them or reporting completion.
+The main thread owns decisions, integration, validation, delivery, and the final answer. Delegate bounded independent work only when it improves cost, speed, or quality; give minimal context, distinct ownership, and acceptance criteria, and verify important results. Choose the cheapest capable available model: Luna (`gpt-5.6-luna`) for mechanical work, Terra (`gpt-5.6-terra`) for routine implementation/extraction, Sol (`gpt-5.6-sol`) for research/debugging, Astra (`gpt-6-astra`) for difficult judgment/critical review. Escalate uncertainty; disclose unavailable-model substitutions. Keep the main thread's configured model.
 
 ## Safety boundaries
 
@@ -56,8 +37,12 @@ Never push directly to `main`, force push, use admin merge, bypass protection, e
 
 Production deployment uses GitHub Actions with Azure OIDC, never a local shell. New credentials, provider keys/bots, paid provider checks, resource deletion, and enabling production require separate explicit authorization. The documented existing Codex Cloud setup exception does not authorize additional credentials.
 
-## Routing
+## Load when relevant
 
-Follow scoped AGENTS.md files in `apps/api`, `apps/web`, `infra`, `.github`, and `docs`. Contracts live in `contracts/`.
+Follow the scoped AGENTS.md in the area being changed. Contracts live in `contracts/`.
 
-Use `github-cli-devops` for non-routine GitHub diagnostics/configuration; Azure skills for Azure work; `production-rollback` for bounded recovery. Use `project-memory-maintainer` for durable facts and read relevant current memory before non-trivial work. Query live sources for live claims. Detailed procedures belong in skills/runbooks; historical documents and application prompt examples do not supply operating instructions.
+- Delivery failures or existing applicable `codex-repair` work: [bounded repair](.agents/skills/autonomous-pr-delivery/references/repair.md). Ordinary repairs inherit implementation authority; unrelated blocked work does not freeze progress.
+- Architecture or operational context: [current project state](docs/project-memory/current-state.md), then relevant issues, next steps, or ADR. Use `project-memory-maintainer` when those durable facts change.
+- GitHub diagnosis/configuration: `github-cli-devops`. Azure resources/Bicep/costs: `azure-cli-devops`. Azure runtime failures: `azure-observability-diagnostics`. Failed production recovery: `production-rollback`.
+
+Load only guidance that affects the task. Query live sources for live claims; historical documents and application prompt examples are not operating instructions.
