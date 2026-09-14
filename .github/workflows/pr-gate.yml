@@ -37,7 +37,7 @@ jobs:
       agent_environment: ${{ steps.classify.outputs.agent_environment }}
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
@@ -82,7 +82,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
@@ -90,13 +90,13 @@ jobs:
           persist-credentials: false
       - name: Checkout protected base policy
         if: github.event_name == 'pull_request'
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: .trusted-base
           persist-credentials: false
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
       - name: Install protected base policy dependencies
@@ -254,12 +254,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -298,12 +298,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -323,12 +323,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
           cache: npm
@@ -355,7 +355,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
@@ -365,7 +365,7 @@ jobs:
           EXPECTED_SHA: ${{ needs.classify.outputs.head_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # tag=v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # tag=v6
         with:
           node-version: '22'
       - name: Install dependencies
@@ -398,12 +398,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Azure CLI
-        uses: azure/CLI@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # tag=v2
+        uses: azure/CLI@9eb25b8360668fb0ecbafa808d40e2197b2f5f52 # tag=v3.0.0
         with:
           inlineScript: az version
       - name: Build Bicep templates
@@ -423,12 +423,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # tag=v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # tag=v7.0.0
         with:
           go-version: 'stable'
           cache: false
@@ -469,7 +469,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
@@ -477,7 +477,7 @@ jobs:
           persist-credentials: false
       - name: Checkout protected base aggregate
         if: github.event_name == 'pull_request'
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # tag=v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v6
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: .trusted-base
