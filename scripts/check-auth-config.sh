@@ -41,7 +41,10 @@ fi
 for permission in \
   catalogue.read \
   reddit.read \
+  youtube.read \
   wlh.read \
+  weather.read \
+  chargecloud.read \
   bring.read \
   bring.write \
   bring.complete \

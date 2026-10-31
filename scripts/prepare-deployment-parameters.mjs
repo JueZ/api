@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const WORKFLOW_REQUIRED_SCOPES =
-  'catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove';
+  'catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,chargecloud.read,bring.read,bring.write,bring.complete,bring.remove';
 
 const PRIVATE_BINDINGS = Object.freeze({
   redditOAuthSecret: 'REDDIT_CLIENT_SECRET',

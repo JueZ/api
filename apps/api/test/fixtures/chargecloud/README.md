@@ -1,0 +1,3 @@
+# Chargecloud fixtures
+
+These sanitized fixtures were captured from the configured Wien Energie Chargecloud locations endpoint on 2026-10-31. They retain provider field names, EVSE IDs, statuses, locations and connector data needed to test normalization; irrelevant fields such as operator phone numbers have been removed. The `postal-1080` fixture contains only the ten locations with postal code 1080 from the full feed: the provider ignored a postal-code query, so this fixture does not represent the full upstream response. `single-evse` is the response to a full EVSE ID lookup; `unknown-evse` is the empty result of an invalid lookup. Statuses are historical test data, not current availability.

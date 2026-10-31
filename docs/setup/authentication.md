@@ -12,6 +12,7 @@ reddit.read
 youtube.read
 wlh.read
 weather.read
+chargecloud.read
 bring.read
 bring.write
 bring.complete
@@ -41,6 +42,7 @@ The catalogue derives other operation scope URIs from that resource prefix and t
 Use a dedicated confidential delegated client and exact ChatGPT callback URIs. `scripts/configure-entra-gpt-action-oauth.sh` verifies and grants all configured granular scopes and prints them as one space-separated OAuth scope value. A generated client secret is displayed once; transfer it directly to the external OAuth client and never store it in this repository or GitHub variables.
 
 MCP uses the same API audience and per-tool permission. See `mcp-devmode.md`.
+For Chargecloud scope exposure, per-user consent, and deployment configuration, see `chargecloud.md`.
 
 ## Service identities
 
@@ -55,7 +57,7 @@ DEPLOYED_ENVIRONMENT_NAME=<local|test|prod>
 AUTH_ENABLED=true
 OIDC_ISSUER=<exact issuer list>
 OIDC_AUDIENCE=api://<api-app-id>
-OIDC_REQUIRED_SCOPES=catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove
+OIDC_REQUIRED_SCOPES=catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,chargecloud.read,bring.read,bring.write,bring.complete,bring.remove
 OIDC_ALLOWED_OBJECT_IDS=<operator object id>
 OIDC_ALLOWED_TENANTS=<allowed tenant ids>
 OIDC_ALLOWED_DELEGATED_CLIENT_IDS=<spa,gpt client ids>

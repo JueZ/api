@@ -32,7 +32,7 @@ param oidcAudience string
 param oidcJwksUri string = ''
 
 @description('Comma-separated delegated scopes/application roles recognized by the operation policy.')
-param oidcRequiredScopes string = 'catalogue.read,reddit.read,youtube.read,wlh.read,bring.read,bring.write,bring.complete,bring.remove'
+param oidcRequiredScopes string = 'catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,chargecloud.read,bring.read,bring.write,bring.complete,bring.remove'
 
 @description('Comma-separated allowed Microsoft Entra user object IDs.')
 param oidcAllowedObjectIds string

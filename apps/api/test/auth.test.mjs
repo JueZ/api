@@ -328,7 +328,13 @@ test('app-only service role aliases normalize to canonical operation permissions
       idtyp: 'app',
       azp: 'service-client-id',
       azpacr: '2',
-      roles: ['catalogue.service.read', 'reddit.service.read', 'weather.service.read', 'catalogue.read'],
+      roles: [
+        'catalogue.service.read',
+        'reddit.service.read',
+        'weather.service.read',
+        'chargecloud.service.read',
+        'catalogue.read',
+      ],
     },
     {},
     {
@@ -338,7 +344,7 @@ test('app-only service role aliases normalize to canonical operation permissions
   );
 
   assert.equal(result.ok, true);
-  assert.deepEqual(result.user.roles, ['catalogue.read', 'reddit.read', 'weather.read']);
+  assert.deepEqual(result.user.roles, ['catalogue.read', 'reddit.read', 'weather.read', 'chargecloud.read']);
 
   const weather = await authorize(
     'Bearer valid-token',

@@ -6,13 +6,14 @@ import { authorizeBearerToken } from '../dist/shared/security/auth.js';
 import { oauthProtectedResourceHandler } from '../dist/functions/oauthProtectedResource.js';
 import { handleMcpHttpRequest, MCP_REQUEST_BODY_MAX_BYTES } from '../dist/mcp/server.js';
 import { getMcpResourceOrigin, validateMcpRequestOrigin } from '../dist/mcp/auth.js';
+import { createChargecloudService } from '../dist/infrastructure/composition/chargecloud.js';
 
 const baseEnv = {
   AUTH_ENABLED: 'true',
   DEPLOYED_ENVIRONMENT_NAME: 'test',
   OIDC_AUDIENCE: 'api://catalogue-test',
   OIDC_REQUIRED_SCOPES:
-    'catalogue.read,reddit.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove',
+    'catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,chargecloud.read,bring.read,bring.write,bring.complete,bring.remove',
   OIDC_ALLOWED_OBJECT_IDS: 'allowed-oid',
   OIDC_ALLOWED_SUBJECTS: '',
   OIDC_ALLOWED_APP_OBJECT_IDS: '',
@@ -64,6 +65,7 @@ test('protected resource metadata is generated from safe environment values', as
           'api://catalogue-test/youtube.read',
           'api://catalogue-test/wlh.read',
           'api://catalogue-test/weather.read',
+          'api://catalogue-test/chargecloud.read',
           'api://catalogue-test/bring.read',
           'api://catalogue-test/bring.write',
           'api://catalogue-test/bring.complete',
@@ -315,6 +317,84 @@ test('MCP advertises the exact missing operation scope', async () => {
     await withEnv({ ...baseEnv, OIDC_ISSUER: issuer, OIDC_JWKS_URI: jwksUri }, async () => {
       const response = await mcpCall('reddit_get_thread', { postId: 'abc' }, `Bearer ${token}`);
       assertInsufficientScope(response, 'Required permission is missing: reddit.read.', token, 'reddit.read');
+    });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('Chargecloud MCP enforces its exact scope before any provider request', async () => {
+  const { server, issuer, jwksUri, privateKey, kid } = await startJwksServer();
+  try {
+    const underprivileged = await signToken(privateKey, kid, issuer, {
+      sub: 'allowed-subject',
+      oid: 'allowed-oid',
+      scp: 'catalogue.read',
+    });
+    const authorized = await signToken(privateKey, kid, issuer, {
+      sub: 'allowed-subject',
+      oid: 'allowed-oid',
+      scp: 'chargecloud.read',
+    });
+    const wrongAudience = await signToken(
+      privateKey,
+      kid,
+      issuer,
+      {
+        sub: 'allowed-subject',
+        oid: 'allowed-oid',
+        scp: 'chargecloud.read',
+      },
+      'api://wrong',
+    );
+    const blockedClient = await signToken(privateKey, kid, issuer, {
+      sub: 'allowed-subject',
+      oid: 'allowed-oid',
+      scp: 'chargecloud.read',
+      azp: 'blocked-client-id',
+    });
+    let providerCalls = 0;
+    const services = stubServices();
+    services.chargecloud = createChargecloudService(async () => {
+      providerCalls++;
+      return new Response(
+        JSON.stringify({
+          timestamp: '2026-10-31T21:00:00+01:00',
+          status_code: 1000,
+          status_message: 'Success',
+          data: [],
+        }),
+      );
+    });
+    await withEnv({ ...baseEnv, OIDC_ISSUER: issuer, OIDC_JWKS_URI: jwksUri }, async () => {
+      for (const [name, args] of [
+        ['chargecloud_list_charging_points', { postalCode: '1080' }],
+        ['chargecloud_get_charging_point', { evseId: 'AT*VNA*E1080570007*2' }],
+      ]) {
+        const denied = await mcpCall(name, args, `Bearer ${underprivileged}`, services);
+        assertInsufficientScope(
+          denied,
+          'Required permission is missing: chargecloud.read.',
+          underprivileged,
+          'chargecloud.read',
+        );
+        const invalid = await mcpCall(name, args, `Bearer ${wrongAudience}`, services);
+        assert.equal(invalid.jsonBody.result.isError, true);
+        const blocked = await mcpCall(name, args, `Bearer ${blockedClient}`, services);
+        assert.equal(blocked.jsonBody.result.isError, true);
+      }
+      assert.equal(providerCalls, 0);
+      const allowed = await mcpCall('chargecloud_list_charging_points', {}, `Bearer ${authorized}`, services);
+      assert.equal(allowed.jsonBody.result.structuredContent.returned, 0);
+      assert.notEqual(allowed.jsonBody.result.isError, true);
+      const missingPoint = await mcpCall(
+        'chargecloud_get_charging_point',
+        { evseId: 'AT*VNA*E1080570007*2' },
+        `Bearer ${authorized}`,
+        services,
+      );
+      assert.equal(missingPoint.jsonBody.result.structuredContent.error, 'not_found');
+      assert.equal(providerCalls, 2);
     });
   } finally {
     await closeServer(server);

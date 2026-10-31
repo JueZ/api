@@ -8,6 +8,7 @@ const KNOWN_PERMISSIONS = new Set([
   'youtube.read',
   'wlh.read',
   'weather.read',
+  'chargecloud.read',
   'bring.read',
   'bring.write',
   'bring.complete',

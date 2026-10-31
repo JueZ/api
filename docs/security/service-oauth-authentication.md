@@ -17,13 +17,14 @@ reddit.read
 youtube.read
 wlh.read
 weather.read
+chargecloud.read
 bring.read
 bring.write
 bring.complete
 bring.remove
 ```
 
-`api.access` and `api.test` are retired. Entra exposes the canonical values above as delegated scopes. Because Entra custom applications reject a delegated scope whose value duplicates an application-role value, service-only roles use aliases such as `catalogue.service.read`, `reddit.service.read`, `youtube.service.read`, and `weather.service.read`. The backend normalizes aliases to canonical operation permissions only after it has classified and allowlisted an app-only service token. Delegated user tokens never receive service-role alias normalization.
+`api.access` and `api.test` are retired. Entra exposes the canonical values above as delegated scopes. Because Entra custom applications reject a delegated scope whose value duplicates an application-role value, service-only roles use aliases such as `catalogue.service.read`, `reddit.service.read`, `youtube.service.read`, `weather.service.read`, and `chargecloud.service.read`. The backend normalizes aliases to canonical operation permissions only after it has classified and allowlisted an app-only service token. Delegated user tokens never receive service-role alias normalization.
 
 The test and production deployment-smoke service principals must each have every provider read role exercised by protected smoke verification. An Entra administrator can apply or verify the YouTube role idempotently without handling a secret:
 

@@ -1,0 +1,44 @@
+{
+  "data": [
+    {
+      "id": "1437363",
+      "name": "Pfeilgasse Station 1",
+      "status": "active",
+      "address": "Pfeilgasse 4-6",
+      "city": "Wien",
+      "postal_code": "1080",
+      "country": "AT",
+      "coordinates": {
+        "latitude": "48.208147",
+        "longitude": "16.348032"
+      },
+      "operator": {
+        "operatorId": "VNA",
+        "name": "Wien Energie City"
+      },
+      "evses": [
+        {
+          "uid": "4379770",
+          "id": "AT*VNA*E1080570007*2",
+          "status": "AVAILABLE",
+          "connectors": [
+            {
+              "id": "263953329",
+              "status": "AVAILABLE",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "status_code": 1000,
+  "status_message": "Success",
+  "timestamp": "2026-10-31T21:38:32+01:00"
+}
