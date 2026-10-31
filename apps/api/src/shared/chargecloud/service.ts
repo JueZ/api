@@ -54,8 +54,8 @@ function normalize(location: Obj, evse: Obj): ChargecloudPoint {
       ? { latitude, longitude }
       : undefined;
   const country = string(location['country'], 3);
-  const rawStatus = string(evse['status'], 32);
-  const status = rawStatus && statuses.has(rawStatus) ? rawStatus : 'UNKNOWN';
+  const rawStatus = evse['status'];
+  const status = typeof rawStatus === 'string' && statuses.has(rawStatus) ? rawStatus : 'UNKNOWN';
   const connectors: ChargecloudConnector[] = [];
   if (Array.isArray(evse['connectors'])) {
     for (const value of evse['connectors'].slice(0, 16)) {

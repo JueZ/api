@@ -56,14 +56,16 @@ test('provider-derived live feed is filtered locally, normalized and paged truth
 test('each call obtains a fresh snapshot; unknown status cannot be available', async () => {
   const body = await fixture('single-evse');
   let calls = 0;
+  const statuses = ['AVAILABLE', 'SURPRISE', ' AVAILABLE ', 'available', null];
   const api = service(async () => {
     const next = structuredClone(body);
-    next.data[0].evses[0].status = calls++ ? 'SURPRISE' : 'AVAILABLE';
+    next.data[0].evses[0].status = statuses[calls++];
     return response(next);
   });
   assert.equal((await api.list({ availableOnly: true })).returned, 1);
-  assert.equal((await api.list({ availableOnly: true })).returned, 0);
-  assert.equal(calls, 2);
+  for (let index = 1; index < statuses.length; index++)
+    assert.equal((await api.list({ availableOnly: true })).returned, 0);
+  assert.equal(calls, statuses.length);
 });
 
 test('exact EVSE lookup uses full ID, ignores upstream extra rows and rejects invalid inputs before fetch', async () => {
