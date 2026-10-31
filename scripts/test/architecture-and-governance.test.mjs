@@ -196,7 +196,7 @@ test('YouTube secret and feature flag remain consistent through deployment verif
   assert.equal((parameterPreparation.match(/oidcRequiredScopes:/g) ?? []).length, 1);
   assert.match(
     parameterPreparation,
-    /catalogue\.read,reddit\.read,youtube\.read,wlh\.read,weather\.read,bring\.read,bring\.write,bring\.complete,bring\.remove/,
+    /catalogue\.read,reddit\.read,youtube\.read,wlh\.read,weather\.read,chargecloud\.read,bring\.read,bring\.write,bring\.complete,bring\.remove/,
   );
   assert.match(deployment, /node scripts\/prepare-deployment-parameters\.mjs/);
   assert.match(deployment, /--parameters "@\$RUNNER_TEMP\/deployment-parameters\.json"/);

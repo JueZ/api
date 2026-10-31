@@ -212,7 +212,7 @@ test('preserves exact workflow booleans, integers, overrides, and compiled liter
   assert.equal(value('apiCorsAllowedOrigins'), 'https://web.example');
   assert.equal(
     value('oidcRequiredScopes'),
-    'catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove',
+    'catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,chargecloud.read,bring.read,bring.write,bring.complete,bring.remove',
   );
   assert.deepEqual(value('releaseRetentionPolicy'), privateConfig.releaseRetentionPolicy);
   assert.equal(value('budgetStartDate'), privateConfig.budgetStartDate);

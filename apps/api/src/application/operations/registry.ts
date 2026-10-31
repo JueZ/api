@@ -1,6 +1,12 @@
 import * as z from 'zod/v4';
 import type { OperationDefinition } from './types.js';
 import { youtubeTranscriptInputSchema, youtubeTranscriptOutputSchema } from '../../shared/youtube/types.js';
+import {
+  chargecloudListInputSchema,
+  chargecloudListOutputSchema,
+  chargecloudGetInputSchema,
+  chargecloudGetOutputSchema,
+} from '../../shared/chargecloud/types.js';
 
 const noInput = z.object({}).strict();
 const unknownOutput = z.unknown();
@@ -27,6 +33,8 @@ export const OPERATION_IDS = {
   wlhOffer: 'wlh.offer',
   wlhOfferImages: 'wlh.offer-images',
   weatherForecast: 'weather.forecast',
+  chargecloudListChargingPoints: 'chargecloud.list-charging-points',
+  chargecloudGetChargingPoint: 'chargecloud.get-charging-point',
   bringListLists: 'bring.list-lists',
   bringGetItems: 'bring.get-items',
   bringAddItems: 'bring.add-items',
@@ -118,6 +126,34 @@ const definitions = [
   }),
   defineRead(OPERATION_IDS.weatherForecast, 'weather', 'weather.read', {
     mcp: { toolName: 'weather_get_forecast' },
+  }),
+  define({
+    id: OPERATION_IDS.chargecloudListChargingPoints,
+    provider: 'chargecloud',
+    effect: 'read',
+    requiredPermission: 'chargecloud.read',
+    allowedTokenTypes: userAndService,
+    allowedEnvironments: allEnvironments,
+    inputSchema: chargecloudListInputSchema,
+    outputSchema: chargecloudListOutputSchema,
+    idempotency: 'not-applicable',
+    confirmation: 'not-applicable',
+    audit: readAudit,
+    mcp: { toolName: 'chargecloud_list_charging_points' },
+  }),
+  define({
+    id: OPERATION_IDS.chargecloudGetChargingPoint,
+    provider: 'chargecloud',
+    effect: 'read',
+    requiredPermission: 'chargecloud.read',
+    allowedTokenTypes: userAndService,
+    allowedEnvironments: allEnvironments,
+    inputSchema: chargecloudGetInputSchema,
+    outputSchema: chargecloudGetOutputSchema,
+    idempotency: 'not-applicable',
+    confirmation: 'not-applicable',
+    audit: readAudit,
+    mcp: { toolName: 'chargecloud_get_charging_point' },
   }),
   defineRead(OPERATION_IDS.bringListLists, 'bring', 'bring.read', {
     rest: { method: 'GET', path: '/api/bring/lists' },

@@ -50,6 +50,7 @@ const serviceRolePermissionAliases = new Map<string, Permission>([
   ['reddit.service.read', 'reddit.read'],
   ['youtube.service.read', 'youtube.read'],
   ['weather.service.read', 'weather.read'],
+  ['chargecloud.service.read', 'chargecloud.read'],
 ]);
 const defaultAuthorizationPolicy = {
   permission: 'catalogue.read',

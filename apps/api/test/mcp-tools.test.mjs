@@ -12,6 +12,8 @@ import { createLegacyBringConnection } from '../dist/application/providerConnect
 import { BringUpstreamError } from '../dist/shared/bring/client.js';
 import { BringService } from '../dist/shared/bring/service.js';
 import { resetCategoryStoreForTesting } from '../dist/shared/wlh/categoryStore.js';
+import { createChargecloudService } from '../dist/infrastructure/composition/chargecloud.js';
+import { ChargecloudError } from '../dist/shared/chargecloud/client.js';
 
 const bringProviderFixture = JSON.parse(
   await readFile(new URL('./fixtures/bring/provider-v2026-07-26.json', import.meta.url), 'utf8'),
@@ -98,6 +100,8 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
         'bring_get_items',
         'bring_list_lists',
         'bring_remove_item',
+        'chargecloud_get_charging_point',
+        'chargecloud_list_charging_points',
         'health_check',
         'hello_authenticated',
         'reddit_get_thread',
@@ -128,6 +132,15 @@ test('MCP initialize and tools/list expose reads and controlled Bring additions'
     assert.ok(youtube.inputSchema.properties.language);
     assert.ok(youtube.inputSchema.properties.pageSize);
     assert.notDeepEqual(youtube.inputSchema.properties, {});
+
+    const chargecloud = tools.find((tool) => tool.name === 'chargecloud_list_charging_points');
+    assert.equal(chargecloud.inputSchema.properties.postalCode.default, '1080');
+    assert.equal(chargecloud.inputSchema.properties.limit.maximum, 100);
+    assert.equal(chargecloud.inputSchema.additionalProperties, false);
+    assert.equal(chargecloud.outputSchema.properties.chargingPoints.maxItems, 100);
+    assert.match(chargecloud.description, /telemetry lag is unknown/);
+    const chargingPoint = tools.find((tool) => tool.name === 'chargecloud_get_charging_point');
+    assert.ok(chargingPoint.inputSchema.properties.evseId.pattern);
 
     for (const tool of tools) {
       const bringWrite = ['bring_add_item', 'bring_complete_item', 'bring_remove_item'].includes(tool.name);
@@ -300,6 +313,96 @@ test('weather tool resolves current-location metadata, explicit override, locale
     assert.equal(missing.jsonBody.result.structuredContent.error, 'location_required');
     assert.match(missing.jsonBody.result.structuredContent.repairable_problem.caller_instruction, /Do not guess/);
     assert.equal(calls.length, 2);
+  });
+});
+
+test('Chargecloud MCP calls preserve fixture-grounded filtering, EVSE identities, and timestamps', async () => {
+  const fixture = JSON.parse(
+    await readFile(new URL('./fixtures/chargecloud/postal-1080.fixture.json', import.meta.url), 'utf8'),
+  );
+  const requests = [];
+  const services = stubServices();
+  services.chargecloud = createChargecloudService(async (url, options) => {
+    requests.push({ url: new URL(url), options });
+    return new Response(JSON.stringify(fixture));
+  });
+  await withEnv(authEnv, async () => {
+    await withMcpSdkClient(services, async (client) => {
+      const listed = await client.callTool({ name: 'chargecloud_list_charging_points', arguments: {} });
+      assert.notEqual(listed.isError, true);
+      assert.equal(listed.structuredContent.totalMatching, 20);
+      assert.equal(listed.structuredContent.returned, 20);
+      assert.equal(listed.structuredContent.sourceTimestamp, fixture.timestamp);
+      assert.ok(listed.structuredContent.chargingPoints.some((point) => point.evseId.startsWith('AT*VIE*')));
+      const available = await client.callTool({
+        name: 'chargecloud_list_charging_points',
+        arguments: { postalCode: '1080', availableOnly: true },
+      });
+      const expectedAvailable = fixture.data
+        .flatMap((location) => location.evses)
+        .filter((evse) => evse.status === 'AVAILABLE');
+      assert.equal(available.structuredContent.totalMatching, expectedAvailable.length);
+      assert.ok(available.structuredContent.chargingPoints.every((point) => point.status === 'AVAILABLE'));
+      const single = await client.callTool({
+        name: 'chargecloud_get_charging_point',
+        arguments: { evseId: 'AT*VNA*E1080570007*2' },
+      });
+      assert.notEqual(single.isError, true);
+      assert.equal(single.structuredContent.point.evseId, 'AT*VNA*E1080570007*2');
+      assert.equal(single.structuredContent.point.address, 'Pfeilgasse 4-6');
+      assert.equal(single.structuredContent.chargingPoints, undefined);
+      assert.equal(requests.length, 3);
+      assert.equal(requests[0].url.search, '');
+      assert.equal(requests[2].url.searchParams.get('evse'), 'AT*VNA*E1080570007*2');
+      const invalid = await client.callTool({
+        name: 'chargecloud_get_charging_point',
+        arguments: { evseId: 'https://example.invalid/' },
+      });
+      assert.equal(invalid.isError, true);
+      assert.equal(requests.length, 3);
+      assert.doesNotMatch(JSON.stringify(listed.structuredContent), /"uid"|"operator"|status_message/);
+    });
+  });
+});
+
+test('Chargecloud MCP errors are sanitized and cannot look like successful empty availability', async () => {
+  const services = stubServices();
+  await withEnv(authEnv, async () => {
+    for (const [kind, status, retry] of [
+      ['not_found', 404, false],
+      ['timeout', 504, true],
+      ['rate_limit', 429, true],
+      ['contract', 502, false],
+    ]) {
+      services.chargecloud = {
+        get: async () => {
+          throw new ChargecloudError(kind, status);
+        },
+      };
+      const response = await mcpCall(
+        'chargecloud_get_charging_point',
+        { evseId: 'AT*VNA*E1080570007*2' },
+        undefined,
+        services,
+      );
+      assertToolError(response, kind, 'chargecloud');
+      const output = response.jsonBody.result.structuredContent;
+      assert.equal(output.repairable_problem.status, status);
+      assert.equal(output.repairable_problem.operation_id, 'chargecloud.get-charging-point');
+      assert.equal(output.repairable_problem.retry_policy.same_request, retry);
+      assert.equal(output.point, undefined);
+    }
+    services.chargecloud.get = async () => {
+      throw new Error('private-upstream-payload-123');
+    };
+    const response = await mcpCall(
+      'chargecloud_get_charging_point',
+      { evseId: 'AT*VNA*E1080570007*2' },
+      undefined,
+      services,
+    );
+    assertToolError(response, 'dependency', 'chargecloud');
+    assert.doesNotMatch(JSON.stringify(response), /private-upstream-payload-123/);
   });
 });
 
@@ -1213,6 +1316,7 @@ function expectedScopes(toolName) {
   if (toolName.startsWith('youtube_')) return ['youtube.read'];
   if (toolName.startsWith('wlh_')) return ['wlh.read'];
   if (toolName === 'weather_get_forecast') return ['weather.read'];
+  if (toolName.startsWith('chargecloud_')) return ['chargecloud.read'];
   if (toolName === 'bring_add_item') return ['bring.write'];
   if (toolName === 'bring_complete_item') return ['bring.complete'];
   if (toolName === 'bring_remove_item') return ['bring.remove'];

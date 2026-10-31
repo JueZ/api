@@ -11,7 +11,7 @@ const tenantId = '22222222-2222-4222-8222-222222222222';
 const listUuid = '33333333-3333-4333-8333-333333333333';
 const delegatedClientId = '44444444-4444-4444-8444-444444444444';
 const canonicalPermissions =
-  'catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove';
+  'catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,chargecloud.read,bring.read,bring.write,bring.complete,bring.remove';
 const validTestEnvironment = {
   DEPLOYED_ENVIRONMENT_NAME: 'test',
   AUTH_ENABLED: 'true',
@@ -33,6 +33,21 @@ const validTestEnvironment = {
 
 test('deployed runtime safety accepts complete exact test configuration', () => {
   assert.deepEqual(validateRuntimeSafety(validTestEnvironment), []);
+});
+
+test('deployed runtime safety requires the Chargecloud permission', () => {
+  const withoutChargecloud = canonicalPermissions
+    .split(',')
+    .filter((permission) => permission !== 'chargecloud.read')
+    .join(',');
+  for (const environment of ['test', 'prod']) {
+    const problems = validateRuntimeSafety({
+      ...validTestEnvironment,
+      DEPLOYED_ENVIRONMENT_NAME: environment,
+      OIDC_REQUIRED_SCOPES: withoutChargecloud,
+    });
+    assert.ok(problems.some((problem) => problem.startsWith('OIDC_REQUIRED_SCOPES')));
+  }
 });
 
 test('runtime environment classification requires an explicit exact value', () => {

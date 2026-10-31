@@ -1,0 +1,557 @@
+{
+  "data": [
+    {
+      "id": "1437145",
+      "name": "Florianigasse",
+      "status": "active",
+      "address": "Florianigasse 50",
+      "city": "Wien",
+      "postal_code": "1080",
+      "country": "AT",
+      "coordinates": {
+        "latitude": "48.212390",
+        "longitude": "16.345225"
+      },
+      "operator": {
+        "operatorId": "VNA",
+        "name": "Wien Energie City"
+      },
+      "evses": [
+        {
+          "uid": "4379460",
+          "id": "AT*VNA*E1080570003*1",
+          "status": "CHARGING",
+          "connectors": [
+            {
+              "id": "263953021",
+              "status": "CHARGING",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        },
+        {
+          "uid": "4379461",
+          "id": "AT*VNA*E1080570003*2",
+          "status": "CHARGING",
+          "connectors": [
+            {
+              "id": "263953022",
+              "status": "CHARGING",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1437147",
+      "name": "Campus der Universität Wien",
+      "status": "active",
+      "address": "Alser Straße vor 21",
+      "city": "Wien",
+      "postal_code": "1080",
+      "country": "AT",
+      "coordinates": {
+        "latitude": "48.214967",
+        "longitude": "16.351209"
+      },
+      "operator": {
+        "operatorId": "VNA",
+        "name": "Wien Energie City"
+      },
+      "evses": [
+        {
+          "uid": "4379586",
+          "id": "AT*VNA*E1080570006*1",
+          "status": "AVAILABLE",
+          "connectors": [
+            {
+              "id": "263953146",
+              "status": "AVAILABLE",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        },
+        {
+          "uid": "4379587",
+          "id": "AT*VNA*E1080570006*2",
+          "status": "AVAILABLE",
+          "connectors": [
+            {
+              "id": "263953147",
+              "status": "AVAILABLE",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1437148",
+      "name": "Weghuberpark",
+      "status": "active",
+      "address": "Lerchenfelder Straße vor 4",
+      "city": "Wien",
+      "postal_code": "1080",
+      "country": "AT",
+      "coordinates": {
+        "latitude": "48.206741",
+        "longitude": "16.354329"
+      },
+      "operator": {
+        "operatorId": "VNA",
+        "name": "Wien Energie City"
+      },
+      "evses": [
+        {
+          "uid": "4379462",
+          "id": "AT*VNA*E1080570004*1",
+          "status": "CHARGING",
+          "connectors": [
+            {
+              "id": "263953023",
+              "status": "CHARGING",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        },
+        {
+          "uid": "4379463",
+          "id": "AT*VNA*E1080570004*2",
+          "status": "CHARGING",
+          "connectors": [
+            {
+              "id": "263953024",
+              "status": "CHARGING",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1437149",
+      "name": "Schönborn Park",
+      "status": "active",
+      "address": "Florianigasse vor 25",
+      "city": "Wien",
+      "postal_code": "1080",
+      "country": "AT",
+      "coordinates": {
+        "latitude": "48.211714",
+        "longitude": "16.350270"
+      },
+      "operator": {
+        "operatorId": "VNA",
+        "name": "Wien Energie City"
+      },
+      "evses": [
+        {
+          "uid": "4379458",
+          "id": "AT*VNA*E1080570002*1",
+          "status": "AVAILABLE",
+          "connectors": [
+            {
+              "id": "263953019",
+              "status": "AVAILABLE",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        },
+        {
+          "uid": "4379459",
+          "id": "AT*VNA*E1080570002*2",
+          "status": "CHARGING",
+          "connectors": [
+            {
+              "id": "263953020",
+              "status": "CHARGING",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1437150",
+      "name": "Breitenfelder Gasse",
+      "status": "active",
+      "address": "Breitenfelder Gasse vor 13",
+      "city": "Wien",
+      "postal_code": "1080",
+      "country": "AT",
+      "coordinates": {
+        "latitude": "48.214133",
+        "longitude": "16.342862"
+      },
+      "operator": {
+        "operatorId": "VNA",
+        "name": "Wien Energie City"
+      },
+      "evses": [
+        {
+          "uid": "4379456",
+          "id": "AT*VNA*E1080570001*1",
+          "status": "CHARGING",
+          "connectors": [
+            {
+              "id": "263953017",
+              "status": "CHARGING",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        },
+        {
+          "uid": "4379457",
+          "id": "AT*VNA*E1080570001*2",
+          "status": "AVAILABLE",
+          "connectors": [
+            {
+              "id": "263953018",
+              "status": "AVAILABLE",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1437363",
+      "name": "Pfeilgasse Station 1",
+      "status": "active",
+      "address": "Pfeilgasse 4-6",
+      "city": "Wien",
+      "postal_code": "1080",
+      "country": "AT",
+      "coordinates": {
+        "latitude": "48.208147",
+        "longitude": "16.348032"
+      },
+      "operator": {
+        "operatorId": "VNA",
+        "name": "Wien Energie City"
+      },
+      "evses": [
+        {
+          "uid": "4379769",
+          "id": "AT*VNA*E1080570007*1",
+          "status": "CHARGING",
+          "connectors": [
+            {
+              "id": "263953328",
+              "status": "CHARGING",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        },
+        {
+          "uid": "4379770",
+          "id": "AT*VNA*E1080570007*2",
+          "status": "AVAILABLE",
+          "connectors": [
+            {
+              "id": "263953329",
+              "status": "AVAILABLE",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1437364",
+      "name": "Pfeilgasse Station 2",
+      "status": "active",
+      "address": "Pfeilgasse 53",
+      "city": "Wien",
+      "postal_code": "1080",
+      "country": "AT",
+      "coordinates": {
+        "latitude": "48.209456",
+        "longitude": "16.340049"
+      },
+      "operator": {
+        "operatorId": "VNA",
+        "name": "Wien Energie City"
+      },
+      "evses": [
+        {
+          "uid": "4380147",
+          "id": "AT*VNA*E1080570010*1",
+          "status": "CHARGING",
+          "connectors": [
+            {
+              "id": "263953704",
+              "status": "CHARGING",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        },
+        {
+          "uid": "4380148",
+          "id": "AT*VNA*E1080570010*2",
+          "status": "AVAILABLE",
+          "connectors": [
+            {
+              "id": "263953705",
+              "status": "AVAILABLE",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1437365",
+      "name": "Albertgasse",
+      "status": "active",
+      "address": "Albertgasse 13",
+      "city": "Wien",
+      "postal_code": "1080",
+      "country": "AT",
+      "coordinates": {
+        "latitude": "48.209310",
+        "longitude": "16.343806"
+      },
+      "operator": {
+        "operatorId": "VNA",
+        "name": "Wien Energie City"
+      },
+      "evses": [
+        {
+          "uid": "4380145",
+          "id": "AT*VNA*E1080570009*1",
+          "status": "CHARGING",
+          "connectors": [
+            {
+              "id": "263953702",
+              "status": "CHARGING",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        },
+        {
+          "uid": "4380146",
+          "id": "AT*VNA*E1080570009*2",
+          "status": "CHARGING",
+          "connectors": [
+            {
+              "id": "263953703",
+              "status": "CHARGING",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "4242704",
+      "name": "Florianigasse 64",
+      "status": "active",
+      "address": "Florianigasse 64",
+      "city": "Wien",
+      "postal_code": "1080",
+      "country": "AT",
+      "coordinates": {
+        "latitude": "48.212095",
+        "longitude": "16.341863"
+      },
+      "operator": {
+        "operatorId": "VIE",
+        "name": "Wien Energie City"
+      },
+      "evses": [
+        {
+          "uid": "13273535",
+          "id": "AT*VIE*E1080580001*1",
+          "status": "AVAILABLE",
+          "connectors": [
+            {
+              "id": "397920455",
+              "status": "AVAILABLE",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        },
+        {
+          "uid": "13273536",
+          "id": "AT*VIE*E1080580001*2",
+          "status": "AVAILABLE",
+          "connectors": [
+            {
+              "id": "397920456",
+              "status": "AVAILABLE",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "4242709",
+      "name": "Fuhrmannsgasse 2",
+      "status": "active",
+      "address": "Fuhrmannsgasse  2",
+      "city": "Wien",
+      "postal_code": "1080",
+      "country": "AT",
+      "coordinates": {
+        "latitude": "48.209942",
+        "longitude": "16.348235"
+      },
+      "operator": {
+        "operatorId": "VIE",
+        "name": "Wien Energie City"
+      },
+      "evses": [
+        {
+          "uid": "13273538",
+          "id": "AT*VIE*E1080580002*1",
+          "status": "CHARGING",
+          "connectors": [
+            {
+              "id": "397920458",
+              "status": "CHARGING",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        },
+        {
+          "uid": "13273539",
+          "id": "AT*VIE*E1080580002*2",
+          "status": "CHARGING",
+          "connectors": [
+            {
+              "id": "397920459",
+              "status": "CHARGING",
+              "standard": "IEC_62196_T2",
+              "format": "SOCKET",
+              "power_type": "AC_3_PHASE",
+              "ampere": "16",
+              "voltage": "400",
+              "max_power": 11,
+              "tariff_id": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "status_code": 1000,
+  "status_message": "Success",
+  "timestamp": "2026-10-31T21:38:59+01:00"
+}

@@ -4,6 +4,7 @@ export const PERMISSIONS = [
   'youtube.read',
   'wlh.read',
   'weather.read',
+  'chargecloud.read',
   'bring.read',
   'bring.write',
   'bring.complete',

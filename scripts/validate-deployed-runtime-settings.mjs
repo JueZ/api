@@ -140,7 +140,7 @@ export function buildExpectedRuntimeSettings(env = process.env, { omitLegacyBrin
     OIDC_REQUIRED_SCOPES: value(
       env,
       'OIDC_REQUIRED_SCOPES',
-      'catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,bring.read,bring.write,bring.complete,bring.remove',
+      'catalogue.read,reddit.read,youtube.read,wlh.read,weather.read,chargecloud.read,bring.read,bring.write,bring.complete,bring.remove',
     ),
     OIDC_ALLOWED_OBJECT_IDS: value(env, 'OIDC_ALLOWED_OBJECT_IDS'),
     OIDC_ALLOWED_SUBJECTS: value(env, 'OIDC_ALLOWED_SUBJECTS'),
